@@ -18,6 +18,9 @@ permissions. No protocol change, no new mod jar.
 
 **Out of scope:** the mod-side stale-outbox fix (next mod release); everything in the v1.2/v2 roadmap.
 
+**Known limitation:** pending restarts live in memory. Restarting the hub during a countdown drops it,
+even though players have already been warned; the daily timer is re-armed at hub start.
+
 ## Architecture
 
 Unchanged: mods → `ServerHub` → frontends. The new logic is split the same way:
@@ -96,10 +99,12 @@ stop(): void                                                    // clear all tim
 - A pending restart is cancelled when the server emits `stopped` or `crashed` before it fires, with
   notify `❎ Restart cancelled (server went down)`. The pending entry is cleared *before* the scheduler
   sends its own `stop`, so the resulting `stopped` event doesn't count as a cancellation.
-- A failed `say` is logged and the countdown continues. A failed `stop` is logged and notified
-  (`❌ Restart failed: <reason>`).
+- A failed `say` is logged and the countdown continues. For `stop`, a `server disconnected` rejection is
+  success (the server shut down before replying); only `offline` or a timeout is a failure, logged and
+  notified (`❌ Restart failed: <reason>`).
 - `daily(id, "06:00")`: arms a timer for the next 05:50 local time, which calls `schedule(id, 10, 'daily')`,
-  then re-arms for the next day. If `schedule` throws (offline, or already pending) it is logged and
+  then re-arms. The next fire time is recomputed from the local clock each time (set HH:MM − 10 min on a copy
+  of now, add a day if already past), never `setTimeout(24h)`, so DST changes don't shift it. If `schedule` throws (offline, or already pending) it is logged and
   skipped; the next day is still armed.
 - Discord: `/restart in minutes:<0–60>` and `/restart cancel`, admin role only, like `/cmd`.
 
@@ -117,7 +122,7 @@ stop(): void                                                    // clear all tim
 |---|---|
 | A SQLite error in `record`/`touch` crashes the hub | Both catch, log `[db]` and return. |
 | Discord system messages ("thread created") relayed as chat | `shouldRelay(m)`: not a bot, not a webhook, not `m.system`. |
-| `.slice` can split an emoji (surrogate pair) | Truncate by code points in `mcText` and `formatOutput`. |
+| `.slice` can split an emoji (surrogate pair) | One shared `truncate(s, max)` in `format.ts`: slices by `.length` (UTF-16, so every Discord limit still holds) and drops a trailing lone high surrogate. Used by `mcText`, `formatOutput`, `formatTopic`, `formatPresence`. |
 | `/cmd` visible to non-admins | `/cmd` and `/restart` get `setDefaultMemberPermissions(0)`: hidden until the admin role is allowed under Server Settings → Integrations. The role check stays. |
 | Hub `close()` waits up to 5 s for pre-handshake sockets | `ServerHub` tracks every accepted socket and destroys all of them in `close()`. |
 
@@ -137,11 +142,14 @@ the presence/topic intervals).
   - cancel on `crashed`;
   - rejects when offline or already pending;
   - a failed `stop` notifies;
-  - `daily` fires at T−10 min and re-arms.
+  - `daily` fires at T−10 min and re-arms from the local clock (tests pin `process.env.TZ`);
+  - an invalid `dailyRestart` string is rejected;
+  - a `stop` rejected with `server disconnected` is not reported as a failure.
 - `crashlogs.test.ts` in a temp dir: picks the newest of each kind; ignores old files, files over 8 MB,
   other names, and a missing dir.
 - `format.test.ts`: existing formatter tests move here, plus `formatPresence`, `formatTopic`,
-  `topicDue`, and `formatOutput` truncating before an emoji without splitting it.
+  `topicDue`, and `truncate`: `formatOutput(['😀'.repeat(2000)])` has `.length` ≤ 2000 and ends in a
+  whole emoji.
 - `servers.test.ts`: `mcText` emoji boundary; `close()` resolves in under 1 s with a pre-handshake
   connection open.
 - `db.test.ts`: `record`/`touch` after `close()` don't throw.

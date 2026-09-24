@@ -53,3 +53,10 @@ test('an event after the last touch still counts as hub-alive time', () => {
   assert.equal(db.uptime('s', 1030, 5000), null); // the outage is unknown, not downtime
   db.close();
 });
+
+test('record and touch never throw, even when the database is unusable', () => {
+  const db = new Db(':memory:');
+  db.close();
+  assert.doesNotThrow(() => db.record('s', 'up', 'connected', 1000));
+  assert.doesNotThrow(() => db.touch(1000));
+});

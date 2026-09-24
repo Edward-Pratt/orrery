@@ -30,18 +30,27 @@ export class Db {
     `);
   }
 
+  /** Never throws: a database error (disk full, locked) is logged instead of taking the hub down. */
   record(serverId: string, state: State, reason: string, ts = Date.now()): void {
-    this.#db
-      .prepare('INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)')
-      .run(serverId, ts, state, reason);
+    try {
+      this.#db
+        .prepare('INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)')
+        .run(serverId, ts, state, reason);
+    } catch (err) {
+      console.error('[db] record failed:', (err as Error).message);
+    }
     this.touch(ts); // the hub was alive at least until this event
   }
 
-  /** Stamps the hub as alive. Call every minute. */
+  /** Stamps the hub as alive. Call every minute. Never throws, like record(). */
   touch(ts = Date.now()): void {
-    this.#db
-      .prepare("INSERT INTO meta (key, value) VALUES ('last_alive', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-      .run(ts);
+    try {
+      this.#db
+        .prepare("INSERT INTO meta (key, value) VALUES ('last_alive', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+        .run(ts);
+    } catch (err) {
+      console.error('[db] touch failed:', (err as Error).message);
+    }
   }
 
   /** Call once at hub startup: the time since the last touch is unknown for every server. */

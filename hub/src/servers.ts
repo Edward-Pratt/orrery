@@ -29,12 +29,21 @@ export function stripCodes(s: string): string {
   return s.replace(/§.?/gs, '');
 }
 
+/** Cuts s to at most max UTF-16 units without leaving half an emoji (a lone high surrogate) at the end. */
+export function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
 /** Makes untrusted text safe for a single line of Minecraft chat. */
 export function mcText(s: string, max: number): string {
-  return stripCodes(s)
-    .replace(/[\u0000-\u001f\u007f\s]+/g, ' ')
-    .trim()
-    .slice(0, max);
+  return truncate(
+    stripCodes(s)
+      .replace(/[\u0000-\u001f\u007f\s]+/g, ' ')
+      .trim(),
+    max,
+  );
 }
 
 function tokenMatches(expected: string, got: string): boolean {
@@ -51,6 +60,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   #configs = new Map<string, ServerConfig>();
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
+  #sockets = new Set<Socket>(); // every accepted socket, including ones still before the handshake
   #server: Server | null = null;
   #timer: NodeJS.Timeout | undefined;
   #grace: NodeJS.Timeout | undefined;
@@ -94,7 +104,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     this.#closing = true;
     clearInterval(this.#timer);
     clearTimeout(this.#grace);
-    for (const conn of this.#conns.values()) conn.socket.destroy();
+    for (const socket of this.#sockets) socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
   }
 
@@ -137,6 +147,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   #accept(socket: Socket): void {
     let id = '';
     let conn: Conn | null = null;
+    this.#sockets.add(socket);
     socket.on('error', () => {}); // 'close' always follows and does the cleanup
     const helloTimer = setTimeout(() => socket.destroy(), this.#helloTimeoutMs);
     const lines = createInterface({ input: socket, crlfDelay: Infinity });
@@ -165,6 +176,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       this.#emit(id, 'connected');
     });
     socket.on('close', () => {
+      this.#sockets.delete(socket);
       clearTimeout(helloTimer);
       if (!conn) return;
       for (const p of conn.pending.values()) {

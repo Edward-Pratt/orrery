@@ -32,9 +32,9 @@ Unchanged: mods → `ServerHub` → frontends. The new logic is split the same w
 |---|---|
 | `hub/src/restarts.ts` | New. `RestartScheduler`. |
 | `hub/src/crashlogs.ts` | New. `findCrashLogs`. |
-| `hub/src/format.ts` | New. `md`, `formatEvent`, `formatStatus`, `formatPlayers`, `formatOutput` move here from `discord.ts`, plus `formatPresence`, `formatTopic`, `topicDue`, `formatCountdown`. |
+| `hub/src/format.ts` | New. `md`, `formatEvent`, `formatStatus`, `formatPlayers`, `formatOutput` move here from `discord.ts`, plus `formatPresence`, `formatTopic`, `topicDue`. |
 | `hub/src/discord.ts` | Webhook chat, presence, topics, crash uploads, `/restart`, command visibility, `shouldRelay`. Returns `{ client, post }`. |
-| `hub/src/servers.ts` | Emoji-safe `mcText`; `close()` destroys every socket, including pre-handshake ones. |
+| `hub/src/servers.ts` | New `truncate` (shared, so hub-core code never imports `format.ts`/`discord.js`); emoji-safe `mcText`; `close()` destroys every socket, including pre-handshake ones. |
 | `hub/src/db.ts` | `record`/`touch` log errors instead of throwing. |
 | `hub/src/index.ts` | Config fields, scheduler wiring. |
 
@@ -51,7 +51,7 @@ Unchanged: mods → `ServerHub` → frontends. The new logic is split the same w
 - `dailyRestart`: `HH:MM`, 24-hour, the hub host's local time. Absent → no daily restart. An invalid value
   fails hub startup with a clear error (`server "gtnh": dailyRestart must be HH:MM`).
 
-Bot permissions: add **Manage Webhooks** and **Manage Channels** to the bot's role (README updated).
+Bot permissions: add **Manage Webhooks**, **Manage Channels** and **Attach Files** to the bot's role (README updated).
 If either is missing, that feature logs one warning and falls back (see below); nothing else breaks.
 
 ## Features
@@ -73,7 +73,8 @@ If either is missing, that feature logs one warning and falls back (see below); 
   Custom status, one segment per server, `" | "`-joined, capped at 128 characters:
   `GTNH: 3 online · 20 TPS` / `GTNH: not responding` / `GTNH: offline`.
 - **Topic**: every 60 s, per linked channel, `formatTopic(state)`:
-  `🟢 Online · 3 players: Steve, Alex, Bob · 19.8 TPS` (names truncated to fit 1024 characters),
+  `🟢 Online · 20 TPS · 3 players: Steve, Alex, Bob` (TPS rounded so the text changes less often; names last,
+  truncated to fit 1024 characters),
   `🟠 Not responding`, `🔴 Offline`. Edited only when `topicDue(last, text, now)`: text differs from the
   last edit **and** at least 5 minutes have passed since it (Discord allows 2 topic edits per 10 minutes).
   A failed edit (missing permission) logs one warning per channel and is not retried until the text changes.
@@ -95,7 +96,8 @@ stop(): void                                                    // clear all tim
   10 min, 5 min, 1 min, 30 s and 10 s before, for those that fit inside the delay. Then `runCommand(id,
   'stop', by)`. `Restart=always` in `gtnh.service` brings it back up. `minutes = 0` → `stop` straight away.
 - `notify` posts to the server's Discord channel: `🔄 Restart in 10 min (by <by>)` when scheduled,
-  `❎ Restart cancelled (by <by>)` when cancelled, `🔄 Restarting now` when `stop` is sent.
+  `❎ Restart cancelled (by <by>)` when cancelled (players also get `say Restart cancelled`), `🔄 Restarting now`
+  when `stop` is sent. The `/restart` interaction itself gets a short private reply.
 - A pending restart is cancelled when the server emits `stopped` or `crashed` before it fires, with
   notify `❎ Restart cancelled (server went down)`. The pending entry is cleared *before* the scheduler
   sends its own `stop`, so the resulting `stopped` event doesn't count as a cancellation.
@@ -112,7 +114,8 @@ stop(): void                                                    // clear all tim
 
 - `findCrashLogs(dir: string, sinceMs: number): Promise<string[]>`: the newest `crash-reports/*.txt` and
   the newest `hs_err_pid*.log` in `dir`, each only if modified at or after `sinceMs` and at most 8 MB.
-  0–2 paths. A missing directory or read error → `[]`, logged.
+  0–2 paths. A missing directory or unreadable file → skipped (`[]` if nothing found); never throws.
+- If the upload fails (e.g. too large), the alert is posted again without attachments.
 - On a `crashed` event for a server with `dir`: `findCrashLogs(dir, now − 10 min)`, and attach the files to
   the "💥 Server went down unexpectedly" post.
 
@@ -122,15 +125,15 @@ stop(): void                                                    // clear all tim
 |---|---|
 | A SQLite error in `record`/`touch` crashes the hub | Both catch, log `[db]` and return. |
 | Discord system messages ("thread created") relayed as chat | `shouldRelay(m)`: not a bot, not a webhook, not `m.system`. |
-| `.slice` can split an emoji (surrogate pair) | One shared `truncate(s, max)` in `format.ts`: slices by `.length` (UTF-16, so every Discord limit still holds) and drops a trailing lone high surrogate. Used by `mcText`, `formatOutput`, `formatTopic`, `formatPresence`. |
+| `.slice` can split an emoji (surrogate pair) | One shared `truncate(s, max)` in `servers.ts`: slices by `.length` (UTF-16, so every Discord limit still holds) and drops a trailing lone high surrogate. Used by `mcText`, `formatOutput`, `formatTopic`, `formatPresence`. |
 | `/cmd` visible to non-admins | `/cmd` and `/restart` get `setDefaultMemberPermissions(0)`: hidden until the admin role is allowed under Server Settings → Integrations. The role check stays. |
 | Hub `close()` waits up to 5 s for pre-handshake sockets | `ServerHub` tracks every accepted socket and destroys all of them in `close()`. |
 
 ## Error handling
 
 Every Discord API call (webhook, presence, topic, attachments) is best-effort: failures are logged and
-never affect the relay, the TCP server or the scheduler. Timers are cleared on shutdown (`scheduler.stop()`,
-the presence/topic intervals).
+never affect the relay, the TCP server or the scheduler. On shutdown: `restarts.stop()`, `client.destroy()`;
+the presence/topic intervals are `unref()`'d.
 
 ## Testing
 

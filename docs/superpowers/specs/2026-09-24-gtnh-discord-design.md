@@ -185,7 +185,7 @@ now (accurate to ~1 minute even if the hub crashed).
 
 ## Hub (`hub/`)
 
-- Node 26, TypeScript run directly by Node (type stripping — no build step;
+- Node 24+ (tested on 24.21 and 26.9), TypeScript run directly by Node (type stripping — no build step;
   `tsc` only typechecks), discord.js v14. Built-ins: `node:net`,
   `node:readline`, `node:sqlite`, `node:events`, `node:test`.
 - `ServerHub` (`servers.ts`) owns every configured server's state, whether

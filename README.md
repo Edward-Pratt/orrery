@@ -12,7 +12,7 @@ commands, status, and start/stop/crash alerts.
 | Directory | What | Toolchain |
 |---|---|---|
 | `mod/` | Server-side Forge 1.7.10 mod. Relays game events, runs commands. | JDK 25, Gradle wrapper |
-| `hub/` | The bot. Owns server state and uptime, talks to Discord. | Node 26 |
+| `hub/` | The bot. Owns server state and uptime, talks to Discord. | Node 24+ |
 | `deploy/` | systemd units for running both on one server. | systemd |
 | `docs/` | Design spec and implementation plan. | — |
 

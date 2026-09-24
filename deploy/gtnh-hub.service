@@ -10,7 +10,7 @@ User=opc
 WorkingDirectory=/home/opc/gtnh-discord/hub
 # .env holds DISCORD_TOKEN=...
 EnvironmentFile=/home/opc/gtnh-discord/hub/.env
-# Needs Node 26+. If installed via nvm, use the full path from `which node`.
+# Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.
 ExecStart=/usr/bin/node src/index.ts
 Restart=on-failure
 RestartSec=5

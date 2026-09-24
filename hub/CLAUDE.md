@@ -1,6 +1,6 @@
 # hub
 
-Node 26 + TypeScript + discord.js 14. Node runs `.ts` directly (type stripping) — there is no build step.
+Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts` directly (type stripping) — there is no build step.
 
 ```bash
 npm test            # node --test "test/*.test.ts"

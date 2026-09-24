@@ -51,6 +51,12 @@ embeds would make the channel noisy. Everything else posts as an embed (`APIEmbe
 `formatEvent(e)` now returns `{ content } | { embeds: [APIEmbed] } | null`. Posting sends whichever it
 gets. Webhook chat is unchanged.
 
+Hub-core modules (`RestartScheduler`, `BackupWatcher`, the watchdog) keep calling
+`notify(serverId, text)` with plain text; `discord.ts` wraps notices in an embed: blue by default, red when
+the text starts with `❌`, orange with `⚠️`, green with `✅`. (`APIEmbed` is a discord-api-types type, which
+hub-core code must not import.) Every embed text goes through `truncate` to Discord's limits (title 256,
+field value 1024, description 4096, whole embed 6000), and player names go through `md()`.
+
 ## Player stats
 
 ### Tracking (`playtime.ts`, hub core)
@@ -61,10 +67,13 @@ hub restarts and missed join/leave events:
 - For each server, `online players − open sessions` → `db.openSession(serverId, player, now)`, and
   `open sessions − online players` → `db.closeSession(…, now)`.
 - A server that isn't online closes all its open sessions.
-- At hub start, `db.closeDanglingSessions(lastAlive)` ends every session left open, at the hub's last
-  `last_alive` stamp (or now, if there is none).
+- At hub start, every session left open is ended at the hub's last `last_alive` stamp (or now, if there is
+  none). This happens inside `markHubRestart`, *before* it re-stamps `last_alive`, so sessions don't stretch
+  across the hub outage.
 - Daily peak: `db.recordPeak(serverId, localDay, count)` keeps the maximum per `YYYY-MM-DD` (local
-  time), updated on every poll.
+  time), updated on every poll. Day keys and midnight boundaries are built from local date parts
+  (`getFullYear/getMonth/getDate`, `setHours(0,0,0,0)`), never `toISOString()` (UTC). A DST day is 23 or 25 h.
+- `poll(now)` is public; the 10 s interval calls it, and tests call it directly.
 
 Accuracy is ±10 s, which is fine for playtime.
 
@@ -80,7 +89,8 @@ Queries count only the overlap with the requested window, and treat a session wi
 Player names are matched case-insensitively. Like `record`, every write logs errors instead of throwing.
 
 - `playtime(serverId, player, from, to) → ms`
-- `lastSeen(serverId, player) → ms | null`: `null` = never seen; `Infinity` = online now
+- `lastSeen(serverId, player) → { online: true } | number | null`: a number is the last session end;
+  `null` = never seen (JSON-safe, for the dashboard)
 - `top(serverId, from, to, limit) → [{ player, ms }]`
 - `unique(serverId, from, to) → number`
 - `peak(serverId, day) → number | null`
@@ -89,11 +99,14 @@ Player names are matched case-insensitively. Like `record`, every write logs err
 ### Commands
 
 - `/playtime player:<name>`: total, last 7 days, last seen (`online now` / `3 h ago` / `never`).
-- `/top period:<day|week|all>` (default `week`): top 10 by playtime in the period.
+- `/top period:<day|week|all>` (default `week`): top 10 by playtime. `day` and `week` are rolling 24 h and
+  7 d windows, matching `/status`'s uptime.
 
 ### Daily summary (`summary.ts`, hub core; posting in `discord.ts`)
 
-At `dailySummary` local time, post an embed for **yesterday** (local midnight to midnight) with:
+At `dailySummary` local time, post an embed for **yesterday** (local midnight to midnight) with the fields
+below. "Yesterday" is computed from the *scheduled* fire time that `everyDay` passes to its callback
+(`fn(target)`), not `Date.now()`, so a timer firing a millisecond early at 00:00 can't report the wrong day:
 
 - uptime %
 - peak players
@@ -117,13 +130,15 @@ while staging. Backups can be zip files or folders.
   1. `runCommand(id, 'backup start', by)` replies with ServerUtilities' own answer ("started" /
      "already running").
   2. On success, `BackupWatcher` polls every 10 s for a backup newer than the start time whose size is
-     unchanged across two polls.
+     unchanged across two polls. `BackupWatcher` takes an injected `list: () => Promise<Backup[]>`, so its
+     timer tests don't touch the filesystem.
   3. It then notifies `✅ Backup finished: <name> (<size>, <m>m <s>s)`. If none appears within 60 min:
      `⚠️ No finished backup appeared within 60 minutes`.
   4. One watch per server at a time.
 - **`/backup status`** (admin): newest backup's name, age and size, backup count and total size.
 - **`/backup list`** (admin): the 10 newest, with sizes, plus count and total size.
-- **Watchdog** (`backupMaxAgeHours`): every 10 min, if the newest backup is older than the limit,
+- **Watchdog** (`backupMaxAgeHours`): every 10 min (names and mtimes only; recursive sizes are computed only
+  for `/backup status`, `/backup list` and the finished backup), if the newest backup is older than the limit,
   notify `⚠️ No new backup for <n> h` once. The alert re-arms after a newer backup appears.
 
 `/backup` is one command with subcommands and `default_member_permissions: "0"`, like `/cmd`.
@@ -142,6 +157,9 @@ returns. Today the mod sends the result straight away and misses those replies.
   - 8000 ms have passed since the start (below the hub's 10 s command timeout).
 - `GameEvents` keeps the pending outputs and checks them on each server tick. When one is ready, it
   sends `cmdResult` and drops it.
+- On `FMLServerStoppingEvent`, every pending output is sent at once (ready or not), *before* `stopping` is
+  announced. Otherwise `/cmd stop` would never get its result once ticks end, and would show
+  "server disconnected".
 - The capturing sender's `addChatMessage` appends to the `CommandOutput` from any thread.
 
 Costs: every `/cmd` now takes about 1.5 s. Output that arrives after 8 s (e.g. the results of
@@ -157,7 +175,7 @@ failure are never replayed hours later.
 
 | Minor | Fix |
 |---|---|
-| `daily()` twice leaks the first timer | New `daily.ts`: `everyDay(time, leadMs, fn) → cancel`, which holds `parseDaily`/`nextDaily` and the early-fire fix. `RestartScheduler.daily` cancels any previous timer before arming; the summary uses it too. |
+| `daily()` twice leaks the first timer | New `daily.ts`: `everyDay(time, leadMs, fn: (target) => void) → cancel`, which holds `parseDaily`/`nextDaily` and the early-fire fix. `RestartScheduler.daily` cancels any previous timer before arming; the summary uses it too. |
 | Crash-log search follows symlinks | `findCrashLogs` uses `lstat`; symlinks are skipped. |
 | `/restart` audit lacks the user id | Scheduler `by` is `discord:<name> (<id>)` for audit; the notice text uses the display name. `schedule(serverId, minutes, by, byName?)`: `byName` defaults to `by`. |
 | Webhook-refused names retried per message | A `Set` of player names that got a 50035 (invalid form body) from the webhook: those skip straight to a bot post. |
@@ -191,6 +209,7 @@ code never throw into the hub's event handlers or timers.
 - `discord.test.ts`: `/backup` in `COMMANDS` with hidden defaults; `/playtime`, `/top`.
 - Mod JUnit:
   - `CommandOutputTest`: quiet window, max window, lines from another thread;
+  - pending outputs are flushed on stop (manual: `/cmd stop` shows its output);
   - `HubClientTest`: `dropNonLifecycle`.
 - Manual (real server):
   - `/cmd spark tps` shows spark's output;

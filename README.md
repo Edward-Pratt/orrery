@@ -73,16 +73,23 @@ Restart the server. The hub logs the connection, and the channel gets
 ## Running on a server
 
 `deploy/` has systemd units for running the hub and the GTNH server together on
-one Linux machine. Edit `User=` and the paths in both files first.
+one Linux machine. Edit `User=`/`SocketUser=` and the paths in the files first.
 
 ```bash
-sudo cp deploy/gtnh-hub.service deploy/gtnh.service /etc/systemd/system/
+sudo install -m 600 -o root -g root hub/.env /etc/gtnh-discord.env   # bot token, root-only
+sudo cp deploy/gtnh-hub.service deploy/gtnh.service deploy/gtnh.socket /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now gtnh-hub gtnh
 ```
 
+These work with SELinux enforcing (the default on RHEL/Oracle Linux): the token
+lives in `/etc` rather than `/home`, and the server runs without tmux, which
+SELinux doesn't let services start.
+
 - **Hub logs:** `journalctl -u gtnh-hub -f`
-- **Minecraft console:** `tmux attach -t gtnh` (detach with Ctrl-b d)
+- **Server console output:** `journalctl -u gtnh -f` (add yourself to the
+  `systemd-journal` group to read it without sudo)
+- **Server console input:** `echo "say hello" > /run/gtnh.stdin`, or `/cmd` from Discord
 - **Stopping the server:** `sudo systemctl stop gtnh` stops it for maintenance.
   An in-game `/stop`, or `/cmd stop` from Discord, restarts it. So does a crash.
 - **Start order doesn't matter:** the mod reconnects to the hub within about 30 s.

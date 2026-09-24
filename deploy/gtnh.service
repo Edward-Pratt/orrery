@@ -1,24 +1,28 @@
-# GTNH server inside tmux, so `tmux attach -t gtnh` still gives the console (detach: Ctrl-b d).
-# Install: sudo cp deploy/gtnh.service /etc/systemd/system/
-# Edit User, WorkingDirectory and the start script to match your server.
+# GTNH server. Console: type with `echo "<command>" > /run/gtnh.stdin`, read with `journalctl -u gtnh -f`.
+# (No tmux: SELinux on RHEL/Oracle Linux doesn't let services start tmux.)
+# Install: sudo cp deploy/gtnh.service deploy/gtnh.socket /etc/systemd/system/
+# Edit User, WorkingDirectory and the start script to match your server (and SocketUser in gtnh.socket).
 #
-# Restart=always because tmux exits cleanly even when Java crashes, so on-failure would never fire:
+# Restart=always because a 1.7.10 server exits with code 0 even after a crash, so on-failure would miss it:
 #   crash / kill -9      -> restarts after 10 s
 #   in-game /stop        -> restarts (a handy restart button, also via /cmd stop from Discord)
 #   systemctl stop gtnh  -> stays down (use this for maintenance)
 [Unit]
 Description=GTNH server
-After=network-online.target gtnh-hub.service
+After=network-online.target gtnh-hub.service gtnh.socket
 Wants=network-online.target
+Requires=gtnh.socket
 
 [Service]
-Type=forking
 User=opc
-WorkingDirectory=/home/opc/gtnh-server
-ExecStart=/usr/bin/tmux new-session -d -s gtnh ./startserver-java9.sh
-# Type `stop` into the console, then wait until the server has finished saving and exited.
-ExecStop=/usr/bin/tmux send-keys -t gtnh stop Enter
-ExecStop=/bin/sh -c 'while /usr/bin/tmux has-session -t gtnh 2>/dev/null; do sleep 2; done'
+WorkingDirectory=/home/opc/GTNH
+# Run the script through bash (not directly) so SELinux doesn't block executing a file in /home.
+ExecStart=/bin/bash ./startserver-java9.sh
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+# `stop` saves and runs every mod's shutdown handler; then wait for the JVM to exit.
+ExecStop=/bin/sh -c 'echo stop > /run/gtnh.stdin; while kill -0 $MAINPID 2>/dev/null; do sleep 2; done'
 # GTNH world saves can take minutes; the 90 s default would SIGKILL mid-save and risk corruption.
 TimeoutStopSec=600
 Restart=always

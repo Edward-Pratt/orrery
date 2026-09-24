@@ -1,0 +1,12 @@
+# Console input for the GTNH server: whatever is written to /run/gtnh.stdin is typed into the server console.
+#   echo "say hello" > /run/gtnh.stdin     (as the User below)
+# Install alongside gtnh.service: sudo cp deploy/gtnh.socket /etc/systemd/system/
+[Unit]
+Description=GTNH server console input
+PartOf=gtnh.service
+
+[Socket]
+ListenFIFO=/run/gtnh.stdin
+SocketUser=opc
+SocketMode=0600
+RemoveOnStop=true

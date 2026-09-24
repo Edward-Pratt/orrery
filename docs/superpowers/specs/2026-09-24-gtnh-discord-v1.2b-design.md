@@ -76,7 +76,8 @@ players only. It sends `link { player, uuid, code }` or `unlink { player }`. The
 
 - A log4j2 `AbstractAppender` attached in `preInit` to the `Server Utilities` logger (`ServerUtilities.LOGGER`).
   Detection is by message text:
-  - `Backup done in …` → `backup { ok: true, detail: "<seconds> s, <size>" }`
+  - `Backup done in …` → `backup { ok: true, detail }`, where `detail` is ServerUtilities' text after
+    `Backup done in `, minus the trailing `!` (e.g. `12.3 seconds (1.2GB)`)
   - `Error while backing up` → `backup { ok: false, detail: <exception message or "unknown error"> }`
 - The appender only enqueues (`HubClient.send` is thread-safe). If ServerUtilities isn't installed, the logger
   never logs those lines and nothing happens.
@@ -137,8 +138,12 @@ number of quests in a batched line.
 - **Codes:** `Links.issue(discordId, discordName) → code`: 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`
   (no look-alikes), valid 10 minutes. A new code replaces the user's previous one. Codes are kept in memory
   only.
-- **In-game link:** `Links.redeem(code, player, uuid) → { ok, message, discordId? }`.
+- **In-game link:** `Links.redeem(code, player, uuid) → { ok, message, discordId? }`. Codes match
+  case-insensitively.
   - Unknown or expired code → `{ ok: false, "That code is unknown or expired. Use /link in Discord for a new one." }`.
+  - Guessing is capped: after 5 failed attempts in 10 minutes, the player gets
+    `{ ok: false, "Too many attempts; try again in a few minutes." }`. With 32⁶ ≈ 10⁹ codes, that makes guessing
+    hopeless.
   - Otherwise it's stored (replacing any earlier link of that Discord user or that player) and the code is used
     up.
   - The hub replies `linkResult` and posts the notice `🔗 <player> linked to <@discordId>`. Pings are disabled
@@ -198,7 +203,8 @@ Same rules as before:
   - `lag.test.ts`: lag after N low samples, recovery, off while offline or hung, the `lagAlerts: false` switch;
     sparkline;
   - `quests.test.ts`: each mode; batching per player with mock timers; the 5-name cap;
-  - `links.test.ts`: issue/redeem, expiry (mock timers), replacement on both sides, unlink, the code alphabet;
+  - `links.test.ts`: issue/redeem (case-insensitive), expiry (mock timers), replacement on both sides, unlink,
+    the code alphabet, the failed-attempt cap;
   - `db.test.ts`: the links and tps tables;
   - `format.test.ts`: the `/tps` embed, quest lines, the link notice;
   - `discord.test.ts`: `/tps`, `/link`, `/unlink` and `/playtime user` in `COMMANDS`.

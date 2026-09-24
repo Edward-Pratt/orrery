@@ -56,8 +56,9 @@ export function formatEvent(e: HubEvent): string | null {
       return '⚠️ Server not responding';
     case 'recovered':
       return '✅ Server responding again';
-    case 'connected':
-      return null; // may just be a reconnect after a hub restart
+    case 'connected': // may just be a reconnect after a hub restart
+    case 'offline': // hub-start bookkeeping for uptime, not news
+      return null;
   }
 }
 

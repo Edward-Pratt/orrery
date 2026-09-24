@@ -136,7 +136,7 @@ test('runCommand fails fast offline, times out, ignores late results, and fails 
   await assert.rejects(hub.runCommand('gtnh', ' / ', 'test'), /empty command/);
   const timedOut = hub.runCommand('gtnh', 'list', 'test');
   const cmd = (await mod.next()) as { id: string };
-  await assert.rejects(timedOut, /timed out/);
+  await assert.rejects(timedOut, /timed out — it may still run when the server responds/);
   mod.send({ type: 'cmdResult', id: cmd.id, output: ['late'] }); // must be ignored
   const dropped = hub.runCommand('gtnh', 'list', 'test');
   await mod.next();
@@ -195,4 +195,32 @@ test('say cleans text and skips empty messages', async (t) => {
   assert.equal(say.author, 'Bob');
   assert.equal(say.message.length, 256);
   assert.ok(say.message.startsWith('line1 line2 xyyy'));
+});
+
+test('a mod cannot claim another serverId in its messages', async (t) => {
+  const { port, events } = await setup(t);
+  const mod = await online(port);
+  mod.send({ type: 'chat', player: 'Steve', message: 'hi', serverId: 'other' });
+  await until(() => events.length === 2);
+  assert.equal(events[1].serverId, 'gtnh');
+});
+
+test('servers that do not connect within the grace period are reported offline', async (t) => {
+  const hub = new ServerHub(
+    [
+      { id: 'gtnh', name: 'GTNH', token: TOKEN },
+      { id: 'idle', name: 'Idle', token: TOKEN },
+    ],
+    { graceMs: 150 },
+  );
+  const events: HubEvent[] = [];
+  hub.on('event', (e) => events.push(e));
+  t.after(() => hub.close());
+  const port = await hub.listen(0);
+  await online(port);
+  await sleep(300);
+  assert.deepEqual(events, [
+    { serverId: 'gtnh', type: 'connected' },
+    { serverId: 'idle', type: 'offline' },
+  ]);
 });

@@ -58,6 +58,12 @@ public class GtnhDiscord {
             .bus()
             .register(events);
         client.start();
+        // SIGTERM (systemctl stop, Ctrl+C): vanilla's shutdown hook calls stopServer() directly, so
+        // FMLServerStoppingEvent never fires. Announce the stop here too. Harmless after a clean /stop or a crash:
+        // the client is already stopped, so this send is never delivered.
+        final HubClient c = client;
+        Runtime.getRuntime()
+            .addShutdownHook(new Thread(() -> announceStop(c), "GTNHDiscord-shutdown"));
     }
 
     @Mod.EventHandler
@@ -67,9 +73,13 @@ public class GtnhDiscord {
 
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
-        if (client == null) return;
-        client.send(GameEvents.msg("stopping"));
-        client.stop(2000); // flush before the JVM can exit, so a clean stop never looks like a crash
+        if (client != null) announceStop(client);
+    }
+
+    /** Queues `stopping` and flushes it before the JVM can exit, so a clean stop never looks like a crash. */
+    private static void announceStop(HubClient c) {
+        c.send(GameEvents.msg("stopping"));
+        c.stop(2000);
     }
 
     @Mod.EventHandler

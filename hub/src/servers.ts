@@ -15,11 +15,11 @@ export type ServerState = {
   players: string[];
 };
 
-export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered';
+export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered' | 'offline';
 export type GameMsg = Extract<ModMsg, { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' }>;
 export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle });
 
-export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number };
+export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number };
 
 type Pending = { resolve: (output: string[]) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
 type Conn = { socket: Socket; stopping: boolean; lastBeat: number; hung: boolean; pending: Map<string, Pending> };
@@ -53,10 +53,12 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   #conns = new Map<string, Conn>();
   #server: Server | null = null;
   #timer: NodeJS.Timeout | undefined;
+  #grace: NodeJS.Timeout | undefined;
   #closing = false;
   #hungMs: number;
   #cmdTimeoutMs: number;
   #helloTimeoutMs: number;
+  #graceMs: number;
 
   constructor(servers: ServerConfig[], opts: HubOptions = {}) {
     super();
@@ -68,6 +70,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     this.#hungMs = opts.hungMs ?? 30_000;
     this.#cmdTimeoutMs = opts.cmdTimeoutMs ?? 10_000;
     this.#helloTimeoutMs = opts.helloTimeoutMs ?? 5_000;
+    this.#graceMs = opts.graceMs ?? 60_000; // longer than the mod's 30 s max reconnect backoff
   }
 
   /** Starts listening. Resolves with the bound port (pass 0 for a random one). */
@@ -78,6 +81,10 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       server.listen(port, host, () => {
         this.#server = server;
         this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
+        // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever).
+        this.#grace = setTimeout(() => {
+          for (const id of this.#states.keys()) if (!this.#conns.has(id)) this.#emit(id, 'offline');
+        }, this.#graceMs);
         resolve((server.address() as AddressInfo).port);
       });
     });
@@ -86,6 +93,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   close(): Promise<void> {
     this.#closing = true;
     clearInterval(this.#timer);
+    clearTimeout(this.#grace);
     for (const conn of this.#conns.values()) conn.socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
   }
@@ -119,7 +127,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         conn.pending.delete(cmdId);
-        reject(new Error('command timed out'));
+        reject(new Error('command timed out — it may still run when the server responds'));
       }, this.#cmdTimeoutMs);
       conn.pending.set(cmdId, { resolve, reject, timer });
       this.#send(conn.socket, { type: 'cmd', id: cmdId, command: cmd });
@@ -205,7 +213,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
         return p.resolve(msg.output);
       }
       default:
-        this.emit('event', { serverId: id, ...msg });
+        this.emit('event', { ...msg, serverId: id }); // serverId last: a mod can't speak for another server
     }
   }
 

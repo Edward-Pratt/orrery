@@ -27,6 +27,7 @@ const STATES = new Map<Lifecycle, State>([
   ['stopped', 'down'],
   ['crashed', 'down'],
   ['hung', 'down'],
+  ['offline', 'down'],
 ]);
 hub.on('event', (e) => {
   const state = STATES.get(e.type as Lifecycle);

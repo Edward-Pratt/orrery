@@ -21,6 +21,7 @@ test('formatEvent escapes markdown, links and § codes', () => {
 
 test('formatEvent announces lifecycle but not reconnects', () => {
   assert.equal(formatEvent({ serverId: 's', type: 'connected' }), null);
+  assert.equal(formatEvent({ serverId: 's', type: 'offline' }), null);
   assert.equal(formatEvent({ serverId: 's', type: 'crashed' }), '💥 Server went down unexpectedly');
   assert.equal(formatEvent({ serverId: 's', type: 'started' }), '✅ Server started');
 });

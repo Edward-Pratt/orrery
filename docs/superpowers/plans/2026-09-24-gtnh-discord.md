@@ -2184,7 +2184,7 @@ The user must do this part, because it needs their Discord bot token and their s
 3. Discord message → shows in game as a blue `[Discord]` prefix, then `<name> text`. A message containing `@everyone` pings nobody in Discord.
 4. `/cmd list` by an admin-role member shows the player list. By a non-admin it's refused (ephemeral). `/cmd forge tps` output comes back in a code block.
 5. `/stop` in game → "🛑 Server stopped" (not "went down unexpectedly").
-6. Start the server, then `kill -9` its Java process → "💥 Server went down unexpectedly".
+6. Start the server, then `kill -9` its Java process → "💥 Server went down unexpectedly". Start it again and stop it with SIGTERM (`kill <pid>` / `systemctl stop` / Ctrl+C in its console) → "🛑 Server stopped" (may follow a burst of "left" posts).
 7. Restart the hub while the server runs → no alert is posted, and `/status` shows it online again within a few seconds.
 
 Anything that fails here is a bug. Fix it with superpowers:systematic-debugging before calling v1 done.

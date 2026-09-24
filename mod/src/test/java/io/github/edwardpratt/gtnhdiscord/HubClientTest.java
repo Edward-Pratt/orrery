@@ -3,6 +3,7 @@ package io.github.edwardpratt.gtnhdiscord;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,7 @@ import java.io.Writer;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.function.BooleanSupplier;
@@ -182,6 +184,19 @@ class HubClientTest {
         assertEquals("stopping", HubClient.str(hub.read(), "type"));
         assertNull(hub.in.readLine());
         assertTrue(!client.isConnected());
+    }
+
+    @Test
+    void sendAfterStopNeverReachesTheHubOrReconnects() throws Exception {
+        client.start();
+        hub.handshake();
+        waitUntil(client::isConnected);
+        client.stop(2000);
+        assertNull(hub.in.readLine());
+        client.send(msg("stopping")); // what the JVM shutdown hook does after a clean /stop or a crash
+        client.stop(2000);
+        hub.server.setSoTimeout(500);
+        assertThrows(SocketTimeoutException.class, hub.server::accept);
     }
 
     @Test

@@ -1,0 +1,14 @@
+{
+  "listenPort": 25580,
+  "dbPath": "hub.db",
+  "guildId": "YOUR_DISCORD_SERVER_ID",
+  "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
+  "servers": [
+    {
+      "id": "gtnh",
+      "name": "GTNH",
+      "token": "CHANGE_ME_TO_A_LONG_RANDOM_STRING",
+      "channelId": "CHANNEL_ID_FOR_THIS_SERVER"
+    }
+  ]
+}

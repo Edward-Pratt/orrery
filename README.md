@@ -84,7 +84,15 @@ sudo systemctl enable --now gtnh-hub gtnh
 
 These work with SELinux enforcing (the default on RHEL/Oracle Linux): the token
 lives in `/etc` rather than `/home`, and the server runs without tmux, which
-SELinux doesn't let services start.
+SELinux doesn't let services start. If `gtnh.socket` fails with "Permission
+denied" (SELinux blocking systemd from its own console FIFO), install the small
+policy module in `deploy/gtnh-fifo.te`, which allows exactly that and nothing else:
+
+```bash
+checkmodule -M -m -o /tmp/gtnh-fifo.mod deploy/gtnh-fifo.te
+semodule_package -o /tmp/gtnh-fifo.pp -m /tmp/gtnh-fifo.mod
+sudo semodule -i /tmp/gtnh-fifo.pp
+```
 
 - **Hub logs:** `journalctl -u gtnh-hub -f`
 - **Server console output:** `journalctl -u gtnh -f` (add yourself to the

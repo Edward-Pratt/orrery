@@ -1,16 +1,17 @@
 # SELinux: let systemd (init_t) use the GTNH console FIFO it creates in /run (var_run_t).
 # Some RHEL/Oracle Linux policies deny this, so gtnh.socket fails with "Permission denied".
-# Grants FIFO access only (no regular files, sockets or other types). Build and install:
+# setattr: chown to SocketUser; unlink: RemoveOnStop. FIFOs only (no regular files, sockets or other types).
+# Build and install:
 #   checkmodule -M -m -o gtnh-fifo.mod deploy/gtnh-fifo.te
 #   semodule_package -o gtnh-fifo.pp -m gtnh-fifo.mod
 #   sudo semodule -i gtnh-fifo.pp
 # Remove with: sudo semodule -r gtnh-fifo
-module gtnh-fifo 1.0;
+module gtnh-fifo 1.1;
 
 require {
     type init_t;
     type var_run_t;
-    class fifo_file { getattr open read write ioctl };
+    class fifo_file { getattr setattr open read write ioctl unlink };
 }
 
-allow init_t var_run_t:fifo_file { getattr open read write ioctl };
+allow init_t var_run_t:fifo_file { getattr setattr open read write ioctl unlink };

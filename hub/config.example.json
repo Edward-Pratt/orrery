@@ -8,7 +8,9 @@
       "id": "gtnh",
       "name": "GTNH",
       "token": "CHANGE_ME_TO_A_LONG_RANDOM_STRING",
-      "channelId": "CHANNEL_ID_FOR_THIS_SERVER"
+      "channelId": "CHANNEL_ID_FOR_THIS_SERVER",
+      "dir": "/home/opc/GTNH",
+      "dailyRestart": "06:00"
     }
   ]
 }

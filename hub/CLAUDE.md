@@ -20,10 +20,14 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
 | `src/db.ts` | SQLite (`node:sqlite`) up/down/unknown log and uptime math. |
-| `src/discord.ts` | Discord frontend: relay, alerts, `/status` `/list` `/cmd`; pure `format*` helpers are unit-tested. |
+| `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts. Hub core. |
+| `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
+| `src/format.ts` | Pure Discord text: `md`, `format*`, `topicDue`. Unit-tested. |
+| `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, `/status` `/list` `/cmd` `/restart`. |
 | `src/index.ts` | Config loading and wiring only. |
 
-A future web dashboard goes in `src/web/` and calls `ServerHub` — never the mod sockets.
+A future web dashboard goes in `src/web/` and calls `ServerHub` and `RestartScheduler` — never the mod sockets.
+Hub-core modules (`servers`, `restarts`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
 
 ## Dependencies
 

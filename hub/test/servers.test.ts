@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { createInterface } from 'node:readline';
 import { test, type TestContext } from 'node:test';
-import { ServerHub, type HubEvent, type HubOptions } from '../src/servers.ts';
+import { mcText, ServerHub, truncate, type HubEvent, type HubOptions } from '../src/servers.ts';
 
 const TOKEN = 'test-token-0123456';
 
@@ -223,4 +223,23 @@ test('servers that do not connect within the grace period are reported offline',
     { serverId: 'gtnh', type: 'connected' },
     { serverId: 'idle', type: 'offline' },
   ]);
+});
+
+test('truncate never leaves half an emoji', () => {
+  assert.equal(truncate('abc', 5), 'abc');
+  assert.equal(truncate('abcdef', 3), 'abc');
+  assert.equal(truncate('ab😀', 3), 'ab'); // cutting at 3 would split the surrogate pair
+  assert.equal(truncate('ab😀', 4), 'ab😀');
+  assert.equal(mcText('a'.repeat(255) + '😀', 256), 'a'.repeat(255));
+});
+
+test('close() does not wait for connections that never sent hello', async () => {
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', token: TOKEN }]);
+  const port = await hub.listen(0);
+  const idle = fakeMod(port);
+  await sleep(50);
+  const start = Date.now();
+  await hub.close();
+  assert.ok(Date.now() - start < 1000, `close took ${Date.now() - start} ms`);
+  await idle.closed;
 });

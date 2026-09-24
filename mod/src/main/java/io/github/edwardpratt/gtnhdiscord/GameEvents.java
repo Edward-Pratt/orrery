@@ -1,6 +1,7 @@
 package io.github.edwardpratt.gtnhdiscord;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -35,6 +36,8 @@ public class GameEvents {
 
     private final HubClient client;
     private long lastHeartbeat;
+    /** Commands still collecting replies. Server thread only (the replies themselves may come from any thread). */
+    private final List<CommandOutput> pending = new ArrayList<>();
 
     GameEvents(HubClient client) {
         this.client = client;
@@ -92,8 +95,15 @@ public class GameEvents {
             MinecraftServer server = MinecraftServer.getServer();
             JsonObject in;
             while ((in = client.poll()) != null) handle(server, in);
-            // Sent from the tick so that a frozen tick loop stops heartbeats (that is how the hub spots a hang).
             long now = System.currentTimeMillis();
+            for (Iterator<CommandOutput> it = pending.iterator(); it.hasNext();) {
+                CommandOutput out = it.next();
+                if (out.ready(now)) {
+                    sendResult(out);
+                    it.remove();
+                }
+            }
+            // Sent from the tick so that a frozen tick loop stops heartbeats (that is how the hub spots a hang).
             if (now - lastHeartbeat >= HEARTBEAT_MS) {
                 lastHeartbeat = now;
                 client.send(heartbeat(server));
@@ -114,8 +124,9 @@ public class GameEvents {
             server.getConfigurationManager()
                 .sendChatMsg(line);
         } else if (type.equals("cmd")) {
-            final List<String> output = new ArrayList<>();
-            // Vanilla's RCON sender: op-level, real world and coordinates. We only capture its replies per line.
+            final CommandOutput output = new CommandOutput(HubClient.str(in, "id"), System.currentTimeMillis());
+            // Vanilla's RCON sender: op-level, real world and coordinates. We only capture its replies per line,
+            // including ones that arrive later from another thread (the result waits for them; see CommandOutput).
             RConConsoleSource sender = new RConConsoleSource() {
 
                 @Override
@@ -125,17 +136,27 @@ public class GameEvents {
 
                 @Override
                 public void addChatMessage(IChatComponent message) {
-                    output.add(message.getUnformattedText());
+                    output.add(message.getUnformattedText(), System.currentTimeMillis());
                 }
             };
             server.getCommandManager()
                 .executeCommand(sender, HubClient.str(in, "command"));
-            JsonObject result = msg("cmdResult", "id", HubClient.str(in, "id"));
-            JsonArray lines = new JsonArray();
-            for (String s : output) lines.add(new JsonPrimitive(s));
-            result.add("output", lines);
-            client.send(result);
+            pending.add(output);
         }
+    }
+
+    /** Sends every pending command result now, ready or not: on shutdown ticks stop, so they'd never go. */
+    void flushPending() {
+        for (CommandOutput out : pending) sendResult(out);
+        pending.clear();
+    }
+
+    private void sendResult(CommandOutput out) {
+        JsonObject result = msg("cmdResult", "id", out.id);
+        JsonArray lines = new JsonArray();
+        for (String s : out.lines()) lines.add(new JsonPrimitive(s));
+        result.add("output", lines);
+        client.send(result);
     }
 
     private static JsonObject heartbeat(MinecraftServer server) {

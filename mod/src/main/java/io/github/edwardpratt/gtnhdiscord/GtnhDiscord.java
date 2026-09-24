@@ -73,7 +73,9 @@ public class GtnhDiscord {
 
     @Mod.EventHandler
     public void serverStopping(FMLServerStoppingEvent event) {
-        if (client != null) announceStop(client);
+        if (client == null) return;
+        events.flushPending(); // e.g. `/cmd stop` gets its output before the connection closes
+        announceStop(client);
     }
 
     /** Queues `stopping` and flushes it before the JVM can exit, so a clean stop never looks like a crash. */

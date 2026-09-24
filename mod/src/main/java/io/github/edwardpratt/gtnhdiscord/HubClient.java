@@ -9,6 +9,7 @@ import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +33,7 @@ public class HubClient {
     private final String host;
     private final int port;
     private final JsonObject hello = new JsonObject();
-    private final LinkedBlockingDeque<String> outbox = new LinkedBlockingDeque<>();
+    private final LinkedBlockingDeque<JsonObject> outbox = new LinkedBlockingDeque<>();
     private final ConcurrentLinkedQueue<JsonObject> inbox = new ConcurrentLinkedQueue<>();
     private volatile boolean running;
     private volatile boolean connected;
@@ -64,12 +65,22 @@ public class HubClient {
      * stale chat. The queue is bounded: when full, the oldest message is dropped.
      */
     public void send(JsonObject msg) {
-        String type = msg.get("type")
-            .getAsString();
-        if (!connected && !type.equals("started") && !type.equals("stopping")) return;
+        if (!connected && !isLifecycle(msg)) return;
         synchronized (outbox) {
             if (outbox.size() >= MAX_OUTBOX) outbox.pollFirst();
-            outbox.offerLast(msg.toString());
+            outbox.offerLast(msg);
+        }
+    }
+
+    private static boolean isLifecycle(JsonObject msg) {
+        String type = str(msg, "type");
+        return type.equals("started") || type.equals("stopping");
+    }
+
+    /** After a connection ends, only started/stopping survive: other lines would be stale by the next connection. */
+    static void dropNonLifecycle(Deque<JsonObject> queue) {
+        synchronized (queue) {
+            queue.removeIf(msg -> !isLifecycle(msg));
         }
     }
 
@@ -127,6 +138,7 @@ public class HubClient {
                 if (running) LOG.warn("Hub connection failed: {}", e.getMessage());
             } finally {
                 connected = false;
+                dropNonLifecycle(outbox);
             }
             if (!running) return;
             try {
@@ -140,17 +152,17 @@ public class HubClient {
 
     private void writeLoop(Socket s, Writer out) throws IOException {
         while (running && !s.isClosed()) {
-            String line;
+            JsonObject msg;
             try {
-                line = outbox.pollFirst(200, TimeUnit.MILLISECONDS);
+                msg = outbox.pollFirst(200, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 continue; // stop() interrupts us; the loop condition sees running == false
             }
-            if (line != null) writeLine(out, line);
+            if (msg != null) writeLine(out, msg.toString());
         }
         if (s.isClosed()) throw new IOException("connection closed by hub");
-        String line;
-        while ((line = outbox.pollFirst()) != null) writeLine(out, line); // stopping: flush what's left
+        JsonObject msg;
+        while ((msg = outbox.pollFirst()) != null) writeLine(out, msg.toString()); // stopping: flush what's left
     }
 
     private void readLoop(Socket s, BufferedReader in) {

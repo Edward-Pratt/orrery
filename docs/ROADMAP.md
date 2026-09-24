@@ -30,7 +30,9 @@ Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2a-design.md`
 | `/cmd` captures async replies (spark) | mod | S |
 | Deferred minors (daily timer leak, symlinks, audit id, webhook name cache, topic warning, stale outbox) | hub + mod | S |
 
-## v1.2b — protocol v2
+## v1.2b — in progress (ships together with v1.2a; additive messages, protocol stays v1)
+
+Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
 
 | Feature | Where | Size |
 |---|---|---|

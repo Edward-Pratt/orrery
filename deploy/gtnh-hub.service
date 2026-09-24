@@ -1,0 +1,19 @@
+# GTNH Discord hub. Install: sudo cp deploy/gtnh-hub.service /etc/systemd/system/
+# Edit User and the paths below to match your server.
+[Unit]
+Description=GTNH Discord hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=opc
+WorkingDirectory=/home/opc/gtnh-discord/hub
+# .env holds DISCORD_TOKEN=...
+EnvironmentFile=/home/opc/gtnh-discord/hub/.env
+# Needs Node 26+. If installed via nvm, use the full path from `which node`.
+ExecStart=/usr/bin/node src/index.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

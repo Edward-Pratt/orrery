@@ -1248,6 +1248,7 @@ cp -r "$tmp/ExampleMod1.7.10-master" mod
 rm -rf "$tmp"
 cd mod
 rm -rf .github jitpack.yml CODEOWNERS LICENSE LICENSE-template README.md docs src/main/resources/LICENSE src/main/java/com
+mkdir -p src/main/java/io/github/edwardpratt/gtnhdiscord   # the build plugin refuses to configure without the modGroup package dir
 ```
 
 - [ ] **Step 2: Set the mod identity**
@@ -2017,7 +2018,7 @@ public class GtnhDiscord {
 Run:
 ```bash
 cd mod && ./gradlew --console=plain spotlessApply build
-jar=$(ls build/libs/gtnhdiscord-*.jar | grep -v -e '-dev' -e '-sources')
+jar=$(ls -t build/libs/gtnhdiscord-*.jar | grep -v -e '-dev' -e '-sources' | head -1)   # newest; older builds leave other versions behind
 unzip -l "$jar" | grep -E 'class|mcmod'
 javap -v -cp "$jar" io.github.edwardpratt.gtnhdiscord.HubClient | grep 'major version'
 javap -cp "$jar" 'io.github.edwardpratt.gtnhdiscord.GameEvents$1'
@@ -2183,7 +2184,7 @@ The user must do this part, because it needs their Discord bot token and their s
 3. Discord message → shows in game as a blue `[Discord]` prefix, then `<name> text`. A message containing `@everyone` pings nobody in Discord.
 4. `/cmd list` by an admin-role member shows the player list. By a non-admin it's refused (ephemeral). `/cmd forge tps` output comes back in a code block.
 5. `/stop` in game → "🛑 Server stopped" (not "went down unexpectedly").
-6. Start the server, then `kill -9` its Java process → "💥 Server went down unexpectedly".
+6. Start the server, then `kill -9` its Java process → "💥 Server went down unexpectedly". Start it again and stop it with SIGTERM (`kill <pid>` / `systemctl stop` / Ctrl+C in its console) → "🛑 Server stopped" (may follow a burst of "left" posts).
 7. Restart the hub while the server runs → no alert is posted, and `/status` shows it online again within a few seconds.
 
 Anything that fails here is a bug. Fix it with superpowers:systematic-debugging before calling v1 done.

@@ -92,7 +92,7 @@ replaces the old one; the old connection's close is then ignored (no alert).
 | type | fields | when |
 |---|---|---|
 | `started` | — | `FMLServerStartedEvent` |
-| `stopping` | — | `FMLServerStoppingEvent` (only fires on a normal stop — verified in FML's `MinecraftServer` patch: a crash skips it) |
+| `stopping` | — | `FMLServerStoppingEvent` (a crash skips it — verified in FML's `MinecraftServer` patch), and a JVM shutdown hook for SIGTERM/`systemctl stop`, where vanilla's own hook calls `stopServer()` directly and the FML event never fires |
 | `heartbeat` | `tps` (number), `players` (string[]) | from the server tick, ≥5 s wall-clock apart |
 | `chat` | `player`, `message` | `ServerChatEvent` |
 | `join` / `leave` | `player` | FML `PlayerLoggedIn/OutEvent` |
@@ -122,6 +122,7 @@ A `cmdResult` with an unknown or late `id` is ignored.
 | `stopping` then disconnect | clean stop | "🛑 Server stopped" |
 | disconnect without `stopping` | crash / killed | "💥 Server went down unexpectedly" |
 | no heartbeat for 30 s, after at least one heartbeat on this connection and before `stopping` | hung | "⚠️ Server not responding"; next heartbeat posts "✅ Server responding again" |
+| not connected 60 s after hub start | offline (recorded as `down` for uptime) | — |
 
 Hung detection is armed by the first heartbeat (not by `started`) so it also
 works after a hub restart, and it stays quiet through GTNH's multi-minute

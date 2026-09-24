@@ -10,21 +10,37 @@ import {
   type Message,
   type Webhook,
 } from 'discord.js';
+import { basename } from 'node:path';
+import { listBackups } from './backups.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import {
+  formatBackupList,
+  formatBackupStatus,
   formatEvent,
+  formatLinked,
+  formatNotice,
   formatOutput,
   formatPlayers,
+  formatPlaytime,
   formatPresence,
+  formatQuests,
   formatStatus,
+  formatSummary,
+  formatTop,
   formatTopic,
+  formatTps,
   md,
+  TOP_PERIODS,
   topicDue,
+  type Post,
   type TopicEdit,
 } from './format.ts';
+import type { Links } from './links.ts';
+import type { QuestBatch } from './quests.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
+import type { Summary } from './summary.ts';
 
 export type DiscordConfig = {
   guildId: string;
@@ -33,20 +49,56 @@ export type DiscordConfig = {
   channels: Record<string, string>;
   /** serverId -> server folder, for crash-log uploads */
   dirs: Record<string, string>;
+  /** serverId -> ServerUtilities backup folder */
+  backupDirs: Record<string, string>;
 };
 
-export type DiscordFrontend = { client: Client; post: (serverId: string, text: string) => void };
+export type DiscordFrontend = {
+  client: Client;
+  /** Posts a hub-core notice (restarts, backups) to the server's channel. */
+  notice: (serverId: string, text: string) => void;
+  summary: (serverId: string, s: Summary) => void;
+  quests: (batch: QuestBatch) => void;
+  linked: (serverId: string, player: string, discordId: string) => void;
+};
 
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 const WEBHOOK_NAME = 'GTNH Relay';
 const CRASH_LOG_WINDOW_MS = 10 * 60_000;
-const UNKNOWN_WEBHOOK = 10015; // Discord API error code
+// Discord API error codes.
+const UNKNOWN_WEBHOOK = 10015;
+const MISSING_PERMISSIONS = 50013;
+const INVALID_FORM_BODY = 50035; // e.g. a webhook username containing "discord"
+
+const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 
 // Admin commands are hidden (default_member_permissions "0") until the admin role is allowed under
 // Server Settings → Integrations; the adminRoleId check below still applies either way.
 export const COMMANDS = [
   new SlashCommandBuilder().setName('status').setDescription('Server status, TPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
+  new SlashCommandBuilder().setName('tps').setDescription('TPS now, over the last hour and day, and the slowest dimensions'),
+  new SlashCommandBuilder()
+    .setName('playtime')
+    .setDescription("A player's playtime and when they were last seen")
+    .addStringOption((o) => o.setName('player').setDescription('Minecraft name'))
+    .addUserOption((o) => o.setName('user').setDescription('Or a Discord member who has linked their account')),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your Minecraft name'),
+  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your Minecraft name'),
+  new SlashCommandBuilder()
+    .setName('top')
+    .setDescription('Top players by playtime')
+    .addStringOption((o) =>
+      o
+        .setName('period')
+        .setDescription('Default: last 7 days')
+        .addChoices(
+          { name: 'last 24 hours', value: 'day' },
+          { name: 'last 7 days', value: 'week' },
+          { name: 'all time', value: 'all' },
+        ),
+    ),
   new SlashCommandBuilder()
     .setName('cmd')
     .setDescription('Run a server console command (admin role only)')
@@ -65,6 +117,13 @@ export const COMMANDS = [
         ),
     )
     .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the scheduled restart')),
+  new SlashCommandBuilder()
+    .setName('backup')
+    .setDescription('ServerUtilities backups (admin role only)')
+    .setDefaultMemberPermissions(0)
+    .addSubcommand((s) => s.setName('start').setDescription('Start a backup now and report when it finishes'))
+    .addSubcommand((s) => s.setName('status').setDescription('Newest backup, count and total size'))
+    .addSubcommand((s) => s.setName('list').setDescription('The 10 newest backups with sizes')),
 ].map((c) => c.toJSON());
 
 /** Only people's own messages go into the game: not bots, webhooks (including our relay), or system notices. */
@@ -72,15 +131,19 @@ export function shouldRelay(m: Pick<Message, 'author' | 'webhookId' | 'system'>)
   return !m.author.bot && !m.webhookId && !m.system;
 }
 
+const errorCode = (err: unknown) => (err as { code?: number }).code;
+
 export async function startDiscord(
   hub: ServerHub,
   db: Db,
   restarts: RestartScheduler,
+  links: Links,
   cfg: DiscordConfig,
   token: string,
 ): Promise<DiscordFrontend> {
   const serverByChannel = new Map(Object.entries(cfg.channels).map(([serverId, channelId]) => [channelId, serverId]));
   const webhooks = new Map<string, Webhook>(); // serverId -> relay webhook
+  const refusedNames = new Set<string>(); // player names Discord won't accept as a webhook username
   const topics = new Map<string, TopicEdit>(); // channelId -> last edit
   let presence = '';
   const client = new Client({
@@ -88,21 +151,21 @@ export async function startDiscord(
     allowedMentions: { parse: [] }, // nothing the bot posts can ping anyone
   });
 
-  async function post(serverId: string, text: string, files: string[] = []): Promise<void> {
+  async function post(serverId: string, message: Post, files: string[] = []): Promise<void> {
     const channelId = cfg.channels[serverId];
     if (!channelId) return;
     const channel = await client.channels.fetch(channelId);
-    if (channel?.isSendable()) await channel.send({ content: text, files });
+    if (channel?.isSendable()) await channel.send({ ...message, files });
   }
 
-  const postSafe = (serverId: string, text: string): void => {
-    post(serverId, text).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
+  const postSafe = (serverId: string, message: Post): void => {
+    post(serverId, message).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
   };
 
   // Game chat goes through the channel's webhook, with the player's name and skin; falls back to the bot.
   async function relayChat(e: Extract<HubEvent, { type: 'chat' }>): Promise<void> {
     const hook = webhooks.get(e.serverId);
-    if (hook) {
+    if (hook && !refusedNames.has(e.player)) {
       try {
         await hook.send({
           username: e.player,
@@ -112,23 +175,27 @@ export async function startDiscord(
         });
         return;
       } catch (err) {
-        // A name Discord refuses for webhooks ("discord" in it) only affects this message; a deleted webhook
-        // (Unknown Webhook, 10015) is forgotten so later chat doesn't retry it on every message.
-        if ((err as { code?: number }).code === UNKNOWN_WEBHOOK) webhooks.delete(e.serverId);
+        // A deleted webhook is forgotten; a refused name is remembered, so neither is retried per message.
+        if (errorCode(err) === UNKNOWN_WEBHOOK) webhooks.delete(e.serverId);
+        if (errorCode(err) === INVALID_FORM_BODY) refusedNames.add(e.player);
         console.warn(`[discord] webhook send failed, posting as the bot: ${(err as Error).message}`);
       }
     }
     await post(e.serverId, formatEvent(e)!);
   }
 
-  async function postCrash(serverId: string, text: string): Promise<void> {
+  async function postCrash(serverId: string, message: Post): Promise<void> {
     const files = cfg.dirs[serverId] ? await findCrashLogs(cfg.dirs[serverId], Date.now() - CRASH_LOG_WINDOW_MS) : [];
+    const withNote: Post =
+      files.length && 'embeds' in message
+        ? { embeds: [{ ...message.embeds[0], description: `Crash logs attached: ${files.map((f) => basename(f)).join(', ')}` }] }
+        : message;
     try {
-      await post(serverId, text, files);
+      await post(serverId, withNote, files);
     } catch (err) {
       if (!files.length) throw err;
       console.warn(`[discord] crash log upload failed, posting without it: ${(err as Error).message}`);
-      await post(serverId, text);
+      await post(serverId, message);
     }
   }
 
@@ -137,17 +204,18 @@ export async function startDiscord(
       relayChat(e).catch((err) => console.error('[discord] chat relay failed:', err));
       return;
     }
-    const text = formatEvent(e);
-    if (!text) return;
-    if (e.type === 'crashed') postCrash(e.serverId, text).catch((err) => console.error('[discord] crash post failed:', err));
-    else postSafe(e.serverId, text);
+    const message = formatEvent(e);
+    if (!message) return;
+    if (e.type === 'crashed') postCrash(e.serverId, message).catch((err) => console.error('[discord] crash post failed:', err));
+    else postSafe(e.serverId, message);
   });
 
   client.on(Events.MessageCreate, (m) => {
     const serverId = serverByChannel.get(m.channelId);
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
-    hub.say(serverId, m.member?.displayName ?? m.author.username, text);
+    // Linked people appear in game under their Minecraft name.
+    hub.say(serverId, db.linkByDiscord(m.author.id)?.player ?? m.member?.displayName ?? m.author.username, text);
   });
 
   client.on(Events.InteractionCreate, (i) => {
@@ -162,42 +230,107 @@ export async function startDiscord(
       await i.reply({ content: 'This channel is not linked to a server.', flags: MessageFlags.Ephemeral });
       return;
     }
+    const now = Date.now();
     if (i.commandName === 'status') {
-      const now = Date.now();
       await i.reply(formatStatus(state, db.uptime(serverId, now - DAY, now), db.uptime(serverId, now - 7 * DAY, now)));
       return;
     }
     if (i.commandName === 'list') {
-      await i.reply(state.online ? formatPlayers(state.players) : `${md(state.name)} is offline.`);
+      await i.reply(state.online ? formatPlayers(state.players) : formatNotice(`🔴 ${state.name} is offline`));
       return;
     }
-    // Admin commands from here on.
+    if (i.commandName === 'tps') {
+      await i.reply(
+        formatTps(state, db.tpsSince(serverId, now - HOUR), db.tpsStats(serverId, now - HOUR, now), db.tpsStats(serverId, now - DAY, now)),
+      );
+      return;
+    }
+    if (i.commandName === 'link') {
+      const code = links.issue(i.user.id, i.user.username);
+      await i.reply({ content: `In game, type \`/discord link ${code}\` within 10 minutes.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (i.commandName === 'unlink') {
+      const removed = links.unlinkDiscord(i.user.id);
+      await i.reply({ content: removed ? 'Unlinked.' : "You weren't linked.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (i.commandName === 'playtime') {
+      const user = i.options.getUser('user');
+      const player = user ? db.linkByDiscord(user.id)?.player : (i.options.getString('player') ?? undefined);
+      if (!player) {
+        const content = user ? `${user.username} hasn't linked a Minecraft account (use /link).` : 'Give a player name or a Discord user.';
+        await i.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await i.reply(
+        formatPlaytime(
+          player,
+          db.playtime(serverId, player, 0, now),
+          db.playtime(serverId, player, now - 7 * DAY, now),
+          db.lastSeen(serverId, player),
+          now,
+        ),
+      );
+      return;
+    }
+    if (i.commandName === 'top') {
+      const period = (i.options.getString('period') ?? 'week') as keyof typeof TOP_PERIODS;
+      const from = period === 'day' ? now - DAY : period === 'week' ? now - 7 * DAY : 0;
+      await i.reply(formatTop(period, db.top(serverId, from, now, 10)));
+      return;
+    }
+    if (!ADMIN_COMMANDS.has(i.commandName)) return;
     if (!i.inCachedGuild() || !i.member.roles.cache.has(cfg.adminRoleId)) {
       await i.reply({ content: 'You need the admin role for this.', flags: MessageFlags.Ephemeral });
       return;
     }
+    const audit = `discord:${i.user.username} (${i.user.id})`;
     if (i.commandName === 'cmd') {
       await i.deferReply(); // commands can take longer than Discord's 3 s reply window
       try {
-        const output = await hub.runCommand(serverId, i.options.getString('command', true), `discord:${i.user.username} (${i.user.id})`);
-        await i.editReply(formatOutput(output));
+        // Replies that arrive later (e.g. spark's profiler link) are posted as follow-ups.
+        const onLate = (lines: string[]) => {
+          i.followUp(formatOutput(lines)).catch((err) => console.error('[discord] late output follow-up failed:', err));
+        };
+        await i.editReply(formatOutput(await hub.runCommand(serverId, i.options.getString('command', true), audit, onLate)));
       } catch (err) {
         await i.editReply(`❌ ${(err as Error).message}`);
       }
     } else if (i.commandName === 'restart') {
-      // The public announcement comes from the scheduler's notify; the reply is just for the admin.
+      // The public announcement comes from the scheduler's notice; the reply is just for the admin.
       let reply: string;
       if (i.options.getSubcommand() === 'cancel') {
         reply = restarts.cancel(serverId, i.user.username) ? 'Restart cancelled.' : 'No restart is scheduled.';
       } else {
         try {
-          restarts.schedule(serverId, i.options.getInteger('minutes', true), i.user.username);
+          restarts.schedule(serverId, i.options.getInteger('minutes', true), audit, i.user.username);
           reply = 'Restart scheduled.';
         } catch (err) {
           reply = `❌ ${(err as Error).message}`;
         }
       }
       await i.reply({ content: reply, flags: MessageFlags.Ephemeral });
+    } else if (i.commandName === 'backup') {
+      const dir = cfg.backupDirs[serverId];
+      if (!dir) {
+        await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const sub = i.options.getSubcommand();
+      if (sub === 'status') {
+        await i.reply(formatBackupStatus(await listBackups(dir), Date.now()));
+      } else if (sub === 'list') {
+        await i.reply(formatBackupList(await listBackups(dir)));
+      } else {
+        await i.deferReply();
+        try {
+          // The "finished"/"failed" notice follows in the channel, from the mod's backup event.
+          await i.editReply(formatOutput(await hub.runCommand(serverId, 'backup start', audit)));
+        } catch (err) {
+          await i.editReply(`❌ ${(err as Error).message}`);
+        }
+      }
     }
   }
 
@@ -232,7 +365,8 @@ export async function startDiscord(
         const channel = await client.channels.fetch(channelId);
         if (channel?.type === ChannelType.GuildText) await channel.setTopic(text);
       } catch (err) {
-        console.warn(`[discord] topic update for ${s.id} failed (needs Manage Channels): ${(err as Error).message}`);
+        const hint = errorCode(err) === MISSING_PERMISSIONS ? ' (the bot needs Manage Channels)' : '';
+        console.warn(`[discord] topic update for ${s.id} failed${hint}: ${(err as Error).message}`);
       }
     }
   }
@@ -250,5 +384,11 @@ export async function startDiscord(
   });
 
   await client.login(token);
-  return { client, post: postSafe };
+  return {
+    client,
+    notice: (serverId, text) => postSafe(serverId, formatNotice(text)),
+    summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
+    quests: (batch) => postSafe(batch.serverId, formatQuests(batch)),
+    linked: (serverId, player, discordId) => postSafe(serverId, formatLinked(player, discordId)),
+  };
 }

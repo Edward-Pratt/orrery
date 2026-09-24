@@ -1,4 +1,8 @@
 dependencies {
+    // Optional integration: compiled against, never bundled. QuestEvents only loads if BetterQuesting is installed.
+    compileOnly("com.github.GTNewHorizons:BetterQuesting:3.8.86-GTNH:dev") { transitive = false }
+
+    testImplementation("com.github.GTNewHorizons:BetterQuesting:3.8.86-GTNH:dev") { transitive = false } // QuestEventsTest
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

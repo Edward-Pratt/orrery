@@ -6,6 +6,7 @@ Discord bridge for GT: New Horizons (MC 1.7.10) servers. Two independent project
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe).
 - `docs/superpowers/specs/` — design spec (authoritative); `docs/superpowers/plans/` — implementation plans.
+- `docs/ROADMAP.md` — planned releases; update it when a release ships or scope moves.
 
 Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
 

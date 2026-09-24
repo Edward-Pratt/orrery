@@ -130,9 +130,26 @@ sudo semodule -i /tmp/gtnh-fifo.pp
 - The bot's status and each channel's topic show who's online and the TPS.
   Topics update at most every 5 minutes (a Discord limit).
 - `/status` shows online state, TPS, player count and 24 h / 7 d uptime.
+  Alerts, status, stats and backups post as embeds; chat stays plain text.
 - `/list` shows online players.
+- `/playtime <player>` (or `user:@someone` who has linked) shows total
+  playtime, the last 7 days and when they were last seen; `/top [day|week|all]`
+  ranks players by playtime.
+- `/tps` shows TPS now, the last hour and day, a trend line and the slowest
+  dimensions. The channel gets `🐢 Lag` when TPS stays below 15 for 2 minutes
+  (per server: `"lagTps"`, `"lagMinutes"`, `"lagAlerts": false`) and
+  `✅ TPS back to normal` after.
+- Quest completions (BetterQuesting): main quests post straight away; the rest
+  are rolled up per player every 10 minutes. `"quests"` per server: `batched`
+  (default), `main`, `all` or `off`.
+- Account linking: `/link` gives you a code; type `/discord link <code>` in
+  game within 10 minutes. Your Discord messages then show in game under your
+  Minecraft name. `/unlink` (Discord) or `/discord unlink` (game) removes it.
+- `/cmd` output that arrives later (e.g. `spark profiler` results) is posted as
+  a follow-up, for up to 15 minutes.
 - `/cmd <command>` runs a console command and shows its output. Admin role only.
-  Every command is logged by the hub.
+  Every command is logged by the hub. The reply takes about 1.5 s: it waits for
+  mods such as spark that answer a moment later.
 - `/restart in <minutes>` restarts with in-game warnings at 10 / 5 / 1 min,
   30 s and 10 s; `/restart cancel` calls it off. Admin role only. Add
   `"dailyRestart": "06:00"` to a server in `config.json` for a daily restart
@@ -141,6 +158,15 @@ sudo semodule -i /tmp/gtnh-fifo.pp
   responding (no heartbeat for 30 s), responding again. With `"dir"` set to
   the server's folder in `config.json`, a crash alert comes with the crash
   report and JVM error log (`hs_err_pid*.log`) attached.
+- Every ServerUtilities backup, scheduled or not, posts `✅ Backup finished` or
+  `❌ Backup failed`. `/backup start` starts one now; `/backup status` shows the newest backup, the count and the total
+  size; `/backup list` shows the 10 newest. Admin role only. Backups are read
+  from `"backupDir"`, or `<dir>/backups` if that isn't set. With
+  `"backupMaxAgeHours": 26`, the bot warns once if no new backup appears for
+  that long.
+- `"dailySummary": "09:00"` posts yesterday's stats every day at that time:
+  uptime, peak and unique players, total playtime, top players, starts and
+  crashes.
 
 Adding another game server: add an entry to `servers` in `config.json`,
 restart the hub, and install the mod with that entry's `serverId` and token.
@@ -153,4 +179,4 @@ cd mod && ./gradlew spotlessApply build   # build runs the JUnit tests
 ```
 
 The wire protocol and design are in
-`docs/superpowers/specs/2026-09-24-gtnh-discord-design.md`.
+`docs/superpowers/specs/2026-09-24-gtnh-discord-design.md`. What's planned next is in `docs/ROADMAP.md`.

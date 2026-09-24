@@ -206,4 +206,17 @@ class HubClientTest {
         hub.read(); // hello arrives, but no welcome is ever sent: the client is blocked reading
         assertTimeoutPreemptively(Duration.ofSeconds(2), () -> client.stop(0));
     }
+
+    @Test
+    void droppingStaleLinesKeepsOnlyLifecycleMessages() {
+        java.util.Deque<JsonObject> queue = new java.util.ArrayDeque<>();
+        queue.add(msg("chat"));
+        queue.add(msg("started"));
+        queue.add(msg("heartbeat"));
+        queue.add(msg("stopping"));
+        HubClient.dropNonLifecycle(queue);
+        assertEquals(2, queue.size());
+        assertEquals("started", HubClient.str(queue.pollFirst(), "type"));
+        assertEquals("stopping", HubClient.str(queue.pollFirst(), "type"));
+    }
 }

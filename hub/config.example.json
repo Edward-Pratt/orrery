@@ -10,7 +10,12 @@
       "token": "CHANGE_ME_TO_A_LONG_RANDOM_STRING",
       "channelId": "CHANNEL_ID_FOR_THIS_SERVER",
       "dir": "/home/opc/GTNH",
-      "dailyRestart": "06:00"
+      "dailyRestart": "06:00",
+      "dailySummary": "09:00",
+      "backupMaxAgeHours": 26,
+      "lagTps": 15,
+      "lagMinutes": 2,
+      "quests": "batched"
     }
   ]
 }

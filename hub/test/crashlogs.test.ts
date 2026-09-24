@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -37,4 +37,13 @@ test('ignores files older than the cutoff or too big to upload', async (t) => {
 
 test('a missing folder yields no files instead of an error', async () => {
   assert.deepEqual(await findCrashLogs(join(tmpdir(), 'does-not-exist-' + Date.now()), 0), []);
+});
+
+test('a symlink is not followed (it could point at the hub token)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'crashlogs-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(join(dir, 'crash-reports'));
+  await file(join(dir, 'secret.env'), 3000);
+  await symlink(join(dir, 'secret.env'), join(dir, 'crash-reports', 'crash-evil.txt'));
+  assert.deepEqual(await findCrashLogs(dir, 0), []);
 });

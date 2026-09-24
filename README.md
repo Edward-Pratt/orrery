@@ -130,9 +130,13 @@ sudo semodule -i /tmp/gtnh-fifo.pp
 - The bot's status and each channel's topic show who's online and the TPS.
   Topics update at most every 5 minutes (a Discord limit).
 - `/status` shows online state, TPS, player count and 24 h / 7 d uptime.
+  Alerts, status, stats and backups post as embeds; chat stays plain text.
 - `/list` shows online players.
+- `/playtime <player>` shows total playtime, the last 7 days and when they were
+  last seen; `/top [day|week|all]` ranks players by playtime.
 - `/cmd <command>` runs a console command and shows its output. Admin role only.
-  Every command is logged by the hub.
+  Every command is logged by the hub. The reply takes about 1.5 s: it waits for
+  mods such as spark that answer a moment later.
 - `/restart in <minutes>` restarts with in-game warnings at 10 / 5 / 1 min,
   30 s and 10 s; `/restart cancel` calls it off. Admin role only. Add
   `"dailyRestart": "06:00"` to a server in `config.json` for a daily restart
@@ -141,6 +145,15 @@ sudo semodule -i /tmp/gtnh-fifo.pp
   responding (no heartbeat for 30 s), responding again. With `"dir"` set to
   the server's folder in `config.json`, a crash alert comes with the crash
   report and JVM error log (`hs_err_pid*.log`) attached.
+- `/backup start` starts a ServerUtilities backup and posts when it has
+  finished; `/backup status` shows the newest backup, the count and the total
+  size; `/backup list` shows the 10 newest. Admin role only. Backups are read
+  from `"backupDir"`, or `<dir>/backups` if that isn't set. With
+  `"backupMaxAgeHours": 26`, the bot warns once if no new backup appears for
+  that long.
+- `"dailySummary": "09:00"` posts yesterday's stats every day at that time:
+  uptime, peak and unique players, total playtime, top players, starts and
+  crashes.
 
 Adding another game server: add an entry to `servers` in `config.json`,
 restart the hub, and install the mod with that entry's `serverId` and token.

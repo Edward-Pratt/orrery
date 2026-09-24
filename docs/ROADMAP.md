@@ -17,7 +17,7 @@ before it's built. **Size:** S = an evening or less, M = a day or two, L = sever
   - crash-log uploads;
   - hub hardening.
 
-## v1.2a — in progress (hub + small mod update, no protocol change)
+## v1.2a — done (hub + small mod update, no protocol change)
 
 Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2a-design.md`
 

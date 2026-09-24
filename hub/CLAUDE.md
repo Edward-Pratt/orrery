@@ -19,11 +19,16 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 |---|---|
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
-| `src/db.ts` | SQLite (`node:sqlite`) up/down/unknown log and uptime math. |
+| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log and uptime math; player sessions, daily peaks and stats queries. Writes never throw. |
+| `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |
+| `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
+| `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
+| `src/summary.ts` | `buildSummary`: yesterday's stats, from the scheduled time. Hub core. |
+| `src/backups.ts` | `listBackups`, `BackupWatcher` (finish notices, missing-backup watchdog). Hub core. |
 | `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts. Hub core. |
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
-| `src/format.ts` | Pure Discord text: `md`, `format*`, `topicDue`. Unit-tested. |
-| `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, `/status` `/list` `/cmd` `/restart`. |
+| `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
+| `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/playtime` `/top` `/cmd` `/restart` `/backup`. |
 | `src/index.ts` | Config loading and wiring only. |
 
 A future web dashboard goes in `src/web/` and calls `ServerHub` and `RestartScheduler` — never the mod sockets.

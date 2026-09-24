@@ -36,6 +36,9 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 - `HubClient.stop(0)` must return immediately (crash path); `stop(2000)` flushes `stopping` on clean shutdown.
 - A clean stop is announced from two places: `FMLServerStoppingEvent` (`/stop`) and a JVM shutdown hook
   (SIGTERM — vanilla's hook bypasses the FML event). Both go through `announceStop`.
+- `/cmd` output is collected in a `CommandOutput` until replies go quiet (1.5 s) or 8 s pass, because some mods
+  (spark) reply from a worker thread after the command returns. `serverStopping` calls `flushPending()` first.
+- The outbox holds `JsonObject`s; when a connection ends, `dropNonLifecycle` keeps only `started`/`stopping`.
 
 ## Tests
 

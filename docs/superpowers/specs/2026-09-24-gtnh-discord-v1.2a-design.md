@@ -120,25 +120,25 @@ embed.
 
 ## Backups (`backups.ts`, hub core)
 
-ServerUtilities names backups `YYYY-MM-DD-HH-MM-SS…` in its backup folder, and uses `.su-save-*.tmp`
-while staging. Backups can be zip files or folders.
+ServerUtilities writes each backup as `<YYYY-MM-DD-HH-MM-SS>.zip` in its backup folder: first to a staging
+`.su-save-*.tmp`, then an atomic move into place (verified in `ThreadBackup.doBackup`). So a backup
+appearing under its final name means it's finished.
 
-- `listBackups(dir) → Backup[]` (newest first): entries whose name matches
-  `^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}`, excluding `.tmp`. Each is `{ name, size, mtimeMs }`, where a
-  folder's size is the recursive sum. Symlinks are not followed. A missing folder → `[]`.
+- `listBackups(dir) → Backup[]` (newest first): regular files matching
+  `^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}.*\.zip$`. Each is `{ name, size, mtimeMs }`. Symlinks and folders are
+  skipped. A missing folder → `[]`.
 - **`/backup start`** (admin):
   1. `runCommand(id, 'backup start', by)` replies with ServerUtilities' own answer ("started" /
      "already running").
-  2. On success, `BackupWatcher` polls every 10 s for a backup newer than the start time whose size is
-     unchanged across two polls. `BackupWatcher` takes an injected `list: () => Promise<Backup[]>`, so its
+  2. On success, `BackupWatcher` polls every 10 s for a backup modified after the start time; the first one
+     found is the finished backup. `BackupWatcher` takes an injected `list: () => Promise<Backup[]>`, so its
      timer tests don't touch the filesystem.
   3. It then notifies `✅ Backup finished: <name> (<size>, <m>m <s>s)`. If none appears within 60 min:
      `⚠️ No finished backup appeared within 60 minutes`.
   4. One watch per server at a time.
 - **`/backup status`** (admin): newest backup's name, age and size, backup count and total size.
 - **`/backup list`** (admin): the 10 newest, with sizes, plus count and total size.
-- **Watchdog** (`backupMaxAgeHours`): every 10 min (names and mtimes only; recursive sizes are computed only
-  for `/backup status`, `/backup list` and the finished backup), if the newest backup is older than the limit,
+- **Watchdog** (`backupMaxAgeHours`): every 10 min, if the newest backup is older than the limit,
   notify `⚠️ No new backup for <n> h` once. The alert re-arms after a newer backup appears.
 
 `/backup` is one command with subcommands and `default_member_permissions: "0"`, like `/cmd`.
@@ -201,8 +201,9 @@ code never throw into the hub's event handlers or timers.
   an offline server closes its sessions.
 - `summary.test.ts`: `buildSummary` over seeded data.
 - `backups.test.ts`:
-  - `listBackups` over a temp folder (zip and folder backups, `.tmp` ignored, a symlink skipped);
-  - `BackupWatcher` with mock timers: finishes on a stable size, times out, one watch per server;
+  - `listBackups` over a temp folder (backups found newest first; `.tmp`, other names, folders and a symlink
+    skipped);
+  - `BackupWatcher` with mock timers: finishes when a new backup appears, times out, one watch per server;
   - the watchdog alerts once and re-arms.
 - `crashlogs.test.ts`: a symlink is skipped.
 - `format.test.ts`: embed builders for events, status, playtime, top, backups and the summary.

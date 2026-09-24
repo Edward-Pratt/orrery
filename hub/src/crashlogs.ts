@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** Discord's upload limit is 10 MB; stay under it. */
@@ -16,7 +16,7 @@ async function newest(dir: string, match: (name: string) => boolean, sinceMs: nu
     if (!match(name)) continue;
     const path = join(dir, name);
     try {
-      const st = await stat(path);
+      const st = await lstat(path); // lstat: a symlink (e.g. to the hub's .env) is not a file and is skipped
       if (!st.isFile() || st.size > MAX_BYTES || st.mtimeMs < sinceMs) continue;
       if (!best || st.mtimeMs > best.mtime) best = { path, mtime: st.mtimeMs };
     } catch {

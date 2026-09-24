@@ -1,51 +1,101 @@
-import { escapeMarkdown } from 'discord.js';
+import { escapeMarkdown, type APIEmbed } from 'discord.js';
+import type { Backup } from './backups.ts';
 import { stripCodes, truncate, type HubEvent, type ServerState } from './servers.ts';
+import type { Summary } from './summary.ts';
+import { formatBytes, formatDuration } from './units.ts';
+
+/** What the bot posts: plain text (chat-like messages) or an embed (everything else). */
+export type Post = { content: string } | { embeds: APIEmbed[] };
+
+export const COLORS = { green: 0x2ecc71, grey: 0x95a5a6, red: 0xe74c3c, orange: 0xe67e22, blue: 0x3498db } as const;
+
+// Discord embed limits.
+const TITLE = 256;
+const FIELD = 1024;
+const DESCRIPTION = 4096;
 
 /** Escapes Minecraft text for Discord: no § codes, no markdown, headings, lists or masked links. */
 export function md(s: string): string {
   return escapeMarkdown(stripCodes(s), { heading: true, maskedLink: true, bulletedList: true, numberedList: true });
 }
 
+/** Embed titles render less markdown than descriptions, so they only get § codes stripped. */
+function title(s: string): string {
+  return truncate(stripCodes(s), TITLE);
+}
+
+const embed = (e: APIEmbed): Post => ({ embeds: [e] });
+
 /** The Discord post for a hub event, or null for events that aren't announced. */
-export function formatEvent(e: HubEvent): string | null {
+export function formatEvent(e: HubEvent): Post | null {
   switch (e.type) {
     case 'chat':
-      return `**${md(e.player)}**: ${md(e.message)}`;
+      return { content: `**${md(e.player)}**: ${md(e.message)}` };
     case 'join':
-      return `➡️ **${md(e.player)}** joined`;
+      return { content: `➡️ **${md(e.player)}** joined` };
     case 'leave':
-      return `⬅️ **${md(e.player)}** left`;
+      return { content: `⬅️ **${md(e.player)}** left` };
     case 'death':
-      return `💀 ${md(e.message)}`;
+      return { content: `💀 ${md(e.message)}` };
     case 'achievement':
-      return `🏆 **${md(e.player)}** earned **${md(e.achievement)}**`;
+      return { content: `🏆 **${md(e.player)}** earned **${md(e.achievement)}**` };
     case 'started':
-      return '✅ Server started';
+      return embed({ title: '✅ Server started', color: COLORS.green });
     case 'stopped':
-      return '🛑 Server stopped';
+      return embed({ title: '🛑 Server stopped', color: COLORS.grey });
     case 'crashed':
-      return '💥 Server went down unexpectedly';
+      return embed({ title: '💥 Server went down unexpectedly', color: COLORS.red });
     case 'hung':
-      return '⚠️ Server not responding';
+      return embed({ title: '⚠️ Server not responding', color: COLORS.orange });
     case 'recovered':
-      return '✅ Server responding again';
+      return embed({ title: '✅ Server responding again', color: COLORS.green });
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
       return null;
   }
 }
 
-export function formatStatus(s: ServerState, day: number | null, week: number | null): string {
-  const pct = (u: number | null) => (u === null ? 'n/a' : `${(u * 100).toFixed(1)}%`);
-  const status = !s.online ? '🔴 Offline' : s.hung ? '🟠 Not responding' : '🟢 Online';
-  const lines = [`**${md(s.name)}** — ${status}`];
-  if (s.online) lines.push(`TPS: ${s.tps === null ? 'n/a' : s.tps.toFixed(1)} · Players: ${s.players.length}`);
-  lines.push(`Uptime: 24h ${pct(day)} · 7d ${pct(week)}`);
-  return lines.join('\n');
+/** A hub-core notice (restarts, backups) as an embed, coloured by its leading emoji. */
+export function formatNotice(text: string): Post {
+  const color = text.startsWith('❌')
+    ? COLORS.red
+    : text.startsWith('⚠️')
+      ? COLORS.orange
+      : text.startsWith('✅')
+        ? COLORS.green
+        : COLORS.blue;
+  return embed({ title: title(text), color });
 }
 
-export function formatPlayers(players: string[]): string {
-  return players.length ? `Online (${players.length}): ${players.map(md).join(', ')}` : 'Nobody online.';
+const pct = (u: number | null) => (u === null ? 'n/a' : `${(u * 100).toFixed(1)}%`);
+
+export function formatStatus(s: ServerState, day: number | null, week: number | null): Post {
+  const [state, color] = !s.online
+    ? ['🔴 Offline', COLORS.red]
+    : s.hung
+      ? ['🟠 Not responding', COLORS.orange]
+      : ['🟢 Online', COLORS.green];
+  const fields = [
+    ...(s.online
+      ? [
+          { name: 'TPS', value: s.tps === null ? 'n/a' : s.tps.toFixed(1), inline: true },
+          { name: 'Players', value: String(s.players.length), inline: true },
+        ]
+      : []),
+    { name: 'Uptime 24 h', value: pct(day), inline: true },
+    { name: 'Uptime 7 d', value: pct(week), inline: true },
+  ];
+  if (s.online && s.players.length) fields.push({ name: 'Online now', value: truncate(s.players.map(md).join(', '), FIELD), inline: false });
+  return embed({ title: title(`${s.name} — ${state}`), color, fields });
+}
+
+export function formatPlayers(players: string[]): Post {
+  if (!players.length) return embed({ title: 'Nobody online', color: COLORS.blue });
+  return embed({
+    title: `Online (${players.length})`,
+    description: truncate(players.map(md).join(', '), DESCRIPTION),
+    color: COLORS.blue,
+  });
 }
 
 /** Command output as a code block that always fits in one Discord message. */
@@ -54,6 +104,81 @@ export function formatOutput(lines: string[]): string {
   let text = stripCodes(lines.join('\n')).replaceAll('```', "'''") || '(no output)';
   if (text.length > max) text = truncate(text, max) + '\n… (truncated)';
   return '```\n' + text + '\n```';
+}
+
+export function formatLastSeen(seen: { online: true } | number | null, now: number): string {
+  if (seen === null) return 'never';
+  if (typeof seen === 'object') return 'online now';
+  return `${formatDuration(now - seen)} ago`;
+}
+
+export function formatPlaytime(player: string, totalMs: number, weekMs: number, seen: { online: true } | number | null, now: number): Post {
+  return embed({
+    title: 'Playtime',
+    color: COLORS.blue,
+    fields: [
+      { name: 'Player', value: md(player), inline: false },
+      { name: 'Total', value: formatDuration(totalMs), inline: true },
+      { name: 'Last 7 days', value: formatDuration(weekMs), inline: true },
+      { name: 'Last seen', value: formatLastSeen(seen, now), inline: true },
+    ],
+  });
+}
+
+export const TOP_PERIODS = { day: 'last 24 hours', week: 'last 7 days', all: 'all time' } as const;
+
+export function formatTop(period: keyof typeof TOP_PERIODS, rows: { player: string; ms: number }[]): Post {
+  const lines = rows.map((r, i) => `${i + 1}. **${md(r.player)}**: ${formatDuration(r.ms)}`);
+  return embed({
+    title: `Top players (${TOP_PERIODS[period]})`,
+    description: truncate(lines.join('\n'), DESCRIPTION) || 'No playtime recorded.',
+    color: COLORS.blue,
+  });
+}
+
+const totalSize = (backups: Backup[]) => formatBytes(backups.reduce((sum, b) => sum + b.size, 0));
+
+export function formatBackupStatus(backups: Backup[], now: number): Post {
+  const newest = backups[0];
+  if (!newest) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
+  return embed({
+    title: 'Backups',
+    color: COLORS.blue,
+    fields: [
+      { name: 'Newest', value: truncate(newest.name, FIELD), inline: false },
+      { name: 'Age', value: `${formatDuration(now - newest.mtimeMs)}`, inline: true },
+      { name: 'Size', value: formatBytes(newest.size), inline: true },
+      { name: 'Count', value: String(backups.length), inline: true },
+      { name: 'Total size', value: totalSize(backups), inline: true },
+    ],
+  });
+}
+
+export function formatBackupList(backups: Backup[]): Post {
+  if (!backups.length) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
+  const lines = backups.slice(0, 10).map((b) => `\`${b.name}\` ${formatBytes(b.size)}`);
+  return embed({
+    title: `Backups: ${backups.length}, ${totalSize(backups)} total`,
+    description: truncate(lines.join('\n'), DESCRIPTION),
+    color: COLORS.blue,
+  });
+}
+
+export function formatSummary(serverName: string, s: Summary): Post {
+  const top = s.top.map((p, i) => `${i + 1}. **${md(p.player)}**: ${formatDuration(p.ms)}`).join('\n') || 'Nobody played.';
+  return embed({
+    title: title(`📊 ${serverName}: ${s.day}`),
+    color: COLORS.blue,
+    fields: [
+      { name: 'Uptime', value: pct(s.uptime), inline: true },
+      { name: 'Peak players', value: s.peak === null ? 'n/a' : String(s.peak), inline: true },
+      { name: 'Unique players', value: String(s.unique), inline: true },
+      { name: 'Total playtime', value: formatDuration(s.totalMs), inline: true },
+      { name: 'Starts', value: String(s.starts), inline: true },
+      { name: 'Crashes', value: String(s.crashes), inline: true },
+      { name: 'Top players', value: truncate(top, FIELD), inline: false },
+    ],
+  });
 }
 
 /** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS". */

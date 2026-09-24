@@ -2018,7 +2018,7 @@ public class GtnhDiscord {
 Run:
 ```bash
 cd mod && ./gradlew --console=plain spotlessApply build
-jar=$(ls build/libs/gtnhdiscord-*.jar | grep -v -e '-dev' -e '-sources')
+jar=$(ls -t build/libs/gtnhdiscord-*.jar | grep -v -e '-dev' -e '-sources' | head -1)   # newest; older builds leave other versions behind
 unzip -l "$jar" | grep -E 'class|mcmod'
 javap -v -cp "$jar" io.github.edwardpratt.gtnhdiscord.HubClient | grep 'major version'
 javap -cp "$jar" 'io.github.edwardpratt.gtnhdiscord.GameEvents$1'

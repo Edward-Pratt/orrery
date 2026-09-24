@@ -145,3 +145,13 @@ test('tps samples: since, average and minimum', () => {
   assert.equal(db.tpsStats('s', 5000, 6000), null);
   db.close();
 });
+
+test('a session opened after the last stamp never ends before it started', () => {
+  const db = new Db(':memory:');
+  db.touch(1000); // last stamp
+  db.openSession('s', 'Steve', 1030); // joined after it, then the hub stopped
+  db.markHubRestart(['s'], 100_000);
+  assert.equal(db.playtime('s', 'Steve', 0, 100_000, 100_000), 0);
+  assert.equal(db.lastSeen('s', 'Steve'), 1030);
+  db.close();
+});

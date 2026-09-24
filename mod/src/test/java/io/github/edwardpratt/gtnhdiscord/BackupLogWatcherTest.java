@@ -41,4 +41,11 @@ class BackupLogWatcherTest {
         assertNull(BackupLogWatcher.toMessage("Backups folder - /home/opc/GTNH/backups", null));
         assertNull(BackupLogWatcher.toMessage(null, null));
     }
+
+    @Test
+    void aFailingSendNeverBreaksServerUtilitiesLogging() {
+        BackupLogWatcher watcher = new BackupLogWatcher(msg -> { throw new NoSuchMethodError("send"); });
+        org.junit.jupiter.api.Assertions
+            .assertDoesNotThrow(() -> watcher.handle("Backup done in 1.0 seconds (1MB)!", null));
+    }
 }

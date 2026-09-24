@@ -14,7 +14,6 @@ import betterquesting.api.events.QuestEvent;
 import betterquesting.api.properties.NativeProps;
 import betterquesting.api.questing.IQuest;
 import betterquesting.api.utils.UuidConverter;
-import betterquesting.questing.QuestDatabase;
 import cpw.mods.fml.common.eventhandler.EventPriority;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 
@@ -28,6 +27,8 @@ public final class QuestEvents {
     private static final int MAX_QUESTS = 50; // the hub rejects larger messages
 
     private final Supplier<HubClient> client;
+    /** Set after a BetterQuesting API mismatch: quest announcements stay off until restart. */
+    private volatile boolean disabled;
 
     QuestEvents(Supplier<HubClient> client) {
         this.client = client;
@@ -35,6 +36,7 @@ public final class QuestEvents {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onQuest(QuestEvent e) {
+        if (disabled) return;
         try {
             // BetterQuesting also posts COMPLETED with an empty set on every check.
             if (e.getType() != QuestEvent.Type.COMPLETED || e.getQuestIDs()
@@ -43,7 +45,8 @@ public final class QuestEvents {
             if (c == null) return;
             JsonArray quests = new JsonArray();
             for (UUID id : e.getQuestIDs()) {
-                IQuest quest = QuestDatabase.INSTANCE.get(id);
+                IQuest quest = QuestingAPI.getAPI(ApiReference.QUEST_DB)
+                    .get(id);
                 if (quest == null || Boolean.TRUE.equals(quest.getProperty(NativeProps.SILENT))) continue;
                 String key = "betterquesting.quest." + UuidConverter.encodeUuidStripPadding(id) + ".name";
                 JsonObject q = new JsonObject();
@@ -65,6 +68,14 @@ public final class QuestEvents {
             JsonObject msg = GameEvents.msg("quest", "player", player);
             msg.add("quests", quests);
             c.send(msg);
+        } catch (LinkageError err) {
+            // A different BetterQuesting build (NoSuchFieldError/NoSuchMethodError). Not a RuntimeException, and it
+            // would otherwise escape FML's event bus into the tick loop and crash the server.
+            disabled = true;
+            GtnhDiscord.LOG.error(
+                "BetterQuesting API mismatch: Discord quest announcements disabled until restart. "
+                    + "Rebuild gtnhdiscord against the server's BetterQuesting version.",
+                err);
         } catch (RuntimeException ex) {
             GtnhDiscord.LOG.error("Discord bridge quest handler failed", ex);
         }

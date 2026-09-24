@@ -68,7 +68,8 @@ export class Db {
     const last = this.#db.prepare("SELECT value FROM meta WHERE key = 'last_alive'").get() as
       | { value: number }
       | undefined;
-    this.#write('close sessions', 'UPDATE sessions SET end = ? WHERE end IS NULL', last?.value ?? now);
+    // MAX: a session opened after the last stamp ends at its start, never before it.
+    this.#write('close sessions', 'UPDATE sessions SET end = MAX(start, ?) WHERE end IS NULL', last?.value ?? now);
     for (const id of serverIds) {
       if (last) this.record(id, 'unknown', 'hub down', last.value);
       this.record(id, 'unknown', 'hub start', now);

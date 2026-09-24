@@ -21,7 +21,7 @@ final class BackupLogWatcher extends AbstractAppender {
 
     private final Consumer<JsonObject> send;
 
-    private BackupLogWatcher(Consumer<JsonObject> send) {
+    BackupLogWatcher(Consumer<JsonObject> send) {
         super("GTNHDiscord-backups", null, null);
         this.send = send;
     }
@@ -35,13 +35,18 @@ final class BackupLogWatcher extends AbstractAppender {
 
     @Override
     public void append(LogEvent event) {
+        handle(
+            event.getMessage()
+                .getFormattedMessage(),
+            event.getThrown());
+    }
+
+    /** Never throws: an error here would surface in ServerUtilities' backup thread. */
+    void handle(String text, Throwable thrown) {
         try {
-            JsonObject msg = toMessage(
-                event.getMessage()
-                    .getFormattedMessage(),
-                event.getThrown());
+            JsonObject msg = toMessage(text, thrown);
             if (msg != null) send.accept(msg);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException | LinkageError ignored) {
             // never break logging
         }
     }

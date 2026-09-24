@@ -111,8 +111,13 @@ public class GameEvents {
             }
             for (Iterator<CommandOutput> it = late.iterator(); it.hasNext();) {
                 CommandOutput out = it.next();
-                if (out.lateReady(now)) send("cmdLate", out);
-                if (out.expired(now)) it.remove();
+                boolean done = out.expired(now) || out.lateBatchesUsed();
+                // Send quiet batches, and whatever is left when it expires, within the batch limit.
+                if (!out.lateBatchesUsed() && (out.lateReady(now) || (done && out.hasUnsent()))) send("cmdLate", out);
+                if (done) {
+                    out.close();
+                    it.remove();
+                }
             }
             // Sent from the tick so that a frozen tick loop stops heartbeats (that is how the hub spots a hang).
             if (now - lastHeartbeat >= HEARTBEAT_MS) {
@@ -167,7 +172,10 @@ public class GameEvents {
     /** Sends every pending command result and late line now: on shutdown ticks stop, so they'd never go. */
     void flushPending() {
         for (CommandOutput out : pending) send("cmdResult", out);
-        for (CommandOutput out : late) if (out.hasUnsent()) send("cmdLate", out);
+        for (CommandOutput out : late) {
+            if (out.hasUnsent() && !out.lateBatchesUsed()) send("cmdLate", out);
+            out.close();
+        }
         pending.clear();
         late.clear();
     }

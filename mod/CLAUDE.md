@@ -45,6 +45,9 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 - BetterQuesting is `compileOnly` (never bundled). Only `QuestEvents` touches its classes, and it's created only when
   `Loader.isModLoaded("betterquesting")`; keep it that way so servers without BetterQuesting still load.
   Quest names resolve server-side via `QuestNames` (BetterQuesting's own translation is client-only).
+  `QuestEvents` also catches `LinkageError` (a different BetterQuesting build): FML's bus rethrows `Error`s into the
+  tick loop, which would crash the server. It disables itself instead. Use BetterQuesting's `QuestingAPI`, not its
+  internal classes.
 - `BackupLogWatcher` is a log4j appender on the `Server Utilities` logger (attached in `preInit`); it only enqueues.
 - `/discord link|unlink` is `DiscordCommand`; the hub answers with `linkResult`.
 

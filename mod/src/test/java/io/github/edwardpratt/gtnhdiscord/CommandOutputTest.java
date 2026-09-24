@@ -73,4 +73,27 @@ class CommandOutputTest {
         assertFalse(out.expired(CommandOutput.LATE_MS - 1));
         assertTrue(out.expired(CommandOutput.LATE_MS));
     }
+
+    @Test
+    void lateOutputIsBoundedInBatchesAndLinesAndStopsAtClose() {
+        CommandOutput out = new CommandOutput("1", 0);
+        out.takeUnsent(); // the first result
+        for (int i = 0; i < CommandOutput.MAX_LATE_BATCHES; i++) {
+            assertFalse(out.lateBatchesUsed());
+            out.add("tick " + i, 0);
+            out.takeUnsent();
+        }
+        assertTrue(out.lateBatchesUsed()); // no more follow-ups for this command
+        for (int i = 0; i < CommandOutput.MAX_LINES + 10; i++) out.add("spam", 0);
+        assertEquals(
+            CommandOutput.MAX_LINES,
+            out.lines()
+                .size());
+        out.close();
+        out.add("after close", 0);
+        assertEquals(
+            CommandOutput.MAX_LINES,
+            out.lines()
+                .size());
+    }
 }

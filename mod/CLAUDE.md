@@ -39,6 +39,14 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 - `/cmd` output is collected in a `CommandOutput` until replies go quiet (1.5 s) or 8 s pass, because some mods
   (spark) reply from a worker thread after the command returns. `serverStopping` calls `flushPending()` first.
 - The outbox holds `JsonObject`s; when a connection ends, `dropNonLifecycle` keeps only `started`/`stopping`.
+- After the first result, a `/cmd` keeps collecting for 5 min and sends `cmdLate` batches (spark profiler links).
+- **Event-listener classes must be `public`**: FML's event bus generates the caller in another package, so a
+  package-private listener throws `IllegalAccessError` when the event first fires.
+- BetterQuesting is `compileOnly` (never bundled). Only `QuestEvents` touches its classes, and it's created only when
+  `Loader.isModLoaded("betterquesting")`; keep it that way so servers without BetterQuesting still load.
+  Quest names resolve server-side via `QuestNames` (BetterQuesting's own translation is client-only).
+- `BackupLogWatcher` is a log4j appender on the `Server Utilities` logger (attached in `preInit`); it only enqueues.
+- `/discord link|unlink` is `DiscordCommand`; the hub answers with `linkResult`.
 
 ## Tests
 

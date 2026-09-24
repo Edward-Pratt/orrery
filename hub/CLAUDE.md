@@ -24,11 +24,14 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
 | `src/summary.ts` | `buildSummary`: yesterday's stats, from the scheduled time. Hub core. |
-| `src/backups.ts` | `listBackups`, `BackupWatcher` (finish notices, missing-backup watchdog). Hub core. |
+| `src/backups.ts` | `listBackups`, `backupNotice` (from the mod's backup events), `BackupWatcher` (missing-backup watchdog). Hub core. |
+| `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
+| `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min). Hub core. |
+| `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`. Hub core. |
 | `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts. Hub core. |
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
-| `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/playtime` `/top` `/cmd` `/restart` `/backup`. |
+| `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
 | `src/index.ts` | Config loading and wiring only. |
 
 A future web dashboard goes in `src/web/` and calls `ServerHub` and `RestartScheduler` — never the mod sockets.

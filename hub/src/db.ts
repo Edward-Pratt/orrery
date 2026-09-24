@@ -17,7 +17,7 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
   return known === 0 ? null : up / known;
 }
 
-/** SQLite log of server up/down transitions. */
+/** SQLite store: server up/down transitions (uptime) and player sessions (playtime). */
 export class Db {
   #db: DatabaseSync;
 
@@ -27,37 +27,44 @@ export class Db {
       CREATE TABLE IF NOT EXISTS events (server_id TEXT NOT NULL, ts INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_server_ts ON events (server_id, ts);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (server_id TEXT NOT NULL, player TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER);
+      CREATE INDEX IF NOT EXISTS sessions_server_player ON sessions (server_id, player);
+      CREATE TABLE IF NOT EXISTS peaks (server_id TEXT NOT NULL, day TEXT NOT NULL, peak INTEGER NOT NULL, PRIMARY KEY (server_id, day));
     `);
   }
 
-  /** Never throws: a database error (disk full, locked) is logged instead of taking the hub down. */
-  record(serverId: string, state: State, reason: string, ts = Date.now()): void {
+  /** Writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
+  #write(label: string, sql: string, ...params: (string | number | null)[]): void {
     try {
-      this.#db
-        .prepare('INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)')
-        .run(serverId, ts, state, reason);
+      this.#db.prepare(sql).run(...params);
     } catch (err) {
-      console.error('[db] record failed:', (err as Error).message);
+      console.error(`[db] ${label} failed:`, (err as Error).message);
     }
+  }
+
+  record(serverId: string, state: State, reason: string, ts = Date.now()): void {
+    this.#write('record', 'INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)', serverId, ts, state, reason);
     this.touch(ts); // the hub was alive at least until this event
   }
 
-  /** Stamps the hub as alive. Call every minute. Never throws, like record(). */
+  /** Stamps the hub as alive. Call every minute. */
   touch(ts = Date.now()): void {
-    try {
-      this.#db
-        .prepare("INSERT INTO meta (key, value) VALUES ('last_alive', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-        .run(ts);
-    } catch (err) {
-      console.error('[db] touch failed:', (err as Error).message);
-    }
+    this.#write(
+      'touch',
+      "INSERT INTO meta (key, value) VALUES ('last_alive', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      ts,
+    );
   }
 
-  /** Call once at hub startup: the time since the last touch is unknown for every server. */
+  /**
+   * Call once at hub startup: the time since the last touch is unknown for every server, and sessions still
+   * open end at that last touch. Both use the old stamp, read before touch(now) replaces it.
+   */
   markHubRestart(serverIds: string[], now = Date.now()): void {
     const last = this.#db.prepare("SELECT value FROM meta WHERE key = 'last_alive'").get() as
       | { value: number }
       | undefined;
+    this.#write('close sessions', 'UPDATE sessions SET end = ? WHERE end IS NULL', last?.value ?? now);
     for (const id of serverIds) {
       if (last) this.record(id, 'unknown', 'hub down', last.value);
       this.record(id, 'unknown', 'hub start', now);
@@ -73,6 +80,71 @@ export class Db {
       .prepare('SELECT ts, state FROM events WHERE server_id = ? AND ts > ? AND ts <= ? ORDER BY ts, rowid')
       .all(serverId, from, to) as Row[];
     return computeUptime(before ? [{ ts: from, state: before.state }, ...rows] : rows, from, to);
+  }
+
+  countEvents(serverId: string, reason: string, from: number, to: number): number {
+    const row = this.#db
+      .prepare('SELECT COUNT(*) AS n FROM events WHERE server_id = ? AND reason = ? AND ts >= ? AND ts < ?')
+      .get(serverId, reason, from, to) as { n: number };
+    return row.n;
+  }
+
+  openSession(serverId: string, player: string, ts: number): void {
+    this.#write('open session', 'INSERT INTO sessions (server_id, player, start, end) VALUES (?, ?, ?, NULL)', serverId, player, ts);
+  }
+
+  closeSession(serverId: string, player: string, ts: number): void {
+    this.#write('close session', 'UPDATE sessions SET end = ? WHERE server_id = ? AND player = ? AND end IS NULL', ts, serverId, player);
+  }
+
+  /** Playtime in [from, to]; an open session counts until `now`. Names match case-insensitively. */
+  playtime(serverId: string, player: string, from: number, to: number, now = Date.now()): number {
+    const row = this.#db
+      .prepare(
+        `SELECT COALESCE(SUM(MIN(COALESCE(end, ?1), ?2) - MAX(start, ?3)), 0) AS ms FROM sessions
+         WHERE server_id = ?4 AND player = ?5 COLLATE NOCASE AND start < ?2 AND COALESCE(end, ?1) > ?3`,
+      )
+      .get(now, to, from, serverId, player) as { ms: number };
+    return row.ms;
+  }
+
+  /** `{ online: true }` while a session is open, else the last session's end, or null if never seen. */
+  lastSeen(serverId: string, player: string): { online: true } | number | null {
+    const row = this.#db
+      .prepare('SELECT MAX(end) AS last, SUM(end IS NULL) AS open FROM sessions WHERE server_id = ? AND player = ? COLLATE NOCASE')
+      .get(serverId, player) as { last: number | null; open: number | null };
+    if (row.open) return { online: true };
+    return row.last;
+  }
+
+  /** Players by playtime in [from, to], most first. */
+  top(serverId: string, from: number, to: number, limit: number, now = Date.now()): { player: string; ms: number }[] {
+    return this.#db
+      .prepare(
+        `SELECT player, SUM(MIN(COALESCE(end, ?1), ?2) - MAX(start, ?3)) AS ms FROM sessions
+         WHERE server_id = ?4 AND start < ?2 AND COALESCE(end, ?1) > ?3
+         GROUP BY player COLLATE NOCASE ORDER BY ms DESC LIMIT ?5`,
+      )
+      .all(now, to, from, serverId, limit)
+      .map((r) => ({ player: r.player as string, ms: r.ms as number })); // plain objects, not sqlite's null-prototype rows
+  }
+
+  /** Keeps the highest player count seen on a local day ("YYYY-MM-DD"). */
+  recordPeak(serverId: string, day: string, count: number): void {
+    this.#write(
+      'peak',
+      'INSERT INTO peaks (server_id, day, peak) VALUES (?, ?, ?) ON CONFLICT (server_id, day) DO UPDATE SET peak = MAX(peak, excluded.peak)',
+      serverId,
+      day,
+      count,
+    );
+  }
+
+  peak(serverId: string, day: string): number | null {
+    const row = this.#db.prepare('SELECT peak FROM peaks WHERE server_id = ? AND day = ?').get(serverId, day) as
+      | { peak: number }
+      | undefined;
+    return row?.peak ?? null;
   }
 
   close(): void {

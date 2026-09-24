@@ -60,3 +60,74 @@ test('record and touch never throw, even when the database is unusable', () => {
   assert.doesNotThrow(() => db.record('s', 'up', 'connected', 1000));
   assert.doesNotThrow(() => db.touch(1000));
 });
+
+test('playtime counts only the overlap with the window, open sessions until now, names case-insensitively', () => {
+  const db = new Db(':memory:');
+  db.openSession('s', 'Steve', 1000);
+  db.closeSession('s', 'Steve', 5000);
+  db.openSession('s', 'Steve', 8000); // still online
+  assert.equal(db.playtime('s', 'steve', 0, 10_000, 10_000), 4000 + 2000);
+  assert.equal(db.playtime('s', 'Steve', 2000, 4000, 10_000), 2000);
+  assert.equal(db.playtime('s', 'Steve', 6000, 7000, 10_000), 0);
+  assert.equal(db.playtime('other', 'Steve', 0, 10_000, 10_000), 0);
+  db.close();
+});
+
+test('lastSeen: online, last session end, or never', () => {
+  const db = new Db(':memory:');
+  assert.equal(db.lastSeen('s', 'Alex'), null);
+  db.openSession('s', 'Alex', 1000);
+  assert.deepEqual(db.lastSeen('s', 'alex'), { online: true });
+  db.closeSession('s', 'Alex', 3000);
+  assert.equal(db.lastSeen('s', 'Alex'), 3000);
+  db.close();
+});
+
+test('top ranks players by playtime in the window', () => {
+  const db = new Db(':memory:');
+  db.openSession('s', 'A', 0);
+  db.closeSession('s', 'A', 1000);
+  db.openSession('s', 'B', 0);
+  db.closeSession('s', 'B', 3000);
+  db.openSession('s', 'C', 5000);
+  db.closeSession('s', 'C', 6000);
+  assert.deepEqual(db.top('s', 0, 4000, 10), [
+    { player: 'B', ms: 3000 },
+    { player: 'A', ms: 1000 },
+  ]);
+  assert.equal(db.top('s', 0, 10_000, 1).length, 1);
+  db.close();
+});
+
+test('peaks keep the daily maximum; countEvents counts reasons in a window', () => {
+  const db = new Db(':memory:');
+  db.recordPeak('s', '2026-09-24', 3);
+  db.recordPeak('s', '2026-09-24', 5);
+  db.recordPeak('s', '2026-09-24', 2);
+  assert.equal(db.peak('s', '2026-09-24'), 5);
+  assert.equal(db.peak('s', '2026-09-25'), null);
+  db.record('s', 'up', 'started', 100);
+  db.record('s', 'down', 'crashed', 200);
+  db.record('s', 'up', 'started', 300);
+  assert.equal(db.countEvents('s', 'started', 0, 1000), 2);
+  assert.equal(db.countEvents('s', 'crashed', 250, 1000), 0);
+  db.close();
+});
+
+test('markHubRestart ends open sessions at the last stamp, not across the outage', () => {
+  const db = new Db(':memory:');
+  db.openSession('s', 'Steve', 1000);
+  db.touch(2000); // hub last alive
+  db.markHubRestart(['s'], 100_000); // hub back much later
+  assert.equal(db.lastSeen('s', 'Steve'), 2000);
+  assert.equal(db.playtime('s', 'Steve', 0, 100_000, 100_000), 1000);
+  db.close();
+});
+
+test('session and peak writes never throw either', () => {
+  const db = new Db(':memory:');
+  db.close();
+  assert.doesNotThrow(() => db.openSession('s', 'a', 1));
+  assert.doesNotThrow(() => db.closeSession('s', 'a', 2));
+  assert.doesNotThrow(() => db.recordPeak('s', '2026-09-24', 1));
+});

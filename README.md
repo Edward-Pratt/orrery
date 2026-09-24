@@ -25,11 +25,19 @@ commands, status, and start/stop/crash alerts.
 2. On the **Bot** page enable **Message Content Intent**. Without it the bot
    receives empty messages and Discord → game chat does nothing.
 3. **OAuth2 → URL Generator**: scopes `bot` and `applications.commands`;
-   permissions *View Channels*, *Send Messages*, *Read Message History*.
-   Open the URL and add the bot to your Discord server.
+   permissions *View Channels*, *Send Messages*, *Read Message History*,
+   *Attach Files*, *Manage Webhooks* (player-skin chat) and *Manage Channels*
+   (live status in the channel topic). Open the URL and add the bot to your
+   Discord server. Without the last two, chat posts as the bot and topics
+   stay unchanged; everything else works.
+   Already added the bot? Give its role those permissions under
+   Server Settings → Roles instead.
 4. In Discord, enable *Settings → Advanced → Developer Mode*, then right-click
    to **Copy ID** of: your Discord server (guild), the channel for each game
    server, and the role allowed to use `/cmd`.
+5. `/cmd` and `/restart` are hidden from everyone by default. Show them to the
+   admin role under Server Settings → Integrations → your bot → each command.
+   The admin-role check still applies either way.
 
 ### 2. Hub
 
@@ -117,13 +125,22 @@ sudo semodule -i /tmp/gtnh-fifo.pp
 ## Using it
 
 - Chat in the linked channel appears in game as `[Discord] <name> message`.
-  In-game chat, joins, leaves, deaths and achievements post to the channel.
+  In-game chat posts with each player's name and skin head; joins, leaves,
+  deaths and achievements post as the bot.
+- The bot's status and each channel's topic show who's online and the TPS.
+  Topics update at most every 5 minutes (a Discord limit).
 - `/status` shows online state, TPS, player count and 24 h / 7 d uptime.
 - `/list` shows online players.
-- `/cmd <command>` runs a console command and shows its output. Only members
-  with the admin role can use it. Every command is logged by the hub.
+- `/cmd <command>` runs a console command and shows its output. Admin role only.
+  Every command is logged by the hub.
+- `/restart in <minutes>` restarts with in-game warnings at 10 / 5 / 1 min,
+  30 s and 10 s; `/restart cancel` calls it off. Admin role only. Add
+  `"dailyRestart": "06:00"` to a server in `config.json` for a daily restart
+  at that local time (the countdown starts 10 minutes before).
 - Alerts: started, stopped, went down unexpectedly (crash or kill), not
-  responding (no heartbeat for 30 s), responding again.
+  responding (no heartbeat for 30 s), responding again. With `"dir"` set to
+  the server's folder in `config.json`, a crash alert comes with the crash
+  report and JVM error log (`hs_err_pid*.log`) attached.
 
 Adding another game server: add an entry to `servers` in `config.json`,
 restart the hub, and install the mod with that entry's `serverId` and token.

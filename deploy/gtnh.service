@@ -1,0 +1,28 @@
+# GTNH server inside tmux, so `tmux attach -t gtnh` still gives the console (detach: Ctrl-b d).
+# Install: sudo cp deploy/gtnh.service /etc/systemd/system/
+# Edit User, WorkingDirectory and the start script to match your server.
+#
+# Restart=always because tmux exits cleanly even when Java crashes, so on-failure would never fire:
+#   crash / kill -9      -> restarts after 10 s
+#   in-game /stop        -> restarts (a handy restart button, also via /cmd stop from Discord)
+#   systemctl stop gtnh  -> stays down (use this for maintenance)
+[Unit]
+Description=GTNH server
+After=network-online.target gtnh-hub.service
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=opc
+WorkingDirectory=/home/opc/gtnh-server
+ExecStart=/usr/bin/tmux new-session -d -s gtnh ./startserver-java9.sh
+# Type `stop` into the console, then wait until the server has finished saving and exited.
+ExecStop=/usr/bin/tmux send-keys -t gtnh stop Enter
+ExecStop=/bin/sh -c 'while /usr/bin/tmux has-session -t gtnh 2>/dev/null; do sleep 2; done'
+# GTNH world saves can take minutes; the 90 s default would SIGKILL mid-save and risk corruption.
+TimeoutStopSec=600
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

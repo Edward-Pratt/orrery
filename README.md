@@ -13,6 +13,7 @@ commands, status, and start/stop/crash alerts.
 |---|---|---|
 | `mod/` | Server-side Forge 1.7.10 mod. Relays game events, runs commands. | JDK 25, Gradle wrapper |
 | `hub/` | The bot. Owns server state and uptime, talks to Discord. | Node 26 |
+| `deploy/` | systemd units for running both on one server. | systemd |
 | `docs/` | Design spec and implementation plan. | — |
 
 ## Setup
@@ -42,26 +43,8 @@ echo 'DISCORD_TOKEN=<bot token>' > .env
 set -a; . ./.env; set +a; npm start
 ```
 
-`config.json` and `.env` are git-ignored. To keep it running, a systemd user
-unit (`~/.config/systemd/user/gtnh-discord.service`):
-
-```ini
-[Unit]
-Description=GTNH Discord hub
-After=network-online.target
-
-[Service]
-WorkingDirectory=/path/to/gtnh-discord/hub
-EnvironmentFile=/path/to/gtnh-discord/hub/.env
-ExecStart=/usr/bin/node src/index.ts
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-`systemctl --user enable --now gtnh-discord` (and `loginctl enable-linger $USER`
-so it runs without you logged in).
+`config.json` and `.env` are git-ignored. To run it permanently, see
+[Running on a server](#running-on-a-server).
 
 ### 3. Mod
 
@@ -86,6 +69,35 @@ general {
 
 Restart the server. The hub logs the connection, and the channel gets
 "✅ Server started".
+
+## Running on a server
+
+`deploy/` has systemd units for running the hub and the GTNH server together on
+one Linux machine. Edit `User=` and the paths in both files first.
+
+```bash
+sudo cp deploy/gtnh-hub.service deploy/gtnh.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now gtnh-hub gtnh
+```
+
+- **Hub logs:** `journalctl -u gtnh-hub -f`
+- **Minecraft console:** `tmux attach -t gtnh` (detach with Ctrl-b d)
+- **Stopping the server:** `sudo systemctl stop gtnh` stops it for maintenance.
+  An in-game `/stop`, or `/cmd stop` from Discord, restarts it. So does a crash.
+- **Start order doesn't matter:** the mod reconnects to the hub within about 30 s.
+
+**Ports.** Only Minecraft needs to be reachable from outside:
+
+- **Bot:** the bot only makes outbound connections to Discord (HTTPS), so it
+  needs no inbound port.
+- **Hub:** it listens on `127.0.0.1:25580`. **Don't open 25580**: that
+  connection is only protected by its token.
+- **Minecraft (25565/tcp)** on Oracle Cloud must be opened in two places:
+  1. **OCI console:** VCN → Security List (or NSG) → an ingress rule for
+     `0.0.0.0/0`, TCP 25565.
+  2. **The host firewall:**
+     `sudo firewall-cmd --permanent --add-port=25565/tcp && sudo firewall-cmd --reload`
 
 ## Using it
 

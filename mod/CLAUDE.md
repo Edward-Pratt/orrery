@@ -47,7 +47,8 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
   Quest names resolve server-side via `QuestNames` (BetterQuesting's own translation is client-only).
   `QuestEvents` also catches `LinkageError` (a different BetterQuesting build): FML's bus rethrows `Error`s into the
   tick loop, which would crash the server. It disables itself instead. Use BetterQuesting's `QuestingAPI`, not its
-  internal classes.
+  internal classes. `dependencies.gradle` pins the BetterQuesting version the server runs (3.8.86-GTNH as of GTNH
+  2.9); when a GTNH update changes it, bump it there and rebuild (`ls <server>/mods | grep -i betterquesting`).
 - `BackupLogWatcher` is a log4j appender on the `Server Utilities` logger (attached in `preInit`); it only enqueues.
 - `/discord link|unlink` is `DiscordCommand`; the hub answers with `linkResult`.
 

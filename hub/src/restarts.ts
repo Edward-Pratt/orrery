@@ -26,7 +26,10 @@ export function parseDaily(time: string): { h: number; m: number } | null {
 export function nextDaily(time: { h: number; m: number }, leadMs: number, now: number): number {
   const d = new Date(now);
   d.setHours(time.h, time.m, 0, 0);
-  while (d.getTime() - leadMs <= now) d.setDate(d.getDate() + 1);
+  while (d.getTime() - leadMs <= now) {
+    d.setDate(d.getDate() + 1);
+    d.setHours(time.h, time.m, 0, 0); // again: a time inside a spring-forward gap was rolled on an hour
+  }
   return d.getTime() - leadMs;
 }
 
@@ -81,8 +84,10 @@ export class RestartScheduler {
   daily(serverId: string, time: string): void {
     const hm = parseDaily(time);
     if (!hm) throw new Error(`server "${serverId}": dailyRestart must be HH:MM (24-hour), got "${time}"`);
-    const arm = () => {
-      const delay = nextDaily(hm, DAILY_LEAD_MS, Date.now()) - Date.now();
+    // `after` is the target that just fired: timers can fire a millisecond early, and computing the next
+    // target from Date.now() alone would then pick the same one again.
+    const arm = (after: number) => {
+      const target = nextDaily(hm, DAILY_LEAD_MS, Math.max(Date.now(), after));
       this.#daily.set(
         serverId,
         setTimeout(() => {
@@ -91,11 +96,11 @@ export class RestartScheduler {
           } catch (err) {
             console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
           }
-          arm();
-        }, delay),
+          arm(target);
+        }, target - Date.now()),
       );
     };
-    arm();
+    arm(0);
   }
 
   /** Clears every timer (hub shutdown). */

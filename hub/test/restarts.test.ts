@@ -159,3 +159,24 @@ test('a skipped daily restart (server offline) still arms the next day', (t) => 
   t.mock.timers.tick(24 * 60 * MIN); // next day 05:50
   assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
 });
+
+test('a daily timer firing a millisecond early does not double-schedule', (t) => {
+  // Real Node timers can fire ~1 ms before the Date.now() target.
+  const { restarts, notices } = setup(t, Date.UTC(2026, 8, 24, 4, 0));
+  const clock = Date.now.bind(Date);
+  let skew = 0;
+  t.mock.method(Date, 'now', () => clock() + skew);
+  const errors = t.mock.method(console, 'error', () => {});
+  restarts.daily('gtnh', '06:00');
+  skew = -1;
+  t.mock.timers.tick(50 * MIN);
+  t.mock.timers.tick(10); // an immediate re-arm would fire here
+  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.equal(errors.mock.callCount(), 0);
+});
+
+test('nextDaily re-applies the time after a spring-forward gap', () => {
+  // 28 Mar 2027: UK clocks skip 01:00–02:00, so 01:30 that day becomes 02:30 BST. The next day must be 01:30 again.
+  const after = Date.UTC(2027, 2, 28, 1, 21); // 02:21 BST, just after that day's 02:20 countdown
+  assert.equal(new Date(nextDaily({ h: 1, m: 30 }, 10 * MIN, after)).toISOString(), '2027-03-29T00:20:00.000Z'); // 01:20 BST
+});

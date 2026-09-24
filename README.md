@@ -153,4 +153,4 @@ cd mod && ./gradlew spotlessApply build   # build runs the JUnit tests
 ```
 
 The wire protocol and design are in
-`docs/superpowers/specs/2026-09-24-gtnh-discord-design.md`.
+`docs/superpowers/specs/2026-09-24-gtnh-discord-design.md`. What's planned next is in `docs/ROADMAP.md`.

@@ -30,6 +30,10 @@ export class Db {
       CREATE TABLE IF NOT EXISTS sessions (server_id TEXT NOT NULL, player TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER);
       CREATE INDEX IF NOT EXISTS sessions_server_player ON sessions (server_id, player);
       CREATE TABLE IF NOT EXISTS peaks (server_id TEXT NOT NULL, day TEXT NOT NULL, peak INTEGER NOT NULL, PRIMARY KEY (server_id, day));
+      CREATE TABLE IF NOT EXISTS tps (server_id TEXT NOT NULL, ts INTEGER NOT NULL, tps REAL NOT NULL, worst_name TEXT, worst_ms REAL);
+      CREATE INDEX IF NOT EXISTS tps_server_ts ON tps (server_id, ts);
+      CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
+      CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
     `);
   }
 
@@ -145,6 +149,64 @@ export class Db {
       | { peak: number }
       | undefined;
     return row?.peak ?? null;
+  }
+
+  recordTps(serverId: string, ts: number, tps: number, worstName: string | null, worstMs: number | null): void {
+    this.#write('tps', 'INSERT INTO tps (server_id, ts, tps, worst_name, worst_ms) VALUES (?, ?, ?, ?, ?)', serverId, ts, tps, worstName, worstMs);
+  }
+
+  /** TPS samples at or after `from`, oldest first. */
+  tpsSince(serverId: string, from: number): { ts: number; tps: number }[] {
+    return this.#db
+      .prepare('SELECT ts, tps FROM tps WHERE server_id = ? AND ts >= ? ORDER BY ts')
+      .all(serverId, from)
+      .map((r) => ({ ts: r.ts as number, tps: r.tps as number }));
+  }
+
+  /** Average and minimum TPS over [from, to), or null without samples. */
+  tpsStats(serverId: string, from: number, to: number): { avg: number; min: number } | null {
+    const row = this.#db
+      .prepare('SELECT AVG(tps) AS avg, MIN(tps) AS min FROM tps WHERE server_id = ? AND ts >= ? AND ts < ?')
+      .get(serverId, from, to) as { avg: number | null; min: number | null };
+    return row.avg === null || row.min === null ? null : { avg: row.avg, min: row.min };
+  }
+
+  /** Links a Discord account to a Minecraft player, replacing any earlier link of either. */
+  link(discordId: string, player: string, uuid: string, ts: number): void {
+    this.#write('unlink old', 'DELETE FROM links WHERE discord_id = ? OR player = ? COLLATE NOCASE', discordId, player);
+    this.#write('link', 'INSERT INTO links (discord_id, player, uuid, linked_at) VALUES (?, ?, ?, ?)', discordId, player, uuid, ts);
+  }
+
+  /** True if a link was removed. */
+  unlinkDiscord(discordId: string): boolean {
+    return this.#delete('DELETE FROM links WHERE discord_id = ?', discordId);
+  }
+
+  unlinkPlayer(player: string): boolean {
+    return this.#delete('DELETE FROM links WHERE player = ? COLLATE NOCASE', player);
+  }
+
+  #delete(sql: string, param: string): boolean {
+    try {
+      return Number(this.#db.prepare(sql).run(param).changes) > 0;
+    } catch (err) {
+      console.error('[db] unlink failed:', (err as Error).message);
+      return false;
+    }
+  }
+
+  linkByDiscord(discordId: string): { player: string; uuid: string } | null {
+    const row = this.#db.prepare('SELECT player, uuid FROM links WHERE discord_id = ?').get(discordId) as
+      | { player: string; uuid: string }
+      | undefined;
+    return row ? { player: row.player, uuid: row.uuid } : null;
+  }
+
+  linkByPlayer(player: string): { discordId: string; player: string } | null {
+    const row = this.#db.prepare('SELECT discord_id, player FROM links WHERE player = ? COLLATE NOCASE').get(player) as
+      | { discord_id: string; player: string }
+      | undefined;
+    return row ? { discordId: row.discord_id, player: row.player } : null;
   }
 
   close(): void {

@@ -131,3 +131,17 @@ test('session and peak writes never throw either', () => {
   assert.doesNotThrow(() => db.closeSession('s', 'a', 2));
   assert.doesNotThrow(() => db.recordPeak('s', '2026-09-24', 1));
 });
+
+test('tps samples: since, average and minimum', () => {
+  const db = new Db(':memory:');
+  db.recordTps('s', 1000, 20, null, null);
+  db.recordTps('s', 2000, 10, 'Nether', 90);
+  db.recordTps('s', 3000, 15, 'Overworld', 40);
+  assert.deepEqual(db.tpsSince('s', 2000), [
+    { ts: 2000, tps: 10 },
+    { ts: 3000, tps: 15 },
+  ]);
+  assert.deepEqual(db.tpsStats('s', 0, 3000), { avg: 15, min: 10 });
+  assert.equal(db.tpsStats('s', 5000, 6000), null);
+  db.close();
+});

@@ -12,7 +12,7 @@ function setup() {
   const db = new Db(':memory:');
   const tracker = new PlaytimeTracker(hub, db);
   const server = (players: string[], online = true): ServerState[] => [
-    { id: 's', name: 'S', online, hung: false, tps: 20, players },
+    { id: 's', name: 'S', online, hung: false, tps: 20, players, dims: [] },
   ];
   return { db, tracker, set: (s: ServerState[]) => (states = s), server };
 }

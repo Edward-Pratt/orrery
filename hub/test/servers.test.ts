@@ -243,3 +243,43 @@ test('close() does not wait for connections that never sent hello', async () => 
   assert.ok(Date.now() - start < 1000, `close took ${Date.now() - start} ms`);
   await idle.closed;
 });
+
+test('v1.2b game messages become events; heartbeat dims land in the state', async (t) => {
+  const { hub, port, events } = await setup(t);
+  const mod = await online(port);
+  mod.send({ type: 'heartbeat', tps: 18, players: [], dims: [{ id: -1, name: 'Nether', ms: 60 }] });
+  mod.send({ type: 'quest', player: 'Steve', quests: [{ name: 'Stone Age', main: true }] });
+  mod.send({ type: 'link', player: 'Steve', uuid: 'u-1', code: 'ABC234' });
+  mod.send({ type: 'backup', ok: true, detail: '12.3 seconds (1.2GB)' });
+  await until(() => events.length === 4);
+  assert.deepEqual(hub.get('gtnh')?.dims, [{ id: -1, name: 'Nether', ms: 60 }]);
+  assert.deepEqual(
+    events.slice(1).map((e) => e.type),
+    ['quest', 'link', 'backup'],
+  );
+});
+
+test('sendLinkResult reaches the mod', async (t) => {
+  const { hub, port } = await setup(t);
+  assert.equal(hub.sendLinkResult('gtnh', 'Steve', true, 'Linked'), false); // offline
+  const mod = await online(port);
+  assert.equal(hub.sendLinkResult('gtnh', 'Steve', true, 'Linked'), true);
+  assert.deepEqual(await mod.next(), { type: 'linkResult', player: 'Steve', ok: true, message: 'Linked' });
+});
+
+test('late command output reaches onLate until it expires', async (t) => {
+  const { hub, port } = await setup(t, { lateMs: 150 });
+  const mod = await online(port);
+  const late: string[][] = [];
+  const result = hub.runCommand('gtnh', 'spark profiler', 'test', (lines) => late.push(lines));
+  const cmd = (await mod.next()) as { id: string };
+  mod.send({ type: 'cmdResult', id: cmd.id, output: ['Profiler started'] });
+  assert.deepEqual(await result, ['Profiler started']);
+  mod.send({ type: 'cmdLate', id: cmd.id, output: ['https://spark.lucko.me/abc'] });
+  mod.send({ type: 'cmdLate', id: 'unknown', output: ['ignored'] });
+  await until(() => late.length === 1);
+  await sleep(250);
+  mod.send({ type: 'cmdLate', id: cmd.id, output: ['too late'] });
+  await sleep(50);
+  assert.deepEqual(late, [['https://spark.lucko.me/abc']]);
+});

@@ -51,6 +51,10 @@ export function formatEvent(e: HubEvent): Post | null {
       return embed({ title: '✅ Server responding again', color: COLORS.green });
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
+    case 'quest': // batched by the QuestAnnouncer
+    case 'link': // answered by Links
+    case 'unlink':
+    case 'backup': // posted as a notice
       return null;
   }
 }

@@ -68,7 +68,7 @@ test('formatOutput always yields one valid code block under 2000 chars', () => {
 const first = (p: Post) => (p as { embeds: APIEmbed[] }).embeds[0];
 
 test('formatStatus is an embed with state, TPS, players and uptime', () => {
-  const base: ServerState = { id: 's', name: 'GTNH', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'] };
+  const base: ServerState = { id: 's', name: 'GTNH', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
   const e = first(formatStatus(base, 1, 0.5));
   assert.equal(e.title, 'GTNH — 🟢 Online');
   assert.equal(e.color, COLORS.green);
@@ -176,7 +176,7 @@ test('formatOutput truncates long emoji output without splitting an emoji', () =
   assert.ok(out.endsWith('😀\n… (truncated)\n```'));
 });
 
-const online: ServerState = { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'] };
+const online: ServerState = { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
 
 test('formatPresence has one segment per server', () => {
   assert.equal(formatPresence([online]), 'GTNH: 2 online · 20 TPS');

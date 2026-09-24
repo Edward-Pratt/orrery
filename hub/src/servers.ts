@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
-import { PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
+import { PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
 
 export type ServerConfig = { id: string; name: string; token: string };
 
@@ -13,13 +13,20 @@ export type ServerState = {
   hung: boolean;
   tps: number | null;
   players: string[];
+  /** Slowest dimensions from the latest heartbeat (empty with an older mod). */
+  dims: DimTime[];
 };
 
 export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered' | 'offline';
-export type GameMsg = Extract<ModMsg, { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' }>;
+export type GameMsg = Extract<
+  ModMsg,
+  { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' | 'quest' | 'link' | 'unlink' | 'backup' }
+>;
 export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle });
 
-export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number };
+export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number; lateMs?: number };
+
+type Late = { onLate: (output: string[]) => void; timer: NodeJS.Timeout };
 
 type Pending = { resolve: (output: string[]) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
 type Conn = { socket: Socket; stopping: boolean; lastBeat: number; hung: boolean; pending: Map<string, Pending> };
@@ -67,6 +74,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   #closing = false;
   #hungMs: number;
   #cmdTimeoutMs: number;
+  #lateMs: number;
+  #late = new Map<string, Late>(); // command id -> handler for output that arrives after the result
   #helloTimeoutMs: number;
   #graceMs: number;
 
@@ -75,10 +84,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     for (const s of servers) {
       if (s.token.length < 16) throw new Error(`server "${s.id}": token must be at least 16 characters`);
       this.#configs.set(s.id, s);
-      this.#states.set(s.id, { id: s.id, name: s.name, online: false, hung: false, tps: null, players: [] });
+      this.#states.set(s.id, { id: s.id, name: s.name, online: false, hung: false, tps: null, players: [], dims: [] });
     }
     this.#hungMs = opts.hungMs ?? 30_000;
     this.#cmdTimeoutMs = opts.cmdTimeoutMs ?? 10_000;
+    this.#lateMs = opts.lateMs ?? 15 * 60_000; // Discord allows interaction follow-ups for 15 minutes
     this.#helloTimeoutMs = opts.helloTimeoutMs ?? 5_000;
     this.#graceMs = opts.graceMs ?? 60_000; // longer than the mod's 30 s max reconnect backoff
   }
@@ -104,17 +114,18 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     this.#closing = true;
     clearInterval(this.#timer);
     clearTimeout(this.#grace);
+    for (const late of this.#late.values()) clearTimeout(late.timer);
     for (const socket of this.#sockets) socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
   }
 
   list(): ServerState[] {
-    return [...this.#states.values()].map((s) => ({ ...s, players: [...s.players] }));
+    return [...this.#states.values()].map((s) => ({ ...s, players: [...s.players], dims: [...s.dims] }));
   }
 
   get(id: string): ServerState | undefined {
     const s = this.#states.get(id);
-    return s && { ...s, players: [...s.players] };
+    return s && { ...s, players: [...s.players], dims: [...s.dims] };
   }
 
   /** Broadcasts a chat line in-game. False if the server is offline or the text is empty after cleaning. */
@@ -126,8 +137,19 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     return true;
   }
 
-  /** Runs a console command. `by` names who asked, for the audit log. */
-  runCommand(id: string, command: string, by: string): Promise<string[]> {
+  /** Tells a player in game how their `/discord link` or `unlink` went. False if the server is offline. */
+  sendLinkResult(id: string, player: string, ok: boolean, message: string): boolean {
+    const conn = this.#conns.get(id);
+    if (!conn) return false;
+    this.#send(conn.socket, { type: 'linkResult', player, ok, message });
+    return true;
+  }
+
+  /**
+   * Runs a console command. `by` names who asked, for the audit log. `onLate` gets output that arrives after
+   * the result (e.g. spark's profiler link), for 15 minutes.
+   */
+  runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
     const conn = this.#conns.get(id);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
     const cmd = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().replace(/^\//, '');
@@ -139,7 +161,14 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
         conn.pending.delete(cmdId);
         reject(new Error('command timed out — it may still run when the server responds'));
       }, this.#cmdTimeoutMs);
-      conn.pending.set(cmdId, { resolve, reject, timer });
+      conn.pending.set(cmdId, {
+        resolve: (output) => {
+          if (onLate) this.#late.set(cmdId, { onLate, timer: setTimeout(() => this.#late.delete(cmdId), this.#lateMs) });
+          resolve(output);
+        },
+        reject,
+        timer,
+      });
       this.#send(conn.socket, { type: 'cmd', id: cmdId, command: cmd });
     });
   }
@@ -186,7 +215,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       conn.pending.clear();
       if (this.#conns.get(id) !== conn) return; // replaced by a newer connection: no alert
       this.#conns.delete(id);
-      Object.assign(this.#states.get(id)!, { online: false, hung: false, tps: null, players: [] });
+      Object.assign(this.#states.get(id)!, { online: false, hung: false, tps: null, players: [], dims: [] });
       if (!this.#closing) this.#emit(id, conn.stopping ? 'stopped' : 'crashed');
     });
   }
@@ -207,6 +236,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
         conn.lastBeat = Date.now();
         state.tps = msg.tps;
         state.players = msg.players;
+        state.dims = msg.dims ?? [];
         if (conn.hung) {
           conn.hung = state.hung = false;
           this.#emit(id, 'recovered');
@@ -223,6 +253,16 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
         conn.pending.delete(msg.id);
         clearTimeout(p.timer);
         return p.resolve(msg.output);
+      }
+      case 'cmdLate': {
+        const late = this.#late.get(msg.id);
+        if (!late) return; // expired or unknown
+        try {
+          late.onLate(msg.output);
+        } catch (err) {
+          console.error('[hub] late output handler failed:', err);
+        }
+        return;
       }
       default:
         this.emit('event', { ...msg, serverId: id }); // serverId last: a mod can't speak for another server

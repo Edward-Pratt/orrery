@@ -57,4 +57,20 @@ class CommandOutputTest {
             out.lines()
                 .get(999));
     }
+
+    @Test
+    void lateLinesComeOutInQuietBatchesUntilExpiry() {
+        CommandOutput out = new CommandOutput("1", 0);
+        out.add("Profiler started", 100);
+        assertEquals(Arrays.asList("Profiler started"), out.takeUnsent()); // the first result
+        assertFalse(out.lateReady(5000)); // nothing new
+        out.add("Uploading…", 30_000);
+        out.add("https://spark.lucko.me/abc", 30_500);
+        assertFalse(out.lateReady(31_000)); // not quiet yet
+        assertTrue(out.lateReady(30_500 + CommandOutput.QUIET_MS));
+        assertEquals(Arrays.asList("Uploading…", "https://spark.lucko.me/abc"), out.takeUnsent());
+        assertFalse(out.hasUnsent());
+        assertFalse(out.expired(CommandOutput.LATE_MS - 1));
+        assertTrue(out.expired(CommandOutput.LATE_MS));
+    }
 }

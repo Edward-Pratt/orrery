@@ -3,6 +3,7 @@ package io.github.edwardpratt.gtnhdiscord;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.network.rcon.RConConsoleSource;
@@ -13,6 +14,8 @@ import net.minecraft.util.ChatStyle;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.IChatComponent;
 import net.minecraft.util.MathHelper;
+import net.minecraft.world.WorldServer;
+import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.AchievementEvent;
@@ -38,6 +41,8 @@ public class GameEvents {
     private long lastHeartbeat;
     /** Commands still collecting replies. Server thread only (the replies themselves may come from any thread). */
     private final List<CommandOutput> pending = new ArrayList<>();
+    /** Commands whose result was sent, still collecting late replies. Server thread only. */
+    private final List<CommandOutput> late = new ArrayList<>();
 
     GameEvents(HubClient client) {
         this.client = client;
@@ -99,9 +104,15 @@ public class GameEvents {
             for (Iterator<CommandOutput> it = pending.iterator(); it.hasNext();) {
                 CommandOutput out = it.next();
                 if (out.ready(now)) {
-                    sendResult(out);
+                    send("cmdResult", out);
                     it.remove();
+                    late.add(out);
                 }
+            }
+            for (Iterator<CommandOutput> it = late.iterator(); it.hasNext();) {
+                CommandOutput out = it.next();
+                if (out.lateReady(now)) send("cmdLate", out);
+                if (out.expired(now)) it.remove();
             }
             // Sent from the tick so that a frozen tick loop stops heartbeats (that is how the hub spots a hang).
             if (now - lastHeartbeat >= HEARTBEAT_MS) {
@@ -142,19 +153,30 @@ public class GameEvents {
             server.getCommandManager()
                 .executeCommand(sender, HubClient.str(in, "command"));
             pending.add(output);
+        } else if (type.equals("linkResult")) {
+            EntityPlayerMP player = server.getConfigurationManager()
+                .func_152612_a(HubClient.str(in, "player")); // getPlayerByUsername
+            if (player != null) DiscordCommand.tell(
+                player,
+                in.has("ok") && in.get("ok")
+                    .getAsBoolean(),
+                HubClient.str(in, "message"));
         }
     }
 
-    /** Sends every pending command result now, ready or not: on shutdown ticks stop, so they'd never go. */
+    /** Sends every pending command result and late line now: on shutdown ticks stop, so they'd never go. */
     void flushPending() {
-        for (CommandOutput out : pending) sendResult(out);
+        for (CommandOutput out : pending) send("cmdResult", out);
+        for (CommandOutput out : late) if (out.hasUnsent()) send("cmdLate", out);
         pending.clear();
+        late.clear();
     }
 
-    private void sendResult(CommandOutput out) {
-        JsonObject result = msg("cmdResult", "id", out.id);
+    /** cmdResult or cmdLate with the lines not sent yet. */
+    private void send(String type, CommandOutput out) {
+        JsonObject result = msg(type, "id", out.id);
         JsonArray lines = new JsonArray();
-        for (String s : out.lines()) lines.add(new JsonPrimitive(s));
+        for (String s : out.takeUnsent()) lines.add(new JsonPrimitive(s));
         result.add("output", lines);
         client.send(result);
     }
@@ -166,6 +188,24 @@ public class GameEvents {
         JsonArray players = new JsonArray();
         for (String name : server.getAllUsernames()) players.add(new JsonPrimitive(name));
         o.add("players", players);
+        o.add("dims", slowestDims(server));
         return o;
+    }
+
+    /** The 5 slowest dimensions by mean tick time (Forge's per-dimension worldTickTimes, nanoseconds). */
+    private static JsonArray slowestDims(MinecraftServer server) {
+        List<Map.Entry<Integer, long[]>> dims = new ArrayList<>(server.worldTickTimes.entrySet());
+        dims.sort((a, b) -> Double.compare(MathHelper.average(b.getValue()), MathHelper.average(a.getValue())));
+        JsonArray out = new JsonArray();
+        for (Map.Entry<Integer, long[]> d : dims.subList(0, Math.min(5, dims.size()))) {
+            WorldServer world = DimensionManager.getWorld(d.getKey());
+            String name = world != null ? world.provider.getDimensionName() : "DIM " + d.getKey();
+            JsonObject dim = new JsonObject();
+            dim.addProperty("id", d.getKey());
+            dim.addProperty("name", name == null || name.isEmpty() ? "DIM " + d.getKey() : name);
+            dim.addProperty("ms", MathHelper.average(d.getValue()) * 1.0E-6D);
+            out.add(dim);
+        }
+        return out;
     }
 }

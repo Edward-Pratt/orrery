@@ -7,6 +7,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
@@ -29,8 +30,9 @@ public class GtnhDiscord {
     private int hubPort;
     private String serverId;
     private String token;
-    private HubClient client;
+    private volatile HubClient client; // read from the log appender and command threads
     private GameEvents events;
+    private Object questEvents; // a QuestEvents, typed Object so BetterQuesting classes load only when installed
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
@@ -41,6 +43,11 @@ public class GtnhDiscord {
         serverId = config.getString("serverId", general, "gtnh", "This server's id in the hub's config.json");
         token = config.getString("token", general, "", "This server's token from the hub's config.json");
         if (config.hasChanged()) config.save();
+        // ServerUtilities logs backup results but only tells players; forward them to the hub.
+        BackupLogWatcher.attach(msg -> {
+            HubClient c = client;
+            if (c != null) c.send(msg);
+        });
     }
 
     @Mod.EventHandler
@@ -57,6 +64,11 @@ public class GtnhDiscord {
         FMLCommonHandler.instance()
             .bus()
             .register(events);
+        event.registerServerCommand(new DiscordCommand(() -> client));
+        if (Loader.isModLoaded("betterquesting")) {
+            questEvents = new QuestEvents(() -> client);
+            MinecraftForge.EVENT_BUS.register(questEvents);
+        }
         client.start();
         // SIGTERM (systemctl stop, Ctrl+C): vanilla's shutdown hook calls stopServer() directly, so
         // FMLServerStoppingEvent never fires. Announce the stop here too. Harmless after a clean /stop or a crash:
@@ -92,6 +104,8 @@ public class GtnhDiscord {
         FMLCommonHandler.instance()
             .bus()
             .unregister(events);
+        if (questEvents != null) MinecraftForge.EVENT_BUS.unregister(questEvents);
+        questEvents = null;
         client = null;
         events = null;
     }

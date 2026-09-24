@@ -1,13 +1,6 @@
 # hub
 hub/node_modules/
-hub/dist/
 hub/config.json
-hub/*.db
+hub/*.db*
 .env
-# mod
-mod/build/
-mod/.gradle/
-mod/run/
-mod/out/
-.idea/
-*.iml
+# mod/ keeps the GTNH template's own .gitignore

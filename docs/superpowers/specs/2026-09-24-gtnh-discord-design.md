@@ -161,8 +161,10 @@ now (accurate to ~1 minute even if the hub crashed).
   - `@Mod.EventHandler`: `FMLServerStarting/Started/Stopping/StoppedEvent`.
 - **Main thread**: inbound `say`/`cmd` are drained in `ServerTickEvent`
   (phase END), which also emits the heartbeat (≥5 s wall-clock apart,
-  never tick-counted). Every handler catches its own exceptions; nothing
-  throws into the game loop.
+  never tick-counted). The tick handler catches `RuntimeException` around
+  its body; the other handlers only read vanilla state and queue a message
+  (`HubClient.send` never throws), and vanilla `CommandHandler` already
+  catches command exceptions.
 - **Death text**: `player.func_110142_aN().func_151521_b()` (combat tracker's
   death message — the tracker is still populated when the event fires).
 - **Achievement filter**: skip if the player's `func_147099_x()` stats file
@@ -207,7 +209,8 @@ now (accurate to ~1 minute even if the hub crashed).
   - The Client is created with `allowedMentions: { parse: [] }` so nothing
     the bot posts (chat, death text, command output) can ping anyone.
   - MC → Discord: player names and message text go through `escapeMarkdown`
-    (no masked links, headings, or broken formatting).
+    with `heading`, `maskedLink`, `bulletedList`, `numberedList` enabled
+    (these are off by default) — no masked links, headings, or broken formatting.
   - Discord → MC: use `message.cleanContent` (mentions shown as names);
     strip `§` and control characters and collapse newlines in both author
     and message; cap at 256 chars; attachments appended as URLs; ignore bots,

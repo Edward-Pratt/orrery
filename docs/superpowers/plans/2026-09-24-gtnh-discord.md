@@ -282,6 +282,16 @@ test('markHubRestart makes hub downtime unknown', () => {
   assert.equal(db.uptime('s', 0, 6000), 1);
   db.close();
 });
+
+test('an event after the last touch still counts as hub-alive time', () => {
+  const db = new Db(':memory:');
+  db.record('s', 'up', 'connected', 500);
+  db.touch(1000);
+  db.record('s', 'down', 'stopped', 1030); // e.g. machine reboot: hub dies before its next touch
+  db.markHubRestart(['s'], 5000);
+  assert.equal(db.uptime('s', 1030, 5000), null); // the outage is unknown, not downtime
+  db.close();
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -330,6 +340,7 @@ export class Db {
     this.#db
       .prepare('INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)')
       .run(serverId, ts, state, reason);
+    this.touch(ts); // the hub was alive at least until this event
   }
 
   /** Stamps the hub as alive. Call every minute. */
@@ -370,7 +381,7 @@ export class Db {
 - [ ] **Step 4: Verify**
 
 Run: `cd hub && npm test && npm run typecheck`
-Expected: `ℹ pass 9`, `ℹ fail 0`, and `tsc` prints nothing.
+Expected: `ℹ pass 10`, `ℹ fail 0`, and `tsc` prints nothing.
 
 - [ ] **Step 5: Commit**
 
@@ -848,7 +859,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
 - [ ] **Step 4: Verify**
 
 Run: `cd hub && npm test && npm run typecheck`
-Expected: `ℹ pass 22`, `ℹ fail 0`, and `tsc` prints nothing. The `[cmd] test on gtnh: …` log lines are expected (audit log).
+Expected: `ℹ pass 23`, `ℹ fail 0`, and `tsc` prints nothing. The `[cmd] test on gtnh: …` log lines are expected (audit log).
 
 - [ ] **Step 5: Commit**
 
@@ -1092,7 +1103,7 @@ export async function startDiscord(hub: ServerHub, db: Db, cfg: DiscordConfig, t
 - [ ] **Step 4: Verify**
 
 Run: `cd hub && npm test && npm run typecheck`
-Expected: `ℹ pass 27`, `ℹ fail 0`, and `tsc` prints nothing.
+Expected: `ℹ pass 28`, `ℹ fail 0`, and `tsc` prints nothing.
 
 - [ ] **Step 5: Commit**
 
@@ -1198,7 +1209,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 - [ ] **Step 2: Typecheck and run the full suite**
 
 Run: `cd hub && npm run typecheck && npm test`
-Expected: `tsc` prints nothing; `ℹ pass 27`, `ℹ fail 0`.
+Expected: `tsc` prints nothing; `ℹ pass 28`, `ℹ fail 0`.
 
 - [ ] **Step 3: Smoke-run without Discord credentials**
 
@@ -1310,7 +1321,7 @@ git commit -m "chore(mod): scaffold from GTNewHorizons ExampleMod1.7.10"
   - `send(JsonObject)`: drops everything except `started`/`stopping` while disconnected; bounded at `MAX_OUTBOX = 1000`, dropping the oldest.
   - `JsonObject poll()`: returns null when empty.
   - `boolean isConnected()`
-  - `stop(long timeoutMs)`: flushes, then closes. Idempotent.
+  - `stop(long timeoutMs)`: flushes (waiting at most `timeoutMs`; `0` means don't wait), then closes. Idempotent.
   - package-private `static JsonObject parse(String)` and `static String str(JsonObject, String)`
   - package-private `minBackoffMs` and `maxBackoffMs`, for tests.
 
@@ -1324,6 +1335,7 @@ package io.github.edwardpratt.gtnhdiscord;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
@@ -1335,6 +1347,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.AfterEach;
@@ -1502,6 +1515,14 @@ class HubClientTest {
         assertNull(hub.in.readLine());
         assertTrue(!client.isConnected());
     }
+
+    @Test
+    void stopWithZeroTimeoutReturnsEvenIfTheHubNeverAnswers() throws Exception {
+        client.start();
+        hub.accept();
+        hub.read(); // hello arrives, but no welcome is ever sent: the client is blocked reading
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> client.stop(0));
+    }
 }
 ```
 
@@ -1599,14 +1620,17 @@ public class HubClient {
         return connected;
     }
 
-    /** Writes out whatever is queued (waiting at most timeoutMs), then disconnects for good. Safe to call twice. */
+    /**
+     * Writes out whatever is queued (waiting at most timeoutMs; 0 = don't wait), then disconnects for good. Safe to
+     * call twice.
+     */
     public void stop(long timeoutMs) {
         running = false;
         Thread t = thread;
         if (t == null) return;
         t.interrupt();
         try {
-            t.join(timeoutMs);
+            if (timeoutMs > 0) t.join(timeoutMs); // join(0) would wait forever
         } catch (InterruptedException e) {
             Thread.currentThread()
                 .interrupt();
@@ -1716,7 +1740,7 @@ Run:
 cd mod && ./gradlew --console=plain spotlessApply test
 grep -ho 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' build/test-results/test/*.xml
 ```
-Expected: `BUILD SUCCESSFUL` and `tests="6" skipped="0" failures="0" errors="0"`.
+Expected: `BUILD SUCCESSFUL` and `tests="7" skipped="0" failures="0" errors="0"`.
 
 - [ ] **Step 5: Commit**
 

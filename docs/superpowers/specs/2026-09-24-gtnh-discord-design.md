@@ -130,7 +130,7 @@ world load (no ticks yet) and shutdown save (after `stopping`).
 State transitions go to SQLite as `events(server_id, ts, state, reason)`
 with `state` ∈ `up` / `down` / `unknown`. Uptime = up time ÷ known time over
 the window. Hub downtime counts as `unknown`: the hub stamps a `last_alive`
-time every minute, and on startup writes `unknown` rows at that time and at
+time every minute and on every recorded event, and on startup writes `unknown` rows at that time and at
 now (accurate to ~1 minute even if the hub crashed).
 
 ## Mod (`mod/`)

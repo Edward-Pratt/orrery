@@ -1,7 +1,8 @@
+import { everyDay, parseDaily } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
 type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get'>;
-type Pending = { at: number; by: string; timers: NodeJS.Timeout[] };
+type Pending = { at: number; by: string; byName: string; timers: NodeJS.Timeout[] };
 
 /** In-game warnings, as time left before the restart. */
 const WARNINGS_MS = [600_000, 300_000, 60_000, 30_000, 10_000];
@@ -13,26 +14,6 @@ export function countdownText(ms: number): string {
   return `${ms / 1000} seconds`;
 }
 
-/** Parses a 24-hour "HH:MM"; null if invalid. */
-export function parseDaily(time: string): { h: number; m: number } | null {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
-  return match ? { h: Number(match[1]), m: Number(match[2]) } : null;
-}
-
-/**
- * The next moment, strictly after `now`, that is `leadMs` before local time h:m. Recomputed from the local
- * clock every time (never "+24 h"), so a DST change doesn't shift the restart by an hour.
- */
-export function nextDaily(time: { h: number; m: number }, leadMs: number, now: number): number {
-  const d = new Date(now);
-  d.setHours(time.h, time.m, 0, 0);
-  while (d.getTime() - leadMs <= now) {
-    d.setDate(d.getDate() + 1);
-    d.setHours(time.h, time.m, 0, 0); // again: a time inside a spring-forward gap was rolled on an hour
-  }
-  return d.getTime() - leadMs;
-}
-
 /**
  * Countdown restarts: in-game warnings, then `stop` (systemd's Restart=always brings the server back).
  * Lives in the hub core so the web dashboard can use it too. Pending restarts are in memory only.
@@ -41,7 +22,7 @@ export class RestartScheduler {
   #hub: Hub;
   #notify: (serverId: string, text: string) => void;
   #pending = new Map<string, Pending>();
-  #daily = new Map<string, NodeJS.Timeout>();
+  #daily = new Map<string, () => void>(); // serverId -> cancel
 
   constructor(hub: Hub, notify: (serverId: string, text: string) => void) {
     this.#hub = hub;
@@ -53,8 +34,11 @@ export class RestartScheduler {
     });
   }
 
-  /** Throws if minutes isn't a whole number 0–60, the server is offline, or a restart is already pending. */
-  schedule(serverId: string, minutes: number, by: string): void {
+  /**
+   * `by` goes to the audit log with the `stop` command (e.g. "discord:alice (123)"); `byName` is shown to
+   * people. Throws if minutes isn't a whole number 0–60, the server is offline, or a restart is already pending.
+   */
+  schedule(serverId: string, minutes: number, by: string, byName = by): void {
     if (!Number.isInteger(minutes) || minutes < 0 || minutes > 60) {
       throw new Error('minutes must be a whole number from 0 to 60');
     }
@@ -63,8 +47,8 @@ export class RestartScheduler {
     const delay = minutes * 60_000;
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
-    this.#pending.set(serverId, { at: Date.now() + delay, by, timers });
-    if (delay) this.#notify(serverId, `🔄 Restart in ${countdownText(delay)} (by ${by})`);
+    this.#pending.set(serverId, { at: Date.now() + delay, by, byName, timers });
+    if (delay) this.#notify(serverId, `🔄 Restart in ${countdownText(delay)} (by ${byName})`);
   }
 
   /** False if nothing was pending. */
@@ -77,36 +61,29 @@ export class RestartScheduler {
 
   pending(serverId: string): { at: number; by: string } | undefined {
     const p = this.#pending.get(serverId);
-    return p && { at: p.at, by: p.by };
+    return p && { at: p.at, by: p.byName };
   }
 
-  /** Arms a daily restart at local "HH:MM" (countdown starts 10 minutes before). Throws on a bad time. */
+  /** Arms (or re-arms) a daily restart at local "HH:MM"; the countdown starts 10 minutes before. Throws on a bad time. */
   daily(serverId: string, time: string): void {
-    const hm = parseDaily(time);
-    if (!hm) throw new Error(`server "${serverId}": dailyRestart must be HH:MM (24-hour), got "${time}"`);
-    // `after` is the target that just fired: timers can fire a millisecond early, and computing the next
-    // target from Date.now() alone would then pick the same one again.
-    const arm = (after: number) => {
-      const target = nextDaily(hm, DAILY_LEAD_MS, Math.max(Date.now(), after));
-      this.#daily.set(
-        serverId,
-        setTimeout(() => {
-          try {
-            this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'daily');
-          } catch (err) {
-            console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
-          }
-          arm(target);
-        }, target - Date.now()),
-      );
-    };
-    arm(0);
+    if (!parseDaily(time)) throw new Error(`server "${serverId}": dailyRestart must be HH:MM (24-hour), got "${time}"`);
+    this.#daily.get(serverId)?.(); // replace, don't stack, an earlier daily restart
+    this.#daily.set(
+      serverId,
+      everyDay(time, DAILY_LEAD_MS, () => {
+        try {
+          this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'daily');
+        } catch (err) {
+          console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
+        }
+      }),
+    );
   }
 
   /** Clears every timer (hub shutdown). */
   stop(): void {
     for (const id of [...this.#pending.keys()]) this.#clear(id);
-    for (const timer of this.#daily.values()) clearTimeout(timer);
+    for (const cancel of this.#daily.values()) cancel();
     this.#daily.clear();
   }
 

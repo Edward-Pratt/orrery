@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { test, type TestContext } from 'node:test';
-import { nextDaily, parseDaily, RestartScheduler } from '../src/restarts.ts';
+import { RestartScheduler } from '../src/restarts.ts';
 import type { HubEvent, ServerHub, ServerState } from '../src/servers.ts';
 
 process.env.TZ = 'Europe/London'; // daily-restart assertions are in UK local time, across a DST change
@@ -13,20 +13,22 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now });
   const events = new EventEmitter<{ event: [HubEvent] }>();
   const commands: string[] = [];
+  const audit: string[] = []; // "command|by"
   const notices: string[] = [];
   const state = { online: true, stopError: null as Error | null };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     get: (id: string) => (state.online ? ({ id, online: true } as ServerState) : undefined),
-    runCommand: async (_id: string, command: string) => {
+    runCommand: async (_id: string, command: string, by: string) => {
       commands.push(command);
+      audit.push(`${command}|${by}`);
       if (command === 'stop' && state.stopError) throw state.stopError;
       return [];
     },
   } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get'>;
   const restarts = new RestartScheduler(hub, (_id, text) => notices.push(text));
   t.after(() => restarts.stop());
-  return { restarts, events, commands, notices, state };
+  return { restarts, events, commands, audit, notices, state };
 }
 
 test('a 10 minute restart warns at 10m, 5m, 1m, 30s and 10s, then stops', (t) => {
@@ -113,22 +115,9 @@ test('stop failing with a disconnect is success; a timeout is reported', async (
   assert.equal(notices.at(-1), '❌ Restart failed: command timed out — it may still run when the server responds');
 });
 
-test('parseDaily accepts only 24-hour HH:MM', () => {
-  assert.deepEqual(parseDaily('06:00'), { h: 6, m: 0 });
-  assert.deepEqual(parseDaily('23:59'), { h: 23, m: 59 });
-  for (const bad of ['6:00', '24:00', '06:60', '6am', '']) assert.equal(parseDaily(bad), null, bad);
-});
-
 test('daily() rejects a bad time', (t) => {
   const { restarts } = setup(t);
   assert.throws(() => restarts.daily('gtnh', '6am'), /dailyRestart must be HH:MM/);
-});
-
-test('nextDaily follows the local clock across the October DST change', () => {
-  // 24 Oct 2026 06:00 BST (05:00 UTC). Clocks go back at 02:00 on 25 Oct.
-  const now = Date.UTC(2026, 9, 24, 5, 0);
-  const next = nextDaily({ h: 6, m: 0 }, 10 * MIN, now);
-  assert.equal(new Date(next).toISOString(), '2026-10-25T05:50:00.000Z'); // 05:50 GMT, 25 h later
 });
 
 test('daily restart counts down from 10 minutes before the time, every day', (t) => {
@@ -175,8 +164,21 @@ test('a daily timer firing a millisecond early does not double-schedule', (t) =>
   assert.equal(errors.mock.callCount(), 0);
 });
 
-test('nextDaily re-applies the time after a spring-forward gap', () => {
-  // 28 Mar 2027: UK clocks skip 01:00–02:00, so 01:30 that day becomes 02:30 BST. The next day must be 01:30 again.
-  const after = Date.UTC(2027, 2, 28, 1, 21); // 02:21 BST, just after that day's 02:20 countdown
-  assert.equal(new Date(nextDaily({ h: 1, m: 30 }, 10 * MIN, after)).toISOString(), '2027-03-29T00:20:00.000Z'); // 01:20 BST
+test('the audit name goes to stop; people see the display name', (t) => {
+  const { restarts, audit, notices } = setup(t);
+  restarts.schedule('gtnh', 1, 'discord:alice (123)', 'alice');
+  assert.equal(restarts.pending('gtnh')?.by, 'alice');
+  t.mock.timers.tick(MIN);
+  assert.equal(notices[0], '🔄 Restart in 1 minute (by alice)');
+  assert.equal(audit.at(-1), 'stop|discord:alice (123)');
+});
+
+test('calling daily() again replaces the earlier daily restart instead of stacking it', (t) => {
+  const { restarts, notices } = setup(t, Date.UTC(2026, 8, 24, 4, 0)); // 05:00 BST
+  const errors = t.mock.method(console, 'error', () => {});
+  restarts.daily('gtnh', '06:00');
+  restarts.daily('gtnh', '06:00');
+  t.mock.timers.tick(50 * MIN); // 05:50: exactly one countdown, and no "already scheduled" skip logged
+  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.equal(errors.mock.callCount(), 0);
 });

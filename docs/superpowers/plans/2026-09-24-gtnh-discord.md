@@ -1248,6 +1248,7 @@ cp -r "$tmp/ExampleMod1.7.10-master" mod
 rm -rf "$tmp"
 cd mod
 rm -rf .github jitpack.yml CODEOWNERS LICENSE LICENSE-template README.md docs src/main/resources/LICENSE src/main/java/com
+mkdir -p src/main/java/io/github/edwardpratt/gtnhdiscord   # the build plugin refuses to configure without the modGroup package dir
 ```
 
 - [ ] **Step 2: Set the mod identity**

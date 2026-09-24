@@ -1,0 +1,9 @@
+[{
+	"modid": "${modId}",
+	"name": "${modName}",
+	"description": "Server-side bridge between a GTNH server and the gtnh-discord hub.",
+	"version": "${modVersion}",
+	"mcversion": "${minecraftVersion}",
+	"url": "https://github.com/Edward-Pratt/gtnh-discord",
+	"authorList": ["Edward-Pratt"]
+}]

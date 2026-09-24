@@ -18,12 +18,16 @@ test('admin commands are hidden by default; public ones are not', () => {
   assert.equal(perms.cmd, '0');
   assert.equal(perms.restart, '0');
   assert.equal(perms.backup, '0');
-  for (const name of ['status', 'list', 'playtime', 'top']) assert.ok(!perms[name], name);
+  for (const name of ['status', 'list', 'playtime', 'top', 'tps', 'link', 'unlink']) assert.ok(!perms[name], name);
 });
 
 test('the command set includes stats and backup subcommands', () => {
   const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
-  assert.deepEqual(Object.keys(byName).sort(), ['backup', 'cmd', 'list', 'playtime', 'restart', 'status', 'top']);
+  assert.deepEqual(Object.keys(byName).sort(), ['backup', 'cmd', 'link', 'list', 'playtime', 'restart', 'status', 'top', 'tps', 'unlink']);
+  assert.deepEqual(byName.playtime.options?.map((o) => [o.name, o.required ?? false]), [
+    ['player', false],
+    ['user', false],
+  ]);
   assert.deepEqual(byName.backup.options?.map((o) => o.name), ['start', 'status', 'list']);
   assert.deepEqual(
     (byName.top.options?.[0] as { choices?: { value: string }[] }).choices?.map((c) => c.value),

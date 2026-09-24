@@ -12,7 +12,10 @@
       "dir": "/home/opc/GTNH",
       "dailyRestart": "06:00",
       "dailySummary": "09:00",
-      "backupMaxAgeHours": 26
+      "backupMaxAgeHours": 26,
+      "lagTps": 15,
+      "lagMinutes": 2,
+      "quests": "batched"
     }
   ]
 }

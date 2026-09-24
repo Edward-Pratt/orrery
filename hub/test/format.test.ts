@@ -7,15 +7,18 @@ import {
   formatBackupStatus,
   formatEvent,
   formatLastSeen,
+  formatLinked,
   formatNotice,
   formatOutput,
   formatPlayers,
   formatPlaytime,
   formatPresence,
+  formatQuests,
   formatStatus,
   formatSummary,
   formatTop,
   formatTopic,
+  formatTps,
   TOPIC_MIN_GAP_MS,
   topicDue,
   type Post,
@@ -203,4 +206,47 @@ test('topicDue edits on first sight, then only on change and after the minimum g
   assert.equal(topicDue(last, 'a', 1000 + TOPIC_MIN_GAP_MS), false); // unchanged
   assert.equal(topicDue(last, 'b', 1000 + TOPIC_MIN_GAP_MS - 1), false); // too soon
   assert.equal(topicDue(last, 'b', 1000 + TOPIC_MIN_GAP_MS), true);
+});
+
+test('formatTps shows now, averages, a trend and the slowest dimensions', () => {
+  const s: ServerState = {
+    id: 's',
+    name: 'GTNH',
+    online: true,
+    hung: false,
+    tps: 13.4,
+    players: [],
+    dims: [{ id: -1, name: 'Nether', ms: 72.4 }],
+  };
+  const e = first(formatTps(s, [{ ts: 1, tps: 20 }, { ts: 2, tps: 10 }], { avg: 15, min: 10 }, { avg: 18.25, min: 9 }));
+  assert.equal(e.title, 'GTNH: 13.4 TPS');
+  assert.equal(e.color, COLORS.orange);
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Last hour', '15.0 (min 10.0)'],
+      ['Last 24 h', '18.3'],
+      ['Trend (1 sample/min)', '█▅'],
+      ['Slowest dimensions', 'Nether (DIM -1): 72 ms/tick'],
+    ],
+  );
+  assert.equal(first(formatTps({ ...s, online: false, tps: null }, [], null, null)).title, 'GTNH: offline');
+});
+
+test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and latest', () => {
+  const q = (name: string, main = false) => ({ name, main });
+  assert.deepEqual(formatQuests({ serverId: 's', player: 'a_b', quests: [q('Stone Age', true)], count: 1 }), {
+    content: '📜 **a\\_b** completed **Stone Age**',
+  });
+  const seven = ['1', '2', '3', '4', '5', '6', '7'].map((n) => q(n));
+  assert.deepEqual(formatQuests({ serverId: 's', player: 'S', quests: seven, count: 7 }), {
+    content: '📜 **S** completed **1**, **2**, **3**, **4**, **5** and 2 more',
+  });
+  assert.deepEqual(formatQuests({ serverId: 's', player: 'S', quests: [q('Bronze')], count: 7 }), {
+    content: '📜 **S** completed 7 quests (latest: **Bronze**)',
+  });
+});
+
+test('formatLinked mentions without escaping the id', () => {
+  assert.deepEqual(formatLinked('Steve', '123'), { content: '🔗 **Steve** linked to <@123>' });
 });

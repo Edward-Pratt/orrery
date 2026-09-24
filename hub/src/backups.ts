@@ -1,13 +1,10 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { formatBytes, formatDuration } from './units.ts';
 
 export type Backup = { name: string; size: number; mtimeMs: number };
 
 /** ServerUtilities' backup names: "<YYYY-MM-DD-HH-MM-SS>.zip", moved into place atomically when finished. */
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}.*\.zip$/;
-const POLL_MS = 10_000;
-const WATCH_TIMEOUT_MS = 60 * 60_000;
 const WATCHDOG_MS = 10 * 60_000;
 const HOUR = 60 * 60_000;
 
@@ -32,43 +29,24 @@ export async function listBackups(dir: string): Promise<Backup[]> {
   return found.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
+/** The notice for a backup event from the mod (ServerUtilities' own "done"/"failed" log lines). */
+export function backupNotice(ok: boolean, detail: string): string {
+  return ok ? `✅ Backup finished (${detail})` : `❌ Backup failed: ${detail}`;
+}
+
 /**
- * Watches backup folders: reports when a backup started from Discord finishes, and warns when scheduled
- * backups stop appearing. Hub core (plain-text notices); `list` is injected so tests needn't touch disk.
+ * Warns when backups stop appearing in a backup folder. (Finish and failure notices come from the mod's backup
+ * events.) Hub core (plain-text notices); `list` is injected so tests needn't touch disk.
  */
 export class BackupWatcher {
   #list: (serverId: string) => Promise<Backup[]>;
   #notify: (serverId: string, text: string) => void;
-  #watches = new Map<string, NodeJS.Timeout>();
   #watchdogs = new Map<string, NodeJS.Timeout>();
   #overdue = new Set<string>();
 
   constructor(list: (serverId: string) => Promise<Backup[]>, notify: (serverId: string, text: string) => void) {
     this.#list = list;
     this.#notify = notify;
-  }
-
-  /** After `/backup start`: report the first backup modified since `since`. False if already watching. */
-  watch(serverId: string, since: number): boolean {
-    if (this.#watches.has(serverId)) return false;
-    const deadline = since + WATCH_TIMEOUT_MS;
-    const poll = async () => {
-      const found = (await this.#list(serverId)).find((b) => b.mtimeMs >= since);
-      if (found) {
-        this.#watches.delete(serverId);
-        this.#notify(
-          serverId,
-          `✅ Backup finished: ${found.name} (${formatBytes(found.size)}, ${formatDuration(found.mtimeMs - since)})`,
-        );
-      } else if (Date.now() >= deadline) {
-        this.#watches.delete(serverId);
-        this.#notify(serverId, '⚠️ No finished backup appeared within 60 minutes');
-      } else {
-        this.#watches.set(serverId, setTimeout(() => void poll(), POLL_MS));
-      }
-    };
-    this.#watches.set(serverId, setTimeout(() => void poll(), POLL_MS));
-    return true;
   }
 
   /** Every 10 minutes, warn once if the newest backup is older than `maxAgeHours`; re-arms after a new one. */
@@ -92,9 +70,7 @@ export class BackupWatcher {
 
   /** Clears every timer (hub shutdown). */
   stop(): void {
-    for (const timer of this.#watches.values()) clearTimeout(timer);
     for (const timer of this.#watchdogs.values()) clearInterval(timer);
-    this.#watches.clear();
     this.#watchdogs.clear();
   }
 }

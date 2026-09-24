@@ -11,28 +11,33 @@ import {
   type Webhook,
 } from 'discord.js';
 import { basename } from 'node:path';
-import { listBackups, type BackupWatcher } from './backups.ts';
+import { listBackups } from './backups.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import {
   formatBackupList,
   formatBackupStatus,
   formatEvent,
+  formatLinked,
   formatNotice,
   formatOutput,
   formatPlayers,
   formatPlaytime,
   formatPresence,
+  formatQuests,
   formatStatus,
   formatSummary,
   formatTop,
   formatTopic,
+  formatTps,
   md,
   TOP_PERIODS,
   topicDue,
   type Post,
   type TopicEdit,
 } from './format.ts';
+import type { Links } from './links.ts';
+import type { QuestBatch } from './quests.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Summary } from './summary.ts';
@@ -53,9 +58,12 @@ export type DiscordFrontend = {
   /** Posts a hub-core notice (restarts, backups) to the server's channel. */
   notice: (serverId: string, text: string) => void;
   summary: (serverId: string, s: Summary) => void;
+  quests: (batch: QuestBatch) => void;
+  linked: (serverId: string, player: string, discordId: string) => void;
 };
 
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 const WEBHOOK_NAME = 'GTNH Relay';
 const CRASH_LOG_WINDOW_MS = 10 * 60_000;
 // Discord API error codes.
@@ -70,10 +78,14 @@ const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 export const COMMANDS = [
   new SlashCommandBuilder().setName('status').setDescription('Server status, TPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
+  new SlashCommandBuilder().setName('tps').setDescription('TPS now, over the last hour and day, and the slowest dimensions'),
   new SlashCommandBuilder()
     .setName('playtime')
     .setDescription("A player's playtime and when they were last seen")
-    .addStringOption((o) => o.setName('player').setDescription('Minecraft name').setRequired(true)),
+    .addStringOption((o) => o.setName('player').setDescription('Minecraft name'))
+    .addUserOption((o) => o.setName('user').setDescription('Or a Discord member who has linked their account')),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your Minecraft name'),
+  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your Minecraft name'),
   new SlashCommandBuilder()
     .setName('top')
     .setDescription('Top players by playtime')
@@ -125,7 +137,7 @@ export async function startDiscord(
   hub: ServerHub,
   db: Db,
   restarts: RestartScheduler,
-  backups: BackupWatcher,
+  links: Links,
   cfg: DiscordConfig,
   token: string,
 ): Promise<DiscordFrontend> {
@@ -202,7 +214,8 @@ export async function startDiscord(
     const serverId = serverByChannel.get(m.channelId);
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
-    hub.say(serverId, m.member?.displayName ?? m.author.username, text);
+    // Linked people appear in game under their Minecraft name.
+    hub.say(serverId, db.linkByDiscord(m.author.id)?.player ?? m.member?.displayName ?? m.author.username, text);
   });
 
   client.on(Events.InteractionCreate, (i) => {
@@ -226,8 +239,30 @@ export async function startDiscord(
       await i.reply(state.online ? formatPlayers(state.players) : formatNotice(`🔴 ${state.name} is offline`));
       return;
     }
+    if (i.commandName === 'tps') {
+      await i.reply(
+        formatTps(state, db.tpsSince(serverId, now - HOUR), db.tpsStats(serverId, now - HOUR, now), db.tpsStats(serverId, now - DAY, now)),
+      );
+      return;
+    }
+    if (i.commandName === 'link') {
+      const code = links.issue(i.user.id, i.user.username);
+      await i.reply({ content: `In game, type \`/discord link ${code}\` within 10 minutes.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (i.commandName === 'unlink') {
+      const removed = links.unlinkDiscord(i.user.id);
+      await i.reply({ content: removed ? 'Unlinked.' : "You weren't linked.", flags: MessageFlags.Ephemeral });
+      return;
+    }
     if (i.commandName === 'playtime') {
-      const player = i.options.getString('player', true);
+      const user = i.options.getUser('user');
+      const player = user ? db.linkByDiscord(user.id)?.player : (i.options.getString('player') ?? undefined);
+      if (!player) {
+        const content = user ? `${user.username} hasn't linked a Minecraft account (use /link).` : 'Give a player name or a Discord user.';
+        await i.reply({ content, flags: MessageFlags.Ephemeral });
+        return;
+      }
       await i.reply(
         formatPlaytime(
           player,
@@ -254,7 +289,11 @@ export async function startDiscord(
     if (i.commandName === 'cmd') {
       await i.deferReply(); // commands can take longer than Discord's 3 s reply window
       try {
-        await i.editReply(formatOutput(await hub.runCommand(serverId, i.options.getString('command', true), audit)));
+        // Replies that arrive later (e.g. spark's profiler link) are posted as follow-ups.
+        const onLate = (lines: string[]) => {
+          i.followUp(formatOutput(lines)).catch((err) => console.error('[discord] late output follow-up failed:', err));
+        };
+        await i.editReply(formatOutput(await hub.runCommand(serverId, i.options.getString('command', true), audit, onLate)));
       } catch (err) {
         await i.editReply(`❌ ${(err as Error).message}`);
       }
@@ -285,11 +324,9 @@ export async function startDiscord(
         await i.reply(formatBackupList(await listBackups(dir)));
       } else {
         await i.deferReply();
-        const since = Date.now();
         try {
-          const output = await hub.runCommand(serverId, 'backup start', audit);
-          backups.watch(serverId, since); // the "finished" notice follows in the channel
-          await i.editReply(formatOutput(output));
+          // The "finished"/"failed" notice follows in the channel, from the mod's backup event.
+          await i.editReply(formatOutput(await hub.runCommand(serverId, 'backup start', audit)));
         } catch (err) {
           await i.editReply(`❌ ${(err as Error).message}`);
         }
@@ -351,5 +388,7 @@ export async function startDiscord(
     client,
     notice: (serverId, text) => postSafe(serverId, formatNotice(text)),
     summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
+    quests: (batch) => postSafe(batch.serverId, formatQuests(batch)),
+    linked: (serverId, player, discordId) => postSafe(serverId, formatLinked(player, discordId)),
   };
 }

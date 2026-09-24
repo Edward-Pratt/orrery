@@ -1,5 +1,7 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import type { Backup } from './backups.ts';
+import { sparkline } from './lag.ts';
+import type { QuestBatch } from './quests.ts';
 import { stripCodes, truncate, type HubEvent, type ServerState } from './servers.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
@@ -183,6 +185,42 @@ export function formatSummary(serverName: string, s: Summary): Post {
       { name: 'Top players', value: truncate(top, FIELD), inline: false },
     ],
   });
+}
+
+export function formatTps(
+  s: ServerState,
+  lastHour: { ts: number; tps: number }[],
+  hour: { avg: number; min: number } | null,
+  day: { avg: number; min: number } | null,
+): Post {
+  if (!s.online || s.tps === null) return embed({ title: title(`${s.name}: offline`), color: COLORS.red });
+  const color = s.tps >= 18 ? COLORS.green : s.tps >= 12 ? COLORS.orange : COLORS.red;
+  const stat = (x: { avg: number; min: number } | null, withMin: boolean) =>
+    x === null ? 'n/a' : withMin ? `${x.avg.toFixed(1)} (min ${x.min.toFixed(1)})` : x.avg.toFixed(1);
+  const fields = [
+    { name: 'Last hour', value: stat(hour, true), inline: true },
+    { name: 'Last 24 h', value: stat(day, false), inline: true },
+  ];
+  if (lastHour.length) fields.push({ name: 'Trend (1 sample/min)', value: sparkline(lastHour.slice(-60).map((x) => x.tps)), inline: false });
+  if (s.dims.length) {
+    const dims = s.dims.map((d) => `${md(d.name)} (DIM ${d.id}): ${Math.round(d.ms)} ms/tick`).join('\n');
+    fields.push({ name: 'Slowest dimensions', value: truncate(dims, FIELD), inline: false });
+  }
+  return embed({ title: title(`${s.name}: ${s.tps.toFixed(1)} TPS`), color, fields });
+}
+
+/** A quest post: the quests completed at once, or a batched roll-up (`count` > quests shown). */
+export function formatQuests(b: QuestBatch): Post {
+  const who = `📜 **${md(b.player)}** completed`;
+  if (b.count > b.quests.length) return { content: `${who} ${b.count} quests (latest: **${md(b.quests[0].name)}**)` };
+  const names = b.quests.slice(0, 5).map((q) => `**${md(q.name)}**`);
+  const more = b.quests.length > 5 ? ` and ${b.quests.length - 5} more` : '';
+  return { content: truncate(`${who} ${names.join(', ')}${more}`, 2000) };
+}
+
+/** The mention renders as a name but doesn't ping (allowedMentions is off for everything the bot posts). */
+export function formatLinked(player: string, discordId: string): Post {
+  return { content: `🔗 **${md(player)}** linked to <@${discordId}>` };
 }
 
 /** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS". */

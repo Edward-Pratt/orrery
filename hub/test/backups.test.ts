@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { BackupWatcher, listBackups, type Backup } from '../src/backups.ts';
+import { backupNotice, BackupWatcher, listBackups, type Backup } from '../src/backups.ts';
 
 const MIN = 60_000;
 const flush = () => new Promise((r) => setImmediate(r)); // lets the injected list() promise settle
@@ -43,30 +43,9 @@ function setup(t: TestContext) {
   return { watcher, notices, set: (b: Backup[]) => (backups = b) };
 }
 
-test('watch reports the first backup that appears after the start', async (t) => {
-  const { watcher, notices, set } = setup(t);
-  const since = Date.now();
-  set([{ name: 'old.zip', size: 1, mtimeMs: since - MIN }]);
-  assert.equal(watcher.watch('gtnh', since), true);
-  assert.equal(watcher.watch('gtnh', since), false); // one watch per server
-  t.mock.timers.tick(10_000);
-  await flush();
-  assert.deepEqual(notices, []);
-  set([{ name: '2026-09-24-06-00-00.zip', size: 3 * 1024 ** 3, mtimeMs: since + 192_000 }]);
-  t.mock.timers.tick(10_000);
-  await flush();
-  assert.deepEqual(notices, ['✅ Backup finished: 2026-09-24-06-00-00.zip (3.0 GB, 3 m 12 s)']);
-  assert.equal(watcher.watch('gtnh', Date.now()), true); // free again
-});
-
-test('watch gives up after 60 minutes', async (t) => {
-  const { watcher, notices } = setup(t);
-  watcher.watch('gtnh', Date.now());
-  for (let i = 0; i < 6 * 60; i++) {
-    t.mock.timers.tick(10_000);
-    await flush();
-  }
-  assert.deepEqual(notices, ['⚠️ No finished backup appeared within 60 minutes']);
+test('backupNotice turns mod backup events into notices', () => {
+  assert.equal(backupNotice(true, '12.3 seconds (1.2GB)'), '✅ Backup finished (12.3 seconds (1.2GB))');
+  assert.equal(backupNotice(false, 'disk full'), '❌ Backup failed: disk full');
 });
 
 test('the watchdog warns once when backups are overdue and re-arms after a new one', async (t) => {

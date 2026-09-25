@@ -12,8 +12,6 @@ import {
   type Webhook,
 } from 'discord.js';
 import { basename } from 'node:path';
-import { freeBytes, listBackups } from './backups.ts';
-import { findCrashLogs } from './crashlogs.ts';
 import {
   formatBackupList,
   formatBackupStatus,
@@ -44,10 +42,6 @@ export type DiscordConfig = {
   adminRoleId: string;
   /** serverId -> channelId */
   channels: Record<string, string>;
-  /** serverId -> server folder, for crash-log uploads */
-  dirs: Record<string, string>;
-  /** serverId -> ServerUtilities backup folder */
-  backupDirs: Record<string, string>;
 };
 
 export type DiscordFrontend = {
@@ -178,7 +172,7 @@ export async function startDiscord(
   }
 
   async function postCrash(serverId: string, message: Post): Promise<void> {
-    const files = cfg.dirs[serverId] ? await findCrashLogs(cfg.dirs[serverId], Date.now() - CRASH_LOG_WINDOW_MS) : [];
+    const files = await stats.crashLogs(serverId, Date.now() - CRASH_LOG_WINDOW_MS);
     const withNote: Post =
       files.length && 'embeds' in message
         ? { embeds: [{ ...message.embeds[0], description: `Crash logs attached: ${files.map((f) => basename(f)).join(', ')}` }] }
@@ -296,16 +290,16 @@ export async function startDiscord(
       }
       await i.reply({ content: reply, flags: MessageFlags.Ephemeral });
     } else if (i.commandName === 'backup') {
-      const dir = cfg.backupDirs[serverId];
-      if (!dir) {
+      const b = (await stats.backups(serverId))!;
+      if (!b.configured) {
         await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
         return;
       }
       const sub = i.options.getSubcommand();
       if (sub === 'status') {
-        await i.reply(formatBackupStatus(await listBackups(dir), Date.now(), await freeBytes(dir)));
+        await i.reply(formatBackupStatus(b.backups, Date.now(), b.free));
       } else if (sub === 'list') {
-        await i.reply(formatBackupList(await listBackups(dir)));
+        await i.reply(formatBackupList(b.backups));
       } else {
         await i.deferReply();
         try {

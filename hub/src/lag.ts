@@ -12,22 +12,21 @@ export function sparkline(values: number[], max = 20): string {
 
 /**
  * Samples each server's TPS once a minute into the `tps` table and alerts when it stays low. Lag is only judged
- * while a server is online and responding: crashes and hangs have their own alerts. Hub core (plain-text notices).
+ * while a server is online and responding: crashes and hangs have their own alerts. Hub core (notices go on the hub's
+ * event stream).
  */
 export class LagMonitor {
-  #hub: Pick<ServerHub, 'list'>;
+  #hub: Pick<ServerHub, 'list' | 'publish'>;
   #db: Db;
   #configs: Record<string, LagConfig>;
-  #notify: (serverId: string, text: string) => void;
   #low = new Map<string, number>(); // serverId -> consecutive low samples
   #lagging = new Set<string>();
   #timer: NodeJS.Timeout | undefined;
 
-  constructor(hub: Pick<ServerHub, 'list'>, db: Db, configs: Record<string, LagConfig>, notify: (serverId: string, text: string) => void) {
+  constructor(hub: Pick<ServerHub, 'list' | 'publish'>, db: Db, configs: Record<string, LagConfig>) {
     this.#hub = hub;
     this.#db = db;
     this.#configs = configs;
-    this.#notify = notify;
   }
 
   start(intervalMs = 60_000): void {
@@ -55,12 +54,11 @@ export class LagMonitor {
         this.#low.set(s.id, low);
         if (low >= cfg.minutes && !this.#lagging.has(s.id)) {
           this.#lagging.add(s.id);
-          const where = worst ? `${worst.name} (DIM ${worst.id}) ${Math.round(worst.ms)} ms/tick` : 'unknown';
-          this.#notify(s.id, `🐢 Lag: ${s.tps.toFixed(1)} TPS; slowest: ${where}`);
+          this.#hub.publish(s.id, { severity: 'warning', kind: 'lag', tps: s.tps, worst: worst ?? null });
         }
       } else {
         this.#low.delete(s.id);
-        if (this.#lagging.delete(s.id)) this.#notify(s.id, `✅ TPS back to normal (${s.tps.toFixed(1)})`);
+        if (this.#lagging.delete(s.id)) this.#hub.publish(s.id, { severity: 'good', kind: 'lagRecovered', tps: s.tps });
       }
     }
   }

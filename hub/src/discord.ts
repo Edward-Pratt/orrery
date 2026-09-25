@@ -57,8 +57,6 @@ export type DiscordConfig = {
 
 export type DiscordFrontend = {
   client: Client;
-  /** Posts a hub-core notice (restarts, backups) to the server's channel. */
-  notice: (serverId: string, text: string) => void;
   summary: (serverId: string, s: Summary) => void;
   quests: (batch: QuestBatch) => void;
   linked: (serverId: string, player: string, discordId: string) => void;
@@ -390,7 +388,6 @@ export async function startDiscord(
   await client.login(token);
   return {
     client,
-    notice: (serverId, text) => postSafe(serverId, formatNotice(text)),
     summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
     quests: (batch) => postSafe(batch.serverId, formatQuests(batch)),
     linked: (serverId, player, discordId) => postSafe(serverId, formatLinked(player, discordId)),

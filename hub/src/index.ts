@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { backupNotice, backupStats, BackupWatcher, freeBytes, listBackups } from './backups.ts';
+import { backupStats, BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
@@ -28,17 +28,15 @@ setInterval(() => db.touch(), 60_000);
 const hub = new ServerHub(config.servers);
 hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
-// Hub-core output goes to Discord, which is connected below; until then it goes nowhere.
-let notice: (serverId: string, text: string) => void = () => {};
+// Quest and link posts go to Discord, which is connected below; until then they go nowhere.
 let postQuests: (batch: QuestBatch) => void = () => {};
 let postLinked: (serverId: string, player: string, discordId: string) => void = () => {};
-const notify = (serverId: string, text: string) => notice(serverId, text);
 const restarts = new RestartScheduler(hub);
 for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
 const backups = new BackupWatcher(
+  hub,
   (serverId) => listBackups(backupDirs[serverId] ?? ''),
   (serverId) => freeBytes(backupDirs[serverId] ?? ''),
-  notify,
 );
 for (const s of config.servers) {
   if (s.backupDir) {
@@ -46,7 +44,7 @@ for (const s of config.servers) {
   }
 }
 const playtime = new PlaytimeTracker(hub, db);
-const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])), notify);
+const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])));
 const quests = new QuestAnnouncer(
   Object.fromEntries(config.servers.map((s) => [s.id, s.quests])),
   (batch) => postQuests(batch),
@@ -54,7 +52,6 @@ const quests = new QuestAnnouncer(
 const links = new Links(db, hub, (serverId, player, discordId) => postLinked(serverId, player, discordId));
 hub.on('event', (e) => {
   if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
-  else if (e.type === 'backup') notify(e.serverId, backupNotice(e.ok, e.detail));
 });
 
 const port = await hub.listen(config.listenPort);
@@ -78,7 +75,6 @@ const discord = await startDiscord(
   },
   token,
 );
-notice = discord.notice;
 postQuests = discord.quests;
 postLinked = discord.linked;
 const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, discord.connected) : () => {};

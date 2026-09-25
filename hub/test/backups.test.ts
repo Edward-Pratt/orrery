@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { backupNotice, backupStats, BackupWatcher, freeBytes, growthPerDay, listBackups, type Backup } from '../src/backups.ts';
+import { backupStats, BackupWatcher, freeBytes, growthPerDay, listBackups, type Backup } from '../src/backups.ts';
+import type { HubEvent, Notice, ServerHub } from '../src/servers.ts';
 
 const MIN = 60_000;
 const GB = 1024 ** 3;
@@ -36,19 +38,30 @@ function setup(t: TestContext) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1_000_000_000_000 });
   let backups: Backup[] = [];
   let free: number | null = 100 * GB;
-  const notices: string[] = [];
+  const notices: (Notice & { serverId: string })[] = [];
+  const events = new EventEmitter<{ event: [HubEvent] }>();
+  const hub = {
+    on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
+    publish: (serverId: string, n: Notice) => notices.push({ ...n, serverId }),
+  } as unknown as Pick<ServerHub, 'on' | 'publish'>;
   const watcher = new BackupWatcher(
+    hub,
     async () => backups,
     async () => free,
-    (_id, text) => notices.push(text),
   );
   t.after(() => watcher.stop());
-  return { watcher, notices, set: (b: Backup[]) => (backups = b), setFree: (f: number | null) => (free = f) };
+  return { watcher, events, notices, set: (b: Backup[]) => (backups = b), setFree: (f: number | null) => (free = f) };
 }
 
-test('backupNotice turns mod backup events into notices', () => {
-  assert.equal(backupNotice(true, '12.3 seconds (1.2GB)'), '✅ Backup finished (12.3 seconds (1.2GB))');
-  assert.equal(backupNotice(false, 'disk full'), '❌ Backup failed: disk full');
+test("the mod's backup events become finished / failed notices", (t) => {
+  const { events, notices } = setup(t);
+  events.emit('event', { serverId: 'gtnh', type: 'backup', ok: true, detail: '12.3 seconds (1.2GB)' });
+  events.emit('event', { serverId: 'gtnh', type: 'backup', ok: false, detail: 'disk full' });
+  events.emit('event', { serverId: 'gtnh', type: 'started' }); // not a backup: ignored
+  assert.deepEqual(notices, [
+    { severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)', serverId: 'gtnh' },
+    { severity: 'problem', kind: 'backupFailed', detail: 'disk full', serverId: 'gtnh' },
+  ]);
 });
 
 test('the watchdog warns once when backups are overdue and re-arms after a new one', async (t) => {
@@ -59,7 +72,7 @@ test('the watchdog warns once when backups are overdue and re-arms after a new o
   await flush();
   t.mock.timers.tick(10 * MIN);
   await flush();
-  assert.deepEqual(notices, ['⚠️ No new backup for 30 h (newest: a.zip)']);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'backupOverdue', hours: 30, newest: 'a.zip', serverId: 'gtnh' }]);
   set([{ name: 'b.zip', size: 1, mtimeMs: Date.now() }]);
   t.mock.timers.tick(10 * MIN);
   await flush();
@@ -67,7 +80,15 @@ test('the watchdog warns once when backups are overdue and re-arms after a new o
   t.mock.timers.tick(10 * MIN);
   await flush();
   assert.equal(notices.length, 2);
-  assert.match(notices[1], /No new backup for 27 h/);
+  assert.deepEqual(notices[1], { severity: 'warning', kind: 'backupOverdue', hours: 27, newest: 'b.zip', serverId: 'gtnh' });
+});
+
+test('the watchdog says so when there are no backups at all', async (t) => {
+  const { watcher, notices } = setup(t);
+  watcher.watchdog('gtnh', { maxAgeHours: 26, minFreeGB: 10 });
+  t.mock.timers.tick(10 * MIN);
+  await flush();
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'backupsMissing', serverId: 'gtnh' }]);
 });
 
 test('growthPerDay compares the newest backup with the oldest, if a day or more apart', () => {
@@ -99,7 +120,7 @@ test('the watchdog warns once about low disk space and re-arms when there is roo
   };
   await tick();
   await tick();
-  assert.deepEqual(notices, ['⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)']);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lowDisk', free: 5 * GB, minFreeGB: 10, serverId: 'gtnh' }]);
   setFree(20 * GB);
   await tick();
   setFree(null); // unreadable: no notice, no re-arm
@@ -107,5 +128,5 @@ test('the watchdog warns once about low disk space and re-arms when there is roo
   setFree(4 * GB);
   await tick();
   assert.equal(notices.length, 2);
-  assert.match(notices[1], /4\.0 GB free/);
+  assert.equal(notices[1].kind === 'lowDisk' && notices[1].free, 4 * GB);
 });

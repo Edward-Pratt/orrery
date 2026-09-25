@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Db } from '../src/db.ts';
 import { LagMonitor, sparkline, type LagConfig } from '../src/lag.ts';
-import type { ServerHub, ServerState } from '../src/servers.ts';
+import type { Notice, ServerHub, ServerState } from '../src/servers.ts';
 
 const MIN = 60_000;
 
 function setup(configs: Record<string, LagConfig> = { s: { tps: 15, minutes: 2, enabled: true } }) {
   let state: ServerState = { id: 's', name: 'S', online: true, hung: false, tps: 20, players: [], dims: [] };
-  const hub = { list: () => [state] } as unknown as Pick<ServerHub, 'list'>;
+  const notices: Notice[] = [];
+  const hub = { list: () => [state], publish: (_id: string, n: Notice) => notices.push(n) } as unknown as Pick<ServerHub, 'list' | 'publish'>;
   const db = new Db(':memory:');
-  const notices: string[] = [];
-  const lag = new LagMonitor(hub, db, configs, (_id, text) => notices.push(text));
+  const lag = new LagMonitor(hub, db, configs);
   let now = 1_000_000;
   const sample = (patch: Partial<ServerState>) => {
     state = { ...state, ...patch };
@@ -28,10 +28,10 @@ test('alerts after TPS stays low for the configured minutes, then once on recove
   assert.deepEqual(notices, []); // one low minute isn't lag yet
   sample({ tps: 12.3, dims: nether });
   sample({ tps: 11, dims: nether }); // still lagging: no repeat
-  assert.deepEqual(notices, ['🐢 Lag: 12.3 TPS; slowest: Nether (DIM -1) 72 ms/tick']);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether[0] }]);
   sample({ tps: 19.9 });
   sample({ tps: 20 });
-  assert.deepEqual(notices.slice(1), ['✅ TPS back to normal (19.9)']);
+  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 19.9 }]);
 });
 
 test('a single normal sample resets the count', () => {

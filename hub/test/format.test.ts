@@ -23,7 +23,7 @@ import {
   topicDue,
   type Post,
 } from '../src/format.ts';
-import type { ServerState } from '../src/servers.ts';
+import type { Notice, ServerState, Severity } from '../src/servers.ts';
 
 test('formatEvent keeps chat-like events as escaped plain text', () => {
   assert.deepEqual(formatEvent({ serverId: 's', type: 'chat', player: 'x_y_z', message: '**hi** [a](http://x) §cred' }), {
@@ -262,4 +262,33 @@ test('formatSummary adds a backups line when it has backup stats', () => {
   const noGrowth = first(formatSummary('GTNH', { ...base, backups: { count: 0, total: 0, free: null, growth: null } }));
   assert.equal(noGrowth.fields!.at(-1)!.value, '0, 0 B total, n/a free');
   assert.equal(first(formatSummary('GTNH', base)).fields!.at(-1)!.name, 'Top players');
+});
+
+test("formatEvent posts restart notices with today's wording", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 600_000, by: 'alice' }), {
+    embeds: [{ title: '🔄 Restart in 10 minutes (by alice)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 60_000, by: 'bob' }), {
+    embeds: [{ title: '🔄 Restart in 1 minute (by bob)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartNow' }), { embeds: [{ title: '🔄 Restarting now', color: COLORS.blue }] });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartCancelled', by: 'bob' }), {
+    embeds: [{ title: '❎ Restart cancelled (by bob)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartCancelledDown' }), {
+    embeds: [{ title: '❎ Restart cancelled (server went down)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'problem', kind: 'restartFailed', error: 'timed out' }), {
+    embeds: [{ title: '❌ Restart failed: timed out', color: COLORS.red }],
+  });
+});
+
+test('a notice is coloured by its severity, not its text', () => {
+  const color = (severity: Severity) =>
+    (formatEvent({ severity, kind: 'restartNow', type: 'notice', serverId: 's' }) as { embeds: APIEmbed[] }).embeds[0].color;
+  assert.equal(color('problem'), COLORS.red);
+  assert.equal(color('warning'), COLORS.orange);
+  assert.equal(color('good'), COLORS.green);
+  assert.equal(color('info'), COLORS.blue);
 });

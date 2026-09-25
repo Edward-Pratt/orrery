@@ -33,7 +33,7 @@ let notice: (serverId: string, text: string) => void = () => {};
 let postQuests: (batch: QuestBatch) => void = () => {};
 let postLinked: (serverId: string, player: string, discordId: string) => void = () => {};
 const notify = (serverId: string, text: string) => notice(serverId, text);
-const restarts = new RestartScheduler(hub, notify);
+const restarts = new RestartScheduler(hub);
 for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
 const backups = new BackupWatcher(
   (serverId) => listBackups(backupDirs[serverId] ?? ''),

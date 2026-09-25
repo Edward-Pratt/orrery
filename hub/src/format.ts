@@ -2,7 +2,8 @@ import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
 import { sparkline } from './lag.ts';
 import type { QuestBatch } from './quests.ts';
-import { stripCodes, truncate, type HubEvent, type ServerState } from './servers.ts';
+import { countdownText } from './restarts.ts';
+import { stripCodes, truncate, type HubEvent, type Notice, type ServerState, type Severity } from './servers.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
 
@@ -28,6 +29,23 @@ function title(s: string): string {
 
 const embed = (e: APIEmbed): Post => ({ embeds: [e] });
 
+const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
+
+function noticeText(n: Notice): string {
+  switch (n.kind) {
+    case 'restartScheduled':
+      return `🔄 Restart in ${countdownText(n.ms)} (by ${n.by})`;
+    case 'restartNow':
+      return '🔄 Restarting now';
+    case 'restartCancelled':
+      return `❎ Restart cancelled (by ${n.by})`;
+    case 'restartCancelledDown':
+      return '❎ Restart cancelled (server went down)';
+    case 'restartFailed':
+      return `❌ Restart failed: ${n.error}`;
+  }
+}
+
 /** The Discord post for a hub event, or null for events that aren't announced. */
 export function formatEvent(e: HubEvent): Post | null {
   switch (e.type) {
@@ -51,6 +69,8 @@ export function formatEvent(e: HubEvent): Post | null {
       return embed({ title: '⚠️ Server not responding', color: COLORS.orange });
     case 'recovered':
       return embed({ title: '✅ Server responding again', color: COLORS.green });
+    case 'notice':
+      return embed({ title: title(noticeText(e)), color: SEVERITY_COLORS[e.severity] });
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
     case 'quest': // batched by the QuestAnnouncer

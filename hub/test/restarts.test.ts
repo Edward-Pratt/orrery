@@ -2,19 +2,24 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { test, type TestContext } from 'node:test';
 import { RestartScheduler } from '../src/restarts.ts';
-import type { HubEvent, ServerHub, ServerState } from '../src/servers.ts';
+import type { HubEvent, Notice, ServerHub, ServerState } from '../src/servers.ts';
 
 process.env.TZ = 'Europe/London'; // daily-restart assertions are in UK local time, across a DST change
 
 const MIN = 60_000;
 const flush = () => new Promise((r) => setImmediate(r)); // setImmediate isn't mocked: lets rejections settle
+const scheduled = (minutes: number, by: string): Notice => ({ severity: 'info', kind: 'restartScheduled', ms: minutes * MIN, by });
+const NOW: Notice = { severity: 'info', kind: 'restartNow' };
+const cancelled = (by: string): Notice => ({ severity: 'info', kind: 'restartCancelled', by });
+const DOWN: Notice = { severity: 'info', kind: 'restartCancelledDown' };
+const failed = (error: string): Notice => ({ severity: 'problem', kind: 'restartFailed', error });
 
 function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now });
   const events = new EventEmitter<{ event: [HubEvent] }>();
   const commands: string[] = [];
   const audit: string[] = []; // "command|by"
-  const notices: string[] = [];
+  const notices: Notice[] = []; // published on the hub's event stream
   const state = { online: true, stopError: null as Error | null };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
@@ -25,8 +30,12 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
       if (command === 'stop' && state.stopError) throw state.stopError;
       return [];
     },
-  } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get'>;
-  const restarts = new RestartScheduler(hub, (_id, text) => notices.push(text));
+    publish: (serverId: string, notice: Notice) => {
+      notices.push(notice);
+      events.emit('event', { ...notice, type: 'notice', serverId });
+    },
+  } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish'>;
+  const restarts = new RestartScheduler(hub);
   t.after(() => restarts.stop());
   return { restarts, events, commands, audit, notices, state };
 }
@@ -46,7 +55,7 @@ test('a 10 minute restart warns at 10m, 5m, 1m, 30s and 10s, then stops', (t) =>
     'say Server restarting in 10 seconds',
     'stop',
   ]);
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by alice)', '🔄 Restarting now']);
+  assert.deepEqual(notices, [scheduled(10, 'alice'), NOW]);
   assert.equal(restarts.pending('gtnh'), undefined);
 });
 
@@ -64,7 +73,7 @@ test('shorter countdowns only use the warnings that fit; 0 stops straight away',
   restarts.schedule('gtnh', 0, 'bob');
   t.mock.timers.tick(0);
   assert.deepEqual(commands, ['stop']);
-  assert.deepEqual(notices, ['🔄 Restarting now']);
+  assert.deepEqual(notices, [NOW]);
 });
 
 test('rejects bad minutes, an offline server, and a second pending restart', (t) => {
@@ -84,7 +93,7 @@ test('cancel stops the countdown and tells players', (t) => {
   assert.equal(restarts.cancel('gtnh', 'bob'), false);
   t.mock.timers.tick(10 * MIN);
   assert.deepEqual(commands, ['say Restart cancelled']);
-  assert.deepEqual(notices, ['🔄 Restart in 5 minutes (by alice)', '❎ Restart cancelled (by bob)']);
+  assert.deepEqual(notices, [scheduled(5, 'alice'), cancelled('bob')]);
 });
 
 test('the server going down first cancels; its own stop does not', (t) => {
@@ -93,12 +102,12 @@ test('the server going down first cancels; its own stop does not', (t) => {
   events.emit('event', { serverId: 'gtnh', type: 'crashed' });
   t.mock.timers.tick(10 * MIN);
   assert.ok(!commands.includes('stop'));
-  assert.equal(notices.at(-1), '❎ Restart cancelled (server went down)');
+  assert.deepEqual(notices.at(-1), DOWN);
   notices.length = 0;
   restarts.schedule('gtnh', 0, 'alice');
   t.mock.timers.tick(0);
   events.emit('event', { serverId: 'gtnh', type: 'stopped' }); // caused by our own stop
-  assert.deepEqual(notices, ['🔄 Restarting now']);
+  assert.deepEqual(notices, [NOW]);
 });
 
 test('stop failing with a disconnect is success; a timeout is reported', async (t) => {
@@ -107,12 +116,12 @@ test('stop failing with a disconnect is success; a timeout is reported', async (
   restarts.schedule('gtnh', 0, 'alice');
   t.mock.timers.tick(0);
   await flush();
-  assert.deepEqual(notices, ['🔄 Restarting now']);
+  assert.deepEqual(notices, [NOW]);
   state.stopError = new Error('command timed out — it may still run when the server responds');
   restarts.schedule('gtnh', 0, 'alice');
   t.mock.timers.tick(0);
   await flush();
-  assert.equal(notices.at(-1), '❌ Restart failed: command timed out — it may still run when the server responds');
+  assert.deepEqual(notices.at(-1), failed('command timed out — it may still run when the server responds'));
 });
 
 test('daily() rejects a bad time and keeps the earlier daily restart', (t) => {
@@ -120,7 +129,7 @@ test('daily() rejects a bad time and keeps the earlier daily restart', (t) => {
   restarts.daily('gtnh', '06:00');
   assert.throws(() => restarts.daily('gtnh', '6am'), /must be HH:MM/);
   t.mock.timers.tick(50 * MIN); // 05:50
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
 });
 
 test('daily restart counts down from 10 minutes before the time, every day', (t) => {
@@ -130,14 +139,14 @@ test('daily restart counts down from 10 minutes before the time, every day', (t)
   t.mock.timers.tick(49 * MIN);
   assert.deepEqual(notices, []);
   t.mock.timers.tick(1 * MIN); // 05:50 BST
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
   t.mock.timers.tick(10 * MIN); // 06:00 BST
   assert.equal(commands.at(-1), 'stop');
   notices.length = 0;
   t.mock.timers.tick(24 * 60 * MIN - 10 * MIN); // 05:50 GMT would be 25 h later, not 24 h
   assert.deepEqual(notices, []);
   t.mock.timers.tick(60 * MIN);
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
 });
 
 test('a skipped daily restart (server offline) still arms the next day', (t) => {
@@ -149,7 +158,7 @@ test('a skipped daily restart (server offline) still arms the next day', (t) => 
   assert.deepEqual(notices, []);
   state.online = true;
   t.mock.timers.tick(24 * 60 * MIN); // next day 05:50
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
 });
 
 test('a daily timer firing a millisecond early does not double-schedule', (t) => {
@@ -163,7 +172,7 @@ test('a daily timer firing a millisecond early does not double-schedule', (t) =>
   skew = -1;
   t.mock.timers.tick(50 * MIN);
   t.mock.timers.tick(10); // an immediate re-arm would fire here
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
   assert.equal(errors.mock.callCount(), 0);
 });
 
@@ -172,7 +181,7 @@ test('the audit name goes to stop; people see the display name', (t) => {
   restarts.schedule('gtnh', 1, 'discord:alice (123)', 'alice');
   assert.equal(restarts.pending('gtnh')?.by, 'alice');
   t.mock.timers.tick(MIN);
-  assert.equal(notices[0], '🔄 Restart in 1 minute (by alice)');
+  assert.deepEqual(notices[0], scheduled(1, 'alice'));
   assert.equal(audit.at(-1), 'stop|discord:alice (123)');
 });
 
@@ -182,6 +191,6 @@ test('calling daily() again replaces the earlier daily restart instead of stacki
   restarts.daily('gtnh', '06:00');
   restarts.daily('gtnh', '06:00');
   t.mock.timers.tick(50 * MIN); // 05:50: exactly one countdown, and no "already scheduled" skip logged
-  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
   assert.equal(errors.mock.callCount(), 0);
 });

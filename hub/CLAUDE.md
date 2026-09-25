@@ -19,7 +19,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | File | Job |
 |---|---|
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
-| `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
+| `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter (game, lifecycle and hub-core `notice` events), `publish` (hub-core modules put typed notices — kind, severity, details — on it). The API frontends use. |
 | `src/config.ts` | `validateConfig` (every error at once, offline) and `loadConfig`, which returns `ServerSettings` per server with every default applied (lag 15 TPS/2 min, quests `batched`, 10 GB free) and the Backup folder derived (`backupDir`, else `<dir>/backups`). The only place per-server defaults live. Used by startup and `check-config`. Hub core. |
 | `src/check-config.ts` | `npm run check-config` entry point. |
 | `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down) and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
@@ -33,7 +33,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
 | `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min). Hub core. |
 | `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`. Hub core. |
-| `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts. Hub core. |
+| `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts; its notices are `publish`ed hub events. Hub core. |
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
@@ -41,6 +41,8 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 
 A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
+New hub-core output should be a typed `Notice` on the event stream (`ServerHub.publish`), worded and coloured in
+`format.ts` — not a text callback. (Lag, backup, quest, link and summary output still use callbacks: #13–#15.)
 
 ## Dependencies
 

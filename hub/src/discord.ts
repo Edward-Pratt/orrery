@@ -11,7 +11,7 @@ import {
   type Webhook,
 } from 'discord.js';
 import { basename } from 'node:path';
-import { listBackups } from './backups.ts';
+import { freeBytes, listBackups } from './backups.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import {
@@ -319,7 +319,7 @@ export async function startDiscord(
       }
       const sub = i.options.getSubcommand();
       if (sub === 'status') {
-        await i.reply(formatBackupStatus(await listBackups(dir), Date.now()));
+        await i.reply(formatBackupStatus(await listBackups(dir), Date.now(), await freeBytes(dir)));
       } else if (sub === 'list') {
         await i.reply(formatBackupList(await listBackups(dir)));
       } else {

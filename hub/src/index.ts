@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { backupNotice, BackupWatcher, listBackups } from './backups.ts';
+import { backupNotice, backupStats, BackupWatcher, DEFAULT_MIN_FREE_GB, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db, type State } from './db.ts';
@@ -54,9 +54,15 @@ let postLinked: (serverId: string, player: string, discordId: string) => void = 
 const notify = (serverId: string, text: string) => notice(serverId, text);
 const restarts = new RestartScheduler(hub, notify);
 for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
-const backups = new BackupWatcher((serverId) => listBackups(backupDirs[serverId] ?? ''), notify);
+const backups = new BackupWatcher(
+  (serverId) => listBackups(backupDirs[serverId] ?? ''),
+  (serverId) => freeBytes(backupDirs[serverId] ?? ''),
+  notify,
+);
 for (const s of config.servers) {
-  if (s.backupMaxAgeHours && backupDirs[s.id]) backups.watchdog(s.id, s.backupMaxAgeHours);
+  if (backupDirs[s.id]) {
+    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB ?? DEFAULT_MIN_FREE_GB });
+  }
 }
 const playtime = new PlaytimeTracker(hub, db);
 const lag = new LagMonitor(hub, db, lagConfigs, notify);
@@ -94,7 +100,17 @@ notice = discord.notice;
 postQuests = discord.quests;
 postLinked = discord.linked;
 const summaries = config.servers.flatMap((s) =>
-  s.dailySummary ? [everyDay(s.dailySummary, 0, (target) => discord.summary(s.id, buildSummary(db, s.id, target)))] : [],
+  s.dailySummary
+    ? [
+        everyDay(s.dailySummary, 0, (target) => {
+          const summary = buildSummary(db, s.id, target);
+          const dir = backupDirs[s.id];
+          void (dir ? backupStats(dir) : Promise.resolve(undefined)).then((backups) =>
+            discord.summary(s.id, { ...summary, backups }),
+          );
+        }),
+      ]
+    : [],
 );
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

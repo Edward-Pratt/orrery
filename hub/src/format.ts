@@ -1,5 +1,5 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
-import type { Backup } from './backups.ts';
+import { growthPerDay, type Backup } from './backups.ts';
 import { sparkline } from './lag.ts';
 import type { QuestBatch } from './quests.ts';
 import { stripCodes, truncate, type HubEvent, type ServerState } from './servers.ts';
@@ -143,10 +143,13 @@ export function formatTop(period: keyof typeof TOP_PERIODS, rows: { player: stri
 }
 
 const totalSize = (backups: Backup[]) => formatBytes(backups.reduce((sum, b) => sum + b.size, 0));
+const formatGrowth = (g: number) => `${g < 0 ? '−' : '+'}${formatBytes(Math.abs(g))}/day`;
+const formatFree = (free: number | null) => (free === null ? 'n/a' : formatBytes(free));
 
-export function formatBackupStatus(backups: Backup[], now: number): Post {
+export function formatBackupStatus(backups: Backup[], now: number, free: number | null): Post {
   const newest = backups[0];
   if (!newest) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
+  const growth = growthPerDay(backups);
   return embed({
     title: 'Backups',
     color: COLORS.blue,
@@ -156,6 +159,8 @@ export function formatBackupStatus(backups: Backup[], now: number): Post {
       { name: 'Size', value: formatBytes(newest.size), inline: true },
       { name: 'Count', value: String(backups.length), inline: true },
       { name: 'Total size', value: totalSize(backups), inline: true },
+      { name: 'Free disk', value: formatFree(free), inline: true },
+      ...(growth === null ? [] : [{ name: 'Growth', value: formatGrowth(growth), inline: true }]),
     ],
   });
 }
@@ -172,6 +177,8 @@ export function formatBackupList(backups: Backup[]): Post {
 
 export function formatSummary(serverName: string, s: Summary): Post {
   const top = s.top.map((p, i) => `${i + 1}. **${md(p.player)}**: ${formatDuration(p.ms)}`).join('\n') || 'Nobody played.';
+  const b = s.backups;
+  const backups = b && [`${b.count}`, `${formatBytes(b.total)} total`, `${formatFree(b.free)} free`, ...(b.growth === null ? [] : [formatGrowth(b.growth)])];
   return embed({
     title: title(`📊 ${serverName}: ${s.day}`),
     color: COLORS.blue,
@@ -183,6 +190,7 @@ export function formatSummary(serverName: string, s: Summary): Post {
       { name: 'Starts', value: String(s.starts), inline: true },
       { name: 'Crashes', value: String(s.crashes), inline: true },
       { name: 'Top players', value: truncate(top, FIELD), inline: false },
+      ...(backups ? [{ name: 'Backups', value: backups.join(', '), inline: false }] : []),
     ],
   });
 }

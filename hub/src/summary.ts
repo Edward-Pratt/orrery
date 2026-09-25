@@ -1,3 +1,4 @@
+import type { BackupStats } from './backups.ts';
 import type { Db } from './db.ts';
 import { localDay } from './units.ts';
 
@@ -10,6 +11,8 @@ export type Summary = {
   top: { player: string; ms: number }[];
   starts: number;
   crashes: number;
+  /** Added by the caller for servers with a backup folder (it needs the disk, buildSummary doesn't). */
+  backups?: BackupStats;
 };
 
 /** The local calendar day before `at`, midnight to midnight (23 or 25 h long on DST days). */

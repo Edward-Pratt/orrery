@@ -3,9 +3,10 @@ import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { backupNotice, BackupWatcher, listBackups, type Backup } from '../src/backups.ts';
+import { backupNotice, backupStats, BackupWatcher, freeBytes, growthPerDay, listBackups, type Backup } from '../src/backups.ts';
 
 const MIN = 60_000;
+const GB = 1024 ** 3;
 const flush = () => new Promise((r) => setImmediate(r)); // lets the injected list() promise settle
 
 test('listBackups finds finished zips newest first and skips everything else', async (t) => {
@@ -34,13 +35,15 @@ test('listBackups finds finished zips newest first and skips everything else', a
 function setup(t: TestContext) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1_000_000_000_000 });
   let backups: Backup[] = [];
+  let free: number | null = 100 * GB;
   const notices: string[] = [];
   const watcher = new BackupWatcher(
     async () => backups,
+    async () => free,
     (_id, text) => notices.push(text),
   );
   t.after(() => watcher.stop());
-  return { watcher, notices, set: (b: Backup[]) => (backups = b) };
+  return { watcher, notices, set: (b: Backup[]) => (backups = b), setFree: (f: number | null) => (free = f) };
 }
 
 test('backupNotice turns mod backup events into notices', () => {
@@ -51,7 +54,7 @@ test('backupNotice turns mod backup events into notices', () => {
 test('the watchdog warns once when backups are overdue and re-arms after a new one', async (t) => {
   const { watcher, notices, set } = setup(t);
   set([{ name: 'a.zip', size: 1, mtimeMs: Date.now() - 30 * 60 * MIN }]); // 30 h old
-  watcher.watchdog('gtnh', 26);
+  watcher.watchdog('gtnh', { maxAgeHours: 26, minFreeGB: 10 });
   t.mock.timers.tick(10 * MIN);
   await flush();
   t.mock.timers.tick(10 * MIN);
@@ -65,4 +68,43 @@ test('the watchdog warns once when backups are overdue and re-arms after a new o
   await flush();
   assert.equal(notices.length, 2);
   assert.match(notices[1], /No new backup for 27 h/);
+});
+
+test('growthPerDay compares the newest backup with the oldest, if a day or more apart', () => {
+  const b = (size: number, hoursAgo: number) => ({ name: 'x.zip', size, mtimeMs: 1e12 - hoursAgo * 3600_000 });
+  assert.equal(growthPerDay([b(3 * GB, 0), b(2 * GB, 24), b(1 * GB, 48)]), GB);
+  assert.equal(growthPerDay([b(1 * GB, 0), b(2 * GB, 48)]), -GB / 2);
+  assert.equal(growthPerDay([b(3 * GB, 0), b(1 * GB, 23)]), null);
+  assert.equal(growthPerDay([]), null);
+});
+
+test('freeBytes and backupStats read the real folder, and never throw', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'backups-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, '2026-09-24-06-00-00.zip'), 'x'.repeat(10));
+  assert.ok(((await freeBytes(dir)) ?? 0) > 0);
+  assert.equal(await freeBytes(join(dir, 'missing')), null);
+  const stats = await backupStats(dir);
+  assert.deepEqual({ ...stats, free: stats.free !== null }, { count: 1, total: 10, free: true, growth: null });
+});
+
+test('the watchdog warns once about low disk space and re-arms when there is room again', async (t) => {
+  const { watcher, notices, setFree } = setup(t);
+  setFree(5 * GB);
+  watcher.watchdog('gtnh', { minFreeGB: 10 }); // no age limit
+  const tick = async () => {
+    t.mock.timers.tick(10 * MIN);
+    await flush();
+  };
+  await tick();
+  await tick();
+  assert.deepEqual(notices, ['⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)']);
+  setFree(20 * GB);
+  await tick();
+  setFree(null); // unreadable: no notice, no re-arm
+  await tick();
+  setFree(4 * GB);
+  await tick();
+  assert.equal(notices.length, 2);
+  assert.match(notices[1], /4\.0 GB free/);
 });

@@ -1,11 +1,11 @@
 import { dirname, join } from 'node:path';
-import { backupNotice, backupStats, BackupWatcher, DEFAULT_MIN_FREE_GB, freeBytes, listBackups } from './backups.ts';
+import { backupNotice, backupStats, BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
 import { startDiscord } from './discord.ts';
 import { startPinger } from './health.ts';
-import { DEFAULT_LAG, LagMonitor, type LagConfig } from './lag.ts';
+import { LagMonitor } from './lag.ts';
 import { Links } from './links.ts';
 import { PlaytimeTracker } from './playtime.ts';
 import { QuestAnnouncer, type QuestBatch } from './quests.ts';
@@ -16,17 +16,8 @@ import { buildSummary } from './summary.ts';
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error('DISCORD_TOKEN is not set');
 const config = loadConfig(process.argv[2] ?? 'config.json');
-const lagConfigs: Record<string, LagConfig> = Object.fromEntries(
-  config.servers.map((s) => [
-    s.id,
-    { tps: s.lagTps ?? DEFAULT_LAG.tps, minutes: s.lagMinutes ?? DEFAULT_LAG.minutes, enabled: s.lagAlerts ?? true },
-  ]),
-);
 const backupDirs: Record<string, string> = Object.fromEntries(
-  config.servers.flatMap((s) => {
-    const dir = s.backupDir ?? (s.dir ? join(s.dir, 'backups') : undefined);
-    return dir ? [[s.id, dir]] : [];
-  }),
+  config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
 );
 
 const db = new Db(config.dbPath);
@@ -49,14 +40,14 @@ const backups = new BackupWatcher(
   notify,
 );
 for (const s of config.servers) {
-  if (backupDirs[s.id]) {
-    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB ?? DEFAULT_MIN_FREE_GB });
+  if (s.backupDir) {
+    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB });
   }
 }
 const playtime = new PlaytimeTracker(hub, db);
-const lag = new LagMonitor(hub, db, lagConfigs, notify);
+const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])), notify);
 const quests = new QuestAnnouncer(
-  Object.fromEntries(config.servers.map((s) => [s.id, s.quests ?? 'batched'])),
+  Object.fromEntries(config.servers.map((s) => [s.id, s.quests])),
   (batch) => postQuests(batch),
 );
 const links = new Links(db, hub, (serverId, player, discordId) => postLinked(serverId, player, discordId));
@@ -94,7 +85,7 @@ const summaries = config.servers.flatMap((s) =>
     ? [
         everyDay(s.dailySummary, 0, (target) => {
           const summary = buildSummary(db, s.id, target);
-          const dir = backupDirs[s.id];
+          const dir = s.backupDir;
           void (dir ? backupStats(dir) : Promise.resolve(null)).then((backups) =>
             discord.summary(s.id, { ...summary, backups: backups ?? undefined }),
           );

@@ -22,7 +22,6 @@ import {
   formatPlaytime,
   formatPresence,
   formatStatus,
-  formatSummary,
   formatTop,
   formatTopic,
   formatTps,
@@ -35,7 +34,6 @@ import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
-import type { Summary } from './summary.ts';
 
 export type DiscordConfig = {
   guildId: string;
@@ -46,7 +44,6 @@ export type DiscordConfig = {
 
 export type DiscordFrontend = {
   client: Client;
-  summary: (serverId: string, s: Summary) => void;
   /** True while every gateway shard is Ready (client.isReady() stays true through reconnects). */
   connected: () => boolean;
 };
@@ -364,7 +361,6 @@ export async function startDiscord(
   await client.login(token);
   return {
     client,
-    summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
     connected: () => client.ws.shards.size > 0 && client.ws.shards.every((s) => s.status === Status.Ready),
   };
 }

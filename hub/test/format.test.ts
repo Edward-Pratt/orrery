@@ -254,6 +254,11 @@ test('formatEvent posts quest batches and new links', () => {
   assert.deepEqual(formatEvent({ serverId: 's', type: 'linked', player: 'Steve', discordId: '123' }), { content: '🔗 **Steve** linked to <@123>' });
 });
 
+test('formatEvent posts a daily summary under the server name', () => {
+  const summary = { day: '2026-09-23', uptime: 1, peak: 2, unique: 1, totalMs: 60_000, top: [], starts: 0, crashes: 0 };
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'summary', name: 'GTNH', summary }), formatSummary('GTNH', summary));
+});
+
 test('formatLinked mentions without escaping the id', () => {
   assert.deepEqual(formatLinked('Steve', '123'), { content: '🔗 **Steve** linked to <@123>' });
 });

@@ -12,6 +12,7 @@ import { QuestAnnouncer } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
 import { ServerHub } from './servers.ts';
 import { Stats } from './stats.ts';
+import { scheduleSummaries } from './summary.ts';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error('DISCORD_TOKEN is not set');
@@ -67,15 +68,7 @@ const discord = await startDiscord(
   token,
 );
 const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, discord.connected) : () => {};
-const summaries = config.servers.flatMap((s) =>
-  s.dailySummary
-    ? [
-        everyDay(s.dailySummary, 0, (target) => {
-          void stats.summary(s.id, target).then((summary) => summary && discord.summary(s.id, summary));
-        }),
-      ]
-    : [],
-);
+const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
 const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
 const dbCopies = join(dirname(config.dbPath), 'db-backups');
 const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
@@ -88,7 +81,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     lag.stop();
     quests.flush(); // don't lose a pending roll-up
     quests.stop();
-    for (const cancel of summaries) cancel();
+    stopSummaries();
     upkeep();
     stopPing();
     void discord.client.destroy();

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg, type QuestDone } from './protocol.ts';
+import type { Summary } from './summary.ts';
 
 export type ServerConfig = { id: string; name: string; token: string };
 
@@ -39,10 +40,14 @@ export type Notice = { severity: Severity } & (
   | { kind: 'backupFinished'; detail: string }
   | { kind: 'backupFailed'; detail: string }
 );
-/** What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up. */
+/**
+ * What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up; a summary
+ * carries the server's name for its heading.
+ */
 export type Announcement =
   | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
-  | { type: 'linked'; player: string; discordId: string };
+  | { type: 'linked'; player: string; discordId: string }
+  | { type: 'summary'; name: string; summary: Summary };
 export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice) | Announcement);
 
 export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number; lateMs?: number };
@@ -163,7 +168,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     this.emit('event', { ...notice, type: 'notice', serverId });
   }
 
-  /** Puts a hub-core announcement (a quest batch, a new link) about a server on the event stream. */
+  /** Puts a hub-core announcement (a quest batch, a new link, the daily summary) about a server on the event stream. */
   announce(serverId: string, announcement: Announcement): void {
     this.emit('event', { ...announcement, serverId });
   }

@@ -298,12 +298,13 @@ test('announce puts a quest batch or a new link on the event stream for that ser
   assert.deepEqual(events, [{ type: 'linked', player: 'Steve', discordId: '123', serverId: 'gtnh' }]);
 });
 
-test('a mod cannot send hub-core notices, quest batches or links', async (t) => {
+test('a mod cannot send hub-core notices, quest batches, links or summaries', async (t) => {
   const { port, types } = await setup(t);
   const mod = await online(port);
   mod.send({ type: 'notice', severity: 'problem', kind: 'restartFailed', error: 'spoofed' });
   mod.send({ type: 'questBatch', player: 'Steve', quests: [{ name: 'x', main: true }], count: 1 });
   mod.send({ type: 'linked', player: 'Steve', discordId: '123' });
+  mod.send({ type: 'summary', name: 'GTNH', summary: {} });
   mod.send({ type: 'started' });
   await until(() => types().includes('started'));
   assert.deepEqual(types(), ['connected', 'started']);

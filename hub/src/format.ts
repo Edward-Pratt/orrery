@@ -90,6 +90,8 @@ export function formatEvent(e: HubEvent): Post | null {
       return formatQuests(e);
     case 'linked':
       return formatLinked(e.player, e.discordId);
+    case 'summary':
+      return formatSummary(e.name, e.summary);
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
     case 'quest': // the QuestAnnouncer turns it into questBatch announcements

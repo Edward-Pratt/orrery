@@ -6,12 +6,13 @@ import {
   GatewayIntentBits,
   MessageFlags,
   SlashCommandBuilder,
+  Status,
   type ChatInputCommandInteraction,
   type Message,
   type Webhook,
 } from 'discord.js';
 import { basename } from 'node:path';
-import { listBackups } from './backups.ts';
+import { freeBytes, listBackups } from './backups.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import {
@@ -60,6 +61,8 @@ export type DiscordFrontend = {
   summary: (serverId: string, s: Summary) => void;
   quests: (batch: QuestBatch) => void;
   linked: (serverId: string, player: string, discordId: string) => void;
+  /** True while every gateway shard is Ready (client.isReady() stays true through reconnects). */
+  connected: () => boolean;
 };
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -319,7 +322,7 @@ export async function startDiscord(
       }
       const sub = i.options.getSubcommand();
       if (sub === 'status') {
-        await i.reply(formatBackupStatus(await listBackups(dir), Date.now()));
+        await i.reply(formatBackupStatus(await listBackups(dir), Date.now(), await freeBytes(dir)));
       } else if (sub === 'list') {
         await i.reply(formatBackupList(await listBackups(dir)));
       } else {
@@ -390,5 +393,6 @@ export async function startDiscord(
     summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
     quests: (batch) => postSafe(batch.serverId, formatQuests(batch)),
     linked: (serverId, player, discordId) => postSafe(serverId, formatLinked(player, discordId)),
+    connected: () => client.ws.shards.size > 0 && client.ws.shards.every((s) => s.status === Status.Ready),
   };
 }

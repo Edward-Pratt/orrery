@@ -2,5 +2,7 @@
 hub/node_modules/
 hub/config.json
 hub/*.db*
+# nightly hub.db copies (hold Discord ID <-> player links)
+hub/db-backups/
 .env
 # mod/ keeps the GTNH template's own .gitignore

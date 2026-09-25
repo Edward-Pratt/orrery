@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/index.ts",
     "test": "node --test \"test/*.test.ts\"",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "check-config": "node src/check-config.ts"
   },
   "dependencies": {
     "discord.js": "^14.27.0"

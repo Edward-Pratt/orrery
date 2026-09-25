@@ -3,6 +3,7 @@
   "dbPath": "hub.db",
   "guildId": "YOUR_DISCORD_SERVER_ID",
   "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
+  "healthcheckUrl": "https://hc-ping.com/YOUR-CHECK-UUID",
   "servers": [
     {
       "id": "gtnh",
@@ -13,6 +14,7 @@
       "dailyRestart": "06:00",
       "dailySummary": "09:00",
       "backupMaxAgeHours": 26,
+      "backupMinFreeGB": 10,
       "lagTps": 15,
       "lagMinutes": 2,
       "quests": "batched"

@@ -1,4 +1,4 @@
-import { everyDay, parseDaily } from './daily.ts';
+import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
 type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get'>;
@@ -66,18 +66,16 @@ export class RestartScheduler {
 
   /** Arms (or re-arms) a daily restart at local "HH:MM"; the countdown starts 10 minutes before. Throws on a bad time. */
   daily(serverId: string, time: string): void {
-    if (!parseDaily(time)) throw new Error(`server "${serverId}": dailyRestart must be HH:MM (24-hour), got "${time}"`);
+    // Arm first: everyDay throws on a bad time, and the earlier daily restart must survive that.
+    const cancel = everyDay(time, DAILY_LEAD_MS, () => {
+      try {
+        this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'daily');
+      } catch (err) {
+        console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
+      }
+    });
     this.#daily.get(serverId)?.(); // replace, don't stack, an earlier daily restart
-    this.#daily.set(
-      serverId,
-      everyDay(time, DAILY_LEAD_MS, () => {
-        try {
-          this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'daily');
-        } catch (err) {
-          console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
-        }
-      }),
-    );
+    this.#daily.set(serverId, cancel);
   }
 
   /** Clears every timer (hub shutdown). */

@@ -1,5 +1,10 @@
 // Wire contract between the mod and the hub: one JSON object per line.
 export const PROTOCOL_VERSION = 1;
+/**
+ * Oldest mod protocol the hub still accepts. Policy (docs/adr/0001): the hub supports the current and the
+ * previous version, so servers can update their mods one at a time.
+ */
+export const MIN_PROTOCOL = 1;
 
 export type Hello = { type: 'hello'; protocol: number; serverId: string; token: string; modVersion: string };
 

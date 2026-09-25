@@ -128,7 +128,7 @@ test('formatBackupStatus and formatBackupList show count and total size', () => 
     { name: '2026-09-24-06-00-00.zip', size: 2 * 1024 ** 3, mtimeMs: now - 2 * 3600_000 },
     { name: '2026-09-23-06-00-00.zip', size: 1024 ** 3, mtimeMs: now - 26 * 3600_000 },
   ];
-  const status = first(formatBackupStatus(backups, now));
+  const status = first(formatBackupStatus(backups, now, 50 * 1024 ** 3));
   assert.deepEqual(
     status.fields!.map((f) => [f.name, f.value]),
     [
@@ -137,12 +137,15 @@ test('formatBackupStatus and formatBackupList show count and total size', () => 
       ['Size', '2.0 GB'],
       ['Count', '2'],
       ['Total size', '3.0 GB'],
+      ['Free disk', '50.0 GB'],
+      ['Growth', '+1.0 GB/day'],
     ],
   );
+  assert.equal(first(formatBackupStatus([backups[0]], now, null)).fields!.at(-1)!.value, 'n/a'); // no growth yet
   const list = first(formatBackupList(backups));
   assert.equal(list.title, 'Backups: 2, 3.0 GB total');
   assert.equal(list.description, '`2026-09-24-06-00-00.zip` 2.0 GB\n`2026-09-23-06-00-00.zip` 1.0 GB');
-  assert.equal(first(formatBackupStatus([], now)).description, 'No backups found.');
+  assert.equal(first(formatBackupStatus([], now, null)).description, 'No backups found.');
 });
 
 test('formatSummary lays out the daily stats', () => {
@@ -249,4 +252,14 @@ test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and l
 
 test('formatLinked mentions without escaping the id', () => {
   assert.deepEqual(formatLinked('Steve', '123'), { content: '🔗 **Steve** linked to <@123>' });
+});
+
+test('formatSummary adds a backups line when it has backup stats', () => {
+  const base = { day: '2026-09-23', uptime: 1, peak: 1, unique: 1, totalMs: 0, top: [], starts: 0, crashes: 0 };
+  const GB = 1024 ** 3;
+  const withBackups = first(formatSummary('GTNH', { ...base, backups: { count: 2, total: 3 * GB, free: 50 * GB, growth: -GB } }));
+  assert.deepEqual(withBackups.fields!.at(-1), { name: 'Backups', value: '2, 3.0 GB total, 50.0 GB free, −1.0 GB/day', inline: false });
+  const noGrowth = first(formatSummary('GTNH', { ...base, backups: { count: 0, total: 0, free: null, growth: null } }));
+  assert.equal(noGrowth.fields!.at(-1)!.value, '0, 0 B total, n/a free');
+  assert.equal(first(formatSummary('GTNH', base)).fields!.at(-1)!.name, 'Top players');
 });

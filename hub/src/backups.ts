@@ -1,6 +1,6 @@
 import { lstat, readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
-import { formatBytes } from './units.ts';
+import type { ServerHub } from './servers.ts';
 
 export type Backup = { name: string; size: number; mtimeMs: number };
 
@@ -65,32 +65,34 @@ export async function backupStats(dir: string): Promise<BackupStats | null> {
   };
 }
 
-/** The notice for a backup event from the mod (ServerUtilities' own "done"/"failed" log lines). */
-export function backupNotice(ok: boolean, detail: string): string {
-  return ok ? `✅ Backup finished (${detail})` : `❌ Backup failed: ${detail}`;
-}
-
 /**
- * Warns when backups stop appearing in a backup folder, and when its disk runs low. (Finish and failure notices
- * come from the mod's backup events.) Hub core (plain-text notices); `list` and `free` are injected so tests
- * needn't touch disk.
+ * Warns when backups stop appearing in a backup folder, and when its disk runs low; turns the mod's backup events
+ * (ServerUtilities' own "done"/"failed" log lines) into finished/failed notices. Hub core: notices go on the hub's
+ * event stream; `list` and `free` are injected so tests needn't touch disk.
  */
 export class BackupWatcher {
+  #hub: Pick<ServerHub, 'on' | 'publish'>;
   #list: (serverId: string) => Promise<Backup[]>;
   #free: (serverId: string) => Promise<number | null>;
-  #notify: (serverId: string, text: string) => void;
   #watchdogs = new Map<string, NodeJS.Timeout>();
   #overdue = new Set<string>();
   #lowDisk = new Set<string>();
 
   constructor(
+    hub: Pick<ServerHub, 'on' | 'publish'>,
     list: (serverId: string) => Promise<Backup[]>,
     free: (serverId: string) => Promise<number | null>,
-    notify: (serverId: string, text: string) => void,
   ) {
+    this.#hub = hub;
     this.#list = list;
     this.#free = free;
-    this.#notify = notify;
+    hub.on('event', (e) => {
+      if (e.type !== 'backup') return;
+      hub.publish(
+        e.serverId,
+        e.ok ? { severity: 'good', kind: 'backupFinished', detail: e.detail } : { severity: 'problem', kind: 'backupFailed', detail: e.detail },
+      );
+    });
   }
 
   /**
@@ -107,9 +109,11 @@ export class BackupWatcher {
           this.#overdue.delete(serverId);
         } else if (!this.#overdue.has(serverId)) {
           this.#overdue.add(serverId);
-          this.#notify(
+          this.#hub.publish(
             serverId,
-            newest ? `⚠️ No new backup for ${Math.floor(age / HOUR)} h (newest: ${newest.name})` : '⚠️ No backups found',
+            newest
+              ? { severity: 'warning', kind: 'backupOverdue', hours: Math.floor(age / HOUR), newest: newest.name }
+              : { severity: 'warning', kind: 'backupsMissing' },
           );
         }
       }
@@ -119,7 +123,7 @@ export class BackupWatcher {
         this.#lowDisk.delete(serverId);
       } else if (!this.#lowDisk.has(serverId)) {
         this.#lowDisk.add(serverId);
-        this.#notify(serverId, `⚠️ Low disk space for backups: ${formatBytes(free)} free (limit ${limits.minFreeGB} GB)`);
+        this.#hub.publish(serverId, { severity: 'warning', kind: 'lowDisk', free, minFreeGB: limits.minFreeGB });
       }
     };
     this.#watchdogs.set(serverId, setInterval(() => void check(), WATCHDOG_MS));

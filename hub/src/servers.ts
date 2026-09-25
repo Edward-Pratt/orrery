@@ -31,6 +31,13 @@ export type Notice = { severity: Severity } & (
   | { kind: 'restartCancelled'; by: string }
   | { kind: 'restartCancelledDown' }
   | { kind: 'restartFailed'; error: string }
+  | { kind: 'lag'; tps: number; worst: DimTime | null }
+  | { kind: 'lagRecovered'; tps: number }
+  | { kind: 'backupOverdue'; hours: number; newest: string }
+  | { kind: 'backupsMissing' }
+  | { kind: 'lowDisk'; free: number; minFreeGB: number }
+  | { kind: 'backupFinished'; detail: string }
+  | { kind: 'backupFailed'; detail: string }
 );
 export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice));
 

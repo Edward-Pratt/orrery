@@ -43,6 +43,22 @@ function noticeText(n: Notice): string {
       return '❎ Restart cancelled (server went down)';
     case 'restartFailed':
       return `❌ Restart failed: ${n.error}`;
+    case 'lag': {
+      const where = n.worst ? `${n.worst.name} (DIM ${n.worst.id}) ${Math.round(n.worst.ms)} ms/tick` : 'unknown';
+      return `🐢 Lag: ${n.tps.toFixed(1)} TPS; slowest: ${where}`;
+    }
+    case 'lagRecovered':
+      return `✅ TPS back to normal (${n.tps.toFixed(1)})`;
+    case 'backupOverdue':
+      return `⚠️ No new backup for ${n.hours} h (newest: ${n.newest})`;
+    case 'backupsMissing':
+      return '⚠️ No backups found';
+    case 'lowDisk':
+      return `⚠️ Low disk space for backups: ${formatBytes(n.free)} free (limit ${n.minFreeGB} GB)`;
+    case 'backupFinished':
+      return `✅ Backup finished (${n.detail})`;
+    case 'backupFailed':
+      return `❌ Backup failed: ${n.detail}`;
   }
 }
 
@@ -76,21 +92,14 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'quest': // batched by the QuestAnnouncer
     case 'link': // answered by Links
     case 'unlink':
-    case 'backup': // posted as a notice
+    case 'backup': // the BackupWatcher publishes it as a notice
       return null;
   }
 }
 
-/** A hub-core notice (restarts, backups) as an embed, coloured by its leading emoji. */
+/** A short informational line as an embed (e.g. a command's "server is offline" reply). */
 export function formatNotice(text: string): Post {
-  const color = text.startsWith('❌')
-    ? COLORS.red
-    : text.startsWith('⚠️')
-      ? COLORS.orange
-      : text.startsWith('✅')
-        ? COLORS.green
-        : COLORS.blue;
-  return embed({ title: title(text), color });
+  return embed({ title: title(text), color: COLORS.blue });
 }
 
 const pct = (u: number | null) => (u === null ? 'n/a' : `${(u * 100).toFixed(1)}%`);

@@ -48,12 +48,9 @@ test('formatEvent announces lifecycle as coloured embeds, but not reconnects', (
   assert.deepEqual(formatEvent({ serverId: 's', type: 'hung' }), { embeds: [{ title: '⚠️ Server not responding', color: COLORS.orange }] });
 });
 
-test('formatNotice colours by the leading emoji', () => {
-  const color = (text: string) => (formatNotice(text) as { embeds: { color?: number }[] }).embeds[0].color;
-  assert.equal(color('🔄 Restart in 5 minutes (by a)'), COLORS.blue);
-  assert.equal(color('❌ Restart failed: timed out'), COLORS.red);
-  assert.equal(color('⚠️ No new backup for 30 h'), COLORS.orange);
-  assert.equal(color('✅ Backup finished: x.zip'), COLORS.green);
+test('formatNotice is a plain info embed, truncated to a title', () => {
+  assert.deepEqual(formatNotice('🔴 GTNH is offline'), { embeds: [{ title: '🔴 GTNH is offline', color: COLORS.blue }] });
+  assert.deepEqual(formatNotice('❌ not red any more'), { embeds: [{ title: '❌ not red any more', color: COLORS.blue }] });
   const long = formatNotice('x'.repeat(300)) as { embeds: { title?: string }[] };
   assert.ok(long.embeds[0].title!.length <= 256);
 });
@@ -281,6 +278,34 @@ test("formatEvent posts restart notices with today's wording", () => {
   });
   assert.deepEqual(post({ severity: 'problem', kind: 'restartFailed', error: 'timed out' }), {
     embeds: [{ title: '❌ Restart failed: timed out', color: COLORS.red }],
+  });
+});
+
+test("formatEvent posts lag and backup notices with today's wording and severity colours", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  const nether = { id: -1, name: 'Nether', ms: 72.4 };
+  const GB = 1024 ** 3;
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether }), {
+    embeds: [{ title: '🐢 Lag: 12.3 TPS; slowest: Nether (DIM -1) 72 ms/tick', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, worst: null }), {
+    embeds: [{ title: '🐢 Lag: 9.0 TPS; slowest: unknown', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9 }), {
+    embeds: [{ title: '✅ TPS back to normal (19.9)', color: COLORS.green }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'backupOverdue', hours: 30, newest: 'a.zip' }), {
+    embeds: [{ title: '⚠️ No new backup for 30 h (newest: a.zip)', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'backupsMissing' }), { embeds: [{ title: '⚠️ No backups found', color: COLORS.orange }] });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lowDisk', free: 5 * GB, minFreeGB: 10 }), {
+    embeds: [{ title: '⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)' }), {
+    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }],
+  });
+  assert.deepEqual(post({ severity: 'problem', kind: 'backupFailed', detail: 'disk full' }), {
+    embeds: [{ title: '❌ Backup failed: disk full', color: COLORS.red }],
   });
 });
 

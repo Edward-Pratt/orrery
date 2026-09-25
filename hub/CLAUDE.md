@@ -28,7 +28,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
 | `src/stats.ts` | `Stats`: frontends' read questions as plain data (`status`, `tps`), owning the time windows. Hub core. |
 | `src/summary.ts` | `buildSummary`: yesterday's stats, from the scheduled time. Hub core. |
-| `src/backups.ts` | `listBackups`, `backupNotice` (from the mod's backup events), `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog). Hub core. |
+| `src/backups.ts` | `listBackups`, `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog; turns the mod's backup events into finished/failed notices). Hub core. |
 | `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent only while Discord is connected. Hub core. |
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
 | `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min). Hub core. |
@@ -42,7 +42,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
 New hub-core output should be a typed `Notice` on the event stream (`ServerHub.publish`), worded and coloured in
-`format.ts` — not a text callback. (Lag, backup, quest, link and summary output still use callbacks: #13–#15.)
+`format.ts` — not a text callback. (Quest, link and summary output still use callbacks: #14–#15.)
 
 ## Dependencies
 

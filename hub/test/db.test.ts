@@ -194,3 +194,25 @@ test('maintain prunes old TPS samples, copies the database and keeps 7 copies', 
   db.maintain(copies, now); // same day again: replaces today's copy, doesn't throw
   db.maintain(join(copies, 'notes.txt', 'x'), now); // a folder under a file (ENOTDIR): logged, doesn't throw
 });
+
+test('recordLifecycle maps lifecycle events to up/down and ignores the rest', () => {
+  const db = new Db(':memory:');
+  const up = ['connected', 'started', 'recovered'];
+  const down = ['stopped', 'crashed', 'hung', 'offline'];
+  [...up, ...down].forEach((type, i) => {
+    db.recordLifecycle('s', type, i * 100);
+    assert.equal(db.uptime('s', i * 100, i * 100 + 50), up.includes(type) ? 1 : 0, type);
+  });
+  db.recordLifecycle('s', 'chat', 700);
+  assert.equal(db.countEvents('s', 'chat', 0, 1000), 0);
+});
+
+test('recordLifecycle keeps the event type as the reason: start, crash, start', () => {
+  const db = new Db(':memory:');
+  db.recordLifecycle('s', 'started', 0);
+  db.recordLifecycle('s', 'crashed', 60);
+  db.recordLifecycle('s', 'started', 80);
+  assert.equal(db.uptime('s', 0, 100), 0.8);
+  assert.equal(db.countEvents('s', 'started', 0, 100), 2);
+  assert.equal(db.countEvents('s', 'crashed', 0, 100), 1);
+});

@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { Lifecycle } from './servers.ts';
 import { localDay } from './units.ts';
 
 const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;
@@ -8,6 +9,16 @@ const COPIES_KEPT = 7;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
+
+const LIFECYCLE_STATES = new Map<string, State>([
+  ['connected', 'up'],
+  ['started', 'up'],
+  ['recovered', 'up'],
+  ['stopped', 'down'],
+  ['crashed', 'down'],
+  ['hung', 'down'],
+  ['offline', 'down'],
+] satisfies [Lifecycle, State][]);
 
 /** Fraction of known (up + down) time in [from, to] that the server was up; null if none was known. */
 export function computeUptime(rows: Row[], from: number, to: number): number | null {
@@ -55,6 +66,12 @@ export class Db {
   record(serverId: string, state: State, reason: string, ts = Date.now()): void {
     this.#write('record', 'INSERT INTO events (server_id, ts, state, reason) VALUES (?, ?, ?, ?)', serverId, ts, state, reason);
     this.touch(ts); // the hub was alive at least until this event
+  }
+
+  /** Records a hub event's effect on uptime, with the event type as the reason; non-lifecycle events are ignored. */
+  recordLifecycle(serverId: string, type: string, ts = Date.now()): void {
+    const state = LIFECYCLE_STATES.get(type);
+    if (state) this.record(serverId, state, type, ts);
   }
 
   /** Stamps the hub as alive. Call every minute. */

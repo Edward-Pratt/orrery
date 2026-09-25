@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { backupNotice, backupStats, BackupWatcher, DEFAULT_MIN_FREE_GB, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
-import { Db, type State } from './db.ts';
+import { Db } from './db.ts';
 import { startDiscord } from './discord.ts';
 import { startPinger } from './health.ts';
 import { DEFAULT_LAG, LagMonitor, type LagConfig } from './lag.ts';
@@ -10,7 +10,7 @@ import { Links } from './links.ts';
 import { PlaytimeTracker } from './playtime.ts';
 import { QuestAnnouncer, type QuestBatch } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
-import { ServerHub, type Lifecycle } from './servers.ts';
+import { ServerHub } from './servers.ts';
 import { buildSummary } from './summary.ts';
 
 const token = process.env.DISCORD_TOKEN;
@@ -34,19 +34,7 @@ db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left o
 setInterval(() => db.touch(), 60_000);
 
 const hub = new ServerHub(config.servers);
-const STATES = new Map<Lifecycle, State>([
-  ['connected', 'up'],
-  ['started', 'up'],
-  ['recovered', 'up'],
-  ['stopped', 'down'],
-  ['crashed', 'down'],
-  ['hung', 'down'],
-  ['offline', 'down'],
-]);
-hub.on('event', (e) => {
-  const state = STATES.get(e.type as Lifecycle);
-  if (state) db.record(e.serverId, state, e.type);
-});
+hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
 // Hub-core output goes to Discord, which is connected below; until then it goes nowhere.
 let notice: (serverId: string, text: string) => void = () => {};

@@ -56,15 +56,13 @@ quests.start();
 
 const discord = await startDiscord(
   hub,
-  new Stats(hub, db),
+  new Stats(hub, db, config.servers),
   restarts,
   links,
   {
     guildId: config.guildId,
     adminRoleId: config.adminRoleId,
     channels: Object.fromEntries(config.servers.map((s) => [s.id, s.channelId])),
-    dirs: Object.fromEntries(config.servers.flatMap((s) => (s.dir ? [[s.id, s.dir]] : []))),
-    backupDirs,
   },
   token,
 );

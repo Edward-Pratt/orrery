@@ -56,7 +56,6 @@ quests.start();
 
 const discord = await startDiscord(
   hub,
-  db,
   new Stats(hub, db),
   restarts,
   links,

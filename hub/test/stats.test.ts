@@ -63,4 +63,58 @@ test('an unknown server is not found, not zeros', () => {
   const { stats } = setup();
   assert.equal(stats.status('nope', NOW), undefined);
   assert.equal(stats.tps('nope', NOW), undefined);
+  assert.equal(stats.playtime('nope', { player: 'Steve' }, NOW), undefined);
+  assert.equal(stats.top('nope', 'week', NOW), undefined);
+});
+
+test('playtime by name gives total, last 7 days and last seen; names match case-insensitively', () => {
+  const { db, stats } = setup();
+  db.openSession('gtnh', 'Steve', NOW - 10 * DAY);
+  db.closeSession('gtnh', 'Steve', NOW - 10 * DAY + 2 * HOUR);
+  db.openSession('gtnh', 'Steve', NOW - 7 * DAY - HOUR); // straddles the week's start: only its last hour counts
+  db.closeSession('gtnh', 'Steve', NOW - 7 * DAY + HOUR);
+  assert.deepEqual(stats.playtime('gtnh', { player: 'steve' }, NOW), {
+    found: true,
+    player: 'steve',
+    totalMs: 4 * HOUR,
+    weekMs: HOUR,
+    lastSeen: NOW - 7 * DAY + HOUR,
+  });
+});
+
+test('playtime by Discord user uses the linked name, and says when there is none or no input', () => {
+  const { db, stats } = setup();
+  db.link('123', 'Steve', 'uuid', NOW);
+  db.openSession('gtnh', 'Steve', NOW - HOUR);
+  assert.deepEqual(stats.playtime('gtnh', { discordId: '123' }, NOW), {
+    found: true,
+    player: 'Steve',
+    totalMs: HOUR,
+    weekMs: HOUR,
+    lastSeen: { online: true },
+  });
+  assert.deepEqual(stats.playtime('gtnh', { discordId: '999' }, NOW), { found: false, reason: 'notLinked' });
+  assert.deepEqual(stats.playtime('gtnh', {}, NOW), { found: false, reason: 'noInput' });
+  assert.equal(stats.linkedPlayer('123'), 'Steve');
+  assert.equal(stats.linkedPlayer('999'), undefined);
+});
+
+test('top covers the last 24 hours, the last 7 days or all time', () => {
+  const { db, stats } = setup();
+  const play = (player: string, start: number, ms: number) => {
+    db.openSession('gtnh', player, start);
+    db.closeSession('gtnh', player, start + ms);
+  };
+  play('Old', NOW - 30 * DAY, 10 * HOUR);
+  play('Week', NOW - 3 * DAY, 5 * HOUR);
+  play('Day', NOW - 2 * HOUR, HOUR);
+  assert.deepEqual(stats.top('gtnh', 'day', NOW), [{ player: 'Day', ms: HOUR }]);
+  assert.deepEqual(stats.top('gtnh', 'week', NOW), [
+    { player: 'Week', ms: 5 * HOUR },
+    { player: 'Day', ms: HOUR },
+  ]);
+  assert.deepEqual(
+    stats.top('gtnh', 'all', NOW)?.map((r) => r.player),
+    ['Old', 'Week', 'Day'],
+  );
 });

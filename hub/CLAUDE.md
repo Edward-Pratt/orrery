@@ -5,6 +5,7 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 ```bash
 npm test            # node --test "test/*.test.ts"
 npm run typecheck   # tsc, noEmit
+npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
 npm start           # node src/index.ts; reads ./config.json (or argv[2]) and env DISCORD_TOKEN
 ```
 
@@ -19,12 +20,15 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 |---|---|
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
-| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log and uptime math; player sessions, daily peaks and stats queries. Writes never throw. |
+| `src/config.ts` | `Config` type, `validateConfig` (every error at once, offline) and `loadConfig`. Used by startup and `check-config`. Hub core. |
+| `src/check-config.ts` | `npm run check-config` entry point. |
+| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
 | `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |
 | `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
 | `src/summary.ts` | `buildSummary`: yesterday's stats, from the scheduled time. Hub core. |
-| `src/backups.ts` | `listBackups`, `backupNotice` (from the mod's backup events), `BackupWatcher` (missing-backup watchdog). Hub core. |
+| `src/backups.ts` | `listBackups`, `backupNotice` (from the mod's backup events), `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog). Hub core. |
+| `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent only while Discord is connected. Hub core. |
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
 | `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min). Hub core. |
 | `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`. Hub core. |
@@ -32,7 +36,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
-| `src/index.ts` | Config loading and wiring only. |
+| `src/index.ts` | Wiring only (config via `config.ts`). |
 
 A future web dashboard goes in `src/web/` and calls `ServerHub` and `RestartScheduler` — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.

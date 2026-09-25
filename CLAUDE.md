@@ -4,7 +4,8 @@ Discord bridge for GT: New Horizons (MC 1.7.10) servers. Two independent project
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
-- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe).
+- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe),
+  and `restore-backup.sh` (puts a backup back over a stopped server's world; tested by `test-restore-backup.sh`).
 - `docs/superpowers/specs/` — design spec (authoritative); `docs/superpowers/plans/` — implementation plans.
 - `docs/ROADMAP.md` — planned releases; update it when a release ships or scope moves.
 
@@ -24,16 +25,25 @@ Protocol lives in three places that must change together:
 2. the mod (`HubClient.java` hello, `GameEvents.java` messages),
 3. the spec's Protocol section.
 Bump `PROTOCOL_VERSION` (and the mod's hello `protocol`) for any incompatible change.
+The hub accepts `MIN_PROTOCOL..PROTOCOL_VERSION` (`protocol.ts`). Policy: keep the previous version supported, so
+raise `MIN_PROTOCOL` only one release after a bump.
 
 ## Verify before claiming done
 
 ```bash
 cd hub && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
+bash deploy/test-restore-backup.sh        # needs zip and unzip
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
 smoke test at the end of the plan — say so rather than claiming it works.
+
+## Releases
+
+Hub and mod are versioned separately (`docs/adr/0001`). Tag `hub-vX.Y.Z` or `mod-vX.Y.Z` on `main` and push
+the tag: `.github/workflows/release.yml` runs CI, then creates the GitHub release. Its notes are that part's
+commits, and for the mod it attaches the jar. The hub is deployed with `git checkout hub-vX.Y.Z` on the server.
 
 ## Secrets
 

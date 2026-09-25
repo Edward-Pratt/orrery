@@ -74,6 +74,9 @@ Before the handshake the hub closes the connection on anything but a valid
 `hello`, and on no `hello` within 5 s. After the handshake, malformed lines
 and unknown types are logged and ignored (forward compatible).
 
+From v1.3 the hub accepts a range of protocol versions, `MIN_PROTOCOL..PROTOCOL_VERSION` (the current and the
+previous), so servers can update their mods one at a time (`docs/adr/0001`).
+
 ### Handshake
 
 First message from mod:

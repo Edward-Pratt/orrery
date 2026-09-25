@@ -42,7 +42,7 @@ Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
 | Exact backup events: the mod watches ServerUtilities' log for "backup done/failed", replacing the folder heuristic | protocol | S |
 | Long-running command output (e.g. the spark profiler's result link) delivered after `/cmd` has returned | protocol | S |
 
-## v1.3 — operations
+## v1.3 — done (operations; server smoke test and first tagged releases pending)
 
 Spec: `docs/superpowers/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `docs/adr/0001-monorepo-independent-versions.md`
 

@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
-import { PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
+import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
 
 export type ServerConfig = { id: string; name: string; token: string };
 
@@ -221,8 +221,10 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   }
 
   #checkHello(hello: Hello): string | null {
-    if (hello.protocol !== PROTOCOL_VERSION) {
-      return `protocol ${hello.protocol} not supported (hub speaks ${PROTOCOL_VERSION})`;
+    const p = hello.protocol;
+    if (!Number.isInteger(p) || p < MIN_PROTOCOL || p > PROTOCOL_VERSION) {
+      const speaks = MIN_PROTOCOL === PROTOCOL_VERSION ? `${PROTOCOL_VERSION}` : `${MIN_PROTOCOL}–${PROTOCOL_VERSION}`;
+      return `protocol ${p} not supported (hub speaks ${speaks})`;
     }
     const cfg = this.#configs.get(hello.serverId);
     if (!cfg || !tokenMatches(cfg.token, hello.token)) return 'unknown serverId or bad token';

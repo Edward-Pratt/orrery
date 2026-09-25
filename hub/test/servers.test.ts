@@ -76,14 +76,16 @@ test('rejects a bad token and closes', async (t) => {
   assert.equal(hub.get('gtnh')?.online, false);
 });
 
-test('rejects an unsupported protocol version', async (t) => {
+test('accepts only protocol versions in the supported range', async (t) => {
   const { port } = await setup(t);
-  const mod = fakeMod(port);
-  mod.send(hello(TOKEN, 2));
-  const reply = (await mod.next()) as { type: string; reason: string };
-  assert.equal(reply.type, 'reject');
-  assert.match(reply.reason, /protocol 2/);
-  await mod.closed;
+  for (const protocol of [0, 2, 1.5]) {
+    const mod = fakeMod(port);
+    mod.send(hello(TOKEN, protocol));
+    const reply = (await mod.next()) as { type: string; reason: string };
+    assert.equal(reply.type, 'reject');
+    assert.equal(reply.reason, `protocol ${protocol} not supported (hub speaks 1)`);
+    await mod.closed;
+  }
 });
 
 test('closes on a non-hello first message, or no hello in time', async (t) => {

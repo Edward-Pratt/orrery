@@ -8,7 +8,7 @@ import { startPinger } from './health.ts';
 import { LagMonitor } from './lag.ts';
 import { Links } from './links.ts';
 import { PlaytimeTracker } from './playtime.ts';
-import { QuestAnnouncer, type QuestBatch } from './quests.ts';
+import { QuestAnnouncer } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
 import { ServerHub } from './servers.ts';
 import { Stats } from './stats.ts';
@@ -28,9 +28,6 @@ setInterval(() => db.touch(), 60_000);
 const hub = new ServerHub(config.servers);
 hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
-// Quest and link posts go to Discord, which is connected below; until then they go nowhere.
-let postQuests: (batch: QuestBatch) => void = () => {};
-let postLinked: (serverId: string, player: string, discordId: string) => void = () => {};
 const restarts = new RestartScheduler(hub);
 for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
 const backups = new BackupWatcher(
@@ -45,11 +42,8 @@ for (const s of config.servers) {
 }
 const playtime = new PlaytimeTracker(hub, db);
 const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])));
-const quests = new QuestAnnouncer(
-  Object.fromEntries(config.servers.map((s) => [s.id, s.quests])),
-  (batch) => postQuests(batch),
-);
-const links = new Links(db, hub, (serverId, player, discordId) => postLinked(serverId, player, discordId));
+const quests = new QuestAnnouncer(hub, Object.fromEntries(config.servers.map((s) => [s.id, s.quests])));
+const links = new Links(db, hub);
 hub.on('event', (e) => {
   if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
 });
@@ -75,8 +69,6 @@ const discord = await startDiscord(
   },
   token,
 );
-postQuests = discord.quests;
-postLinked = discord.linked;
 const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, discord.connected) : () => {};
 const summaries = config.servers.flatMap((s) =>
   s.dailySummary

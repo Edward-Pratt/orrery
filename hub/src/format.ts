@@ -1,9 +1,8 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
 import { sparkline } from './lag.ts';
-import type { QuestBatch } from './quests.ts';
 import { countdownText } from './restarts.ts';
-import { stripCodes, truncate, type HubEvent, type Notice, type ServerState, type Severity } from './servers.ts';
+import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity } from './servers.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
 
@@ -87,10 +86,14 @@ export function formatEvent(e: HubEvent): Post | null {
       return embed({ title: '✅ Server responding again', color: COLORS.green });
     case 'notice':
       return embed({ title: title(noticeText(e)), color: SEVERITY_COLORS[e.severity] });
+    case 'questBatch':
+      return formatQuests(e);
+    case 'linked':
+      return formatLinked(e.player, e.discordId);
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
-    case 'quest': // batched by the QuestAnnouncer
-    case 'link': // answered by Links
+    case 'quest': // the QuestAnnouncer turns it into questBatch announcements
+    case 'link': // answered by Links, which announces a new link
     case 'unlink':
     case 'backup': // the BackupWatcher publishes it as a notice
       return null;
@@ -247,7 +250,7 @@ export function formatTps(
 }
 
 /** A quest post: the quests completed at once, or a batched roll-up (`count` > quests shown). */
-export function formatQuests(b: QuestBatch): Post {
+export function formatQuests(b: Omit<Extract<Announcement, { type: 'questBatch' }>, 'type'>): Post {
   const who = `📜 **${md(b.player)}** completed`;
   if (b.count > b.quests.length) return { content: `${who} ${b.count} quests (latest: **${md(b.quests[0].name)}**)` };
   const names = b.quests.slice(0, 5).map((q) => `**${md(q.name)}**`);

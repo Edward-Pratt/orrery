@@ -19,13 +19,11 @@ import {
   formatBackupList,
   formatBackupStatus,
   formatEvent,
-  formatLinked,
   formatNotice,
   formatOutput,
   formatPlayers,
   formatPlaytime,
   formatPresence,
-  formatQuests,
   formatStatus,
   formatSummary,
   formatTop,
@@ -38,7 +36,6 @@ import {
   type TopicEdit,
 } from './format.ts';
 import type { Links } from './links.ts';
-import type { QuestBatch } from './quests.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Stats } from './stats.ts';
@@ -58,8 +55,6 @@ export type DiscordConfig = {
 export type DiscordFrontend = {
   client: Client;
   summary: (serverId: string, s: Summary) => void;
-  quests: (batch: QuestBatch) => void;
-  linked: (serverId: string, player: string, discordId: string) => void;
   /** True while every gateway shard is Ready (client.isReady() stays true through reconnects). */
   connected: () => boolean;
 };
@@ -389,8 +384,6 @@ export async function startDiscord(
   return {
     client,
     summary: (serverId, s) => postSafe(serverId, formatSummary(hub.get(serverId)?.name ?? serverId, s)),
-    quests: (batch) => postSafe(batch.serverId, formatQuests(batch)),
-    linked: (serverId, player, discordId) => postSafe(serverId, formatLinked(player, discordId)),
     connected: () => client.ws.shards.size > 0 && client.ws.shards.every((s) => s.status === Status.Ready),
   };
 }

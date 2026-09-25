@@ -31,8 +31,8 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/backups.ts` | `listBackups`, `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog; turns the mod's backup events into finished/failed notices). Hub core. |
 | `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent only while Discord is connected. Hub core. |
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
-| `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min). Hub core. |
-| `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`. Hub core. |
+| `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min); announces `questBatch` events. Hub core. |
+| `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`, announces `linked` events. Hub core. |
 | `src/restarts.ts` | `RestartScheduler`: countdown restarts (in-game `say` warnings, then `stop`) and daily restarts; its notices are `publish`ed hub events. Hub core. |
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
@@ -42,7 +42,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
 New hub-core output should be a typed `Notice` on the event stream (`ServerHub.publish`), worded and coloured in
-`format.ts` — not a text callback. (Quest, link and summary output still use callbacks: #14–#15.)
+`format.ts` — not a text callback. Quest batches and new links go on it too (`ServerHub.announce`). (The daily summary still uses a callback: #15.)
 
 ## Dependencies
 

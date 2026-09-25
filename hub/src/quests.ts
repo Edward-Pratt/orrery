@@ -1,24 +1,22 @@
 import type { QuestDone } from './protocol.ts';
+import type { ServerHub } from './servers.ts';
 
 export type QuestMode = 'batched' | 'main' | 'all' | 'off';
 export const QUEST_MODES: readonly QuestMode[] = ['batched', 'main', 'all', 'off'];
 
-/** `quests` to name; `count` is the total (greater than quests.length for a batched roll-up). */
-export type QuestBatch = { serverId: string; player: string; quests: QuestDone[]; count: number };
-
 /**
  * Decides which quest completions get posted: main quests at once, the rest by mode (`batched` rolls them up per
- * player every 10 minutes). Hub core: works on plain data, `emit` does the posting.
+ * player every 10 minutes). Hub core: batches go on the hub's event stream.
  */
 export class QuestAnnouncer {
+  #hub: Pick<ServerHub, 'announce'>;
   #modes: Record<string, QuestMode>;
-  #emit: (batch: QuestBatch) => void;
   #pending = new Map<string, { serverId: string; player: string; count: number; latest: QuestDone }>();
   #timer: NodeJS.Timeout | undefined;
 
-  constructor(modes: Record<string, QuestMode>, emit: (batch: QuestBatch) => void) {
+  constructor(hub: Pick<ServerHub, 'announce'>, modes: Record<string, QuestMode>) {
+    this.#hub = hub;
     this.#modes = modes;
-    this.#emit = emit;
   }
 
   start(intervalMs = 10 * 60_000): void {
@@ -34,7 +32,7 @@ export class QuestAnnouncer {
     const mode = this.#modes[serverId];
     if (mode === 'off') return;
     const now = mode === 'all' ? quests : quests.filter((q) => q.main);
-    if (now.length) this.#emit({ serverId, player, quests: now, count: now.length });
+    if (now.length) this.#hub.announce(serverId, { type: 'questBatch', player, quests: now, count: now.length });
     const later = quests.filter((q) => !q.main);
     if (mode !== 'batched' || !later.length) return;
     const key = `${serverId}\u0000${player}`;
@@ -46,7 +44,9 @@ export class QuestAnnouncer {
 
   /** Posts one roll-up line per player with batched quests, then starts over. */
   flush(): void {
-    for (const p of this.#pending.values()) this.#emit({ serverId: p.serverId, player: p.player, quests: [p.latest], count: p.count });
+    for (const p of this.#pending.values()) {
+      this.#hub.announce(p.serverId, { type: 'questBatch', player: p.player, quests: [p.latest], count: p.count });
+    }
     this.#pending.clear();
   }
 }

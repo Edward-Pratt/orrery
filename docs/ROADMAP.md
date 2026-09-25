@@ -44,15 +44,18 @@ Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
 
 ## v1.3 — operations
 
+Spec: `docs/superpowers/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `docs/adr/0001-monorepo-independent-versions.md`
+
 | Feature | Where | Size |
 |---|---|---|
-| GitHub Actions CI: hub tests on Node 24 + 26, mod build and JUnit | repo | S |
-| Tagged releases: version from the git tag, mod jar attached to the GitHub release | repo | S |
-| **Backup restore** as a server-side script (`deploy/restore-backup.sh <name>`): refuses unless `gtnh` is stopped, moves the current world to `World.pre-restore-<time>`, unpacks the chosen backup, prints the next steps | deploy | M |
-| Backup retention report: size trend, and a warning when the backup folder passes a size limit | hub | S |
-| `hub.db` maintenance: prune old events/sessions, and a nightly copy of the database | hub | S |
-| External liveness ping (e.g. healthchecks.io) so you're told when the hub or the whole host dies, which the bot can't report itself | hub | S |
-| `npm run check-config`: validate `config.json` (JSON, ids, times, paths) without starting the bot | hub | S |
+| GitHub Actions CI: hub tests on Node 24 + 26, mod build and JUnit, restore-script test | repo | S |
+| Independent releases: `hub-vX.Y.Z` / `mod-vX.Y.Z` tags (past releases tagged too); mod version from `mod-v*` tags; mod jar attached to its GitHub release | repo + mod | S |
+| Hub accepts a protocol version range (current and previous), so servers can update mods one at a time | hub | S |
+| **Backup restore** as a server-side script (`deploy/restore-backup.sh <name>\|latest`): refuses unless `gtnh` is stopped, unpacks to staging, swaps it in and keeps the old world as `World.pre-restore-<time>`, prints the next steps | deploy | M |
+| Backup disk space: free-space warning (`backupMinFreeGB`); size, free space and growth in `/backup status` and the daily summary | hub | S |
+| `hub.db` upkeep: prune TPS samples older than 90 days (other tables kept), nightly `VACUUM INTO` copy, 7 kept | hub | S |
+| External liveness ping (`healthcheckUrl`, e.g. healthchecks.io), only while Discord is connected, so you're told when the hub or the whole host dies | hub | S |
+| `npm run check-config`: validate `config.json` offline with the same rules as startup, all errors at once | hub | S |
 
 ## v2 — web dashboard
 

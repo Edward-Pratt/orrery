@@ -38,3 +38,17 @@ smoke test at the end of the plan — say so rather than claiming it works.
 ## Secrets
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`) are git-ignored. Never commit them.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `Edward-Pratt/gtnh-discord` (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

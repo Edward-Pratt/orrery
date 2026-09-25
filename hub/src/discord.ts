@@ -41,6 +41,7 @@ import type { Links } from './links.ts';
 import type { QuestBatch } from './quests.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
+import type { Stats } from './stats.ts';
 import type { Summary } from './summary.ts';
 
 export type DiscordConfig = {
@@ -66,7 +67,6 @@ export type DiscordFrontend = {
 };
 
 const DAY = 24 * 60 * 60 * 1000;
-const HOUR = 60 * 60 * 1000;
 const WEBHOOK_NAME = 'GTNH Relay';
 const CRASH_LOG_WINDOW_MS = 10 * 60_000;
 // Discord API error codes.
@@ -139,6 +139,7 @@ const errorCode = (err: unknown) => (err as { code?: number }).code;
 export async function startDiscord(
   hub: ServerHub,
   db: Db,
+  stats: Stats,
   restarts: RestartScheduler,
   links: Links,
   cfg: DiscordConfig,
@@ -235,7 +236,8 @@ export async function startDiscord(
     }
     const now = Date.now();
     if (i.commandName === 'status') {
-      await i.reply(formatStatus(state, db.uptime(serverId, now - DAY, now), db.uptime(serverId, now - 7 * DAY, now)));
+      const s = stats.status(serverId, now)!;
+      await i.reply(formatStatus(s.state, s.uptimeDay, s.uptimeWeek));
       return;
     }
     if (i.commandName === 'list') {
@@ -243,9 +245,8 @@ export async function startDiscord(
       return;
     }
     if (i.commandName === 'tps') {
-      await i.reply(
-        formatTps(state, db.tpsSince(serverId, now - HOUR), db.tpsStats(serverId, now - HOUR, now), db.tpsStats(serverId, now - DAY, now)),
-      );
+      const t = stats.tps(serverId, now)!;
+      await i.reply(formatTps(t.state, t.lastHour, t.hour, t.day));
       return;
     }
     if (i.commandName === 'link') {

@@ -11,6 +11,7 @@ import { PlaytimeTracker } from './playtime.ts';
 import { QuestAnnouncer, type QuestBatch } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
 import { ServerHub } from './servers.ts';
+import { Stats } from './stats.ts';
 import { buildSummary } from './summary.ts';
 
 const token = process.env.DISCORD_TOKEN;
@@ -65,6 +66,7 @@ quests.start();
 const discord = await startDiscord(
   hub,
   db,
+  new Stats(hub, db),
   restarts,
   links,
   {

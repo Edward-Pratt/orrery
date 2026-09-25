@@ -3,18 +3,19 @@ import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 import { Db } from '../src/db.ts';
 import { CODE_ALPHABET, Links } from '../src/links.ts';
-import type { HubEvent, ServerHub } from '../src/servers.ts';
+import type { Announcement, HubEvent, ServerHub } from '../src/servers.ts';
 
 function setup() {
   const db = new Db(':memory:');
   const events = new EventEmitter<{ event: [HubEvent] }>();
   const results: string[] = [];
-  const linked: string[] = [];
+  const linked: (Announcement & { serverId: string })[] = [];
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     sendLinkResult: (_id: string, player: string, ok: boolean, message: string) => results.push(`${player}|${ok}|${message}`),
-  } as unknown as Pick<ServerHub, 'on' | 'sendLinkResult'>;
-  const links = new Links(db, hub, (serverId, player, discordId) => linked.push(`${serverId}|${player}|${discordId}`));
+    announce: (serverId: string, a: Announcement) => linked.push({ ...a, serverId }),
+  } as unknown as Pick<ServerHub, 'on' | 'sendLinkResult' | 'announce'>;
+  const links = new Links(db, hub);
   return { db, links, events, results, linked };
 }
 
@@ -73,5 +74,5 @@ test('link and unlink messages from the mod are answered and announced', () => {
     'Steve|true|Unlinked from Discord.',
     "Steve|false|You weren't linked.",
   ]);
-  assert.deepEqual(linked, ['gtnh|Steve|d1']);
+  assert.deepEqual(linked, [{ type: 'linked', player: 'Steve', discordId: 'd1', serverId: 'gtnh' }]);
 });

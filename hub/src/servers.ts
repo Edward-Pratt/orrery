@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
-import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
+import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg, type QuestDone } from './protocol.ts';
 
 export type ServerConfig = { id: string; name: string; token: string };
 
@@ -39,7 +39,11 @@ export type Notice = { severity: Severity } & (
   | { kind: 'backupFinished'; detail: string }
   | { kind: 'backupFailed'; detail: string }
 );
-export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice));
+/** What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up. */
+export type Announcement =
+  | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
+  | { type: 'linked'; player: string; discordId: string };
+export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice) | Announcement);
 
 export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number; lateMs?: number };
 
@@ -157,6 +161,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   /** Puts a hub-core notice about a server on the event stream. */
   publish(serverId: string, notice: Notice): void {
     this.emit('event', { ...notice, type: 'notice', serverId });
+  }
+
+  /** Puts a hub-core announcement (a quest batch, a new link) about a server on the event stream. */
+  announce(serverId: string, announcement: Announcement): void {
+    this.emit('event', { ...announcement, serverId });
   }
 
   /** Tells a player in game how their `/discord link` or `unlink` went. False if the server is offline. */

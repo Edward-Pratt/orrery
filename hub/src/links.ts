@@ -12,24 +12,21 @@ export type RedeemResult = { ok: boolean; message: string; discordId?: string };
 
 /**
  * Discord ↔ Minecraft account linking: `/link` issues a code, `/discord link <code>` in game redeems it. Codes live
- * in memory only. Handles the mod's link/unlink messages itself; `onLinked` announces a new link. Hub core.
+ * in memory only. Handles the mod's link/unlink messages itself and announces a new link on the hub's event stream.
+ * Hub core.
  */
 export class Links {
   #db: Db;
   #codes = new Map<string, { discordId: string; discordName: string; expires: number }>();
   #fails = new Map<string, number[]>(); // lower-case player -> recent failed attempt times
 
-  constructor(
-    db: Db,
-    hub: Pick<ServerHub, 'on' | 'sendLinkResult'>,
-    onLinked: (serverId: string, player: string, discordId: string) => void,
-  ) {
+  constructor(db: Db, hub: Pick<ServerHub, 'on' | 'sendLinkResult' | 'announce'>) {
     this.#db = db;
     hub.on('event', (e) => {
       if (e.type === 'link') {
         const result = this.redeem(e.code, e.player, e.uuid);
         hub.sendLinkResult(e.serverId, e.player, result.ok, result.message);
-        if (result.ok && result.discordId) onLinked(e.serverId, e.player, result.discordId);
+        if (result.ok && result.discordId) hub.announce(e.serverId, { type: 'linked', player: e.player, discordId: result.discordId });
       } else if (e.type === 'unlink') {
         const removed = this.#db.unlinkPlayer(e.player);
         hub.sendLinkResult(e.serverId, e.player, removed, removed ? 'Unlinked from Discord.' : "You weren't linked.");

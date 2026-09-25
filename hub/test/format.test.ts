@@ -235,16 +235,23 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
 
 test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and latest', () => {
   const q = (name: string, main = false) => ({ name, main });
-  assert.deepEqual(formatQuests({ serverId: 's', player: 'a_b', quests: [q('Stone Age', true)], count: 1 }), {
+  assert.deepEqual(formatQuests({ player: 'a_b', quests: [q('Stone Age', true)], count: 1 }), {
     content: '📜 **a\\_b** completed **Stone Age**',
   });
   const seven = ['1', '2', '3', '4', '5', '6', '7'].map((n) => q(n));
-  assert.deepEqual(formatQuests({ serverId: 's', player: 'S', quests: seven, count: 7 }), {
+  assert.deepEqual(formatQuests({ player: 'S', quests: seven, count: 7 }), {
     content: '📜 **S** completed **1**, **2**, **3**, **4**, **5** and 2 more',
   });
-  assert.deepEqual(formatQuests({ serverId: 's', player: 'S', quests: [q('Bronze')], count: 7 }), {
+  assert.deepEqual(formatQuests({ player: 'S', quests: [q('Bronze')], count: 7 }), {
     content: '📜 **S** completed 7 quests (latest: **Bronze**)',
   });
+});
+
+test('formatEvent posts quest batches and new links', () => {
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'questBatch', player: 'Steve', quests: [{ name: 'Stone Age', main: true }], count: 1 }), {
+    content: '📜 **Steve** completed **Stone Age**',
+  });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'linked', player: 'Steve', discordId: '123' }), { content: '🔗 **Steve** linked to <@123>' });
 });
 
 test('formatLinked mentions without escaping the id', () => {

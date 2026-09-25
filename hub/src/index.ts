@@ -1,51 +1,20 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { backupNotice, BackupWatcher, listBackups } from './backups.ts';
-import { everyDay, parseDaily } from './daily.ts';
+import { loadConfig } from './config.ts';
+import { everyDay } from './daily.ts';
 import { Db, type State } from './db.ts';
 import { startDiscord } from './discord.ts';
 import { DEFAULT_LAG, LagMonitor, type LagConfig } from './lag.ts';
 import { Links } from './links.ts';
 import { PlaytimeTracker } from './playtime.ts';
-import { QUEST_MODES, QuestAnnouncer, type QuestBatch, type QuestMode } from './quests.ts';
+import { QuestAnnouncer, type QuestBatch } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
-import { ServerHub, type Lifecycle, type ServerConfig } from './servers.ts';
+import { ServerHub, type Lifecycle } from './servers.ts';
 import { buildSummary } from './summary.ts';
-
-type Config = {
-  listenPort: number;
-  dbPath: string;
-  guildId: string;
-  adminRoleId: string;
-  servers: (ServerConfig & {
-    channelId: string;
-    dir?: string;
-    dailyRestart?: string;
-    dailySummary?: string;
-    backupDir?: string;
-    backupMaxAgeHours?: number;
-    lagTps?: number;
-    lagMinutes?: number;
-    lagAlerts?: boolean;
-    quests?: QuestMode;
-  })[];
-};
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error('DISCORD_TOKEN is not set');
-const config = JSON.parse(readFileSync(process.argv[2] ?? 'config.json', 'utf8')) as Config;
-for (const s of config.servers) {
-  if (s.dailySummary !== undefined && !parseDaily(s.dailySummary)) {
-    throw new Error(`server "${s.id}": dailySummary must be HH:MM (24-hour), got "${s.dailySummary}"`);
-  }
-  if (s.quests !== undefined && !QUEST_MODES.includes(s.quests)) {
-    throw new Error(`server "${s.id}": quests must be one of ${QUEST_MODES.join(', ')}, got "${s.quests}"`);
-  }
-  if (s.lagTps !== undefined && !(s.lagTps > 0 && s.lagTps <= 20)) throw new Error(`server "${s.id}": lagTps must be 1–20`);
-  if (s.lagMinutes !== undefined && !(Number.isInteger(s.lagMinutes) && s.lagMinutes >= 1)) {
-    throw new Error(`server "${s.id}": lagMinutes must be a whole number of at least 1`);
-  }
-}
+const config = loadConfig(process.argv[2] ?? 'config.json');
 const lagConfigs: Record<string, LagConfig> = Object.fromEntries(
   config.servers.map((s) => [
     s.id,

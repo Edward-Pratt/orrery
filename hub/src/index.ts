@@ -4,6 +4,7 @@ import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db, type State } from './db.ts';
 import { startDiscord } from './discord.ts';
+import { startPinger } from './health.ts';
 import { DEFAULT_LAG, LagMonitor, type LagConfig } from './lag.ts';
 import { Links } from './links.ts';
 import { PlaytimeTracker } from './playtime.ts';
@@ -99,6 +100,7 @@ const discord = await startDiscord(
 notice = discord.notice;
 postQuests = discord.quests;
 postLinked = discord.linked;
+const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, discord.connected) : () => {};
 const summaries = config.servers.flatMap((s) =>
   s.dailySummary
     ? [
@@ -126,6 +128,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     quests.stop();
     for (const cancel of summaries) cancel();
     upkeep();
+    stopPing();
     void discord.client.destroy();
     void hub.close().finally(() => {
       db.close();

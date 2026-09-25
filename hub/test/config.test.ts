@@ -58,6 +58,9 @@ test('validateConfig reports every problem at once, with where it is', async (t)
     'server "gtnh": duplicate id',
     'server "gtnh": "token" must be at least 16 characters',
   ]);
+  const low = valid(dir);
+  low.servers[0].lagTps = 0.5;
+  assert.deepEqual(validateConfig(low), ['server "gtnh": "lagTps" must be a number from 1 to 20']);
   assert.deepEqual(validateConfig([]), ['config must be a JSON object']);
   assert.deepEqual(validateConfig({}), [
     '"listenPort" must be a port number (1–65535)',

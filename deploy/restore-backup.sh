@@ -66,9 +66,9 @@ FREE=$(df --output=avail -B1 "$GTNH_DIR" | tail -1)
   die "not enough space: $NAME unpacks to $(numfmt --to=iec "$NEED") (+10 %), $(numfmt --to=iec "$FREE") free"
 
 STAMP=$(date +%Y-%m-%d-%H-%M-%S)
-OLD=$GTNH_DIR/$WORLD.pre-restore-$STAMP
+PRE_RESTORE=$GTNH_DIR/$WORLD.pre-restore-$STAMP
 echo "Restore $NAME (taken $(date -r "$ZIP" '+%Y-%m-%d %H:%M')) into $GTNH_DIR/$WORLD."
-if [[ -e $GTNH_DIR/$WORLD ]]; then echo "The current world will be kept as $OLD."; fi
+if [[ -e $GTNH_DIR/$WORLD ]]; then echo "The current world will be kept as $PRE_RESTORE."; fi
 read -r -p "Continue? [y/N] " answer || true
 [[ ${answer:-} == [yY] ]] || die "cancelled"
 
@@ -87,10 +87,10 @@ fi
 
 # Unpacking can take minutes: make sure nobody started the server meanwhile.
 stopped || die "$GTNH_SERVICE was started while unpacking; the world was not touched"
-if [[ -e $GTNH_DIR/$WORLD ]]; then mv "$GTNH_DIR/$WORLD" "$OLD"; fi
+if [[ -e $GTNH_DIR/$WORLD ]]; then mv "$GTNH_DIR/$WORLD" "$PRE_RESTORE"; fi
 if ! mv "$NEW" "$GTNH_DIR/$WORLD"; then
-  if [[ -e $OLD ]]; then mv "$OLD" "$GTNH_DIR/$WORLD"; fi
-  die "couldn't move the restored world into place; the old world is back"
+  if [[ -e $PRE_RESTORE ]]; then mv "$PRE_RESTORE" "$GTNH_DIR/$WORLD"; fi
+  die "couldn't move the restored world into place; the current world was put back"
 fi
 
 echo "Restored $NAME into $GTNH_DIR/$WORLD."

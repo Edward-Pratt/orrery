@@ -1,4 +1,4 @@
-import { lstat, readdir, statfs } from 'node:fs/promises';
+import { lstat, readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { formatBytes } from './units.ts';
 
@@ -54,7 +54,9 @@ export async function freeBytes(dir: string): Promise<number | null> {
 
 export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };
 
-export async function backupStats(dir: string): Promise<BackupStats> {
+/** Count, total size, free space and growth; null if `dir` isn't a folder (no backups line at all). Never throws. */
+export async function backupStats(dir: string): Promise<BackupStats | null> {
+  if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) return null;
   const backups = await listBackups(dir);
   return {
     count: backups.length,

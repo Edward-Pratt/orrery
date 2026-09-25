@@ -78,14 +78,15 @@ test('growthPerDay compares the newest backup with the oldest, if a day or more 
   assert.equal(growthPerDay([]), null);
 });
 
-test('freeBytes and backupStats read the real folder, and never throw', async (t) => {
+test('freeBytes and backupStats read the real folder, never throw, and give no stats without one', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'backups-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, '2026-09-24-06-00-00.zip'), 'x'.repeat(10));
   assert.ok(((await freeBytes(dir)) ?? 0) > 0);
   assert.equal(await freeBytes(join(dir, 'missing')), null);
   const stats = await backupStats(dir);
-  assert.deepEqual({ ...stats, free: stats.free !== null }, { count: 1, total: 10, free: true, growth: null });
+  assert.deepEqual({ ...stats, free: stats?.free !== null }, { count: 1, total: 10, free: true, growth: null });
+  assert.equal(await backupStats(join(dir, 'missing')), null); // e.g. the default <dir>/backups before any backup
 });
 
 test('the watchdog warns once about low disk space and re-arms when there is room again', async (t) => {

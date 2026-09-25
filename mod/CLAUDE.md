@@ -10,7 +10,8 @@ Server-side-only Forge 1.7.10 mod, built from the GTNewHorizons ExampleMod1.7.10
 
 - Needs a full JDK 25 (`javac`). The jar to deploy is the newest `build/libs/gtnhdiscord-<version>.jar`
   (not `-dev`/`-sources`); version comes from the nearest `mod-v*` tag (`build.gradle.kts`; hub tags are ignored, see docs/adr/0001).
-- Don't edit `build.gradle.kts`; project settings go in `gradle.properties` / `dependencies.gradle`.
+- Don't edit `build.gradle.kts`; project settings go in `gradle.properties` / `dependencies.gradle`. The one
+  exception is its versioning block: the plugin can't filter tags by prefix, so the version is computed there (docs/adr/0001).
 - Checkstyle rejects wildcard imports.
 
 ## Java 8 runtime

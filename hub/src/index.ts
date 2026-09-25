@@ -107,8 +107,8 @@ const summaries = config.servers.flatMap((s) =>
         everyDay(s.dailySummary, 0, (target) => {
           const summary = buildSummary(db, s.id, target);
           const dir = backupDirs[s.id];
-          void (dir ? backupStats(dir) : Promise.resolve(undefined)).then((backups) =>
-            discord.summary(s.id, { ...summary, backups }),
+          void (dir ? backupStats(dir) : Promise.resolve(null)).then((backups) =>
+            discord.summary(s.id, { ...summary, backups: backups ?? undefined }),
           );
         }),
       ]

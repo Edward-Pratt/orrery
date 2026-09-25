@@ -93,7 +93,7 @@ export function validateConfig(raw: unknown): string[] {
     if (s.quests !== undefined && !QUEST_MODES.includes(s.quests as QuestMode)) {
       err(where, `"quests" must be one of ${QUEST_MODES.join(', ')}`);
     }
-    num(s, 'lagTps', where, (n) => n > 0 && n <= 20, 'a number from 1 to 20');
+    num(s, 'lagTps', where, (n) => n >= 1 && n <= 20, 'a number from 1 to 20');
     num(s, 'lagMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
     num(s, 'backupMaxAgeHours', where, (n) => n > 0, 'a positive number');
     num(s, 'backupMinFreeGB', where, (n) => n > 0, 'a positive number');

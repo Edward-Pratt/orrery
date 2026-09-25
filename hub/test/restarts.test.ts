@@ -115,9 +115,12 @@ test('stop failing with a disconnect is success; a timeout is reported', async (
   assert.equal(notices.at(-1), '❌ Restart failed: command timed out — it may still run when the server responds');
 });
 
-test('daily() rejects a bad time', (t) => {
-  const { restarts } = setup(t);
-  assert.throws(() => restarts.daily('gtnh', '6am'), /dailyRestart must be HH:MM/);
+test('daily() rejects a bad time and keeps the earlier daily restart', (t) => {
+  const { restarts, notices } = setup(t, Date.UTC(2026, 8, 24, 4, 0)); // 05:00 BST
+  restarts.daily('gtnh', '06:00');
+  assert.throws(() => restarts.daily('gtnh', '6am'), /must be HH:MM/);
+  t.mock.timers.tick(50 * MIN); // 05:50
+  assert.deepEqual(notices, ['🔄 Restart in 10 minutes (by daily)']);
 });
 
 test('daily restart counts down from 10 minutes before the time, every day', (t) => {

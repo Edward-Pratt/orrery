@@ -14,7 +14,6 @@ import {
 import { basename } from 'node:path';
 import { freeBytes, listBackups } from './backups.ts';
 import { findCrashLogs } from './crashlogs.ts';
-import type { Db } from './db.ts';
 import {
   formatBackupList,
   formatBackupStatus,
@@ -30,7 +29,6 @@ import {
   formatTopic,
   formatTps,
   md,
-  TOP_PERIODS,
   topicDue,
   type Post,
   type TopicEdit,
@@ -38,7 +36,7 @@ import {
 import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
-import type { Stats } from './stats.ts';
+import type { Period, Stats } from './stats.ts';
 import type { Summary } from './summary.ts';
 
 export type DiscordConfig = {
@@ -59,7 +57,6 @@ export type DiscordFrontend = {
   connected: () => boolean;
 };
 
-const DAY = 24 * 60 * 60 * 1000;
 const WEBHOOK_NAME = 'GTNH Relay';
 const CRASH_LOG_WINDOW_MS = 10 * 60_000;
 // Discord API error codes.
@@ -131,7 +128,6 @@ const errorCode = (err: unknown) => (err as { code?: number }).code;
 
 export async function startDiscord(
   hub: ServerHub,
-  db: Db,
   stats: Stats,
   restarts: RestartScheduler,
   links: Links,
@@ -212,7 +208,7 @@ export async function startDiscord(
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
     // Linked people appear in game under their Minecraft name.
-    hub.say(serverId, db.linkByDiscord(m.author.id)?.player ?? m.member?.displayName ?? m.author.username, text);
+    hub.say(serverId, stats.linkedPlayer(m.author.id) ?? m.member?.displayName ?? m.author.username, text);
   });
 
   client.on(Events.InteractionCreate, (i) => {
@@ -254,27 +250,18 @@ export async function startDiscord(
     }
     if (i.commandName === 'playtime') {
       const user = i.options.getUser('user');
-      const player = user ? db.linkByDiscord(user.id)?.player : (i.options.getString('player') ?? undefined);
-      if (!player) {
+      const p = stats.playtime(serverId, user ? { discordId: user.id } : { player: i.options.getString('player') ?? undefined }, now)!;
+      if (!p.found) {
         const content = user ? `${user.username} hasn't linked a Minecraft account (use /link).` : 'Give a player name or a Discord user.';
         await i.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }
-      await i.reply(
-        formatPlaytime(
-          player,
-          db.playtime(serverId, player, 0, now),
-          db.playtime(serverId, player, now - 7 * DAY, now),
-          db.lastSeen(serverId, player),
-          now,
-        ),
-      );
+      await i.reply(formatPlaytime(p.player, p.totalMs, p.weekMs, p.lastSeen, now));
       return;
     }
     if (i.commandName === 'top') {
-      const period = (i.options.getString('period') ?? 'week') as keyof typeof TOP_PERIODS;
-      const from = period === 'day' ? now - DAY : period === 'week' ? now - 7 * DAY : 0;
-      await i.reply(formatTop(period, db.top(serverId, from, now, 10)));
+      const period = (i.options.getString('period') ?? 'week') as Period;
+      await i.reply(formatTop(period, stats.top(serverId, period, now)!));
       return;
     }
     if (!ADMIN_COMMANDS.has(i.commandName)) return;

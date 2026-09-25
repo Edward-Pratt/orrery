@@ -2,7 +2,6 @@ import type { Db } from './db.ts';
 import type { ServerHub } from './servers.ts';
 
 export type LagConfig = { tps: number; minutes: number; enabled: boolean };
-export const DEFAULT_LAG: LagConfig = { tps: 15, minutes: 2, enabled: true };
 
 const BARS = '▁▂▃▄▅▆▇█';
 
@@ -49,7 +48,7 @@ export class LagMonitor {
       }
       const worst = s.dims[0];
       this.#db.recordTps(s.id, now, s.tps, worst?.name ?? null, worst?.ms ?? null);
-      const cfg = this.#configs[s.id] ?? DEFAULT_LAG;
+      const cfg = this.#configs[s.id];
       if (!cfg.enabled) continue;
       if (s.tps < cfg.tps) {
         const low = (this.#low.get(s.id) ?? 0) + 1;

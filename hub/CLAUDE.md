@@ -20,7 +20,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 |---|---|
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
-| `src/config.ts` | `Config` type, `validateConfig` (every error at once, offline) and `loadConfig`. Used by startup and `check-config`. Hub core. |
+| `src/config.ts` | `validateConfig` (every error at once, offline) and `loadConfig`, which returns `ServerSettings` per server with every default applied (lag 15 TPS/2 min, quests `batched`, 10 GB free) and the Backup folder derived (`backupDir`, else `<dir>/backups`). The only place per-server defaults live. Used by startup and `check-config`. Hub core. |
 | `src/check-config.ts` | `npm run check-config` entry point. |
 | `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down) and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
 | `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |

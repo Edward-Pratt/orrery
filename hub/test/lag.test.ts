@@ -6,7 +6,7 @@ import type { ServerHub, ServerState } from '../src/servers.ts';
 
 const MIN = 60_000;
 
-function setup(configs: Record<string, LagConfig> = {}) {
+function setup(configs: Record<string, LagConfig> = { s: { tps: 15, minutes: 2, enabled: true } }) {
   let state: ServerState = { id: 's', name: 'S', online: true, hung: false, tps: 20, players: [], dims: [] };
   const hub = { list: () => [state] } as unknown as Pick<ServerHub, 'list'>;
   const db = new Db(':memory:');

@@ -85,3 +85,36 @@ test('loadConfig throws one error listing every problem; check-config prints the
   await writeFile(path, JSON.stringify(valid(dir)));
   assert.equal(run(path), `${path} OK\n`);
 });
+
+async function load(dir: string, server: Record<string, unknown>) {
+  const c = valid(dir);
+  const { id, name, token, channelId } = c.servers[0];
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify({ ...c, servers: [{ id, name, token, channelId, ...server }] }));
+  return loadConfig(path).servers[0];
+}
+
+test('loadConfig derives the Backup folder: backupDir, else <dir>/backups, else none', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  const other = await mkdtemp(join(tmpdir(), 'config-bk-'));
+  t.after(() => Promise.all([rm(dir, { recursive: true, force: true }), rm(other, { recursive: true, force: true })]));
+  assert.equal((await load(dir, { dir })).backupDir, join(dir, 'backups'));
+  assert.equal((await load(dir, { backupDir: other })).backupDir, other);
+  assert.equal((await load(dir, { dir, backupDir: other })).backupDir, other);
+  assert.equal((await load(dir, {})).backupDir, undefined);
+});
+
+test('loadConfig applies each per-server default once, and keeps set values', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const d = await load(dir, {});
+  assert.deepEqual(d.lag, { tps: 15, minutes: 2, enabled: true });
+  assert.equal(d.quests, 'batched');
+  assert.equal(d.backupMinFreeGB, 10);
+  assert.equal(d.backupMaxAgeHours, undefined);
+  const s = await load(dir, { lagTps: 18, lagMinutes: 5, lagAlerts: false, quests: 'off', backupMinFreeGB: 3, backupMaxAgeHours: 26 });
+  assert.deepEqual(s.lag, { tps: 18, minutes: 5, enabled: false });
+  assert.equal(s.quests, 'off');
+  assert.equal(s.backupMinFreeGB, 3);
+  assert.equal(s.backupMaxAgeHours, 26);
+});

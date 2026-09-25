@@ -31,7 +31,7 @@ export class QuestAnnouncer {
   }
 
   add(serverId: string, player: string, quests: QuestDone[]): void {
-    const mode = this.#modes[serverId] ?? 'batched';
+    const mode = this.#modes[serverId];
     if (mode === 'off') return;
     const now = mode === 'all' ? quests : quests.filter((q) => q.main);
     if (now.length) this.#emit({ serverId, player, quests: now, count: now.length });

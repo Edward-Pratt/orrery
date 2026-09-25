@@ -10,7 +10,6 @@ const WATCHDOG_MS = 10 * 60_000;
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
 const GB = 1024 ** 3;
-export const DEFAULT_MIN_FREE_GB = 10;
 
 /** Finished backups in a folder, newest first. Skips staging files, folders and symlinks; never throws. */
 export async function listBackups(dir: string): Promise<Backup[]> {

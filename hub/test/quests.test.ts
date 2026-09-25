@@ -39,12 +39,3 @@ test('main, all and off modes', () => {
   off.announcer.flush();
   assert.deepEqual(off.out, []);
 });
-
-test('an unknown server defaults to batched', () => {
-  const out: QuestBatch[] = [];
-  const announcer = new QuestAnnouncer({}, (b) => out.push(b));
-  announcer.add('other', 'Steve', [q('a')]);
-  assert.deepEqual(out, []);
-  announcer.flush();
-  assert.equal(out.length, 1);
-});

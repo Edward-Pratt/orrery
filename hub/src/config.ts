@@ -1,9 +1,12 @@
 import { readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseDaily } from './daily.ts';
+import type { LagConfig } from './lag.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
 import type { ServerConfig } from './servers.ts';
 
-export type ServerEntry = ServerConfig & {
+/** A server entry as written in config.json. */
+type ServerEntry = ServerConfig & {
   channelId: string;
   dir?: string;
   dailyRestart?: string;
@@ -17,14 +20,40 @@ export type ServerEntry = ServerConfig & {
   quests?: QuestMode;
 };
 
+/** What a server is configured to do, with every default applied. */
+export type ServerSettings = ServerConfig & {
+  channelId: string;
+  dir?: string;
+  /** `backupDir`, else `<dir>/backups`, else none (no Backup features). */
+  backupDir?: string;
+  dailyRestart?: string;
+  dailySummary?: string;
+  /** Unset: no missing-Backup check. */
+  backupMaxAgeHours?: number;
+  backupMinFreeGB: number;
+  lag: LagConfig;
+  quests: QuestMode;
+};
+
 export type Config = {
   listenPort: number;
   dbPath: string;
   guildId: string;
   adminRoleId: string;
   healthcheckUrl?: string;
-  servers: ServerEntry[];
+  servers: ServerSettings[];
 };
+
+function resolve(s: ServerEntry): ServerSettings {
+  const { lagTps, lagMinutes, lagAlerts, ...rest } = s;
+  return {
+    ...rest,
+    backupDir: s.backupDir ?? (s.dir ? join(s.dir, 'backups') : undefined),
+    backupMinFreeGB: s.backupMinFreeGB ?? 10,
+    lag: { tps: lagTps ?? 15, minutes: lagMinutes ?? 2, enabled: lagAlerts ?? true },
+    quests: s.quests ?? 'batched',
+  };
+}
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -117,7 +146,7 @@ export function validateConfig(raw: unknown): string[] {
   return errors;
 }
 
-/** Reads, parses and validates a config file; throws one error listing every problem. */
+/** Reads, parses, validates and resolves a config file; throws one error listing every problem. */
 export function loadConfig(path: string): Config {
   let raw: unknown;
   try {
@@ -129,5 +158,6 @@ export function loadConfig(path: string): Config {
   if (errors.length) {
     throw new Error(`${path} has ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n- ${errors.join('\n- ')}`);
   }
-  return raw as Config;
+  const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
+  return { ...c, servers: c.servers.map(resolve) };
 }

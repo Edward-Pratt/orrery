@@ -26,8 +26,8 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |
 | `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
-| `src/stats.ts` | `Stats`: frontends' read questions as plain data (`status`, `tps`, `playtime`, `top`, `backups`, `crashLogs`, `linkedPlayer`), owning the time windows, `/top` periods and each server's folders. Hub core. |
-| `src/summary.ts` | `buildSummary`: yesterday's stats, from the scheduled time. Hub core. |
+| `src/stats.ts` | `Stats`: frontends' read questions as plain data (`status`, `tps`, `playtime`, `top`, `backups`, `crashLogs`, `summary`, `linkedPlayer`), owning the time windows, `/top` periods and each server's folders. Hub core. |
+| `src/summary.ts` | `Summary` type and `yesterday` (the local day before the summary's scheduled time; `Stats.summary` builds it). Hub core. |
 | `src/backups.ts` | `listBackups`, `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog; turns the mod's backup events into finished/failed notices). Hub core. |
 | `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent only while Discord is connected. Hub core. |
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |

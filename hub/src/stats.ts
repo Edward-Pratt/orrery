@@ -1,8 +1,9 @@
-import { freeBytes, listBackups, type Backup } from './backups.ts';
+import { backupStats, freeBytes, listBackups, type Backup } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import type { ServerHub, ServerState } from './servers.ts';
+import { yesterday, type Summary } from './summary.ts';
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
@@ -88,6 +89,26 @@ export class Stats {
   crashLogs(serverId: string, sinceMs: number): Promise<string[]> {
     const dir = this.#folders.get(serverId)?.dir;
     return dir ? findCrashLogs(dir, sinceMs) : Promise.resolve([]);
+  }
+
+  /** Stats for the day before `at` (the summary's scheduled time, not Date.now()); Backups only with a folder. */
+  async summary(serverId: string, at: number): Promise<Summary | undefined> {
+    if (!this.#hub.get(serverId)) return undefined;
+    const { from, to, day } = yesterday(at);
+    const players = this.#db.top(serverId, from, to, 1_000_000, at);
+    const dir = this.#folders.get(serverId)?.backupDir;
+    const backups = dir ? await backupStats(dir) : null;
+    return {
+      day,
+      uptime: this.#db.uptime(serverId, from, to),
+      peak: this.#db.peak(serverId, day),
+      unique: players.length,
+      totalMs: players.reduce((sum, p) => sum + p.ms, 0),
+      top: players.slice(0, 3),
+      starts: this.#db.countEvents(serverId, 'started', from, to),
+      crashes: this.#db.countEvents(serverId, 'crashed', from, to),
+      ...(backups ? { backups } : {}),
+    };
   }
 
   /** The Minecraft name linked to a Discord user, if any. */

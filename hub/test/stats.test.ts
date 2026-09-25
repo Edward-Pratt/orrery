@@ -6,6 +6,9 @@ import { test, type TestContext } from 'node:test';
 import { Db } from '../src/db.ts';
 import type { ServerHub, ServerState } from '../src/servers.ts';
 import { Stats } from '../src/stats.ts';
+import { yesterday } from '../src/summary.ts';
+
+process.env.TZ = 'Europe/London'; // the daily summary's day is a local (UK) calendar day
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -168,4 +171,50 @@ test('crash logs come from the server folder; none without one', async (t) => {
   await writeFile(join(dir, 'hs_err_pid42.log'), 'boom');
   assert.deepEqual(await setup({ dir }).stats.crashLogs('gtnh', 0), [join(dir, 'hs_err_pid42.log')]);
   assert.deepEqual(await setup().stats.crashLogs('gtnh', 0), []);
+});
+
+const SUMMARY_AT = Date.UTC(2026, 8, 24, 8, 0); // 09:00 BST on 24 Sep: yesterday = 23 Sep (local)
+
+test('the daily summary gathers uptime, peak, unique players, playtime, top 3, starts and crashes', async () => {
+  const { db, stats } = setup();
+  const { from } = yesterday(SUMMARY_AT);
+  db.record('gtnh', 'up', 'started', from);
+  db.record('gtnh', 'down', 'crashed', from + 12 * HOUR);
+  db.record('gtnh', 'up', 'started', from + 18 * HOUR);
+  for (const [p, start, hours] of [['A', 1, 3], ['B', 2, 1], ['C', 3, 2], ['D', 4, 0.5]] as const) {
+    db.openSession('gtnh', p, from + start * HOUR);
+    db.closeSession('gtnh', p, from + (start + hours) * HOUR);
+  }
+  db.recordPeak('gtnh', '2026-09-23', 3);
+  const s = await stats.summary('gtnh', SUMMARY_AT);
+  assert.ok(s);
+  assert.equal(s.day, '2026-09-23');
+  assert.equal(s.uptime, 18 / 24);
+  assert.equal(s.peak, 3);
+  assert.equal(s.unique, 4);
+  assert.equal(s.totalMs, 6.5 * HOUR);
+  assert.deepEqual(s.top.map((p) => p.player), ['A', 'C', 'B']);
+  assert.equal(s.starts, 2);
+  assert.equal(s.crashes, 1);
+  assert.equal(s.backups, undefined); // no Backup folder: no Backup line
+  assert.equal(await stats.summary('nope', SUMMARY_AT), undefined);
+});
+
+test('the daily summary covers a 25-hour DST day', async () => {
+  const { db, stats } = setup();
+  const at = Date.UTC(2026, 9, 26, 9, 0); // 26 Oct; 25 Oct had the clocks go back
+  const { from } = yesterday(at);
+  db.record('gtnh', 'up', 'started', from);
+  db.record('gtnh', 'down', 'stopped', from + 20 * HOUR);
+  const s = await stats.summary('gtnh', at);
+  assert.equal(s?.day, '2026-10-25');
+  assert.equal(s?.uptime, 20 / 25);
+});
+
+test('the daily summary has a Backup line only with a Backup folder', async (t) => {
+  const dir = await tempDir(t);
+  await backup(dir, '2026-09-23-06-00-00.zip', SUMMARY_AT - HOUR, 100);
+  const s = await setup({ backupDir: dir }).stats.summary('gtnh', SUMMARY_AT);
+  assert.equal(s?.backups?.count, 1);
+  assert.equal(s?.backups?.total, 100);
 });

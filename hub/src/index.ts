@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { backupStats, BackupWatcher, freeBytes, listBackups } from './backups.ts';
+import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
@@ -12,7 +12,6 @@ import { QuestAnnouncer } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
 import { ServerHub } from './servers.ts';
 import { Stats } from './stats.ts';
-import { buildSummary } from './summary.ts';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error('DISCORD_TOKEN is not set');
@@ -54,9 +53,10 @@ playtime.start();
 lag.start();
 quests.start();
 
+const stats = new Stats(hub, db, config.servers);
 const discord = await startDiscord(
   hub,
-  new Stats(hub, db, config.servers),
+  stats,
   restarts,
   links,
   {
@@ -71,11 +71,7 @@ const summaries = config.servers.flatMap((s) =>
   s.dailySummary
     ? [
         everyDay(s.dailySummary, 0, (target) => {
-          const summary = buildSummary(db, s.id, target);
-          const dir = s.backupDir;
-          void (dir ? backupStats(dir) : Promise.resolve(null)).then((backups) =>
-            discord.summary(s.id, { ...summary, backups: backups ?? undefined }),
-          );
+          void stats.summary(s.id, target).then((summary) => summary && discord.summary(s.id, summary));
         }),
       ]
     : [],

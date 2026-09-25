@@ -22,7 +22,17 @@ export type GameMsg = Extract<
   ModMsg,
   { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' | 'quest' | 'link' | 'unlink' | 'backup' }
 >;
-export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle });
+/** How much a notice matters; frontends pick colours from it. */
+export type Severity = 'problem' | 'warning' | 'good' | 'info';
+/** Something a hub-core module wants people to know about a server. Never sent by a mod. */
+export type Notice = { severity: Severity } & (
+  | { kind: 'restartScheduled'; ms: number; by: string }
+  | { kind: 'restartNow' }
+  | { kind: 'restartCancelled'; by: string }
+  | { kind: 'restartCancelledDown' }
+  | { kind: 'restartFailed'; error: string }
+);
+export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice));
 
 export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number; lateMs?: number };
 
@@ -135,6 +145,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     if (!conn || !text) return false;
     this.#send(conn.socket, { type: 'say', author: mcText(author, 32) || '?', message: text });
     return true;
+  }
+
+  /** Puts a hub-core notice about a server on the event stream. */
+  publish(serverId: string, notice: Notice): void {
+    this.emit('event', { ...notice, type: 'notice', serverId });
   }
 
   /** Tells a player in game how their `/discord link` or `unlink` went. False if the server is offline. */

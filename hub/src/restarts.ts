@@ -1,7 +1,7 @@
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
-type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get'>;
+type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish'>;
 type Pending = { at: number; by: string; byName: string; timers: NodeJS.Timeout[] };
 
 /** In-game warnings, as time left before the restart. */
@@ -16,20 +16,19 @@ export function countdownText(ms: number): string {
 
 /**
  * Countdown restarts: in-game warnings, then `stop` (systemd's Restart=always brings the server back).
- * Lives in the hub core so the web dashboard can use it too. Pending restarts are in memory only.
+ * Lives in the hub core so the web dashboard can use it too; its notices go on the hub's event stream. Pending
+ * restarts are in memory only.
  */
 export class RestartScheduler {
   #hub: Hub;
-  #notify: (serverId: string, text: string) => void;
   #pending = new Map<string, Pending>();
   #daily = new Map<string, () => void>(); // serverId -> cancel
 
-  constructor(hub: Hub, notify: (serverId: string, text: string) => void) {
+  constructor(hub: Hub) {
     this.#hub = hub;
-    this.#notify = notify;
     hub.on('event', (e) => {
       if ((e.type === 'stopped' || e.type === 'crashed') && this.#clear(e.serverId)) {
-        this.#notify(e.serverId, '❎ Restart cancelled (server went down)');
+        hub.publish(e.serverId, { severity: 'info', kind: 'restartCancelledDown' });
       }
     });
   }
@@ -48,13 +47,13 @@ export class RestartScheduler {
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
     this.#pending.set(serverId, { at: Date.now() + delay, by, byName, timers });
-    if (delay) this.#notify(serverId, `🔄 Restart in ${countdownText(delay)} (by ${byName})`);
+    if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName });
   }
 
   /** False if nothing was pending. */
   cancel(serverId: string, by: string): boolean {
     if (!this.#clear(serverId)) return false;
-    this.#notify(serverId, `❎ Restart cancelled (by ${by})`);
+    this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by });
     this.#say(serverId, 'say Restart cancelled');
     return true;
   }
@@ -107,11 +106,11 @@ export class RestartScheduler {
     const p = this.#pending.get(serverId);
     if (!p) return;
     this.#clear(serverId); // first, so the `stopped` event this causes isn't reported as a cancellation
-    this.#notify(serverId, '🔄 Restarting now');
+    this.#hub.publish(serverId, { severity: 'info', kind: 'restartNow' });
     this.#hub.runCommand(serverId, 'stop', p.by).catch((err: Error) => {
       if (err.message === 'server disconnected') return; // it shut down before replying: that's success
       console.error(`[restart] stop on ${serverId} failed: ${err.message}`);
-      this.#notify(serverId, `❌ Restart failed: ${err.message}`);
+      this.#hub.publish(serverId, { severity: 'problem', kind: 'restartFailed', error: err.message });
     });
   }
 }

@@ -285,3 +285,18 @@ test('late command output reaches onLate until it expires', async (t) => {
   await sleep(50);
   assert.deepEqual(late, [['https://spark.lucko.me/abc']]);
 });
+
+test('publish puts a hub-core notice on the event stream for that server', async (t) => {
+  const { hub, events } = await setup(t);
+  hub.publish('gtnh', { severity: 'info', kind: 'restartNow' });
+  assert.deepEqual(events, [{ severity: 'info', kind: 'restartNow', type: 'notice', serverId: 'gtnh' }]);
+});
+
+test('a mod cannot send hub-core notices', async (t) => {
+  const { port, types } = await setup(t);
+  const mod = await online(port);
+  mod.send({ type: 'notice', severity: 'problem', kind: 'restartFailed', error: 'spoofed' });
+  mod.send({ type: 'started' });
+  await until(() => types().includes('started'));
+  assert.deepEqual(types(), ['connected', 'started']);
+});

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { computeUptime, Db } from '../src/db.ts';
 
@@ -154,4 +158,39 @@ test('a session opened after the last stamp never ends before it started', () =>
   assert.equal(db.playtime('s', 'Steve', 0, 100_000, 100_000), 0);
   assert.equal(db.lastSeen('s', 'Steve'), 1030);
   db.close();
+});
+
+test('maintain prunes old TPS samples, copies the database and keeps 7 copies', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'db-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const DAY = 24 * 3600_000;
+  const now = new Date(2026, 8, 25, 4, 0).getTime();
+  const db = new Db(':memory:');
+  db.recordTps('gtnh', now - 91 * DAY, 20, null, null);
+  db.recordTps('gtnh', now - 89 * DAY, 19, null, null);
+  db.openSession('gtnh', 'Old', now - 400 * DAY);
+  const copies = join(dir, 'db-backups');
+  await mkdir(copies);
+  for (let d = 1; d <= 8; d++) await writeFile(join(copies, `hub-2026-09-${String(d).padStart(2, '0')}.db`), '');
+  await writeFile(join(copies, 'notes.txt'), '');
+
+  db.maintain(copies, now);
+
+  assert.deepEqual(db.tpsSince('gtnh', 0).map((r) => r.tps), [19]);
+  assert.deepEqual((await readdir(copies)).sort(), [
+    'hub-2026-09-03.db',
+    'hub-2026-09-04.db',
+    'hub-2026-09-05.db',
+    'hub-2026-09-06.db',
+    'hub-2026-09-07.db',
+    'hub-2026-09-08.db',
+    'hub-2026-09-25.db',
+    'notes.txt',
+  ]);
+  const copy = new DatabaseSync(join(copies, 'hub-2026-09-25.db'));
+  assert.equal((copy.prepare('SELECT COUNT(*) AS n FROM sessions').get() as { n: number }).n, 1);
+  copy.close();
+
+  db.maintain(copies, now); // same day again: replaces today's copy, doesn't throw
+  db.maintain(join(copies, 'notes.txt', 'x'), now); // a folder under a file (ENOTDIR): logged, doesn't throw
 });

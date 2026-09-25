@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { backupNotice, backupStats, BackupWatcher, DEFAULT_MIN_FREE_GB, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
 import { everyDay } from './daily.ts';
@@ -112,6 +112,9 @@ const summaries = config.servers.flatMap((s) =>
       ]
     : [],
 );
+const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
+const dbCopies = join(dirname(config.dbPath), 'db-backups');
+const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
@@ -122,6 +125,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     quests.flush(); // don't lose a pending roll-up
     quests.stop();
     for (const cancel of summaries) cancel();
+    upkeep();
     void discord.client.destroy();
     void hub.close().finally(() => {
       db.close();

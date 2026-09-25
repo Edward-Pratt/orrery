@@ -1,4 +1,10 @@
+import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { localDay } from './units.ts';
+
+const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;
+const COPIES_KEPT = 7;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
@@ -17,7 +23,7 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
   return known === 0 ? null : up / known;
 }
 
-/** SQLite store: server up/down transitions (uptime) and player sessions (playtime). */
+/** SQLite store: server up/down transitions (uptime) and player sessions (playtime), and nightly upkeep. */
 export class Db {
   #db: DatabaseSync;
 
@@ -208,6 +214,28 @@ export class Db {
       | { discord_id: string; player: string }
       | undefined;
     return row ? { discordId: row.discord_id, player: row.player } : null;
+  }
+
+  /**
+   * Nightly upkeep: drops TPS samples older than 90 days (every other table is small and kept for all-time
+   * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies. Never throws.
+   */
+  maintain(copyDir: string, now = Date.now()): void {
+    this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - TPS_KEEP_MS);
+    try {
+      mkdirSync(copyDir, { recursive: true });
+      const file = join(copyDir, `hub-${localDay(now)}.db`);
+      rmSync(file, { force: true }); // VACUUM INTO refuses to overwrite
+      this.#db.prepare('VACUUM INTO ?').run(file);
+      const old = readdirSync(copyDir)
+        .filter((n) => /^hub-\d{4}-\d{2}-\d{2}\.db$/.test(n))
+        .sort()
+        .reverse()
+        .slice(COPIES_KEPT);
+      for (const name of old) rmSync(join(copyDir, name), { force: true });
+    } catch (err) {
+      console.error('[db] nightly copy failed:', (err as Error).message);
+    }
   }
 
   close(): void {

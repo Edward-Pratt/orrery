@@ -14,8 +14,9 @@ Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
 ## Architecture rules
 
 - Mods connect **out** to the hub (TCP `127.0.0.1:25580`, newline-delimited JSON, protocol v1).
-- The hub owns all state. Frontends (Discord now, web dashboard later) only call `ServerHub`'s public
-  API in `hub/src/servers.ts`; they never talk to mods. Discord-specific config stays in `discord.ts`.
+- The hub owns all state. Frontends (Discord now, web dashboard later) only call the public
+  API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler` and `Stats` (`hub/src/stats.ts`); they
+  never talk to mods. Discord-specific config stays in `discord.ts`.
 - The mod has no business logic and no Discord knowledge.
 
 ## Changing the wire protocol

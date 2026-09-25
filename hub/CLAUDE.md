@@ -22,7 +22,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter. The API frontends use. |
 | `src/config.ts` | `Config` type, `validateConfig` (every error at once, offline) and `loadConfig`. Used by startup and `check-config`. Hub core. |
 | `src/check-config.ts` | `npm run check-config` entry point. |
-| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
+| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down) and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
 | `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |
 | `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |

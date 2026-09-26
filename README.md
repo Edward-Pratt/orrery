@@ -55,7 +55,9 @@ set -a; . ./.env; set +a; npm start
 
 `config.json` and `.env` are git-ignored. Each section under `integrations` is
 optional: leave out `discord` to run without the bot (and without a token), or
-`minecraft` to open no mod port. `npm run check-config` checks the file
+`minecraft` to open no mod port. A server needs a token when `minecraft` is on,
+but a Discord channel is optional: one left out of `channels` just isn't
+bridged to Discord. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see

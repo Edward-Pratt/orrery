@@ -40,7 +40,7 @@ export type ServerSettings = {
 export type DiscordConfig = {
   guildId: string;
   adminRoleId: string;
-  /** serverId -> channelId */
+  /** serverId -> channelId. A server with no channel gets no chat or posts in Discord. */
   channels: Record<string, string>;
 };
 

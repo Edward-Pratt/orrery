@@ -116,7 +116,8 @@ export async function startDiscord(
   cfg: DiscordConfig,
   token: string,
 ): Promise<DiscordFrontend> {
-  const serverByChannel = new Map(Object.entries(cfg.channels).map(([serverId, channelId]) => [channelId, serverId]));
+  const channels = new Map(Object.entries(cfg.channels)); // serverId -> channelId; a Map, so no inherited keys
+  const serverByChannel = new Map([...channels].map(([serverId, channelId]) => [channelId, serverId]));
   const webhooks = new Map<string, Webhook>(); // serverId -> relay webhook
   const refusedNames = new Set<string>(); // player names Discord won't accept as a webhook username
   const topics = new Map<string, TopicEdit>(); // channelId -> last edit
@@ -127,7 +128,7 @@ export async function startDiscord(
   });
 
   async function post(serverId: string, message: Post, files: string[] = []): Promise<void> {
-    const channelId = cfg.channels[serverId];
+    const channelId = channels.get(serverId);
     if (!channelId) return;
     const channel = await client.channels.fetch(channelId);
     if (channel?.isSendable()) await channel.send({ ...message, files });
@@ -301,7 +302,7 @@ export async function startDiscord(
   }
 
   async function setupWebhooks(c: Client<true>): Promise<void> {
-    for (const [serverId, channelId] of Object.entries(cfg.channels)) {
+    for (const [serverId, channelId] of channels) {
       try {
         const channel = await c.channels.fetch(channelId);
         if (channel?.type !== ChannelType.GuildText) continue;
@@ -323,7 +324,7 @@ export async function startDiscord(
   async function updateTopics(): Promise<void> {
     const now = Date.now();
     for (const s of hub.list()) {
-      const channelId = cfg.channels[s.id];
+      const channelId = channels.get(s.id);
       const text = formatTopic(s);
       if (!channelId || !topicDue(topics.get(channelId), text, now)) continue;
       topics.set(channelId, { text, at: now }); // also on failure: don't retry until the text changes

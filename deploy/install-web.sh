@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installs a dashboard release for Caddy to serve, replacing the previous build. Run as root on the server:
-#   sudo bash deploy/install-web.sh web-v0.1.0                     # fetched with gh (the repo is private)
+#   sudo bash deploy/install-web.sh web-v0.1.0                     # fetched with gh: the repo is private, so root's
+#                                                                   # gh needs a login (sudo gh auth login) or GH_TOKEN
 #   sudo bash deploy/install-web.sh /tmp/orrery-web-v0.1.0.tar.gz  # or an archive copied over
 # WEB_DIR (default /var/www/orrery) is outside /home: under /var/www new files get httpd_sys_content_t, which
 # Caddy may read under SELinux. If Caddy still gets a denial, check `sudo ausearch -m avc -ts recent` rather than

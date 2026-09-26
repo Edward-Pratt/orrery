@@ -9,7 +9,6 @@ export type { Announcement, AuditEntry, GameMsg, HubEvent, HubOutput, Lifecycle,
 /** No token: the server can't connect (the Minecraft integration is off). */
 export type ServerConfig = { id: string; name: string; token?: string };
 
-
 export type HubOptions = {
   hungMs?: number;
   cmdTimeoutMs?: number;

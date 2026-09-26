@@ -1,14 +1,14 @@
 // Wire contract between the mod and the hub: one JSON object per line.
+// The message types live in types.ts (pure types, for the dashboard too); this file validates against them.
+import type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+export type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+
 export const PROTOCOL_VERSION = 1;
 /**
  * Oldest mod protocol the hub still accepts. Policy (docs/adr/0001): the hub supports the current and the
  * previous version, so servers can update their mods one at a time.
  */
 export const MIN_PROTOCOL = 1;
-
-// The message types live in types.ts (pure types, for the dashboard too); this file validates against them.
-import type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
-export type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
 
 type Kind = 'string' | 'number' | 'boolean' | 'string[]' | 'dims?' | 'quests';
 

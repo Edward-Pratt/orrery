@@ -10,7 +10,6 @@ export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, Tp
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
 
-
 const PERIOD_MS: Record<Period, number> = { day: DAY, week: 7 * DAY, all: Infinity };
 const TOP_LIMIT = 10;
 

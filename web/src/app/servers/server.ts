@@ -8,7 +8,7 @@ import { filter } from 'rxjs';
 import { LiveEvents } from '../events';
 
 type ChatLine = Extract<LiveEvent, { type: 'chat' | 'join' | 'leave' | 'death' | 'say' }>;
-const CHAT_TYPES: string[] = ['chat', 'join', 'leave', 'death', 'say'] satisfies ChatLine['type'][];
+const CHAT_TYPES: LiveEvent['type'][] = ['chat', 'join', 'leave', 'death', 'say'] satisfies ChatLine['type'][];
 const MAX_LINES = 500;
 
 @Component({
@@ -16,8 +16,8 @@ const MAX_LINES = 500;
   imports: [RouterLink, HlmButton],
   template: `
     <a routerLink=".." class="text-sm text-muted-foreground hover:underline">← Servers</a>
-    @if (missing()) {
-      <p class="pt-8">No such server.</p>
+    @if (missing(); as why) {
+      <p class="pt-8">{{ why }}</p>
     } @else if (card(); as c) {
       <h1 class="mt-2 mb-4 text-lg font-semibold">{{ c.name }} <span class="text-sm font-normal text-muted-foreground">{{ c.online ? 'Online' : 'Offline' }}</span></h1>
       @if (c.features.chat) {
@@ -55,14 +55,16 @@ export default class ServerPage {
   readonly #http = inject(HttpClient);
   readonly #id = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
   readonly card = signal<ServerCard | undefined>(undefined);
-  readonly missing = signal(false);
+  /** Why the server can't be shown: unknown, or the hub didn't answer. */
+  readonly missing = signal<string | null>(null);
   readonly lines = signal<ChatLine[]>([]);
   readonly error = signal<string | null>(null);
 
   constructor() {
     this.#http.get<ServerDetail>(`/api/servers/${encodeURIComponent(this.#id)}`).subscribe({
       next: (detail) => this.card.set(detail.card),
-      error: () => this.missing.set(true),
+      error: (err: HttpErrorResponse) =>
+        this.missing.set(err.status === 404 ? 'No such server.' : `The hub didn't answer (HTTP ${err.status}). Reload to try again.`),
     });
     // The stream's replay brings recent chat first, then new lines arrive live.
     inject(LiveEvents)

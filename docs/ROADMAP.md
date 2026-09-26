@@ -69,7 +69,7 @@ below is the original feature list. What ships in v2.0 hasn't been decided yet.
 Discord and Minecraft switched on by config, and the health ping follows the hub instead of Discord (#30);
 production cutover and smoke test (#31).
 
-**Step 2 — done (`hub-v2.1.0`, production smoke test pending):** the web integration with Discord login and
+**Step 2 — done (`hub-v2.1.0`, deployed 2026-09-26):** the web integration with Discord login and
 sessions (#37); an audit log of frontend actions (#32); the live event stream (#33); REST reads (#34) and actions
 (#35); `dash.orrery.run` served through Caddy (`deploy/Caddyfile`) (#36).
 

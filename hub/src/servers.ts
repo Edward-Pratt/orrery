@@ -51,7 +51,7 @@ export type Announcement =
   | { type: 'summary'; name: string; summary: Summary };
 /** Chat sent into the game (`say`), and a command's output (`late`: output that came after the result). */
 export type HubOutput =
-  | { type: 'say'; author: string; message: string }
+  | Extract<HubMsg, { type: 'say' }>
   | { type: 'console'; command: string; by: string; output: string[]; late?: true };
 export type HubEvent = { serverId: string } & (
   | GameMsg

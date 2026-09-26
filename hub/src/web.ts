@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -105,7 +106,7 @@ export function serveWebApi(app: WebApi, port: number): Promise<{ port: number; 
         close: () =>
           new Promise((done) => {
             server.close(() => done());
-            (server as import('node:http').Server).closeAllConnections(); // open event streams never end on their own
+            (server as Server).closeAllConnections(); // open event streams never end on their own
           }),
       }),
     );

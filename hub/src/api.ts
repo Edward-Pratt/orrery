@@ -50,6 +50,11 @@ export type AuditLog = (AuditEntry & { ts: number })[];
 /** The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. */
 export type LiveEvent = HubEvent;
 
+/**
+ * Every request but GET/HEAD — the actions below, logout too — must send `Origin` (the dashboard's) and
+ * `content-type: application/json`, even with no body (else 403/415). Actions answer 404 for an unknown server,
+ * 409 if it is offline, 400 for bad input and 502 if it doesn't answer.
+ */
 /** `POST /api/servers/:id/chat`: said in game as the admin (their Minecraft name if linked). 204. */
 export type ChatRequest = { message: string };
 

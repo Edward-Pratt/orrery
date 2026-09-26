@@ -599,7 +599,9 @@ test('a console command answers with its output, and late output arrives on the 
   assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
     { actor: ACTOR, action: 'command', target: 'gtnh', details: 'spark profiler' },
   ]);
-  assert.equal((await post(app, cookie, '/api/servers/gtnh/command', { command: ' ' })).status, 400);
+  for (const body of [{ command: ' /' }, { command: '\u0001' }, {}]) {
+    assert.equal((await post(app, cookie, '/api/servers/gtnh/command', body)).status, 400, JSON.stringify(body));
+  }
 });
 
 test('a restart is scheduled with a countdown and cancelled from the dashboard', async (t) => {

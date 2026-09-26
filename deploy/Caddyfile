@@ -1,0 +1,21 @@
+# Caddy in front of the hub's web API (integrations.web.listenPort) and Grafana. TLS certificates are automatic.
+# Install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# SELinux: Caddy may connect to local ports only with `sudo setsebool -P httpd_can_network_connect 1`.
+
+dash.orrery.run {
+	handle /api/* {
+		# flush_interval -1: never buffer, so the event stream (/api/events) arrives live.
+		reverse_proxy 127.0.0.1:25581 {
+			flush_interval -1
+		}
+	}
+	# ponytail: placeholder until the dashboard (v2 step 3) exists; then serve its build with file_server.
+	handle {
+		respond "orrery dashboard: coming soon. Log in: /api/login" 200
+	}
+}
+
+# Grafana with http_addr = 127.0.0.1 and root_url = https://grafana.orrery.run/ in grafana.ini.
+grafana.orrery.run {
+	reverse_proxy 127.0.0.1:3000
+}

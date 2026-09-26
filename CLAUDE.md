@@ -5,7 +5,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
-- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe),
+- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), the `Caddyfile` (TLS for the dashboard and Grafana),
   and `restore-backup.sh` (puts a backup back over a stopped server's world; tested by `test-restore-backup.sh`).
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).

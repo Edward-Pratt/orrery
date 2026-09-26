@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import type { DiscordConfig, WebIntegration } from './config.ts';
+import type { WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 
 /** A user's membership in a guild. */
@@ -22,7 +22,7 @@ const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } a
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(db: Db, web: WebIntegration, discord: DiscordConfig, oauth: OAuth) {
+export function webApi(db: Db, web: WebIntegration, oauth: OAuth) {
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
   const app = new Hono<{ Variables: { user: { id: string; username: string } } }>().basePath('/api');
 
@@ -46,12 +46,12 @@ export function webApi(db: Db, web: WebIntegration, discord: DiscordConfig, oaut
     if (!state || c.req.query('state') !== state || !code) return c.text('Login failed (bad state): try again.', 400);
     let member: Member | undefined;
     try {
-      member = await oauth.member(await oauth.token(code, redirectUri), discord.guildId);
+      member = await oauth.member(await oauth.token(code, redirectUri), web.guildId);
     } catch (err) {
       console.error('[web] Discord login failed:', (err as Error).message);
       return c.text('Login failed: Discord did not answer. Try again.', 502);
     }
-    if (!member?.roles.includes(discord.adminRoleId)) return c.text('You are not allowed in: the dashboard is for admins.', 403);
+    if (!member?.roles.includes(web.adminRoleId)) return c.text('You are not allowed in: the dashboard is for admins.', 403);
     const id = randomBytes(32).toString('base64url');
     db.addWebSession(hash(id), member.id, member.username, Date.now() + web.sessionDays * DAY_S * 1000);
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });

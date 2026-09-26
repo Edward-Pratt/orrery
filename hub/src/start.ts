@@ -44,7 +44,7 @@ export type HubHandle = {
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
   const { minecraft, discord, web } = config.integrations;
-  if (web && !(discord && deps.oauth)) throw new Error('integrations.web needs integrations.discord and Discord OAuth');
+  if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   const backupDirs: Record<string, string> = Object.fromEntries(
     config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
   );
@@ -89,7 +89,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
-  const app = web && discord && deps.oauth ? webApi(db, web, discord, deps.oauth) : undefined;
+  const app = web && deps.oauth ? webApi(db, web, deps.oauth) : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 

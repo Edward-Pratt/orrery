@@ -103,11 +103,12 @@ test('every integration is optional', async (t) => {
 
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
-test('the web integration needs a port, an https public URL, a client id, and Discord\'s guild and admin role', async (t) => {
+test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { integrations, ...c } = valid(dir);
   assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: { ...WEB, sessionDays: 30 } } }), []);
+  assert.deepEqual(validateConfig({ ...c, integrations: { web: { ...WEB, guildId: ID, adminRoleId: ID } } }), []);
   assert.deepEqual(
     validateConfig({
       ...c,
@@ -118,13 +119,12 @@ test('the web integration needs a port, an https public URL, a client id, and Di
       'integrations.web: "publicUrl" must be an https URL with no path',
       'integrations.web: "clientId" must be a Discord ID (17–20 digits)',
       'integrations.web: "sessionDays" must be a positive number',
-      'integrations.web: needs integrations.discord for its "guildId" and "adminRoleId"',
+      'integrations.web: "guildId" is required (or set integrations.discord.guildId)',
+      'integrations.web: "adminRoleId" is required (or set integrations.discord.adminRoleId)',
     ],
   );
-  const { guildId, adminRoleId, ...neither } = integrations.discord;
-  assert.deepEqual(validateConfig({ ...c, integrations: { discord: neither, web: WEB } }), [
-    'integrations.discord: "guildId" is required',
-    'integrations.discord: "adminRoleId" is required',
+  assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: { ...WEB, guildId: 'abc' } } }), [
+    'integrations.web: "guildId" must be a Discord ID (17–20 digits)',
   ]);
   const onPath = { ...WEB, publicUrl: 'https://orrery.run/dash' };
   assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: onPath } }), [
@@ -132,13 +132,19 @@ test('the web integration needs a port, an https public URL, a client id, and Di
   ]);
 });
 
-test('loadConfig defaults the web session length to 7 days', async (t) => {
+test('loadConfig defaults web sessions to 7 days and its guild and admin role to the bot\'s', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'config.json');
   const c = valid(dir);
-  await writeFile(path, JSON.stringify({ ...c, integrations: { ...c.integrations, web: WEB } }));
-  assert.deepEqual(loadConfig(path).integrations.web, { ...WEB, sessionDays: 7 });
+  const bot = { ...c.integrations.discord, guildId: '111111111111111111', adminRoleId: '222222222222222222' };
+  const own = { guildId: '333333333333333333', adminRoleId: '444444444444444444' };
+  const web = async (w: object) => {
+    await writeFile(path, JSON.stringify({ ...c, integrations: { discord: bot, web: w } }));
+    return loadConfig(path).integrations.web;
+  };
+  assert.deepEqual(await web(WEB), { ...WEB, sessionDays: 7, guildId: bot.guildId, adminRoleId: bot.adminRoleId });
+  assert.deepEqual(await web({ ...WEB, ...own, sessionDays: 3 }), { ...WEB, ...own, sessionDays: 3 });
 });
 
 test('the old config shape is rejected with each key it has to move', () => {

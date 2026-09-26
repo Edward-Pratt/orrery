@@ -23,7 +23,7 @@ Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler` and `Stats` (`hub/src/stats.ts`); they
   never talk to mods. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
-  for admin-role members (guild and role from `integrations.discord`) and SQLite sessions (`hub/src/web.ts`). Same
+  for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same
   frontend rule as Discord, plus its own session rows in `Db`. Off: no HTTP port and no `DISCORD_CLIENT_SECRET` needed.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge.

@@ -47,8 +47,18 @@ export type DiscordConfig = {
 /** The mod port and a token per server id. */
 export type MinecraftIntegration = { listenPort: number; tokens: Record<string, string> };
 
-/** The HTTP API: localhost port, the public URL (OAuth redirect is derived from it), the Discord OAuth app. */
-export type WebIntegration = { listenPort: number; publicUrl: string; clientId: string; sessionDays: number };
+/**
+ * The HTTP API: localhost port, the public URL (OAuth redirect is derived from it), the Discord OAuth app, and the
+ * guild whose admin role may log in (its own, else the bot's).
+ */
+export type WebIntegration = {
+  listenPort: number;
+  publicUrl: string;
+  clientId: string;
+  guildId: string;
+  adminRoleId: string;
+  sessionDays: number;
+};
 
 export type Config = {
   dbPath: string;
@@ -214,7 +224,12 @@ export function validateConfig(raw: unknown): string[] {
     }
     id(web, 'clientId', where);
     num(web, 'sessionDays', where, (n) => n > 0, 'a positive number');
-    if (discord === undefined) err(where, 'needs integrations.discord for its "guildId" and "adminRoleId"');
+    for (const key of ['guildId', 'adminRoleId']) {
+      if (web[key] !== undefined) id(web, key, where);
+      else if (!isObj(discord) || discord[key] === undefined) {
+        err(where, `"${key}" is required (or set integrations.discord.${key})`);
+      }
+    }
   }
   return errors;
 }
@@ -254,6 +269,14 @@ export function loadConfig(path: string): Config {
   }
   const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
   const integrations = { ...c.integrations };
-  if (integrations.web) integrations.web = { ...integrations.web, sessionDays: integrations.web.sessionDays ?? 7 };
+  const { web, discord } = integrations;
+  if (web) {
+    integrations.web = {
+      ...web,
+      guildId: web.guildId ?? discord!.guildId, // validated: one of them is set
+      adminRoleId: web.adminRoleId ?? discord!.adminRoleId,
+      sessionDays: web.sessionDays ?? 7,
+    };
+  }
   return { ...c, servers: c.servers.map(resolve), integrations };
 }

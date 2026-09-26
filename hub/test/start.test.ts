@@ -113,8 +113,15 @@ test('startup with Discord configured and no DISCORD_TOKEN fails with a clear me
   );
 });
 
-const WEB = { listenPort: 0, publicUrl: 'https://dash.orrery.run', clientId: '4'.repeat(18), sessionDays: 7 };
-const ADMIN = { id: '5'.repeat(18), username: 'alex', roles: ['9'.repeat(18), DISCORD.adminRoleId] };
+const WEB = {
+  listenPort: 0,
+  publicUrl: 'https://dash.orrery.run',
+  clientId: '4'.repeat(18),
+  guildId: '7'.repeat(18),
+  adminRoleId: '8'.repeat(18),
+  sessionDays: 7,
+};
+const ADMIN = { id: '5'.repeat(18), username: 'alex', roles: ['9'.repeat(18), WEB.adminRoleId] };
 const PLAYER = { id: '6'.repeat(18), username: 'sam', roles: ['9'.repeat(18)] };
 
 /** A fake Discord OAuth backend: code `admin`/`player` logs in that member; records every call. */
@@ -128,16 +135,17 @@ function fakeOAuth() {
     },
     member: async (accessToken, guildId) => {
       calls.push(`member ${accessToken}`);
-      assert.equal(guildId, DISCORD.guildId);
+      assert.equal(guildId, WEB.guildId);
       return { admin: ADMIN, player: PLAYER }[accessToken.slice('access-'.length)];
     },
   };
   return { oauth, calls };
 }
 
+/** A hub with only the web integration: no bot is started. */
 async function webHub(t: TestContext, oauth: OAuth) {
-  const handle = await startHub(config(t, { discord: DISCORD, web: WEB }), {
-    startFrontend: async () => ({ stop: () => {} }),
+  const handle = await startHub(config(t, { web: WEB }), {
+    startFrontend: () => assert.fail('Discord is off'),
     get: async () => ({ ok: true, status: 200 }),
     oauth,
   });
@@ -247,10 +255,11 @@ test('with web off the hub has no HTTP API and needs no OAuth', async (t) => {
 });
 
 test('startup with web configured and no DISCORD_CLIENT_SECRET fails with a clear message', (t) => {
-  const cfg = config(t, { discord: DISCORD, web: { ...WEB, listenPort: 25581 } });
+  const cfg = config(t, { web: { ...WEB, listenPort: 25581 } });
   const path = join(dirname(cfg.dbPath), 'config.json');
   writeFileSync(path, JSON.stringify({ ...cfg, servers: [{ id: 'gtnh', name: 'GTNH' }] }));
-  const env: NodeJS.ProcessEnv = { ...process.env, DISCORD_TOKEN: 'set' };
+  const env = { ...process.env };
+  delete env.DISCORD_TOKEN; // web alone needs no bot token
   delete env.DISCORD_CLIENT_SECRET;
   assert.throws(
     () => execFileSync(process.execPath, ['src/index.ts', path], { env, encoding: 'utf8', stdio: 'pipe', timeout: 10_000 }),

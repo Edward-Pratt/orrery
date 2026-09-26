@@ -122,9 +122,6 @@ export function validateConfig(raw: unknown): string[] {
     return entries;
   };
 
-  const moves = oldShapeMoves(raw);
-  if (moves.length) return moves;
-
   str(raw, 'dbPath', '');
   const url = str(raw, 'healthcheckUrl', '', false);
   if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err('', '"healthcheckUrl" must be an http(s) URL');
@@ -166,7 +163,11 @@ export function validateConfig(raw: unknown): string[] {
     }
   }
 
-  const integrations = raw.integrations ?? {};
+  // An old-shape config gets its moves plus every other problem, so fixing it is one edit.
+  const moves = oldShapeMoves(raw);
+  if (moves.length) return [...moves, ...errors];
+
+  const integrations = raw.integrations === undefined ? {} : raw.integrations;
   if (!isObj(integrations)) {
     err('', '"integrations" must be an object');
     return errors;

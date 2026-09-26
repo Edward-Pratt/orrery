@@ -75,6 +75,7 @@ test('validateConfig reports every problem at once, with where it is', async (t)
   assert.deepEqual(validateConfig([]), ['config must be a JSON object']);
   assert.deepEqual(validateConfig({}), ['"dbPath" is required', '"servers" must be a non-empty list']);
   assert.deepEqual(validateConfig({ ...valid(dir), integrations: [] }), ['"integrations" must be an object']);
+  assert.deepEqual(validateConfig({ ...valid(dir), integrations: null }), ['"integrations" must be an object']);
   assert.deepEqual(validateConfig({ ...valid(dir), integrations: { discord: 'x' } }), ['integrations: "discord" must be an object']);
 });
 
@@ -108,7 +109,7 @@ test('the old config shape is rejected with each key it has to move', () => {
     adminRoleId: ID,
     servers: [
       { id: 'gtnh', name: 'GTNH', token: 'a-long-enough-token', channelId: ID },
-      { id: 'two', name: 'Two', token: 'another-long-token', channelId: ID },
+      { id: 'two', name: 'Two', token: 'another-long-token', channelId: ID, quests: 'loud' },
     ],
   };
   assert.deepEqual(validateConfig(old), [
@@ -119,6 +120,7 @@ test('the old config shape is rejected with each key it has to move', () => {
     'old config shape: move server "gtnh"\'s "channelId" to integrations.discord.channels.gtnh',
     'old config shape: move server "two"\'s "token" to integrations.minecraft.tokens.two',
     'old config shape: move server "two"\'s "channelId" to integrations.discord.channels.two',
+    'server "two": "quests" must be one of batched, main, all, off',
   ]);
 });
 

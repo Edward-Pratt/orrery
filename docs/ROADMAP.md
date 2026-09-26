@@ -73,6 +73,10 @@ production cutover and smoke test (#31).
 sessions (#37); an audit log of frontend actions (#32); the live event stream (#33); REST reads (#34) and actions
 (#35); `dash.orrery.run` served through Caddy (`deploy/Caddyfile`) (#36).
 
+**Step 3 — done (`hub-v2.2.0` + `web-v0.1.0`, deployed 2026-09-27):** TPS on the event stream (#38); the
+dashboard in `web/` with Discord login and logout against the hub's API types (#39); live server cards and chat
+(#40); `web-v*` releases, `deploy/install-web.sh` and Caddy serving the dashboard (#41); production smoke test (#42).
+
 | Feature | Where | Size |
 |---|---|---|
 | HTTP API and live event stream (`hub/src/web/`, calling `ServerHub`, `RestartScheduler`, stats) | hub | M |

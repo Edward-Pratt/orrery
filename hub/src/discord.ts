@@ -30,17 +30,11 @@ import {
   type Post,
   type TopicEdit,
 } from './format.ts';
+import type { DiscordConfig } from './config.ts';
 import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
-
-export type DiscordConfig = {
-  guildId: string;
-  adminRoleId: string;
-  /** serverId -> channelId */
-  channels: Record<string, string>;
-};
 
 export type DiscordFrontend = {
   client: Client;

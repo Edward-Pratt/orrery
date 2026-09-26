@@ -1,15 +1,10 @@
 {
-  "listenPort": 25580,
   "dbPath": "hub.db",
-  "guildId": "YOUR_DISCORD_SERVER_ID",
-  "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
   "healthcheckUrl": "https://hc-ping.com/YOUR-CHECK-UUID",
   "servers": [
     {
       "id": "gtnh",
       "name": "GTNH",
-      "token": "CHANGE_ME_TO_A_LONG_RANDOM_STRING",
-      "channelId": "CHANNEL_ID_FOR_THIS_SERVER",
       "dir": "/home/opc/GTNH",
       "dailyRestart": "06:00",
       "dailySummary": "09:00",
@@ -19,5 +14,16 @@
       "lagMinutes": 2,
       "quests": "batched"
     }
-  ]
+  ],
+  "integrations": {
+    "minecraft": {
+      "listenPort": 25580,
+      "tokens": { "gtnh": "CHANGE_ME_TO_A_LONG_RANDOM_STRING" }
+    },
+    "discord": {
+      "guildId": "YOUR_DISCORD_SERVER_ID",
+      "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
+      "channels": { "gtnh": "CHANNEL_ID_FOR_THIS_SERVER" }
+    }
+  }
 }

@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
-import type { Config } from './config.ts';
+import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
 import { startPinger, type Get } from './health.ts';
@@ -18,7 +18,13 @@ export type Frontend = { connected: () => boolean; stop: () => void };
 
 /** The outside world the hub touches, passed in so tests need no network. */
 export type HubDeps = {
-  startFrontend: (hub: ServerHub, stats: Stats, restarts: RestartScheduler, links: Links) => Promise<Frontend>;
+  startFrontend: (
+    hub: ServerHub,
+    stats: Stats,
+    restarts: RestartScheduler,
+    links: Links,
+    cfg: DiscordConfig,
+  ) => Promise<Frontend>;
   /** The health ping's HTTP GET. */
   get: Get;
 };
@@ -39,7 +45,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left open when the hub last stopped
   const touch = setInterval(() => db.touch(), 60_000);
 
-  const hub = new ServerHub(config.servers);
+  const { minecraft, discord } = config.integrations;
+  const hub = new ServerHub(config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft.tokens[s.id] ?? '' })));
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
   const restarts = new RestartScheduler(hub);
@@ -62,14 +69,14 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
   });
 
-  const port = await hub.listen(config.listenPort);
+  const port = await hub.listen(minecraft.listenPort);
   console.log(`[hub] listening on 127.0.0.1:${port}`);
   playtime.start();
   lag.start();
   quests.start();
 
   const stats = new Stats(hub, db, config.servers);
-  const frontend = await deps.startFrontend(hub, stats, restarts, links);
+  const frontend = await deps.startFrontend(hub, stats, restarts, links, discord);
   const stopPing = config.healthcheckUrl
     ? startPinger(config.healthcheckUrl, frontend.connected, 60_000, deps.get)
     : () => {};

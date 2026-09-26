@@ -3,11 +3,11 @@ import { join } from 'node:path';
 import { parseDaily } from './daily.ts';
 import type { LagConfig } from './lag.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
-import type { ServerConfig } from './servers.ts';
 
 /** A server entry as written in config.json. */
-type ServerEntry = ServerConfig & {
-  channelId: string;
+type ServerEntry = {
+  id: string;
+  name: string;
   dir?: string;
   dailyRestart?: string;
   dailySummary?: string;
@@ -21,8 +21,9 @@ type ServerEntry = ServerConfig & {
 };
 
 /** What a server is configured to do, with every default applied. */
-export type ServerSettings = ServerConfig & {
-  channelId: string;
+export type ServerSettings = {
+  id: string;
+  name: string;
   dir?: string;
   /** `backupDir`, else `<dir>/backups`, else none (no Backup features). */
   backupDir?: string;
@@ -35,13 +36,22 @@ export type ServerSettings = ServerConfig & {
   quests: QuestMode;
 };
 
-export type Config = {
-  listenPort: number;
-  dbPath: string;
+/** The bot's guild, the role allowed to run admin commands, and a channel per server id. */
+export type DiscordConfig = {
   guildId: string;
   adminRoleId: string;
+  /** serverId -> channelId */
+  channels: Record<string, string>;
+};
+
+/** The mod port and a token per server id. */
+export type MinecraftIntegration = { listenPort: number; tokens: Record<string, string> };
+
+export type Config = {
+  dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
+  integrations: { minecraft: MinecraftIntegration; discord: DiscordConfig };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -93,57 +103,122 @@ export function validateConfig(raw: unknown): string[] {
     if (v !== undefined && (typeof v !== 'number' || !ok(v))) err(where, `"${key}" must be ${rule}`);
   };
 
-  const port = raw.listenPort;
-  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-    err('', '"listenPort" must be a port number (1–65535)');
-  }
+  const port = (o: Obj, where: string) => {
+    const v = o.listenPort;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 65535) {
+      err(where, '"listenPort" must be a port number (1–65535)');
+    }
+  };
+  /** A map keyed by server id: reports unknown ids and returns its entries. */
+  const byServer = (o: Obj, key: string, where: string, ids: Set<string> | undefined): [string, unknown][] => {
+    const v = o[key];
+    if (!isObj(v)) {
+      err(where, `"${key}" must be an object keyed by server id`);
+      return [];
+    }
+    const entries = Object.entries(v);
+    if (ids) for (const [sid] of entries) if (!ids.has(sid)) err(`${where}.${key}`, `"${sid}" is not a server id`);
+    return entries;
+  };
+
+  const moves = oldShapeMoves(raw);
+  if (moves.length) return moves;
+
   str(raw, 'dbPath', '');
-  id(raw, 'guildId', '');
-  id(raw, 'adminRoleId', '');
   const url = str(raw, 'healthcheckUrl', '', false);
   if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err('', '"healthcheckUrl" must be an http(s) URL');
 
+  let ids: Set<string> | undefined;
   if (!Array.isArray(raw.servers) || raw.servers.length === 0) {
     err('', '"servers" must be a non-empty list');
+  } else {
+    ids = new Set<string>();
+    for (const [i, s] of (raw.servers as unknown[]).entries()) {
+      if (!isObj(s)) {
+        err(`servers[${i}]`, 'must be an object');
+        continue;
+      }
+      const sid = str(s, 'id', `servers[${i}]`);
+      const where = sid === undefined ? `servers[${i}]` : `server "${sid}"`;
+      str(s, 'name', where);
+      for (const key of ['dailyRestart', 'dailySummary']) {
+        const time = str(s, key, where, false);
+        if (time !== undefined && !parseDaily(time)) err(where, `"${key}" must be HH:MM (24-hour), got "${time}"`);
+      }
+      if (s.quests !== undefined && !QUEST_MODES.includes(s.quests as QuestMode)) {
+        err(where, `"quests" must be one of ${QUEST_MODES.join(', ')}`);
+      }
+      num(s, 'lagTps', where, (n) => n >= 1 && n <= 20, 'a number from 1 to 20');
+      num(s, 'lagMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
+      num(s, 'backupMaxAgeHours', where, (n) => n > 0, 'a positive number');
+      num(s, 'backupMinFreeGB', where, (n) => n > 0, 'a positive number');
+      if (s.lagAlerts !== undefined && typeof s.lagAlerts !== 'boolean') err(where, '"lagAlerts" must be true or false');
+      for (const key of ['dir', 'backupDir']) {
+        const path = str(s, key, where, false);
+        if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
+      }
+      // Last, so a duplicate's own problems read first.
+      if (sid !== undefined) {
+        if (ids.has(sid)) err(where, 'duplicate id');
+        ids.add(sid);
+      }
+    }
+  }
+
+  const integrations = raw.integrations;
+  if (!isObj(integrations)) {
+    err('', '"integrations" is required');
     return errors;
   }
-  const ids = new Set<string>();
-  const tokens = new Set<string>();
-  raw.servers.forEach((s: unknown, i: number) => {
-    if (!isObj(s)) return err(`servers[${i}]`, 'must be an object');
-    const sid = str(s, 'id', `servers[${i}]`);
-    const where = sid === undefined ? `servers[${i}]` : `server "${sid}"`;
-    str(s, 'name', where);
-    id(s, 'channelId', where);
-    for (const key of ['dailyRestart', 'dailySummary']) {
-      const time = str(s, key, where, false);
-      if (time !== undefined && !parseDaily(time)) err(where, `"${key}" must be HH:MM (24-hour), got "${time}"`);
+  const mc = integrations.minecraft;
+  if (!isObj(mc)) err('integrations', '"minecraft" is required');
+  else {
+    const where = 'integrations.minecraft';
+    port(mc, where);
+    const seen = new Set<string>();
+    for (const [sid, token] of byServer(mc, 'tokens', where, ids)) {
+      if (typeof token !== 'string' || token.length < 16) err(`${where}.tokens`, `"${sid}" must be at least 16 characters`);
+      else if (seen.has(token)) err(`${where}.tokens`, `"${sid}" is the same as another server's`);
+      else seen.add(token);
     }
-    if (s.quests !== undefined && !QUEST_MODES.includes(s.quests as QuestMode)) {
-      err(where, `"quests" must be one of ${QUEST_MODES.join(', ')}`);
+    if (isObj(mc.tokens)) {
+      for (const sid of ids ?? []) if (!Object.hasOwn(mc.tokens, sid)) err(`${where}.tokens`, `server "${sid}" has no token`);
     }
-    num(s, 'lagTps', where, (n) => n >= 1 && n <= 20, 'a number from 1 to 20');
-    num(s, 'lagMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
-    num(s, 'backupMaxAgeHours', where, (n) => n > 0, 'a positive number');
-    num(s, 'backupMinFreeGB', where, (n) => n > 0, 'a positive number');
-    if (s.lagAlerts !== undefined && typeof s.lagAlerts !== 'boolean') err(where, '"lagAlerts" must be true or false');
-    for (const key of ['dir', 'backupDir']) {
-      const path = str(s, key, where, false);
-      if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
+  }
+  const discord = integrations.discord;
+  if (!isObj(discord)) err('integrations', '"discord" is required');
+  else {
+    const where = 'integrations.discord';
+    id(discord, 'guildId', where);
+    id(discord, 'adminRoleId', where);
+    for (const [sid, channel] of byServer(discord, 'channels', where, ids)) {
+      if (typeof channel !== 'string' || !SNOWFLAKE.test(channel)) {
+        err(`${where}.channels`, `"${sid}" must be a Discord ID (17–20 digits)`);
+      }
     }
-    // Last, so a duplicate's own problems read first.
-    if (sid !== undefined) {
-      if (ids.has(sid)) err(where, 'duplicate id');
-      ids.add(sid);
-    }
-    const token = str(s, 'token', where);
-    if (token !== undefined) {
-      if (token.length < 16) err(where, '"token" must be at least 16 characters');
-      else if (tokens.has(token)) err(where, '"token" is the same as another server\'s');
-      tokens.add(token);
-    }
-  });
+  }
   return errors;
+}
+
+/** The keys of a pre-orrery config.json, each with where it moves to; empty if there are none. */
+function oldShapeMoves(raw: Obj): string[] {
+  const moves: string[] = [];
+  for (const [key, to] of [
+    ['listenPort', 'integrations.minecraft.listenPort'],
+    ['guildId', 'integrations.discord.guildId'],
+    ['adminRoleId', 'integrations.discord.adminRoleId'],
+  ]) {
+    if (Object.hasOwn(raw, key)) moves.push(`old config shape: move "${key}" to ${to}`);
+  }
+  if (Array.isArray(raw.servers)) {
+    for (const [i, s] of (raw.servers as unknown[]).entries()) {
+      if (!isObj(s)) continue;
+      const sid = typeof s.id === 'string' ? s.id : `<id of servers[${i}]>`;
+      if (Object.hasOwn(s, 'token')) moves.push(`old config shape: move server "${sid}"'s "token" to integrations.minecraft.tokens.${sid}`);
+      if (Object.hasOwn(s, 'channelId')) moves.push(`old config shape: move server "${sid}"'s "channelId" to integrations.discord.channels.${sid}`);
+    }
+  }
+  return moves;
 }
 
 /** Reads, parses, validates and resolves a config file; throws one error listing every problem. */

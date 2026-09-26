@@ -8,19 +8,8 @@ if (!token) throw new Error('DISCORD_TOKEN is not set');
 const config = loadConfig(process.argv[2] ?? 'config.json');
 
 const handle = await startHub(config, {
-  startFrontend: async (hub, stats, restarts, links) => {
-    const discord = await startDiscord(
-      hub,
-      stats,
-      restarts,
-      links,
-      {
-        guildId: config.guildId,
-        adminRoleId: config.adminRoleId,
-        channels: Object.fromEntries(config.servers.map((s) => [s.id, s.channelId])),
-      },
-      token,
-    );
+  startFrontend: async (hub, stats, restarts, links, cfg) => {
+    const discord = await startDiscord(hub, stats, restarts, links, cfg, token);
     return { connected: discord.connected, stop: () => void discord.client.destroy() };
   },
   get: httpGet,

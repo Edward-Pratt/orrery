@@ -14,22 +14,15 @@ test('a started hub relays mod chat to the frontend and shuts down cleanly', asy
   const dir = mkdtempSync(join(tmpdir(), 'hub-start-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const config: Config = {
-    listenPort: 0,
     dbPath: join(dir, 'hub.db'),
-    guildId: '1'.repeat(18),
-    adminRoleId: '2'.repeat(18),
     healthcheckUrl: 'https://example.invalid/ping',
     servers: [
-      {
-        id: 'gtnh',
-        name: 'GTNH',
-        token: TOKEN,
-        channelId: '3'.repeat(18),
-        backupMinFreeGB: 10,
-        lag: { tps: 15, minutes: 2, enabled: true },
-        quests: 'batched',
-      },
+      { id: 'gtnh', name: 'GTNH', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
     ],
+    integrations: {
+      minecraft: { listenPort: 0, tokens: { gtnh: TOKEN } },
+      discord: { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } },
+    },
   };
   const seen: HubEvent[] = [];
   let stopped = false;

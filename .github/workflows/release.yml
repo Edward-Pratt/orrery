@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ['hub-v*', 'mod-v*']
+    tags: ['hub-v*', 'mod-v*', 'web-v*']
 
 permissions:
   contents: write # gh release create
@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - name: Notes from this part's history only
         run: |
-          part=${GITHUB_REF_NAME%%-v*}   # hub or mod
+          part=${GITHUB_REF_NAME%%-v*}   # hub, mod or web
           prev=$(git describe --tags --abbrev=0 --match "$part-v*" "$GITHUB_REF_NAME^" 2>/dev/null || true)
           git log --oneline "${prev:+$prev..}$GITHUB_REF_NAME" -- "$part/" > notes.md
       - uses: actions/download-artifact@v4
@@ -27,10 +27,18 @@ jobs:
         with:
           name: mod-jar
           path: dist
+      - uses: actions/download-artifact@v4
+        if: startsWith(github.ref_name, 'web-v')
+        with:
+          name: web-dist
+          path: web-dist
+      - name: Archive the dashboard build
+        if: startsWith(github.ref_name, 'web-v')
+        run: mkdir -p dist && tar -czf "dist/orrery-$GITHUB_REF_NAME.tar.gz" -C web-dist .
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           files=()
-          if [[ -d dist ]]; then files=(dist/*.jar); fi
+          if [[ -d dist ]]; then files=(dist/*); fi
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md "${files[@]}"

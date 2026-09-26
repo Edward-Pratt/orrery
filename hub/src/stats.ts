@@ -1,26 +1,15 @@
-import { backupStats, freeBytes, growthPerDay, listBackups, type Backup } from './backups.ts';
+import { backupStats, freeBytes, growthPerDay, listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
-import type { AuditEntry, ServerHub, ServerState } from './servers.ts';
+import type { AuditEntry, ServerHub } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
+import type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, TpsStats } from './types.ts';
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
 
-type TpsStats = { avg: number; min: number } | null;
-
-export type StatusAnswer = { state: ServerState; uptimeDay: number | null; uptimeWeek: number | null };
-export type TpsAnswer = { state: ServerState; lastHour: { ts: number; tps: number }[]; hour: TpsStats; day: TpsStats };
-export type PlaytimeAnswer =
-  | { found: true; player: string; totalMs: number; weekMs: number; lastSeen: { online: true } | number | null }
-  | { found: false; reason: 'noInput' | 'notLinked' };
-/** A Server without a Backup folder has no Backup answers at all, rather than an empty list. */
-export type BackupsAnswer =
-  | { configured: false }
-  | { configured: true; backups: Backup[]; free: number | null; /** Bytes per day. */ growth: number | null };
-/** `/top` periods: the last 24 hours, the last 7 days, all time. */
-export type Period = 'day' | 'week' | 'all';
 
 const PERIOD_MS: Record<Period, number> = { day: DAY, week: 7 * DAY, all: Infinity };
 const TOP_LIMIT = 10;

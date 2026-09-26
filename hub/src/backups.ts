@@ -1,8 +1,9 @@
 import { lstat, readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ServerHub } from './servers.ts';
+import type { Backup, BackupStats } from './types.ts';
+export type { Backup, BackupStats } from './types.ts';
 
-export type Backup = { name: string; size: number; mtimeMs: number };
 
 /** ServerUtilities' backup names: "<YYYY-MM-DD-HH-MM-SS>.zip", moved into place atomically when finished. */
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}.*\.zip$/;
@@ -51,7 +52,6 @@ export async function freeBytes(dir: string): Promise<number | null> {
   }
 }
 
-export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };
 
 /** Count, total size, free space and growth; null if `dir` isn't a folder (no backups line at all). Never throws. */
 export async function backupStats(dir: string): Promise<BackupStats | null> {

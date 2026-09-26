@@ -1,10 +1,23 @@
-/** The HTTP API's types, for the dashboard to import type-only. Imports nothing at runtime. */
-import type { AuditEntry, HubEvent } from './servers.ts';
-import type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
+/**
+ * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
+ * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
+ */
+import type { AuditEntry, BackupsAnswer, HubEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
 
-export type { HubEvent, Lifecycle, Notice, Severity, ServerState, Tps } from './servers.ts';
-export type { Backup } from './backups.ts';
-export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
+export type {
+  Backup,
+  BackupsAnswer,
+  HubEvent,
+  Lifecycle,
+  Notice,
+  Period,
+  PlaytimeAnswer,
+  ServerState,
+  Severity,
+  StatusAnswer,
+  Tps,
+  TpsAnswer,
+} from './types.ts';
 
 /** `GET /api/me`: the logged-in admin. */
 export type Me = { id: string; username: string };

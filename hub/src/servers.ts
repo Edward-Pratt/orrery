@@ -2,70 +2,13 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
-import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg, type QuestDone } from './protocol.ts';
-import type { Summary } from './summary.ts';
+import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
+import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState } from './types.ts';
+export type { Announcement, AuditEntry, GameMsg, HubEvent, HubOutput, Lifecycle, Notice, ServerState, Severity, Tps } from './types.ts';
 
 /** No token: the server can't connect (the Minecraft integration is off). */
 export type ServerConfig = { id: string; name: string; token?: string };
 
-export type ServerState = {
-  id: string;
-  name: string;
-  online: boolean;
-  hung: boolean;
-  tps: number | null;
-  players: string[];
-  /** Slowest dimensions from the latest heartbeat (empty with an older mod). */
-  dims: DimTime[];
-};
-
-export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered' | 'offline';
-export type GameMsg = Extract<
-  ModMsg,
-  { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' | 'quest' | 'link' | 'unlink' | 'backup' }
->;
-/** How much a notice matters; frontends pick colours from it. */
-export type Severity = 'problem' | 'warning' | 'good' | 'info';
-/** Something a hub-core module wants people to know about a server. Never sent by a mod. */
-export type Notice = { severity: Severity } & (
-  | { kind: 'restartScheduled'; ms: number; by: string }
-  | { kind: 'restartNow' }
-  | { kind: 'restartCancelled'; by: string }
-  | { kind: 'restartCancelledDown' }
-  | { kind: 'restartFailed'; error: string }
-  | { kind: 'lag'; tps: number; worst: DimTime | null }
-  | { kind: 'lagRecovered'; tps: number }
-  | { kind: 'backupOverdue'; hours: number; newest: string }
-  | { kind: 'backupsMissing' }
-  | { kind: 'lowDisk'; free: number; minFreeGB: number }
-  | { kind: 'backupFinished'; detail: string }
-  | { kind: 'backupFailed'; detail: string }
-);
-/**
- * What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up; a summary
- * carries the server's name for its heading.
- */
-export type Announcement =
-  | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
-  | { type: 'linked'; player: string; discordId: string }
-  | { type: 'summary'; name: string; summary: Summary };
-/** Chat sent into the game (`say`), and a command's output (`late`: output that came after the result). */
-export type HubOutput =
-  | Extract<HubMsg, { type: 'say' }>
-  | { type: 'console'; command: string; by: string; output: string[]; late?: true };
-export type HubEvent = { serverId: string } & (
-  | GameMsg
-  | { type: Lifecycle }
-  | ({ type: 'notice' } & Notice)
-  | Announcement
-  | HubOutput
-  | Tps
-);
-/** A server's TPS, from heartbeats, only when it moved by 0.1 or more. The live feed keeps just the latest. */
-export type Tps = { type: 'tps'; tps: number };
-
-/** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
-export type AuditEntry = { actor: string; action: string; target: string; details: string };
 
 export type HubOptions = {
   hungMs?: number;

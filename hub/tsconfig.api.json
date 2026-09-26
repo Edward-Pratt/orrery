@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": [], "lib": ["es2022"] },
+  "include": [],
+  "files": ["src/api.ts"]
+}

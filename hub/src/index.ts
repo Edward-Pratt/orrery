@@ -3,14 +3,17 @@ import { startDiscord } from './discord.ts';
 import { httpGet } from './health.ts';
 import { startHub } from './start.ts';
 
-const token = process.env.DISCORD_TOKEN;
-if (!token) throw new Error('DISCORD_TOKEN is not set');
 const config = loadConfig(process.argv[2] ?? 'config.json');
+const token = process.env.DISCORD_TOKEN;
+if (config.integrations.discord && !token) {
+  console.error('integrations.discord is configured but DISCORD_TOKEN is not set');
+  process.exit(1);
+}
 
 const handle = await startHub(config, {
   startFrontend: async (hub, stats, restarts, links, cfg) => {
-    const discord = await startDiscord(hub, stats, restarts, links, cfg, token);
-    return { connected: discord.connected, stop: () => void discord.client.destroy() };
+    const discord = await startDiscord(hub, stats, restarts, links, cfg, token ?? '');
+    return { stop: () => void discord.client.destroy() };
   },
   get: httpGet,
 });

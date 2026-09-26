@@ -6,7 +6,7 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 npm test            # node --test "test/*.test.ts"
 npm run typecheck   # tsc, noEmit
 npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
-npm start           # node src/index.ts; reads ./config.json (or argv[2]) and env DISCORD_TOKEN
+npm start           # node src/index.ts; reads ./config.json (or argv[2]) and env DISCORD_TOKEN (only with integrations.discord)
 ```
 
 ## TypeScript constraints (type stripping)
@@ -29,7 +29,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/stats.ts` | `Stats`: frontends' read questions as plain data (`status`, `tps`, `playtime`, `top`, `backups`, `crashLogs`, `summary`, `linkedPlayer`), owning the time windows, `/top` periods and each server's folders. Hub core. |
 | `src/summary.ts` | `Summary` type, `yesterday` (the local day before the summary's scheduled time; `Stats.summary` builds it) and `scheduleSummaries` (announces each server's summary at its `dailySummary` time). Hub core. |
 | `src/backups.ts` | `listBackups`, `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog; turns the mod's backup events into finished/failed notices). Hub core. |
-| `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent only while Discord is connected. Hub core. |
+| `src/health.ts` | `startPinger`: the `healthcheckUrl` liveness ping, sent every minute from the hub's own timer (so it stops when the hub dies or hangs), whatever Discord is doing. Hub core. |
 | `src/lag.ts` | `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices; `sparkline`. Hub core. |
 | `src/quests.ts` | `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min); announces `questBatch` events. Hub core. |
 | `src/links.ts` | `Links`: link codes (6 chars, 10 min, guess cap), answers the mod's `link`/`unlink`, announces `linked` events. Hub core. |
@@ -37,7 +37,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
-| `src/start.ts` | `startHub(config, { startFrontend, get })`: wires and starts a whole hub; its handle's `close` stops everything in order. The seam for whole-hub tests. |
+| `src/start.ts` | `startHub(config, { startFrontend, get })`: wires and starts a whole hub, switching on each integration whose config section is present (Minecraft: `listen`; Discord: `startFrontend`); its handle's `close` stops everything in order. The seam for whole-hub tests. |
 | `src/index.ts` | Entry point: reads config and env, starts the hub with the real Discord frontend and HTTP get, wires signals. |
 
 A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.

@@ -49,11 +49,13 @@ cp config.example.json config.json
 openssl rand -hex 24          # one token per game server
 $EDITOR config.json           # servers[]: id, name; integrations.minecraft.tokens and
                               # integrations.discord (guildId, adminRoleId, channels), keyed by server id
-echo 'DISCORD_TOKEN=<bot token>' > .env
+echo 'DISCORD_TOKEN=<bot token>' > .env   # only needed with integrations.discord
 set -a; . ./.env; set +a; npm start
 ```
 
-`config.json` and `.env` are git-ignored. `npm run check-config` checks it
+`config.json` and `.env` are git-ignored. Each section under `integrations` is
+optional: leave out `discord` to run without the bot (and without a token), or
+`minecraft` to open no mod port. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see

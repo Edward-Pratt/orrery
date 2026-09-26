@@ -6,7 +6,6 @@ import {
   GatewayIntentBits,
   MessageFlags,
   SlashCommandBuilder,
-  Status,
   type ChatInputCommandInteraction,
   type Message,
   type Webhook,
@@ -38,8 +37,6 @@ import type { Period, Stats } from './stats.ts';
 
 export type DiscordFrontend = {
   client: Client;
-  /** True while every gateway shard is Ready (client.isReady() stays true through reconnects). */
-  connected: () => boolean;
 };
 
 const WEBHOOK_NAME = 'GTNH Relay';
@@ -355,6 +352,5 @@ export async function startDiscord(
   await client.login(token);
   return {
     client,
-    connected: () => client.ws.shards.size > 0 && client.ws.shards.every((s) => s.status === Status.Ready),
   };
 }

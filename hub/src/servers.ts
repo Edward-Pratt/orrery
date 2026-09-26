@@ -5,7 +5,8 @@ import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type DimTime, type Hello, type HubMsg, type ModMsg, type QuestDone } from './protocol.ts';
 import type { Summary } from './summary.ts';
 
-export type ServerConfig = { id: string; name: string; token: string };
+/** No token: the server can't connect (the Minecraft integration is off). */
+export type ServerConfig = { id: string; name: string; token?: string };
 
 export type ServerState = {
   id: string;
@@ -108,7 +109,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   constructor(servers: ServerConfig[], opts: HubOptions = {}) {
     super();
     for (const s of servers) {
-      if (s.token.length < 16) throw new Error(`server "${s.id}": token must be at least 16 characters`);
+      if (s.token !== undefined && s.token.length < 16) throw new Error(`server "${s.id}": token must be at least 16 characters`);
       this.#configs.set(s.id, s);
       this.#states.set(s.id, { id: s.id, name: s.name, online: false, hung: false, tps: null, players: [], dims: [] });
     }
@@ -263,7 +264,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       return `protocol ${p} not supported (hub speaks ${speaks})`;
     }
     const cfg = this.#configs.get(hello.serverId);
-    if (!cfg || !tokenMatches(cfg.token, hello.token)) return 'unknown serverId or bad token';
+    if (!cfg?.token || !tokenMatches(cfg.token, hello.token)) return 'unknown serverId or bad token';
     return null;
   }
 

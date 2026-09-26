@@ -73,7 +73,9 @@ test('validateConfig reports every problem at once, with where it is', async (t)
   low.servers[0].lagTps = 0.5;
   assert.deepEqual(validateConfig(low), ['server "gtnh": "lagTps" must be a number from 1 to 20']);
   assert.deepEqual(validateConfig([]), ['config must be a JSON object']);
-  assert.deepEqual(validateConfig({}), ['"dbPath" is required', '"servers" must be a non-empty list', '"integrations" is required']);
+  assert.deepEqual(validateConfig({}), ['"dbPath" is required', '"servers" must be a non-empty list']);
+  assert.deepEqual(validateConfig({ ...valid(dir), integrations: [] }), ['"integrations" must be an object']);
+  assert.deepEqual(validateConfig({ ...valid(dir), integrations: { discord: 'x' } }), ['integrations: "discord" must be an object']);
 });
 
 test('every server needs its own token when Minecraft is configured', async (t) => {
@@ -86,6 +88,16 @@ test('every server needs its own token when Minecraft is configured', async (t) 
     'integrations.minecraft.tokens: "two" is the same as another server\'s',
     'integrations.minecraft.tokens: server "three" has no token',
   ]);
+});
+
+test('every integration is optional', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations, ...none } = valid(dir);
+  assert.deepEqual(validateConfig(none), []);
+  assert.deepEqual(validateConfig({ ...none, integrations: {} }), []);
+  assert.deepEqual(validateConfig({ ...none, integrations: { discord: integrations.discord } }), []);
+  assert.deepEqual(validateConfig({ ...none, integrations: { minecraft: integrations.minecraft } }), []);
 });
 
 test('the old config shape is rejected with each key it has to move', () => {

@@ -14,7 +14,7 @@ import { Stats } from './stats.ts';
 import { scheduleSummaries } from './summary.ts';
 
 /** What the hub needs from a frontend once it is running. */
-export type Frontend = { connected: () => boolean; stop: () => void };
+export type Frontend = { stop: () => void };
 
 /** The outside world the hub touches, passed in so tests need no network. */
 export type HubDeps = {
@@ -30,7 +30,8 @@ export type HubDeps = {
 };
 
 export type HubHandle = {
-  port: number;
+  /** The mod port; undefined when the Minecraft integration is off. */
+  port: number | undefined;
   /** Stops everything in order; resolves once the socket and database are closed. */
   close: () => Promise<void>;
 };
@@ -46,7 +47,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const touch = setInterval(() => db.touch(), 60_000);
 
   const { minecraft, discord } = config.integrations;
-  const hub = new ServerHub(config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft.tokens[s.id] ?? '' })));
+  const hub = new ServerHub(config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft?.tokens[s.id] })));
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
   const restarts = new RestartScheduler(hub);
@@ -69,17 +70,15 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
   });
 
-  const port = await hub.listen(minecraft.listenPort);
-  console.log(`[hub] listening on 127.0.0.1:${port}`);
+  const port = minecraft ? await hub.listen(minecraft.listenPort) : undefined;
+  console.log(port === undefined ? '[hub] Minecraft integration off: no mod port' : `[hub] listening on 127.0.0.1:${port}`);
   playtime.start();
   lag.start();
   quests.start();
 
   const stats = new Stats(hub, db, config.servers);
-  const frontend = await deps.startFrontend(hub, stats, restarts, links, discord);
-  const stopPing = config.healthcheckUrl
-    ? startPinger(config.healthcheckUrl, frontend.connected, 60_000, deps.get)
-    : () => {};
+  const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
+  const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
@@ -97,7 +96,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       stopSummaries();
       upkeep();
       stopPing();
-      frontend.stop();
+      frontend?.stop();
       return hub.close().finally(() => {
         clearInterval(touch);
         db.close();

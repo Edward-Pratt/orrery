@@ -51,7 +51,8 @@ export type Config = {
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
-  integrations: { minecraft: MinecraftIntegration; discord: DiscordConfig };
+  /** Each integration is on when its section is present; none is required. */
+  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -165,14 +166,14 @@ export function validateConfig(raw: unknown): string[] {
     }
   }
 
-  const integrations = raw.integrations;
+  const integrations = raw.integrations ?? {};
   if (!isObj(integrations)) {
-    err('', '"integrations" is required');
+    err('', '"integrations" must be an object');
     return errors;
   }
   const mc = integrations.minecraft;
-  if (!isObj(mc)) err('integrations', '"minecraft" is required');
-  else {
+  if (mc !== undefined && !isObj(mc)) err('integrations', '"minecraft" must be an object');
+  else if (mc) {
     const where = 'integrations.minecraft';
     port(mc, where);
     const seen = new Set<string>();
@@ -186,8 +187,8 @@ export function validateConfig(raw: unknown): string[] {
     }
   }
   const discord = integrations.discord;
-  if (!isObj(discord)) err('integrations', '"discord" is required');
-  else {
+  if (discord !== undefined && !isObj(discord)) err('integrations', '"discord" must be an object');
+  else if (discord) {
     const where = 'integrations.discord';
     id(discord, 'guildId', where);
     id(discord, 'adminRoleId', where);
@@ -234,5 +235,5 @@ export function loadConfig(path: string): Config {
     throw new Error(`${path} has ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n- ${errors.join('\n- ')}`);
   }
   const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
-  return { ...c, servers: c.servers.map(resolve) };
+  return { ...c, servers: c.servers.map(resolve), integrations: c.integrations ?? {} };
 }

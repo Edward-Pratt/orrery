@@ -4,18 +4,15 @@ import { startPinger } from '../src/health.ts';
 
 const flush = () => new Promise((r) => setImmediate(r));
 
-test('pings every interval only while up, and survives failures', async (t) => {
+test('pings every interval and survives failures', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
-  let up = false;
   const calls: string[] = [];
   let result: Promise<{ ok: boolean; status: number }> = Promise.resolve({ ok: true, status: 200 });
-  const stop = startPinger('https://hc/x', () => up, 60_000, async (url) => {
+  const stop = startPinger('https://hc/x', 60_000, async (url) => {
     calls.push(url);
     return result;
   });
-  t.mock.timers.tick(60_000);
   assert.deepEqual(calls, []);
-  up = true;
   t.mock.timers.tick(60_000);
   assert.deepEqual(calls, ['https://hc/x']);
   result = Promise.reject(new Error('network down'));

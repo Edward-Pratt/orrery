@@ -15,13 +15,15 @@ Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
 
 ## Architecture rules
 
-- Mods connect **out** to the hub (TCP `127.0.0.1:25580`, newline-delimited JSON, protocol v1).
-- The hub owns all state. Frontends (Discord now, web dashboard later) only call the public
+- The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
+  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft` and `discord`.
+- **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
+  `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
+- **Discord integration** = the bot, a frontend. Frontends (Discord now, web dashboard later) only call the public
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler` and `Stats` (`hub/src/stats.ts`); they
-  never talk to mods. Discord-specific config stays in `discord.ts`.
+  never talk to mods. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
+- `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge.
-- v2 is changing this: the hub becomes a platform with built-in integrations and a separate dashboard
-  (`docs/adr/0002`, `CONTEXT.md`). The rules above describe the code as it is until that lands.
 
 ## Changing the wire protocol
 

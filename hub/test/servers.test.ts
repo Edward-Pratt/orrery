@@ -34,6 +34,16 @@ test('rejects a bad token and closes', async (t) => {
   assert.equal(hub.get('gtnh')?.online, false);
 });
 
+test('rejects a server that has no token', async (t) => {
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH' }]);
+  const port = await hub.listen(0);
+  t.after(() => hub.close());
+  const mod = fakeMod(port);
+  mod.send(hello(''));
+  assert.deepEqual(await mod.next(), { type: 'reject', reason: 'unknown serverId or bad token' });
+  await mod.closed;
+});
+
 test('accepts only protocol versions in the supported range', async (t) => {
   const { port } = await setup(t);
   for (const protocol of [0, 2, 1.5]) {

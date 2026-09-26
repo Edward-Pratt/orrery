@@ -60,7 +60,7 @@ Spec: `docs/archive/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `
 
 ## v2 — web dashboard (being designed)
 
-Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes a platform whose integrations (Discord,
+Spec: #26 · Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes a platform whose integrations (Discord,
 Minecraft, host) are switched on by config, and the dashboard is a separate Angular app in `web/`. The table
 below is the original feature list. What ships in v2.0 hasn't been decided yet.
 

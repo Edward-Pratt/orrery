@@ -49,3 +49,15 @@ export type AuditLog = (AuditEntry & { ts: number })[];
 
 /** The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. */
 export type LiveEvent = HubEvent;
+
+/** `POST /api/servers/:id/chat`: said in game as the admin (their Minecraft name if linked). 204. */
+export type ChatRequest = { message: string };
+
+/** `POST /api/servers/:id/command`: a console command, answered with `CommandOutput`; later output comes as `console` events. */
+export type CommandRequest = { command: string };
+
+/** `POST /api/servers/:id/restart`: a countdown restart in 0–60 whole minutes. 204; cancel with `POST …/restart/cancel`. */
+export type RestartRequest = { minutes: number };
+
+/** The answer to a command and to `POST /api/servers/:id/backup`. */
+export type CommandOutput = { output: string[] };

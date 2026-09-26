@@ -4,12 +4,12 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { AuditLog, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type { AuditLog, CommandOutput, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { HubEvent, ServerHub, ServerState } from './servers.ts';
+import { mcText, type HubEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
@@ -31,6 +31,12 @@ const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } a
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
 const AUDIT_LIMIT = 200;
+
+/** A request's JSON object body; undefined if it isn't one. */
+async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown> | undefined> {
+  const body = await req.json().catch(() => undefined);
+  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
+}
 
 /** What the API reads from; `db` only for its own sessions. */
 export type WebDeps = {
@@ -58,7 +64,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
   });
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
+  const origin = new URL(web.publicUrl).origin;
   const app = new Hono<{ Variables: { user: { id: string; username: string } } }>().basePath('/api');
+  const actor = (user: Me) => `web:${user.username} (${user.id})`;
 
   app.get('/login', (c) => {
     const state = randomBytes(16).toString('base64url');
@@ -100,6 +108,16 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     c.set('user', user);
     await next();
   });
+  // CSRF, with SameSite=Lax: a state-changing request must come from the dashboard, and be JSON (a cross-site form
+  // can't send that without a CORS preflight, which is never answered).
+  app.use(async (c, next) => {
+    if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
+    if (c.req.header('origin') !== origin) return c.text('Wrong origin', 403);
+    if (c.req.header('content-type')?.split(';')[0]!.trim().toLowerCase() !== 'application/json') {
+      return c.text('Send JSON', 415);
+    }
+    await next();
+  });
   app.get('/me', (c) => c.json(c.get('user') satisfies Me));
   app.post('/logout', (c) => {
     db.deleteWebSession(hash(getCookie(c, 'session')!));
@@ -134,6 +152,61 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     if (server !== undefined && !hub.get(server)) return c.notFound();
     return c.json(stats.audit(AUDIT_LIMIT, server) satisfies AuditLog);
   });
+  // Actions: the server must be known and online.
+  app.post('/servers/:id/*', async (c, next) => {
+    const state = hub.get(c.req.param('id'));
+    if (!state) return c.notFound();
+    if (!state.online) return c.text(`${state.name} is offline`, 409);
+    await next();
+  });
+  app.post('/servers/:id/chat', async (c) => {
+    const id = c.req.param('id');
+    const user = c.get('user');
+    const message = (await jsonBody(c.req))?.message;
+    // Linked people appear in game under their Minecraft name, as from Discord.
+    if (typeof message !== 'string' || !hub.say(id, stats.linkedPlayer(user.id) ?? user.username, message)) {
+      return c.text('Give a message', 400);
+    }
+    hub.audit(actor(user), 'chat', id, mcText(message, 256));
+    return c.body(null, 204);
+  });
+  const run = async (id: string, command: string, by: string) => {
+    try {
+      return { output: await hub.runCommand(id, command, by) } satisfies CommandOutput;
+    } catch (err) {
+      return (err as Error).message; // timed out, or the server went away
+    }
+  };
+  app.post('/servers/:id/command', async (c) => {
+    const command = (await jsonBody(c.req))?.command;
+    if (typeof command !== 'string' || !command.trim().replace(/^\//, '')) {
+      return c.text('Give a command', 400);
+    }
+    // Output that comes later (spark's profiler link) goes on the event stream.
+    const result = await run(c.req.param('id'), command, actor(c.get('user')));
+    return typeof result === 'string' ? c.text(result, 502) : c.json(result);
+  });
+  app.post('/servers/:id/backup', async (c) => {
+    // The finished/failed notice follows on the event stream, from the mod's backup event.
+    const result = await run(c.req.param('id'), 'backup start', actor(c.get('user')));
+    return typeof result === 'string' ? c.text(result, 502) : c.json(result);
+  });
+  app.post('/servers/:id/restart', async (c) => {
+    const id = c.req.param('id');
+    if (restarts.pending(id)) return c.text('A restart is already scheduled: cancel it first.', 409);
+    const minutes = (await jsonBody(c.req))?.minutes;
+    try {
+      restarts.schedule(id, minutes as number, actor(c.get('user')), c.get('user').username);
+    } catch (err) {
+      return c.text((err as Error).message, 400); // only bad minutes are left to throw
+    }
+    return c.body(null, 204);
+  });
+  app.post('/servers/:id/restart/cancel', (c) =>
+    restarts.cancel(c.req.param('id'), actor(c.get('user')), c.get('user').username)
+      ? c.body(null, 204)
+      : c.text('No restart is scheduled.', 409),
+  );
   // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
   app.get('/events', (c) =>
     streamSSE(c, async (stream) => {

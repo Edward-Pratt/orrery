@@ -40,7 +40,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]), env D
 | `src/api.ts` | The HTTP API's request/response types, one per endpoint (`Integrations`, `ServerCard`, `ServerDetail`, `AuditLog`, `LiveEvent`, …), for the dashboard to import type-only. Type-only: imports nothing at runtime; `web.ts` checks each payload against it with `satisfies`. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
-| `src/web.ts` | Web integration: the Hono HTTP API under `/api` (`webApi`), Discord OAuth login for admin-role members (`OAuth`, real `discordOAuth`), sessions in SQLite, `GET /api/me`, `POST /api/logout`, reads (`/api/integrations`; `/api/servers` cards; `/api/servers/:id` status, TPS, top per period, backups; `/api/servers/:id/players/:name`, 404 if never seen; `/api/audit[?server=]`, newest 200; unknown server ids 404; chat/TPS/quest features, and TPS, only for a server with a mod token), `GET /api/events` (SSE: `LiveFeed`'s buffer after `Last-Event-ID`, then live events; keep-alive comments); every other route needs a session. `serveWebApi` serves it on 127.0.0.1. |
+| `src/web.ts` | Web integration: the Hono HTTP API under `/api` (`webApi`), Discord OAuth login for admin-role members (`OAuth`, real `discordOAuth`), sessions in SQLite, `GET /api/me`, `POST /api/logout`, reads (`/api/integrations`; `/api/servers` cards; `/api/servers/:id` status, TPS, top per period, backups; `/api/servers/:id/players/:name`, 404 if never seen; `/api/audit[?server=]`, newest 200; unknown server ids 404; chat/TPS/quest features, and TPS, only for a server with a mod token), `GET /api/events` (SSE: `LiveFeed`'s buffer after `Last-Event-ID`, then live events; keep-alive comments); actions (`POST /api/servers/:id/chat`, `/command`, `/restart`, `/restart/cancel`, `/backup`: 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the admin); every other route needs a session. `serveWebApi` serves it on 127.0.0.1. |
 | `src/start.ts` | `startHub(config, { startFrontend, get, oauth })`: wires and starts a whole hub, switching on each integration whose config section is present (Minecraft: `listen`; Discord: `startFrontend`; web: the HTTP API, with the injected `oauth`); its handle has the `LiveFeed`, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests. |
 | `src/index.ts` | Entry point: reads config and env, starts the hub with the real Discord frontend, HTTP get and Discord OAuth, wires signals. |
 
@@ -63,10 +63,12 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   `allowedMentions: { parse: [] }` so nothing the bot posts can ping.
 - `/cmd`: admin role check + `deferReply`. Every action on a server (commands via `runCommand`, restarts scheduled
   or cancelled) goes to the `audit` table with its actor: `discord:<username> (<id>)`, or `hub:<why>`
-  (`hub:daily`, `hub:restart`) for the hub's own. Web actions will use `web:<username> (<id>)`.
+  (`hub:daily`, `hub:restart`) for the hub's own, or `web:<username> (<id>)` from the dashboard (chat from it too).
 - Web: binds `127.0.0.1` (Caddy adds TLS in front). Login is Discord OAuth with a single-use `state` cookie; only
   members with the admin role get a session. Session ids are random, sent only in an httpOnly, Secure, SameSite=Lax
-  cookie, stored hashed, and expire server-side. Every `/api` route but login/callback needs one. The OAuth client
+  cookie, stored hashed, and expire server-side. Every `/api` route but login/callback needs one. Every request
+  but GET/HEAD (logout too) must also carry `Origin` = the public URL's origin (else 403) and a JSON content type
+  (else 415): CSRF, alongside SameSite=Lax. Chat from the dashboard goes through `ServerHub.say` like Discord's. The OAuth client
   secret comes from `DISCORD_CLIENT_SECRET`, never config.
 
 ## Tests

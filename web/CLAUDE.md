@@ -15,11 +15,23 @@ npm start        # dev server on http://localhost:4200, /api proxied to a local 
 change that breaks the dashboard fails `npm run build`. That module imports only `hub/src/types.ts`, which imports
 nothing, so nothing from the hub's runtime or Node types gets compiled here. Don't redeclare API types locally.
 
+## Files
+
+| File | Job |
+|---|---|
+| `src/app/session.ts` | `Session` (who is logged in, logout) and the `loggedOutOn401` interceptor. |
+| `src/app/integrations.ts` | `Integrations` (`GET /api/integrations`, asked once) and `enabled(name)`, the `canMatch` guard. |
+| `src/app/app.routes.ts` | One lazy route per integration with pages, matched only when it is on (Minecraft: `servers`). |
+| `src/app/events.ts` | `LiveEvents.all$`: `GET /api/events` as an observable (fetch, not EventSource: a reconnect sends Last-Event-ID and skips ids already seen). Ends on 401. |
+| `src/app/servers/` | The Minecraft integration's pages: server cards (live TPS from `tps` events, re-fetched on lifecycle, join/leave and restart notices; nothing polls) and a server page with live chat. |
+| `src/app/testing.ts` | `fakeEvents()`: a fake `/api/events` for the `FETCH` token. |
+
 ## Rules
 
 - Every POST sends `content-type: application/json`, even with no body (HttpClient adds none for `null`): the hub
   rejects anything else (CSRF). The browser adds `Origin` itself.
-- Any 401 means logged out: the `loggedOutOn401` interceptor clears `Session.user`.
+- Any 401 means logged out: the `loggedOutOn401` interceptor clears `Session.user` (the event stream does too).
+- Features come from the card (`features.chat`, `features.tps`): a server without the mod shows neither.
 - spartan/ui components are generated into `libs/ui` (`npx ng g @spartan-ng/cli:ui <name>`, config in
   `components.json`), and are ours to edit.
 
@@ -32,5 +44,5 @@ so the hub's `Origin` check and its post-login redirect match the dev server. Ad
 
 ## Tests
 
-Vitest on services against a fake backend (`provideHttpClientTesting` + `HttpTestingController`). Minimal component
+Vitest against a fake backend: `provideHttpClientTesting` + `HttpTestingController` for REST, `fakeEvents()` for the stream. Minimal component
 tests; no end-to-end tests yet.

@@ -1,8 +1,8 @@
-import { backupStats, freeBytes, listBackups, type Backup } from './backups.ts';
+import { backupStats, freeBytes, growthPerDay, listBackups, type Backup } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
-import type { ServerHub, ServerState } from './servers.ts';
+import type { AuditEntry, ServerHub, ServerState } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
 
 const HOUR = 60 * 60_000;
@@ -16,7 +16,9 @@ export type PlaytimeAnswer =
   | { found: true; player: string; totalMs: number; weekMs: number; lastSeen: { online: true } | number | null }
   | { found: false; reason: 'noInput' | 'notLinked' };
 /** A Server without a Backup folder has no Backup answers at all, rather than an empty list. */
-export type BackupsAnswer = { configured: false } | { configured: true; backups: Backup[]; free: number | null };
+export type BackupsAnswer =
+  | { configured: false }
+  | { configured: true; backups: Backup[]; free: number | null; /** Bytes per day. */ growth: number | null };
 /** `/top` periods: the last 24 hours, the last 7 days, all time. */
 export type Period = 'day' | 'week' | 'all';
 
@@ -77,12 +79,13 @@ export class Stats {
     return this.#db.top(serverId, Math.max(0, now - PERIOD_MS[period]), now, TOP_LIMIT, now);
   }
 
-  /** Finished Backups newest first, and free space on their disk. Never throws. */
+  /** Finished Backups newest first, free space on their disk, and growth per day. Never throws. */
   async backups(serverId: string): Promise<BackupsAnswer | undefined> {
     if (!this.#hub.get(serverId)) return undefined;
     const dir = this.#folders.get(serverId)?.backupDir;
     if (!dir) return { configured: false };
-    return { configured: true, backups: await listBackups(dir), free: await freeBytes(dir) };
+    const backups = await listBackups(dir);
+    return { configured: true, backups, free: await freeBytes(dir), growth: growthPerDay(backups) };
   }
 
   /** Crash logs written at or after `sinceMs` in the server folder (none without one). Never throws. */
@@ -109,6 +112,11 @@ export class Stats {
       crashes: this.#db.countEvents(serverId, 'crashed', from, to),
       ...(backups ? { backups } : {}),
     };
+  }
+
+  /** The newest audit log entries, for every server or one. */
+  audit(limit: number, serverId?: string): (AuditEntry & { ts: number })[] {
+    return this.#db.auditLog(limit, serverId);
   }
 
   /** The Minecraft name linked to a Discord user, if any. */

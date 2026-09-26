@@ -4,10 +4,13 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { WebIntegration } from './config.ts';
+import type { AuditLog, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
-import type { HubEvent } from './servers.ts';
+import type { RestartScheduler } from './restarts.ts';
+import type { HubEvent, ServerHub, ServerState } from './servers.ts';
+import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
 export type Member = { id: string; username: string; roles: string[] };
@@ -27,8 +30,33 @@ const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } a
 /** Sessions are stored hashed, so a copy of the database logs nobody in. */
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
+const AUDIT_LIMIT = 200;
+
+/** What the API reads from; `db` only for its own sessions. */
+export type WebDeps = {
+  db: Db;
+  live: LiveFeed;
+  hub: ServerHub;
+  stats: Stats;
+  restarts: RestartScheduler;
+  integrations: Config['integrations'];
+};
+
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(db: Db, web: WebIntegration, oauth: OAuth, live: LiveFeed) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, integrations }: WebDeps) {
+  // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
+  const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
+  const card = (s: ServerState): ServerCard => ({
+    id: s.id,
+    name: s.name,
+    online: s.online,
+    hung: s.hung,
+    tps: hasMod(s.id) ? s.tps : null,
+    players: s.players,
+    uptimeDay: stats.status(s.id)!.uptimeDay,
+    restart: restarts.pending(s.id) ?? null,
+    features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
+  });
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
   const app = new Hono<{ Variables: { user: { id: string; username: string } } }>().basePath('/api');
 
@@ -72,11 +100,36 @@ export function webApi(db: Db, web: WebIntegration, oauth: OAuth, live: LiveFeed
     c.set('user', user);
     await next();
   });
-  app.get('/me', (c) => c.json(c.get('user')));
+  app.get('/me', (c) => c.json(c.get('user') satisfies Me));
   app.post('/logout', (c) => {
     db.deleteWebSession(hash(getCookie(c, 'session')!));
     deleteCookie(c, 'session', COOKIE);
     return c.body(null, 204);
+  });
+  app.get('/integrations', (c) =>
+    c.json({ minecraft: !!integrations.minecraft, discord: !!integrations.discord, web: true } satisfies Integrations),
+  );
+  app.get('/servers', (c) => c.json(hub.list().map(card) satisfies ServerCard[]));
+  app.get('/servers/:id', async (c) => {
+    const id = c.req.param('id');
+    const state = hub.get(id);
+    if (!state) return c.notFound();
+    return c.json({
+      card: card(state),
+      status: stats.status(id)!,
+      tps: hasMod(id) ? stats.tps(id)! : null,
+      top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
+      backups: (await stats.backups(id))!,
+    } satisfies ServerDetail);
+  });
+  app.get('/servers/:id/players/:name', (c) => {
+    const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });
+    return answer ? c.json(answer satisfies PlayerAnswer) : c.notFound();
+  });
+  app.get('/audit', (c) => {
+    const server = c.req.query('server');
+    if (server !== undefined && !hub.get(server)) return c.notFound();
+    return c.json(stats.audit(AUDIT_LIMIT, server) satisfies AuditLog);
   });
   // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
   app.get('/events', (c) =>

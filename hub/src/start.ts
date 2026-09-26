@@ -96,7 +96,10 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
-  const app = web && deps.oauth ? webApi(db, web, deps.oauth, live) : undefined;
+  const app =
+    web && deps.oauth
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, integrations: config.integrations })
+      : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 

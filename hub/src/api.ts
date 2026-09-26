@@ -1,7 +1,51 @@
-/** The HTTP API's types, for the dashboard to import type-only. */
-import type { HubEvent } from './servers.ts';
+/** The HTTP API's types, for the dashboard to import type-only. Imports nothing at runtime. */
+import type { AuditEntry, HubEvent } from './servers.ts';
+import type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
 
-export type { HubEvent, Lifecycle, Notice, Severity } from './servers.ts';
+export type { HubEvent, Lifecycle, Notice, Severity, ServerState } from './servers.ts';
+export type { Backup } from './backups.ts';
+export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
+
+/** `GET /api/me`: the logged-in admin. */
+export type Me = { id: string; username: string };
+
+/** `GET /api/integrations`: which integrations are switched on. */
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean };
+
+/** What a server has; chat, TPS and quests only for a Minecraft server with the mod (a token configured). */
+export type Features = { chat: boolean; tps: boolean; quests: boolean };
+
+/** A countdown restart in progress: when it fires and who scheduled it. */
+export type PendingRestart = { at: number; by: string };
+
+/** `GET /api/servers`: one card per server. `tps` is null without the TPS feature. */
+export type ServerCard = {
+  id: string;
+  name: string;
+  online: boolean;
+  hung: boolean;
+  tps: number | null;
+  players: string[];
+  /** Share of the last 24 h the server was up (0–1), null if unknown. */
+  uptimeDay: number | null;
+  restart: PendingRestart | null;
+  features: Features;
+};
+
+/** `GET /api/servers/:id`. `tps` is null without the TPS feature; `top` is the 10 most-played per period. */
+export type ServerDetail = {
+  card: ServerCard;
+  status: StatusAnswer;
+  tps: TpsAnswer | null;
+  top: Record<Period, { player: string; ms: number }[]>;
+  backups: BackupsAnswer;
+};
+
+/** `GET /api/servers/:id/players/:name`: playtime and last seen. */
+export type PlayerAnswer = PlaytimeAnswer;
+
+/** `GET /api/audit[?server=id]`: newest first. */
+export type AuditLog = (AuditEntry & { ts: number })[];
 
 /** The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. */
 export type LiveEvent = HubEvent;

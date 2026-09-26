@@ -159,11 +159,20 @@ test('backups lists the folder newest first, with free space', async (t) => {
     ],
   );
   assert.equal(typeof b.free, 'number');
+  assert.equal(b.growth, 100);
+});
+
+test('audit reads the log newest first, all servers or one', () => {
+  const { db, stats } = setup();
+  db.audit({ actor: 'discord:a (1)', action: 'command', target: 'gtnh', details: 'list' }, 1);
+  db.audit({ actor: 'hub:daily', action: 'restart', target: 'other', details: '' }, 2);
+  assert.deepEqual(stats.audit(10).map((e) => e.target), ['other', 'gtnh']);
+  assert.deepEqual(stats.audit(10, 'gtnh').map((e) => e.ts), [1]);
 });
 
 test('backups in a folder that has gone away: none listed, free space unknown', async () => {
   const { stats } = setup({ backupDir: '/nonexistent/stats-test' });
-  assert.deepEqual(await stats.backups('gtnh'), { configured: true, backups: [], free: null });
+  assert.deepEqual(await stats.backups('gtnh'), { configured: true, backups: [], free: null, growth: null });
 });
 
 test('crash logs come from the server folder; none without one', async (t) => {

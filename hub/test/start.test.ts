@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
+import type { AuditLog, Integrations, PlayerAnswer, ServerCard, ServerDetail } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
+import type { RestartScheduler } from '../src/restarts.ts';
 import type { HubEvent, ServerHub } from '../src/servers.ts';
 import { startHub } from '../src/start.ts';
 import type { OAuth, WebApi } from '../src/web.ts';
-import { online, TOKEN, until } from './fake-mod.ts';
+import { online, sleep, TOKEN, until } from './fake-mod.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
@@ -406,4 +408,137 @@ test('the event stream needs a session, and a closed stream leaves no listener o
   assert.equal(live.listenerCount('event'), 1);
   await stream.close();
   await until(() => live.listenerCount('event') === 0);
+});
+
+/**
+ * A Minecraft + Discord + web hub with a logged-in admin and two servers: `gtnh` (with the mod and a Backup folder
+ * holding two backups a day apart) and `web` (no mod token).
+ */
+async function apiHub(t: TestContext) {
+  const cfg = config(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
+  const backupDir = join(dirname(cfg.dbPath), 'backups');
+  mkdirSync(backupDir);
+  const DAY_MS = 24 * 60 * 60_000;
+  for (const [name, bytes, mtime] of [
+    ['2026-09-24-06-00-00.zip', 100, Date.now() - DAY_MS],
+    ['2026-09-25-06-00-00.zip', 300, Date.now()],
+  ] as const) {
+    writeFileSync(join(backupDir, name), 'x'.repeat(bytes));
+    utimesSync(join(backupDir, name), mtime / 1000, mtime / 1000);
+  }
+  cfg.servers = [{ ...cfg.servers[0]!, backupDir }, { ...cfg.servers[0]!, id: 'web', name: 'Website' }];
+  let hub: ServerHub | undefined;
+  let restarts: RestartScheduler | undefined;
+  const handle = await startHub(cfg, {
+    startFrontend: async (h, _s, r) => {
+      hub = h;
+      restarts = r;
+      return { stop: () => {} };
+    },
+    get: async () => ({ ok: true, status: 200 }),
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async <T>(path: string): Promise<T> => {
+    const res = await app.request(path, { headers: { cookie } });
+    assert.equal(res.status, 200, path);
+    return res.json() as Promise<T>;
+  };
+  return { app, cookie, get, hub: hub!, restarts: restarts!, port: handle.port! };
+}
+
+const MOD = { chat: true, tps: true, quests: true };
+const NO_MOD = { chat: false, tps: false, quests: false };
+
+test('the API says which integrations are on, and nothing else about them', async (t) => {
+  const { get } = await apiHub(t);
+  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true });
+});
+
+test('server cards while offline: features only for the server with the mod', async (t) => {
+  const { get } = await apiHub(t);
+  const offline = { online: false, hung: false, tps: null, players: [], uptimeDay: null, restart: null };
+  assert.deepEqual(await get<ServerCard[]>('/api/servers'), [
+    { id: 'gtnh', name: 'GTNH', ...offline, features: MOD },
+    { id: 'web', name: 'Website', ...offline, features: NO_MOD },
+  ]);
+});
+
+test('a connected server card shows TPS, players, uptime and a pending restart', async (t) => {
+  const { get, hub, restarts, port } = await apiHub(t);
+  const mod = await online(port);
+  mod.send({ type: 'heartbeat', tps: 19.5, players: ['Steve'] });
+  await until(() => hub.get('gtnh')?.tps === 19.5);
+  restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
+  const [card] = await get<ServerCard[]>('/api/servers');
+  const { uptimeDay, restart, ...rest } = card!;
+  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], features: MOD });
+  assert.equal(uptimeDay, 1);
+  assert.equal(restart?.by, 'alice');
+  assert.ok(restart!.at > Date.now());
+});
+
+test('one server: status, TPS, top players per period and backups', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] }); // playtime syncs on a 10 s interval
+  const { get, hub, port } = await apiHub(t);
+  const offline = await get<ServerDetail>('/api/servers/gtnh');
+  assert.equal(offline.card.online, false);
+  assert.deepEqual(offline.status, { state: { id: 'gtnh', name: 'GTNH', online: false, hung: false, tps: null, players: [], dims: [] }, uptimeDay: null, uptimeWeek: null });
+  assert.deepEqual(offline.tps, { state: offline.status.state, lastHour: [], hour: null, day: null });
+  assert.deepEqual(offline.top, { day: [], week: [], all: [] });
+  assert.ok(offline.backups.configured);
+  assert.deepEqual(offline.backups.backups.map((b) => [b.name, b.size]), [
+    ['2026-09-25-06-00-00.zip', 300],
+    ['2026-09-24-06-00-00.zip', 100],
+  ]);
+  assert.equal(offline.backups.growth, 200);
+  assert.equal(typeof offline.backups.free, 'number');
+
+  const mod = await online(port);
+  mod.send({ type: 'heartbeat', tps: 20, players: ['Steve'] });
+  await until(() => hub.get('gtnh')?.players.length === 1);
+  t.mock.timers.tick(10_000);
+  await sleep(5); // a session needs a millisecond of playtime to count
+  const detail = await get<ServerDetail>('/api/servers/gtnh');
+  assert.equal(detail.status.state.online, true);
+  assert.deepEqual(detail.top.day.map((p) => p.player), ['Steve']);
+  const steve = await get<PlayerAnswer>('/api/servers/gtnh/players/Steve');
+  assert.ok(steve.found);
+  assert.deepEqual(steve.lastSeen, { online: true });
+});
+
+test('a server without the mod has no TPS and no Backup folder', async (t) => {
+  const { get } = await apiHub(t);
+  const detail = await get<ServerDetail>('/api/servers/web');
+  assert.deepEqual(detail.card.features, NO_MOD);
+  assert.equal(detail.tps, null);
+  assert.deepEqual(detail.backups, { configured: false });
+});
+
+test('the audit log reads newest first, for all servers or one', async (t) => {
+  const { get, restarts, port } = await apiHub(t);
+  await online(port);
+  restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
+  restarts.cancel('gtnh', 'discord:bob (2)', 'bob');
+  // Not the hub's own in-game warnings, whose timing varies.
+  const byPeople = (log: AuditLog) => log.filter((e) => e.actor.startsWith('discord:'));
+  const log = byPeople(await get<AuditLog>('/api/audit'));
+  assert.deepEqual(log.map(({ ts: _, ...e }) => e), [
+    { actor: 'discord:bob (2)', action: 'restart cancel', target: 'gtnh', details: '' },
+    { actor: 'discord:alice (1)', action: 'restart', target: 'gtnh', details: 'in 10 min' },
+  ]);
+  assert.deepEqual(byPeople(await get<AuditLog>('/api/audit?server=gtnh')), log);
+  assert.deepEqual(await get<AuditLog>('/api/audit?server=web'), []);
+});
+
+test('unknown servers get 404, and every read needs a session', async (t) => {
+  const { app, cookie } = await apiHub(t);
+  for (const path of ['/api/servers/nope', '/api/servers/nope/players/Steve', '/api/audit?server=nope']) {
+    assert.equal((await app.request(path, { headers: { cookie } })).status, 404, path);
+  }
+  for (const path of ['/api/integrations', '/api/servers', '/api/servers/gtnh', '/api/servers/gtnh/players/Steve', '/api/audit']) {
+    assert.equal((await app.request(path)).status, 401, path);
+  }
 });

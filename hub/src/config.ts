@@ -47,12 +47,15 @@ export type DiscordConfig = {
 /** The mod port and a token per server id. */
 export type MinecraftIntegration = { listenPort: number; tokens: Record<string, string> };
 
+/** The HTTP API: localhost port, the public URL (OAuth redirect is derived from it), the Discord OAuth app. */
+export type WebIntegration = { listenPort: number; publicUrl: string; clientId: string; sessionDays: number };
+
 export type Config = {
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
   /** Each integration is on when its section is present; none is required. */
-  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig };
+  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -199,6 +202,20 @@ export function validateConfig(raw: unknown): string[] {
       }
     }
   }
+  const web = integrations.web;
+  if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
+  else if (web) {
+    const where = 'integrations.web';
+    port(web, where);
+    const url = str(web, 'publicUrl', where);
+    const parsed = url === undefined ? undefined : URL.parse(url);
+    if (url !== undefined && (parsed?.protocol !== 'https:' || parsed.pathname !== '/')) {
+      err(where, '"publicUrl" must be an https URL with no path');
+    }
+    id(web, 'clientId', where);
+    num(web, 'sessionDays', where, (n) => n > 0, 'a positive number');
+    if (discord === undefined) err(where, 'needs integrations.discord for its "guildId" and "adminRoleId"');
+  }
   return errors;
 }
 
@@ -236,5 +253,7 @@ export function loadConfig(path: string): Config {
     throw new Error(`${path} has ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n- ${errors.join('\n- ')}`);
   }
   const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
-  return { ...c, servers: c.servers.map(resolve), integrations: c.integrations ?? {} };
+  const integrations = { ...c.integrations };
+  if (integrations.web) integrations.web = { ...integrations.web, sessionDays: integrations.web.sessionDays ?? 7 };
+  return { ...c, servers: c.servers.map(resolve), integrations };
 }

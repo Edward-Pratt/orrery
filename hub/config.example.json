@@ -24,6 +24,12 @@
       "guildId": "YOUR_DISCORD_SERVER_ID",
       "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
       "channels": { "gtnh": "CHANNEL_ID_FOR_THIS_SERVER" }
+    },
+    "web": {
+      "listenPort": 25581,
+      "publicUrl": "https://dash.orrery.run",
+      "clientId": "YOUR_DISCORD_OAUTH_APP_ID",
+      "sessionDays": 7
     }
   }
 }

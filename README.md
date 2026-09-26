@@ -50,12 +50,15 @@ openssl rand -hex 24          # one token per game server
 $EDITOR config.json           # servers[]: id, name; integrations.minecraft.tokens and
                               # integrations.discord (guildId, adminRoleId, channels), keyed by server id
 echo 'DISCORD_TOKEN=<bot token>' > .env   # only needed with integrations.discord
+echo 'DISCORD_CLIENT_SECRET=<OAuth secret>' >> .env   # only needed with integrations.web
 set -a; . ./.env; set +a; npm start
 ```
 
 `config.json` and `.env` are git-ignored. Each section under `integrations` is
 optional: leave out `discord` to run without the bot (and without a token), or
-`minecraft` to open no mod port. A server needs a token when `minecraft` is on,
+`minecraft` to open no mod port. `web` serves the dashboard's API on
+`127.0.0.1` (Discord login for admins; it needs `discord` for the guild and
+admin role, and the OAuth app's redirect set to `<publicUrl>/api/callback`). A server needs a token when `minecraft` is on,
 but a Discord channel is optional: one left out of `channels` just isn't
 bridged to Discord. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each

@@ -51,6 +51,7 @@ export class Db {
       CREATE INDEX IF NOT EXISTS tps_server_ts ON tps (server_id, ts);
       CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL);
     `);
   }
 
@@ -239,6 +240,7 @@ export class Db {
    */
   maintain(copyDir: string, now = Date.now()): void {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - TPS_KEEP_MS);
+    this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
     try {
       mkdirSync(copyDir, { recursive: true });
       const file = join(copyDir, `hub-${localDay(now)}.db`);
@@ -253,6 +255,30 @@ export class Db {
     } catch (err) {
       console.error('[db] nightly copy failed:', (err as Error).message);
     }
+  }
+
+  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. */
+  addWebSession(id: string, userId: string, username: string, expires: number): void {
+    this.#write(
+      'add web session',
+      'INSERT INTO web_sessions (id, user_id, username, expires) VALUES (?, ?, ?, ?)',
+      id,
+      userId,
+      username,
+      expires,
+    );
+  }
+
+  /** The logged-in Discord user of an unexpired session. */
+  webSession(id: string, now = Date.now()): { id: string; username: string } | undefined {
+    const row = this.#db
+      .prepare('SELECT user_id AS id, username FROM web_sessions WHERE id = ? AND expires > ?')
+      .get(id, now) as { id: string; username: string } | undefined;
+    return row && { ...row };
+  }
+
+  deleteWebSession(id: string): void {
+    this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
   }
 
   close(): void {

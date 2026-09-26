@@ -8,7 +8,7 @@ Wants=network-online.target
 [Service]
 User=opc
 WorkingDirectory=/home/opc/ClaudeCode/orrery/hub
-# DISCORD_TOKEN=... lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
+# DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
 # Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.

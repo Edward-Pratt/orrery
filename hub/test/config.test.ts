@@ -101,6 +101,46 @@ test('every integration is optional', async (t) => {
   assert.deepEqual(validateConfig({ ...none, integrations: { minecraft: integrations.minecraft } }), []);
 });
 
+const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
+
+test('the web integration needs a port, an https public URL, a client id, and Discord\'s guild and admin role', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations, ...c } = valid(dir);
+  assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: { ...WEB, sessionDays: 30 } } }), []);
+  assert.deepEqual(
+    validateConfig({
+      ...c,
+      integrations: { web: { listenPort: 'x', publicUrl: 'http://dash.orrery.run', clientId: 'abc', sessionDays: 0 } },
+    }),
+    [
+      'integrations.web: "listenPort" must be a port number (1–65535)',
+      'integrations.web: "publicUrl" must be an https URL with no path',
+      'integrations.web: "clientId" must be a Discord ID (17–20 digits)',
+      'integrations.web: "sessionDays" must be a positive number',
+      'integrations.web: needs integrations.discord for its "guildId" and "adminRoleId"',
+    ],
+  );
+  const { guildId, adminRoleId, ...neither } = integrations.discord;
+  assert.deepEqual(validateConfig({ ...c, integrations: { discord: neither, web: WEB } }), [
+    'integrations.discord: "guildId" is required',
+    'integrations.discord: "adminRoleId" is required',
+  ]);
+  const onPath = { ...WEB, publicUrl: 'https://orrery.run/dash' };
+  assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: onPath } }), [
+    'integrations.web: "publicUrl" must be an https URL with no path',
+  ]);
+});
+
+test('loadConfig defaults the web session length to 7 days', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'config.json');
+  const c = valid(dir);
+  await writeFile(path, JSON.stringify({ ...c, integrations: { ...c.integrations, web: WEB } }));
+  assert.deepEqual(loadConfig(path).integrations.web, { ...WEB, sessionDays: 7 });
+});
+
 test('the old config shape is rejected with each key it has to move', () => {
   const old = {
     listenPort: 25580,

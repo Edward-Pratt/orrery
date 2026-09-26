@@ -6,7 +6,8 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 npm test            # node --test "test/*.test.ts"
 npm run typecheck   # tsc, noEmit
 npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
-npm start           # node src/index.ts; reads ./config.json (or argv[2]) and env DISCORD_TOKEN (only with integrations.discord)
+npm start           # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord)
+                    # and DISCORD_CLIENT_SECRET (only with integrations.web)
 ```
 
 ## TypeScript constraints (type stripping)
@@ -20,9 +21,9 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 |---|---|
 | `src/protocol.ts` | Wire types + `parseModLine` validation. The contract with the mod. |
 | `src/servers.ts` | `ServerHub`: TCP server, per-server state, liveness (crash/stop/hung), `say`, `runCommand`, `event` emitter (game, lifecycle and hub-core `notice` events), `publish` (hub-core modules put typed notices — kind, severity, details — on it). The API frontends use. |
-| `src/config.ts` | Config shape: `dbPath`, `healthcheckUrl`, `servers[]`, and `integrations.minecraft` (port, tokens) / `integrations.discord` (guild, admin role, channels) keyed by server id. `validateConfig` (every error at once, offline; the pre-2.0 shape gets a list of keys to move) and `loadConfig`, which returns `ServerSettings` per server with every default applied (lag 15 TPS/2 min, quests `batched`, 10 GB free) and the Backup folder derived (`backupDir`, else `<dir>/backups`). The only place per-server defaults live. Used by startup and `check-config`. Hub core. |
+| `src/config.ts` | Config shape: `dbPath`, `healthcheckUrl`, `servers[]`, and `integrations.minecraft` (port, tokens) / `integrations.discord` (guild, admin role, channels) keyed by server id, `integrations.web` (port, public URL, OAuth client id, session days; needs `discord`). `validateConfig` (every error at once, offline; the pre-2.0 shape gets a list of keys to move) and `loadConfig`, which returns `ServerSettings` per server with every default applied (lag 15 TPS/2 min, quests `batched`, 10 GB free, 7-day web sessions) and the Backup folder derived (`backupDir`, else `<dir>/backups`). The only place per-server defaults live. Used by startup and `check-config`. Hub core. |
 | `src/check-config.ts` | `npm run check-config` entry point. |
-| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down) and uptime math; player sessions, daily peaks and stats queries; `maintain` (nightly: prune TPS > 90 days, 7 dated copies). Writes never throw. |
+| `src/db.ts` | SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down) and uptime math; player sessions, daily peaks and stats queries; dashboard login sessions (stored hashed); `maintain` (nightly: prune TPS > 90 days and expired sessions, 7 dated copies). Writes never throw. |
 | `src/daily.ts` | `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core. |
 | `src/units.ts` | `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core. |
 | `src/playtime.ts` | `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core. |
@@ -37,17 +38,18 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
-| `src/start.ts` | `startHub(config, { startFrontend, get })`: wires and starts a whole hub, switching on each integration whose config section is present (Minecraft: `listen`; Discord: `startFrontend`); its handle's `close` stops everything in order. The seam for whole-hub tests. |
-| `src/index.ts` | Entry point: reads config and env, starts the hub with the real Discord frontend and HTTP get, wires signals. |
+| `src/web.ts` | Web integration: the Hono HTTP API under `/api` (`webApi`), Discord OAuth login for admin-role members (`OAuth`, real `discordOAuth`), sessions in SQLite, `GET /api/me`, `POST /api/logout`; every other route needs a session. `serveWebApi` serves it on 127.0.0.1. |
+| `src/start.ts` | `startHub(config, { startFrontend, get, oauth })`: wires and starts a whole hub, switching on each integration whose config section is present (Minecraft: `listen`; Discord: `startFrontend`; web: the HTTP API, with the injected `oauth`); its handle's `close` stops everything in order. The seam for whole-hub tests. |
+| `src/index.ts` | Entry point: reads config and env, starts the hub with the real Discord frontend, HTTP get and Discord OAuth, wires signals. |
 
-A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.
+The web API (`src/web.ts`, for the separate dashboard app) calls `ServerHub`, `RestartScheduler` and `Stats` (and `Db` only for its own sessions) — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
 New hub-core output should be a typed `Notice` on the event stream (`ServerHub.publish`), worded and coloured in
 `format.ts` — not a text callback. Quest batches, new links and the daily summary go on it too (`ServerHub.announce`).
 
 ## Dependencies
 
-Runtime: `discord.js` only. Prefer Node built-ins (`node:net`, `node:readline`, `node:sqlite`,
+Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web integration). Prefer Node built-ins (`node:net`, `node:readline`, `node:sqlite`,
 `node:test`, `node:crypto`) over adding packages.
 
 ## Trust boundaries (do not weaken)
@@ -58,8 +60,12 @@ Runtime: `discord.js` only. Prefer Node built-ins (`node:net`, `node:readline`, 
 - MC → Discord: `md()` escapes markdown incl. headings/masked links; the Client uses
   `allowedMentions: { parse: [] }` so nothing the bot posts can ping.
 - `/cmd`: admin role check + `deferReply`; `runCommand` logs who ran it.
+- Web: binds `127.0.0.1` (Caddy adds TLS in front). Login is Discord OAuth with a single-use `state` cookie; only
+  members with the admin role get a session. Session ids are random, sent only in an httpOnly, Secure, SameSite=Lax
+  cookie, stored hashed, and expire server-side. Every `/api` route but login/callback needs one. The OAuth client
+  secret comes from `DISCORD_CLIENT_SECRET`, never config.
 
 ## Tests
 
 `test/servers.test.ts` drives a real socket with a fake mod (`fakeMod`, `online`, `until` helpers in `test/fake-mod.ts`) — use it
-for any hub behaviour change. `test/start.test.ts` starts a whole hub via `startHub` with a stub frontend. Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.
+for any hub behaviour change. `test/start.test.ts` starts a whole hub via `startHub` with a stub frontend and a fake Discord OAuth, driving the web API through `app.request` (no port). Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.

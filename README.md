@@ -1,11 +1,12 @@
-# gtnh-discord
+# orrery
 
-Talk to your GT: New Horizons servers from Discord: two-way chat, console
-commands, status, and start/stop/crash alerts.
+A hub for everything you run or ship, game servers first. Today it connects
+GT: New Horizons servers to Discord: two-way chat, console commands, status,
+and start/stop/crash alerts.
 
 ```
 [GTNH server] ─ gtnhdiscord mod ─┐
-[GTNH server] ─ gtnhdiscord mod ─┼─ TCP 127.0.0.1:25580 ─> hub (Node) ─> Discord
+[GTNH server] ─ gtnhdiscord mod ─┼─ TCP 127.0.0.1:25580 ─> orrery hub (Node) ─> Discord
                                  ┘                              └─ SQLite uptime log
 ```
 
@@ -84,10 +85,10 @@ Restart the server. The hub logs the connection, and the channel gets
 one Linux machine. Edit `User=`/`SocketUser=` and the paths in the files first.
 
 ```bash
-sudo install -m 600 -o root -g root hub/.env /etc/gtnh-discord.env   # bot token, root-only
-sudo cp deploy/gtnh-hub.service deploy/gtnh.service deploy/gtnh.socket /etc/systemd/system/
+sudo install -m 600 -o root -g root hub/.env /etc/orrery.env   # bot token, root-only
+sudo cp deploy/orrery-hub.service deploy/gtnh.service deploy/gtnh.socket /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now gtnh-hub gtnh
+sudo systemctl enable --now orrery-hub gtnh
 ```
 
 These work with SELinux enforcing (the default on RHEL/Oracle Linux): the token
@@ -102,7 +103,7 @@ semodule_package -o /tmp/gtnh-fifo.pp -m /tmp/gtnh-fifo.mod
 sudo semodule -i /tmp/gtnh-fifo.pp
 ```
 
-- **Hub logs:** `journalctl -u gtnh-hub -f`
+- **Hub logs:** `journalctl -u orrery-hub -f`
 - **Server console output:** `journalctl -u gtnh -f` (add yourself to the
   `systemd-journal` group to read it without sudo)
 - **Server console input:** `echo "say hello" > /run/gtnh.stdin`, or `/cmd` from Discord
@@ -183,7 +184,7 @@ The wire protocol is in `docs/protocol.md`, the project's vocabulary in `CONTEXT
 
 ## What's next
 
-v2 turns this into **orrery**: a hub for everything that runs or ships, not only GTNH. Discord, Minecraft
+v2 makes orrery a hub for everything that runs or ships, not only GTNH. Discord, Minecraft
 servers, the host, systemd services and HTTP checks become integrations you switch on in config, and a browser
-dashboard (Angular) joins Discord as a way in. The repo will be renamed when that work starts. See
+dashboard (Angular) joins Discord as a way in. See
 `docs/adr/0002-hub-with-integrations.md` and `docs/ROADMAP.md`.

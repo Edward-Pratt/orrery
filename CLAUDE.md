@@ -1,6 +1,7 @@
-# gtnh-discord
+# orrery
 
-Discord bridge for GT: New Horizons (MC 1.7.10) servers. Two independent projects in one repo:
+A hub for everything its owner runs or ships (game servers first); today a Discord bridge for GT: New Horizons
+(MC 1.7.10) servers. Two independent projects in one repo:
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
@@ -57,7 +58,7 @@ commits, and for the mod it attaches the jar. The hub is deployed with `git chec
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `Edward-Pratt/gtnh-discord` (via `gh`). See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on `Edward-Pratt/orrery` (via `gh`). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

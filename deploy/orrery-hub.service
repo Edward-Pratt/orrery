@@ -1,16 +1,16 @@
-# GTNH Discord hub. Install: sudo cp deploy/gtnh-hub.service /etc/systemd/system/
+# orrery hub. Install: sudo cp deploy/orrery-hub.service /etc/systemd/system/
 # Edit User and the paths below to match your server.
 [Unit]
-Description=GTNH Discord hub
+Description=orrery hub
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=opc
-WorkingDirectory=/home/opc/gtnh-discord/hub
+WorkingDirectory=/home/opc/ClaudeCode/orrery/hub
 # DISCORD_TOKEN=... lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
-#   sudo install -m 600 -o root -g root hub/.env /etc/gtnh-discord.env
-EnvironmentFile=/etc/gtnh-discord.env
+#   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
+EnvironmentFile=/etc/orrery.env
 # Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.
 ExecStart=/usr/bin/node src/index.ts
 Restart=on-failure

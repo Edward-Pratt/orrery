@@ -9,7 +9,7 @@
 #   systemctl stop gtnh  -> stays down (use this for maintenance)
 [Unit]
 Description=GTNH server
-After=network-online.target gtnh-hub.service gtnh.socket
+After=network-online.target orrery-hub.service gtnh.socket
 Wants=network-online.target
 Requires=gtnh.socket
 

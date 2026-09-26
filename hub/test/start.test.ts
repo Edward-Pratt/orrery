@@ -404,6 +404,40 @@ test('the replay buffer keeps the last 500 events per server', async (t) => {
   assert.equal((stream.events[0]!.data as { message: string }).message, '11');
 });
 
+test('heartbeats put TPS on the stream, and an hour of them evicts no chat and replays only the latest', async (t) => {
+  const { app, cookie, port } = await liveHub(t);
+  const stream = await openStream(app, cookie);
+  t.after(() => stream.close());
+  const mod = await online(port);
+  mod.send({ type: 'chat', player: 'Steve', message: 'before' });
+  mod.send({ type: 'heartbeat', tps: 19.5, players: ['Steve'] });
+  mod.send({ type: 'heartbeat', tps: 19.52, players: ['Steve'] }); // not a noticeable change
+  mod.send({ type: 'heartbeat', tps: 12, players: ['Steve'] });
+  await until(() => stream.events.filter((e) => e.data.type === 'tps').length === 2);
+  assert.deepEqual(
+    stream.events.filter((e) => e.data.type === 'tps').map((e) => e.data),
+    [
+      { serverId: 'gtnh', type: 'tps', tps: 19.5 },
+      { serverId: 'gtnh', type: 'tps', tps: 12 },
+    ],
+  );
+
+  for (let i = 0; i < 720; i++) mod.send({ type: 'heartbeat', tps: 10 + (i % 100) / 10, players: [] }); // 5 s apart
+  mod.send({ type: 'heartbeat', tps: 18, players: [] });
+  await until(() => (stream.events.at(-1)!.data as { tps?: number }).tps === 18);
+  const replay = await openStream(app, cookie);
+  t.after(() => replay.close());
+  await until(() => replay.events.length === 3);
+  assert.deepEqual(
+    replay.events.map((e) => e.data),
+    [
+      { serverId: 'gtnh', type: 'connected' },
+      { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'before' },
+      { serverId: 'gtnh', type: 'tps', tps: 18 },
+    ],
+  );
+});
+
 test('the event stream needs a session, and a closed stream leaves no listener on the hub', async (t) => {
   const { app, cookie, live } = await liveHub(t);
   assert.equal((await app.request('/api/events')).status, 401);

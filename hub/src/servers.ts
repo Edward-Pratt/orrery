@@ -59,7 +59,10 @@ export type HubEvent = { serverId: string } & (
   | ({ type: 'notice' } & Notice)
   | Announcement
   | HubOutput
+  | Tps
 );
+/** A server's TPS, from heartbeats, only when it moved by 0.1 or more. The live feed keeps just the latest. */
+export type Tps = { type: 'tps'; tps: number };
 
 /** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
 export type AuditEntry = { actor: string; action: string; target: string; details: string };
@@ -77,7 +80,15 @@ export type HubOptions = {
 type Late = { command: string; by: string; onLate?: (output: string[]) => void; timer: NodeJS.Timeout };
 
 type Pending = { resolve: (output: string[]) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
-type Conn = { socket: Socket; stopping: boolean; lastBeat: number; hung: boolean; pending: Map<string, Pending> };
+type Conn = {
+  socket: Socket;
+  stopping: boolean;
+  lastBeat: number;
+  hung: boolean;
+  pending: Map<string, Pending>;
+  /** The last TPS put on the event stream. */
+  sentTps: number | null;
+};
 
 /** Removes Minecraft § formatting codes. */
 export function stripCodes(s: string): string {
@@ -264,7 +275,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
         return void socket.end();
       }
       id = msg.serverId;
-      conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map() };
+      conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
       const old = this.#conns.get(id);
       this.#conns.set(id, conn);
       old?.socket.destroy();
@@ -304,6 +315,10 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     switch (msg.type) {
       case 'heartbeat':
         conn.lastBeat = Date.now();
+        if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {
+          conn.sentTps = msg.tps;
+          this.emit('event', { serverId: id, type: 'tps', tps: msg.tps });
+        }
         state.tps = msg.tps;
         state.players = msg.players;
         state.dims = msg.dims ?? [];

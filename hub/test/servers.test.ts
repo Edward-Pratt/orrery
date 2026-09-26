@@ -152,7 +152,7 @@ test('hung detection arms on the first heartbeat, recovers, and is off after sto
   assert.equal(hub.get('gtnh')?.hung, false);
   mod.send({ type: 'stopping' });
   await sleep(250);
-  assert.deepEqual(types(), ['connected', 'hung', 'recovered']);
+  assert.deepEqual(types(), ['connected', 'tps', 'hung', 'recovered']); // the same TPS again isn't news
 });
 
 test('a reconnect replaces the old connection without a crash alert', async (t) => {
@@ -232,11 +232,11 @@ test('v1.2b game messages become events; heartbeat dims land in the state', asyn
   mod.send({ type: 'quest', player: 'Steve', quests: [{ name: 'Stone Age', main: true }] });
   mod.send({ type: 'link', player: 'Steve', uuid: 'u-1', code: 'ABC234' });
   mod.send({ type: 'backup', ok: true, detail: '12.3 seconds (1.2GB)' });
-  await until(() => events.length === 4);
+  await until(() => events.length === 5);
   assert.deepEqual(hub.get('gtnh')?.dims, [{ id: -1, name: 'Nether', ms: 60 }]);
   assert.deepEqual(
     events.slice(1).map((e) => e.type),
-    ['quest', 'link', 'backup'],
+    ['tps', 'quest', 'link', 'backup'],
   );
 });
 

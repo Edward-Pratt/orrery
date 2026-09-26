@@ -41,6 +41,7 @@ test('formatEvent keeps chat-like events as escaped plain text', () => {
 test('formatEvent announces lifecycle as coloured embeds, but not reconnects', () => {
   assert.equal(formatEvent({ serverId: 's', type: 'connected' }), null);
   assert.equal(formatEvent({ serverId: 's', type: 'offline' }), null);
+  assert.equal(formatEvent({ serverId: 's', type: 'tps', tps: 12 }), null);
   assert.deepEqual(formatEvent({ serverId: 's', type: 'crashed' }), {
     embeds: [{ title: '💥 Server went down unexpectedly', color: COLORS.red }],
   });

@@ -100,6 +100,7 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'backup': // the BackupWatcher publishes it as a notice
     case 'say': // chat sent into the game: Discord's own came from its channel
     case 'console': // the /cmd reply shows it to whoever ran it
+    case 'tps': // for the dashboard; /tps and lag notices cover Discord
       return null;
   }
 }

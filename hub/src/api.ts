@@ -2,7 +2,7 @@
 import type { AuditEntry, HubEvent } from './servers.ts';
 import type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
 
-export type { HubEvent, Lifecycle, Notice, Severity, ServerState } from './servers.ts';
+export type { HubEvent, Lifecycle, Notice, Severity, ServerState, Tps } from './servers.ts';
 export type { Backup } from './backups.ts';
 export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './stats.ts';
 
@@ -47,7 +47,10 @@ export type PlayerAnswer = PlaytimeAnswer;
 /** `GET /api/audit[?server=id]`: newest first. */
 export type AuditLog = (AuditEntry & { ts: number })[];
 
-/** The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. */
+/**
+ * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. `tps` events come
+ * from heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest.
+ */
 export type LiveEvent = HubEvent;
 
 /**

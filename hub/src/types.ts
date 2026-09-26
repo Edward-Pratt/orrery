@@ -1,8 +1,37 @@
 /**
- * The hub's plain data types: its events, audit entries and stats answers. Pure types with no Node imports, so the
- * dashboard can type-check the API types (`api.ts`) without the hub's runtime. The modules that own them re-export them.
+ * The hub's plain data types: the wire messages, its events, audit entries and stats answers. Pure types that import
+ * nothing, so the dashboard can type-check the API types (`api.ts`) without the hub's runtime or Node types. The
+ * modules that own them re-export them (the wire messages from `protocol.ts`, which validates against them).
  */
-import type { DimTime, HubMsg, ModMsg, QuestDone } from './protocol.ts';
+export type Hello = { type: 'hello'; protocol: number; serverId: string; token: string; modVersion: string };
+
+export type ModMsg =
+  | { type: 'started' }
+  | { type: 'stopping' }
+  | { type: 'heartbeat'; tps: number; players: string[]; dims?: DimTime[] }
+  | { type: 'chat'; player: string; message: string }
+  | { type: 'join'; player: string }
+  | { type: 'leave'; player: string }
+  | { type: 'death'; player: string; message: string }
+  | { type: 'achievement'; player: string; achievement: string }
+  | { type: 'cmdResult'; id: string; output: string[] }
+  | { type: 'cmdLate'; id: string; output: string[] }
+  | { type: 'quest'; player: string; quests: QuestDone[] }
+  | { type: 'link'; player: string; uuid: string; code: string }
+  | { type: 'unlink'; player: string }
+  | { type: 'backup'; ok: boolean; detail: string };
+
+/** A dimension's mean tick time. */
+export type DimTime = { id: number; name: string; ms: number };
+/** A completed quest. */
+export type QuestDone = { name: string; main: boolean };
+
+export type HubMsg =
+  | { type: 'welcome' }
+  | { type: 'reject'; reason: string }
+  | { type: 'say'; author: string; message: string }
+  | { type: 'cmd'; id: string; command: string }
+  | { type: 'linkResult'; player: string; ok: boolean; message: string };
 
 export type Backup = { name: string; size: number; mtimeMs: number };
 export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };

@@ -6,35 +6,9 @@ export const PROTOCOL_VERSION = 1;
  */
 export const MIN_PROTOCOL = 1;
 
-export type Hello = { type: 'hello'; protocol: number; serverId: string; token: string; modVersion: string };
-
-export type ModMsg =
-  | { type: 'started' }
-  | { type: 'stopping' }
-  | { type: 'heartbeat'; tps: number; players: string[]; dims?: DimTime[] }
-  | { type: 'chat'; player: string; message: string }
-  | { type: 'join'; player: string }
-  | { type: 'leave'; player: string }
-  | { type: 'death'; player: string; message: string }
-  | { type: 'achievement'; player: string; achievement: string }
-  | { type: 'cmdResult'; id: string; output: string[] }
-  | { type: 'cmdLate'; id: string; output: string[] }
-  | { type: 'quest'; player: string; quests: QuestDone[] }
-  | { type: 'link'; player: string; uuid: string; code: string }
-  | { type: 'unlink'; player: string }
-  | { type: 'backup'; ok: boolean; detail: string };
-
-/** A dimension's mean tick time. */
-export type DimTime = { id: number; name: string; ms: number };
-/** A completed quest. */
-export type QuestDone = { name: string; main: boolean };
-
-export type HubMsg =
-  | { type: 'welcome' }
-  | { type: 'reject'; reason: string }
-  | { type: 'say'; author: string; message: string }
-  | { type: 'cmd'; id: string; command: string }
-  | { type: 'linkResult'; player: string; ok: boolean; message: string };
+// The message types live in types.ts (pure types, for the dashboard too); this file validates against them.
+import type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+export type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
 
 type Kind = 'string' | 'number' | 'boolean' | 'string[]' | 'dims?' | 'quests';
 

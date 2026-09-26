@@ -5,13 +5,14 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
+- `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), the `Caddyfile` (TLS for the dashboard and Grafana),
   and `restore-backup.sh` (puts a backup back over a stopped server's world; tested by `test-restore-backup.sh`).
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
 - `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
 
-Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
+Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 
 ## Architecture rules
 
@@ -32,7 +33,7 @@ Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
 ## Changing the wire protocol
 
 Protocol lives in three places that must change together:
-1. `hub/src/protocol.ts` (types + `SCHEMAS` validation),
+1. `hub/src/protocol.ts` (`SCHEMAS` validation; the message types are in `hub/src/types.ts`),
 2. the mod (`HubClient.java` hello, `GameEvents.java` messages),
 3. `docs/protocol.md`.
 Bump `PROTOCOL_VERSION` (and the mod's hello `protocol`) for any incompatible change.
@@ -44,6 +45,7 @@ raise `MIN_PROTOCOL` only one release after a bump.
 ```bash
 cd hub && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
+cd web && npm test && npm run build       # the build also type-checks against the hub's API types
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 ```
 

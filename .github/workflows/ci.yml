@@ -48,6 +48,26 @@ jobs:
             !mod/build/libs/*-dev.jar
             !mod/build/libs/*-sources.jar
 
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build # type-checks against hub/src/api.ts: an incompatible API change fails here
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/web/browser
+
   deploy:
     runs-on: ubuntu-latest
     steps:

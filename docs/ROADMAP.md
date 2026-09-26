@@ -1,7 +1,8 @@
 # Roadmap
 
-Living document. Each release gets a spec (`docs/superpowers/specs/`) and a plan (`docs/superpowers/plans/`)
-before it's built. **Size:** S = an evening or less, M = a day or two, L = several days.
+Living document. Each release gets a spec as a GitHub issue (`/to-spec`), broken into ticket issues
+(`/to-tickets`), before it's built; its section here links the spec issue. v1–v1.3 specs and plans are in
+`docs/archive/`. **Size:** S = an evening or less, M = a day or two, L = several days.
 **Where:** *hub* = hub-only update; *mod* = new mod jar; *protocol* = hub and mod both change (protocol bump).
 
 ## Done
@@ -19,7 +20,7 @@ before it's built. **Size:** S = an evening or less, M = a day or two, L = sever
 
 ## v1.2a — done (hub + small mod update, no protocol change)
 
-Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2a-design.md`
+Spec: `docs/archive/specs/2026-09-24-gtnh-discord-v1.2a-design.md`
 
 | Feature | Where | Size |
 |---|---|---|
@@ -32,7 +33,7 @@ Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2a-design.md`
 
 ## v1.2b — done (shipped with v1.2a; additive messages, protocol stays v1)
 
-Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
+Spec: `docs/archive/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
 
 | Feature | Where | Size |
 |---|---|---|
@@ -44,7 +45,7 @@ Spec: `docs/superpowers/specs/2026-09-24-gtnh-discord-v1.2b-design.md`
 
 ## v1.3 — done (operations; server smoke test and first tagged releases pending)
 
-Spec: `docs/superpowers/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `docs/adr/0001-monorepo-independent-versions.md`
+Spec: `docs/archive/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `docs/adr/0001-monorepo-independent-versions.md`
 
 | Feature | Where | Size |
 |---|---|---|
@@ -57,7 +58,11 @@ Spec: `docs/superpowers/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decisio
 | External liveness ping (`healthcheckUrl`, e.g. healthchecks.io), only while Discord is connected, so you're told when the hub or the whole host dies | hub | S |
 | `npm run check-config`: validate `config.json` offline with the same rules as startup, all errors at once | hub | S |
 
-## v2 — web dashboard
+## v2 — web dashboard (being designed)
+
+Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes a platform whose integrations (Discord,
+Minecraft, host) are switched on by config, and the dashboard is a separate Angular app in `web/`. The table
+below is the original feature list. What ships in v2.0 hasn't been decided yet.
 
 | Feature | Where | Size |
 |---|---|---|
@@ -69,6 +74,8 @@ Spec: `docs/superpowers/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decisio
 | Base stats (LSC power, AE2 storage, crafting CPUs) from the existing `oc-influxdb-exporter` | hub | M |
 
 ## Later / if needed
+
+- GitHub integration: a repo's CI runs, releases and open issues (introduces a Project term).
 
 - Whitelist gating (auto-whitelist linked members, remove on leaving the Discord server). Needs the
   privileged Server Members intent.

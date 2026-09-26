@@ -14,7 +14,7 @@ commands, status, and start/stop/crash alerts.
 | `mod/` | Server-side Forge 1.7.10 mod. Relays game events, runs commands. | JDK 25, Gradle wrapper |
 | `hub/` | The bot. Owns server state and uptime, talks to Discord. | Node 24+ |
 | `deploy/` | systemd units for running both on one server. | systemd |
-| `docs/` | Design spec and implementation plan. | — |
+| `docs/` | Wire protocol, roadmap, decisions (`adr/`), and archived v1 specs. | — |
 
 ## Setup
 
@@ -178,5 +178,12 @@ cd hub && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # build runs the JUnit tests
 ```
 
-The wire protocol and design are in
-`docs/superpowers/specs/2026-09-24-gtnh-discord-design.md`. What's planned next is in `docs/ROADMAP.md`.
+The wire protocol is in `docs/protocol.md`, the project's vocabulary in `CONTEXT.md`, and decisions in
+`docs/adr/`. Specs and tickets are GitHub issues. What's planned next is in `docs/ROADMAP.md`.
+
+## What's next
+
+v2 turns this into **orrery**: a hub for everything that runs or ships, not only GTNH. Discord, Minecraft
+servers, the host, systemd services and HTTP checks become integrations you switch on in config, and a browser
+dashboard (Angular) joins Discord as a way in. The repo will be renamed when that work starts. See
+`docs/adr/0002-hub-with-integrations.md` and `docs/ROADMAP.md`.

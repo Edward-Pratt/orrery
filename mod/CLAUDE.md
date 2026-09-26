@@ -56,4 +56,4 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 ## Tests
 
 `HubClientTest` plays the hub over a real `ServerSocket`. `GameEvents`/`GtnhDiscord` can only be verified by
-the manual smoke test on a real GTNH server (see the plan's final task).
+the manual smoke test on a real GTNH server (see the release's tickets; the v1 list is in `docs/archive/plans/`).

@@ -6,8 +6,9 @@ Discord bridge for GT: New Horizons (MC 1.7.10) servers. Two independent project
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe),
   and `restore-backup.sh` (puts a backup back over a stopped server's world; tested by `test-restore-backup.sh`).
-- `docs/superpowers/specs/` — design spec (authoritative); `docs/superpowers/plans/` — implementation plans.
-- `docs/ROADMAP.md` — planned releases; update it when a release ships or scope moves.
+- `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
+  (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
+- `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
 
 Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
 
@@ -18,13 +19,15 @@ Nothing builds at the root: run npm in `hub/`, Gradle in `mod/`.
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler` and `Stats` (`hub/src/stats.ts`); they
   never talk to mods. Discord-specific config stays in `discord.ts`.
 - The mod has no business logic and no Discord knowledge.
+- v2 is changing this: the hub becomes a platform with built-in integrations and a separate dashboard
+  (`docs/adr/0002`, `CONTEXT.md`). The rules above describe the code as it is until that lands.
 
 ## Changing the wire protocol
 
 Protocol lives in three places that must change together:
 1. `hub/src/protocol.ts` (types + `SCHEMAS` validation),
 2. the mod (`HubClient.java` hello, `GameEvents.java` messages),
-3. the spec's Protocol section.
+3. `docs/protocol.md`.
 Bump `PROTOCOL_VERSION` (and the mod's hello `protocol`) for any incompatible change.
 The hub accepts `MIN_PROTOCOL..PROTOCOL_VERSION` (`protocol.ts`). Policy: keep the previous version supported, so
 raise `MIN_PROTOCOL` only one release after a bump.
@@ -38,7 +41,7 @@ bash deploy/test-restore-backup.sh        # needs zip and unzip
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
-smoke test at the end of the plan — say so rather than claiming it works.
+smoke test in the release's tickets — say so rather than claiming it works.
 
 ## Releases
 

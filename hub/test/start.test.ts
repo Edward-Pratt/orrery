@@ -292,3 +292,118 @@ test('startup with web configured and no DISCORD_CLIENT_SECRET fails with a clea
       err.status === 1 && /integrations\.web is configured but DISCORD_CLIENT_SECRET is not set/.test(err.stderr),
   );
 });
+
+/** A web + Minecraft hub with a logged-in admin: its API, session cookie, hub and mod port. */
+async function liveHub(t: TestContext) {
+  let hub: ServerHub | undefined;
+  const handle = await startHub(config(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB }), {
+    startFrontend: async (h) => {
+      hub = h;
+      return { stop: () => {} };
+    },
+    get: async () => ({ ok: true, status: 200 }),
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  return { app, cookie: await loginCookie(app), hub: hub!, live: handle.live, port: handle.port! };
+}
+
+type Sse = { id: number; data: HubEvent };
+
+/** Opens /api/events and reads its frames (comments skipped) as they arrive. */
+async function openStream(app: WebApi, cookie: string, lastEventId?: number) {
+  const headers: Record<string, string> = { cookie };
+  if (lastEventId !== undefined) headers['last-event-id'] = String(lastEventId);
+  const res = await app.request('/api/events', { headers });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'text/event-stream');
+  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+  const events: Sse[] = [];
+  let buf = '';
+  const pump = (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buf += value;
+      let end;
+      while ((end = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, end).split('\n');
+        buf = buf.slice(end + 2);
+        const field = (name: string) => frame.find((l) => l.startsWith(`${name}: `))?.slice(name.length + 2);
+        const data = field('data');
+        if (data) events.push({ id: Number(field('id')), data: JSON.parse(data) });
+      }
+    }
+  })();
+  return { events, close: async () => (await reader.cancel(), await pump) };
+}
+
+test('chat, commands and lifecycle changes reach an open event stream', async (t) => {
+  const { app, cookie, hub, port } = await liveHub(t);
+  const stream = await openStream(app, cookie);
+  t.after(() => stream.close());
+  const mod = await online(port);
+  mod.send({ type: 'chat', player: 'Steve', message: 'hi' });
+  await until(() => stream.events.length === 2);
+  hub.say('gtnh', 'alex', 'hello back');
+  const result = hub.runCommand('gtnh', 'list', 'web:alex (5)');
+  assert.equal(((await mod.next()) as { type: string }).type, 'say');
+  const run = (await mod.next()) as { id: string };
+  mod.send({ type: 'cmdResult', id: run.id, output: ['There are 0 players'] });
+  await result;
+  mod.send({ type: 'cmdLate', id: run.id, output: ['later'] });
+  await until(() => stream.events.length >= 5);
+  assert.deepEqual(
+    stream.events.map((e) => e.data),
+    [
+      { serverId: 'gtnh', type: 'connected' },
+      { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' },
+      { serverId: 'gtnh', type: 'say', author: 'alex', message: 'hello back' },
+      { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:alex (5)', output: ['There are 0 players'] },
+      { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:alex (5)', output: ['later'], late: true },
+    ],
+  );
+  const ids = stream.events.map((e) => e.id);
+  assert.deepEqual(ids, [...ids].sort((a, b) => a - b));
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('a new stream replays recent events first, and Last-Event-ID resumes after that id', async (t) => {
+  const { app, cookie, port } = await liveHub(t);
+  const mod = await online(port);
+  for (const message of ['one', 'two', 'three']) mod.send({ type: 'chat', player: 'Steve', message });
+  const first = await openStream(app, cookie);
+  await until(() => first.events.length === 4);
+  await first.close();
+  const chats = first.events.filter((e) => e.data.type === 'chat');
+  assert.deepEqual(chats.map((e) => (e.data as { message: string }).message), ['one', 'two', 'three']);
+
+  mod.send({ type: 'chat', player: 'Steve', message: 'four' });
+  const resumed = await openStream(app, cookie, chats[1]!.id);
+  t.after(() => resumed.close());
+  await until(() => resumed.events.length === 2);
+  assert.deepEqual(resumed.events.map((e) => (e.data as { message: string }).message), ['three', 'four']);
+});
+
+test('the replay buffer keeps the last 500 events per server', async (t) => {
+  const { app, cookie, port } = await liveHub(t);
+  const mod = await online(port);
+  for (let i = 1; i <= 510; i++) mod.send({ type: 'chat', player: 'Steve', message: String(i) });
+  const probe = await openStream(app, cookie);
+  await until(() => probe.events.some((e) => (e.data as { message?: string }).message === '510'));
+  await probe.close();
+  const stream = await openStream(app, cookie);
+  t.after(() => stream.close());
+  await until(() => stream.events.length === 500);
+  assert.equal((stream.events[0]!.data as { message: string }).message, '11');
+});
+
+test('the event stream needs a session, and a closed stream leaves no listener on the hub', async (t) => {
+  const { app, cookie, live } = await liveHub(t);
+  assert.equal((await app.request('/api/events')).status, 401);
+  const stream = await openStream(app, cookie);
+  assert.equal(live.listenerCount('event'), 1);
+  await stream.close();
+  await until(() => live.listenerCount('event') === 0);
+});

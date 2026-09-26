@@ -49,7 +49,17 @@ export type Announcement =
   | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
   | { type: 'linked'; player: string; discordId: string }
   | { type: 'summary'; name: string; summary: Summary };
-export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice) | Announcement);
+/** Chat sent into the game (`say`), and a command's output (`late`: output that came after the result). */
+export type HubOutput =
+  | { type: 'say'; author: string; message: string }
+  | { type: 'console'; command: string; by: string; output: string[]; late?: true };
+export type HubEvent = { serverId: string } & (
+  | GameMsg
+  | { type: Lifecycle }
+  | ({ type: 'notice' } & Notice)
+  | Announcement
+  | HubOutput
+);
 
 /** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
 export type AuditEntry = { actor: string; action: string; target: string; details: string };
@@ -64,7 +74,7 @@ export type HubOptions = {
   audit?: (entry: AuditEntry) => void;
 };
 
-type Late = { onLate: (output: string[]) => void; timer: NodeJS.Timeout };
+type Late = { command: string; by: string; onLate?: (output: string[]) => void; timer: NodeJS.Timeout };
 
 type Pending = { resolve: (output: string[]) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
 type Conn = { socket: Socket; stopping: boolean; lastBeat: number; hung: boolean; pending: Map<string, Pending> };
@@ -173,7 +183,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     const conn = this.#conns.get(id);
     const text = mcText(message, 256);
     if (!conn || !text) return false;
-    this.#send(conn.socket, { type: 'say', author: mcText(author, 32) || '?', message: text });
+    const msg = { type: 'say', author: mcText(author, 32) || '?', message: text } as const;
+    this.#send(conn.socket, msg);
+    this.emit('event', { ...msg, serverId: id });
     return true;
   }
 
@@ -202,7 +214,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
 
   /**
    * Runs a console command. `by` names who asked, for the audit log. `onLate` gets output that arrives after
-   * the result (e.g. spark's profiler link), for 15 minutes.
+   * the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also goes on the event stream.
    */
   runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
     const conn = this.#conns.get(id);
@@ -218,7 +230,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       }, this.#cmdTimeoutMs);
       conn.pending.set(cmdId, {
         resolve: (output) => {
-          if (onLate) this.#late.set(cmdId, { onLate, timer: setTimeout(() => this.#late.delete(cmdId), this.#lateMs) });
+          this.#late.set(cmdId, { command: cmd, by, onLate, timer: setTimeout(() => this.#late.delete(cmdId), this.#lateMs) });
+          this.emit('event', { serverId: id, type: 'console', command: cmd, by, output });
           resolve(output);
         },
         reject,
@@ -314,8 +327,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
       case 'cmdLate': {
         const late = this.#late.get(msg.id);
         if (!late) return; // expired or unknown
+        this.emit('event', { serverId: id, type: 'console', command: late.command, by: late.by, output: msg.output, late: true });
         try {
-          late.onLate(msg.output);
+          late.onLate?.(msg.output);
         } catch (err) {
           console.error('[hub] late output handler failed:', err);
         }

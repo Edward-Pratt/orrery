@@ -2,8 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { streamSSE } from 'hono/streaming';
 import type { WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
+import type { LiveFeed } from './live.ts';
+import type { HubEvent } from './servers.ts';
 
 /** A user's membership in a guild. */
 export type Member = { id: string; username: string; roles: string[] };
@@ -17,12 +20,14 @@ export type OAuth = {
 };
 
 const DAY_S = 24 * 60 * 60;
+/** Keeps proxies from closing an idle event stream. */
+const KEEP_ALIVE_MS = 25_000;
 const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } as const;
 /** Sessions are stored hashed, so a copy of the database logs nobody in. */
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(db: Db, web: WebIntegration, oauth: OAuth) {
+export function webApi(db: Db, web: WebIntegration, oauth: OAuth, live: LiveFeed) {
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
   const app = new Hono<{ Variables: { user: { id: string; username: string } } }>().basePath('/api');
 
@@ -72,6 +77,20 @@ export function webApi(db: Db, web: WebIntegration, oauth: OAuth) {
     deleteCookie(c, 'session', COOKIE);
     return c.body(null, 204);
   });
+  // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
+  app.get('/events', (c) =>
+    streamSSE(c, async (stream) => {
+      const send = (id: number, e: HubEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
+      const onEvent = (id: number, e: HubEvent) => void send(id, e);
+      // ponytail: a client that stops reading queues events in memory until its connection drops.
+      for (const [id, e] of live.since(Number(c.req.header('last-event-id')) || 0)) void send(id, e);
+      live.on('event', onEvent);
+      const keepAlive = setInterval(() => void stream.write(': keep-alive\n\n'), KEEP_ALIVE_MS);
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      clearInterval(keepAlive);
+      live.off('event', onEvent);
+    }),
+  );
   return app;
 }
 
@@ -81,7 +100,14 @@ export type WebApi = ReturnType<typeof webApi>;
 export function serveWebApi(app: WebApi, port: number): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) =>
-      resolve({ port: info.port, close: () => new Promise((done) => server.close(() => done())) }),
+      resolve({
+        port: info.port,
+        close: () =>
+          new Promise((done) => {
+            server.close(() => done());
+            (server as import('node:http').Server).closeAllConnections(); // open event streams never end on their own
+          }),
+      }),
     );
     server.once('error', reject);
   });

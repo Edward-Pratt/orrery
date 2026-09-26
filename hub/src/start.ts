@@ -6,6 +6,7 @@ import { Db } from './db.ts';
 import { startPinger, type Get } from './health.ts';
 import { LagMonitor } from './lag.ts';
 import { Links } from './links.ts';
+import { LiveFeed } from './live.ts';
 import { PlaytimeTracker } from './playtime.ts';
 import { QuestAnnouncer } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
@@ -37,6 +38,8 @@ export type HubHandle = {
   port: number | undefined;
   /** The HTTP API and its port; undefined when the web integration is off. */
   web?: { port: number; app: WebApi };
+  /** Every hub event, numbered, with recent ones buffered for replay. */
+  live: LiveFeed;
   /** Stops everything in order; resolves once the socket and database are closed. */
   close: () => Promise<void>;
 };
@@ -58,6 +61,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     { audit: (entry) => db.audit(entry) },
   );
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
+  const live = new LiveFeed(hub);
 
   const restarts = new RestartScheduler(hub);
   for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
@@ -92,12 +96,13 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
-  const app = web && deps.oauth ? webApi(db, web, deps.oauth) : undefined;
+  const app = web && deps.oauth ? webApi(db, web, deps.oauth, live) : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 
   return {
     port,
+    live,
     web: app && http && { port: http.port, app },
     close: () => {
       restarts.stop();

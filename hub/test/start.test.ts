@@ -418,9 +418,8 @@ async function apiHub(t: TestContext) {
   const cfg = config(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
   const backupDir = join(dirname(cfg.dbPath), 'backups');
   mkdirSync(backupDir);
-  const DAY_MS = 24 * 60 * 60_000;
   for (const [name, bytes, mtime] of [
-    ['2026-09-24-06-00-00.zip', 100, Date.now() - DAY_MS],
+    ['2026-09-24-06-00-00.zip', 100, Date.now() - 24 * 60 * 60_000],
     ['2026-09-25-06-00-00.zip', 300, Date.now()],
   ] as const) {
     writeFileSync(join(backupDir, name), 'x'.repeat(bytes));
@@ -533,9 +532,9 @@ test('the audit log reads newest first, for all servers or one', async (t) => {
   assert.deepEqual(await get<AuditLog>('/api/audit?server=web'), []);
 });
 
-test('unknown servers get 404, and every read needs a session', async (t) => {
+test('unknown servers and players get 404, and every read needs a session', async (t) => {
   const { app, cookie } = await apiHub(t);
-  for (const path of ['/api/servers/nope', '/api/servers/nope/players/Steve', '/api/audit?server=nope']) {
+  for (const path of ['/api/servers/nope', '/api/servers/nope/players/Steve', '/api/servers/gtnh/players/Nobody', '/api/audit?server=nope']) {
     assert.equal((await app.request(path, { headers: { cookie } })).status, 404, path);
   }
   for (const path of ['/api/integrations', '/api/servers', '/api/servers/gtnh', '/api/servers/gtnh/players/Steve', '/api/audit']) {

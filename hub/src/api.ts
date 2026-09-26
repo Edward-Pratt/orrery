@@ -41,7 +41,7 @@ export type ServerDetail = {
   backups: BackupsAnswer;
 };
 
-/** `GET /api/servers/:id/players/:name`: playtime and last seen. */
+/** `GET /api/servers/:id/players/:name`: playtime and last seen; 404 for a name never seen on the server. */
 export type PlayerAnswer = PlaytimeAnswer;
 
 /** `GET /api/audit[?server=id]`: newest first. */

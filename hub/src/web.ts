@@ -46,14 +46,14 @@ export type WebDeps = {
 export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
-  const card = (s: ServerState): ServerCard => ({
+  const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
     id: s.id,
     name: s.name,
     online: s.online,
     hung: s.hung,
     tps: hasMod(s.id) ? s.tps : null,
     players: s.players,
-    uptimeDay: stats.status(s.id)!.uptimeDay,
+    uptimeDay: status.uptimeDay,
     restart: restarts.pending(s.id) ?? null,
     features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
   });
@@ -109,14 +109,15 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   app.get('/integrations', (c) =>
     c.json({ minecraft: !!integrations.minecraft, discord: !!integrations.discord, web: true } satisfies Integrations),
   );
-  app.get('/servers', (c) => c.json(hub.list().map(card) satisfies ServerCard[]));
+  app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
   app.get('/servers/:id', async (c) => {
     const id = c.req.param('id');
     const state = hub.get(id);
     if (!state) return c.notFound();
+    const status = stats.status(id)!;
     return c.json({
-      card: card(state),
-      status: stats.status(id)!,
+      card: card(state, status),
+      status,
       tps: hasMod(id) ? stats.tps(id)! : null,
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
@@ -124,7 +125,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   });
   app.get('/servers/:id/players/:name', (c) => {
     const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });
-    return answer ? c.json(answer satisfies PlayerAnswer) : c.notFound();
+    // Never seen: an unknown name, not a player with no playtime.
+    if (!answer || (answer.found && answer.lastSeen === null)) return c.notFound();
+    return c.json(answer satisfies PlayerAnswer);
   });
   app.get('/audit', (c) => {
     const server = c.req.query('server');

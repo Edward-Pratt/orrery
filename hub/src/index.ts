@@ -1,93 +1,31 @@
-import { dirname, join } from 'node:path';
-import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { loadConfig } from './config.ts';
-import { everyDay } from './daily.ts';
-import { Db } from './db.ts';
 import { startDiscord } from './discord.ts';
-import { startPinger } from './health.ts';
-import { LagMonitor } from './lag.ts';
-import { Links } from './links.ts';
-import { PlaytimeTracker } from './playtime.ts';
-import { QuestAnnouncer } from './quests.ts';
-import { RestartScheduler } from './restarts.ts';
-import { ServerHub } from './servers.ts';
-import { Stats } from './stats.ts';
-import { scheduleSummaries } from './summary.ts';
+import { httpGet } from './health.ts';
+import { startHub } from './start.ts';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error('DISCORD_TOKEN is not set');
 const config = loadConfig(process.argv[2] ?? 'config.json');
-const backupDirs: Record<string, string> = Object.fromEntries(
-  config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
-);
 
-const db = new Db(config.dbPath);
-db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left open when the hub last stopped
-setInterval(() => db.touch(), 60_000);
-
-const hub = new ServerHub(config.servers);
-hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
-
-const restarts = new RestartScheduler(hub);
-for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
-const backups = new BackupWatcher(
-  hub,
-  (serverId) => listBackups(backupDirs[serverId] ?? ''),
-  (serverId) => freeBytes(backupDirs[serverId] ?? ''),
-);
-for (const s of config.servers) {
-  if (s.backupDir) {
-    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB });
-  }
-}
-const playtime = new PlaytimeTracker(hub, db);
-const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])));
-const quests = new QuestAnnouncer(hub, Object.fromEntries(config.servers.map((s) => [s.id, s.quests])));
-const links = new Links(db, hub);
-hub.on('event', (e) => {
-  if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
+const handle = await startHub(config, {
+  startFrontend: async (hub, stats, restarts, links) => {
+    const discord = await startDiscord(
+      hub,
+      stats,
+      restarts,
+      links,
+      {
+        guildId: config.guildId,
+        adminRoleId: config.adminRoleId,
+        channels: Object.fromEntries(config.servers.map((s) => [s.id, s.channelId])),
+      },
+      token,
+    );
+    return { connected: discord.connected, stop: () => void discord.client.destroy() };
+  },
+  get: httpGet,
 });
 
-const port = await hub.listen(config.listenPort);
-console.log(`[hub] listening on 127.0.0.1:${port}`);
-playtime.start();
-lag.start();
-quests.start();
-
-const stats = new Stats(hub, db, config.servers);
-const discord = await startDiscord(
-  hub,
-  stats,
-  restarts,
-  links,
-  {
-    guildId: config.guildId,
-    adminRoleId: config.adminRoleId,
-    channels: Object.fromEntries(config.servers.map((s) => [s.id, s.channelId])),
-  },
-  token,
-);
-const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, discord.connected) : () => {};
-const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
-const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
-const dbCopies = join(dirname(config.dbPath), 'db-backups');
-const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
-
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    restarts.stop();
-    backups.stop();
-    playtime.stop();
-    lag.stop();
-    quests.flush(); // don't lose a pending roll-up
-    quests.stop();
-    stopSummaries();
-    upkeep();
-    stopPing();
-    void discord.client.destroy();
-    void hub.close().finally(() => {
-      db.close();
-      process.exit(0);
-    });
-  });
+  process.once(signal, () => void handle.close().finally(() => process.exit(0)));
 }

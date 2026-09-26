@@ -1,6 +1,6 @@
-type Get = (url: string) => Promise<{ ok: boolean; status: number }>;
+export type Get = (url: string) => Promise<{ ok: boolean; status: number }>;
 
-const httpGet: Get = (url) => fetch(url, { signal: AbortSignal.timeout(10_000) });
+export const httpGet: Get = (url) => fetch(url, { signal: AbortSignal.timeout(10_000) });
 
 /**
  * GETs `url` every `everyMs` while `up()` is true, so an outside monitor (e.g. healthchecks.io) alerts when the

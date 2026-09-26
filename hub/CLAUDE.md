@@ -37,7 +37,8 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]) and en
 | `src/crashlogs.ts` | `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder. Hub core. |
 | `src/format.ts` | Pure Discord output: `Post` = plain text or embeds; `md`, `format*`, `topicDue`. Unit-tested. |
 | `src/discord.ts` | Discord frontend: webhook chat, alerts (+ crash-log uploads), presence, topics, notices as embeds, `/status` `/list` `/tps` `/playtime` `/top` `/link` `/unlink` `/cmd` `/restart` `/backup`; late `/cmd` output as follow-ups. |
-| `src/index.ts` | Wiring only (config via `config.ts`). |
+| `src/start.ts` | `startHub(config, { startFrontend, get })`: wires and starts a whole hub; its handle's `close` stops everything in order. The seam for whole-hub tests. |
+| `src/index.ts` | Entry point: reads config and env, starts the hub with the real Discord frontend and HTTP get, wires signals. |
 
 A future web dashboard goes in `src/web/` and calls `ServerHub`, `RestartScheduler` and `Stats` — never the mod sockets.
 Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
@@ -60,5 +61,5 @@ Runtime: `discord.js` only. Prefer Node built-ins (`node:net`, `node:readline`, 
 
 ## Tests
 
-`test/servers.test.ts` drives a real socket with a fake mod (`fakeMod`, `online`, `until` helpers) — use it
-for any hub behaviour change. Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.
+`test/servers.test.ts` drives a real socket with a fake mod (`fakeMod`, `online`, `until` helpers in `test/fake-mod.ts`) — use it
+for any hub behaviour change. `test/start.test.ts` starts a whole hub via `startHub` with a stub frontend. Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.

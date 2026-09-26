@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
 import type { Config } from '../src/config.ts';
-import type { HubEvent } from '../src/servers.ts';
+import { Db } from '../src/db.ts';
+import type { HubEvent, ServerHub } from '../src/servers.ts';
 import { startHub } from '../src/start.ts';
 import type { OAuth, WebApi } from '../src/web.ts';
 import { online, TOKEN, until } from './fake-mod.ts';
@@ -70,6 +71,30 @@ test('a started hub relays mod chat to the frontend and shuts down cleanly', asy
     /ECONNREFUSED/,
   );
   assert.deepEqual(lifecycle(cfg.dbPath), [{ state: 'up', reason: 'connected' }]);
+});
+
+test('a command run through the hub lands in its audit log', async (t) => {
+  const cfg = config(t, { minecraft: MINECRAFT, discord: DISCORD });
+  let hub: ServerHub | undefined;
+  const handle = await startHub(cfg, {
+    startFrontend: async (h) => {
+      hub = h;
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('no ping within a test'),
+  });
+  const mod = await online(handle.port!);
+  const result = hub!.runCommand('gtnh', 'list', 'discord:alice (123)');
+  const cmd = (await mod.next()) as { id: string };
+  mod.send({ type: 'cmdResult', id: cmd.id, output: [] });
+  await result;
+  await handle.close();
+  const db = new Db(cfg.dbPath);
+  t.after(() => db.close());
+  assert.deepEqual(
+    db.auditLog(10).map(({ ts: _, ...e }) => e),
+    [{ actor: 'discord:alice (123)', action: 'command', target: 'gtnh', details: 'list' }],
+  );
 });
 
 test('with Discord off the hub starts no frontend, still records mods, and pings while it runs', async (t) => {

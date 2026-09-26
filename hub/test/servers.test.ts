@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { mcText, ServerHub, truncate, type HubEvent, type HubOptions } from '../src/servers.ts';
+import { mcText, ServerHub, truncate, type AuditEntry, type HubEvent, type HubOptions } from '../src/servers.ts';
 import { fakeMod, hello, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 async function setup(t: TestContext, opts: HubOptions = {}) {
@@ -97,6 +97,17 @@ test('runCommand round-trips through the mod', async (t) => {
   assert.equal(cmd.command, 'list');
   mod.send({ type: 'cmdResult', id: cmd.id, output: ['There are 0/20 players online:'] });
   assert.deepEqual(await result, ['There are 0/20 players online:']);
+});
+
+test('commands sent, and only those, go to the audit log', async (t) => {
+  const audit: AuditEntry[] = [];
+  const { hub, port } = await setup(t, { audit: (e) => audit.push(e) });
+  await assert.rejects(hub.runCommand('gtnh', 'list', 'test'), /offline/);
+  const mod = await online(port);
+  await assert.rejects(hub.runCommand('gtnh', ' / ', 'test'), /empty command/);
+  void hub.runCommand('gtnh', '/backup start', 'discord:alice (123)').catch(() => {});
+  await mod.next();
+  assert.deepEqual(audit, [{ actor: 'discord:alice (123)', action: 'command', target: 'gtnh', details: 'backup start' }]);
 });
 
 test('runCommand fails fast offline, times out, ignores late results, and fails on disconnect', async (t) => {

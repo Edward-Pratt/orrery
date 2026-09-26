@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { Lifecycle } from './servers.ts';
+import type { AuditEntry, Lifecycle } from './servers.ts';
 import { localDay } from './units.ts';
 
 const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;
@@ -34,7 +34,7 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
   return known === 0 ? null : up / known;
 }
 
-/** SQLite store: server up/down transitions (uptime) and player sessions (playtime), and nightly upkeep. */
+/** SQLite store: server up/down transitions (uptime), player sessions (playtime), the audit log, and nightly upkeep. */
 export class Db {
   #db: DatabaseSync;
 
@@ -52,6 +52,8 @@ export class Db {
       CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS audit (ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, details TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS audit_target_ts ON audit (target, ts);
     `);
   }
 
@@ -279,6 +281,19 @@ export class Db {
 
   deleteWebSession(id: string): void {
     this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
+  }
+
+  /** Records who did what to which server. Never pruned: the table is small. */
+  audit(e: AuditEntry, ts = Date.now()): void {
+    this.#write('audit', 'INSERT INTO audit (ts, actor, action, target, details) VALUES (?, ?, ?, ?, ?)', ts, e.actor, e.action, e.target, e.details);
+  }
+
+  /** The newest `limit` audit entries, newest first, for every server or just `target`. */
+  auditLog(limit: number, target?: string): (AuditEntry & { ts: number })[] {
+    return this.#db
+      .prepare('SELECT ts, actor, action, target, details FROM audit WHERE ?1 IS NULL OR target = ?1 ORDER BY ts DESC, rowid DESC LIMIT ?2')
+      .all(target ?? null, limit)
+      .map((r) => ({ ...r }) as AuditEntry & { ts: number });
   }
 
   close(): void {

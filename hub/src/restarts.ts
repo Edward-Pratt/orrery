@@ -1,7 +1,7 @@
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
-type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish'>;
+type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
 type Pending = { at: number; by: string; byName: string; timers: NodeJS.Timeout[] };
 
 /** In-game warnings, as time left before the restart. */
@@ -34,8 +34,8 @@ export class RestartScheduler {
   }
 
   /**
-   * `by` goes to the audit log with the `stop` command (e.g. "discord:alice (123)"); `byName` is shown to
-   * people. Throws if minutes isn't a whole number 0–60, the server is offline, or a restart is already pending.
+   * `by` goes to the audit log, now and with the `stop` command (e.g. "discord:alice (123)"); `byName` is shown
+   * to people. Throws if minutes isn't a whole number 0–60, the server is offline, or a restart is already pending.
    */
   schedule(serverId: string, minutes: number, by: string, byName = by): void {
     if (!Number.isInteger(minutes) || minutes < 0 || minutes > 60) {
@@ -47,13 +47,15 @@ export class RestartScheduler {
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
     this.#pending.set(serverId, { at: Date.now() + delay, by, byName, timers });
+    this.#hub.audit(by, 'restart', serverId, `in ${minutes} min`);
     if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName });
   }
 
-  /** False if nothing was pending. */
-  cancel(serverId: string, by: string): boolean {
+  /** False if nothing was pending. `by` and `byName` as for `schedule`. */
+  cancel(serverId: string, by: string, byName = by): boolean {
     if (!this.#clear(serverId)) return false;
-    this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by });
+    this.#hub.audit(by, 'restart cancel', serverId);
+    this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by: byName });
     this.#say(serverId, 'say Restart cancelled');
     return true;
   }
@@ -68,7 +70,7 @@ export class RestartScheduler {
     // Arm first: everyDay throws on a bad time, and the earlier daily restart must survive that.
     const cancel = everyDay(time, DAILY_LEAD_MS, () => {
       try {
-        this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'daily');
+        this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'hub:daily', 'daily');
       } catch (err) {
         console.error(`[restart] daily restart of ${serverId} skipped: ${(err as Error).message}`);
       }
@@ -94,7 +96,7 @@ export class RestartScheduler {
 
   #say(serverId: string, command: string): void {
     this.#hub
-      .runCommand(serverId, command, 'restart')
+      .runCommand(serverId, command, 'hub:restart')
       .catch((err: Error) => console.error(`[restart] "${command}" on ${serverId} failed: ${err.message}`));
   }
 

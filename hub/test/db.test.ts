@@ -216,3 +216,17 @@ test('recordLifecycle keeps the event type as the reason: start, crash, start', 
   assert.equal(db.countEvents('s', 'started', 0, 100), 2);
   assert.equal(db.countEvents('s', 'crashed', 0, 100), 1);
 });
+
+test('the audit log reads newest first, limited, for all servers or one; writes never throw', () => {
+  const db = new Db(':memory:');
+  db.audit({ actor: 'discord:alice (1)', action: 'command', target: 'a', details: 'list' }, 1000);
+  db.audit({ actor: 'hub:daily', action: 'restart', target: 'b', details: 'in 10 min' }, 2000);
+  db.audit({ actor: 'hub:daily', action: 'command', target: 'b', details: 'stop' }, 2000);
+  assert.deepEqual(db.auditLog(2), [
+    { ts: 2000, actor: 'hub:daily', action: 'command', target: 'b', details: 'stop' },
+    { ts: 2000, actor: 'hub:daily', action: 'restart', target: 'b', details: 'in 10 min' },
+  ]);
+  assert.deepEqual(db.auditLog(10, 'a'), [{ ts: 1000, actor: 'discord:alice (1)', action: 'command', target: 'a', details: 'list' }]);
+  db.close();
+  assert.doesNotThrow(() => db.audit({ actor: 'x', action: 'command', target: 'a', details: '' }));
+});

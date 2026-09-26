@@ -268,7 +268,7 @@ export async function startDiscord(
       // The public announcement comes from the scheduler's notice; the reply is just for the admin.
       let reply: string;
       if (i.options.getSubcommand() === 'cancel') {
-        reply = restarts.cancel(serverId, i.user.username) ? 'Restart cancelled.' : 'No restart is scheduled.';
+        reply = restarts.cancel(serverId, audit, i.user.username) ? 'Restart cancelled.' : 'No restart is scheduled.';
       } else {
         try {
           restarts.schedule(serverId, i.options.getInteger('minutes', true), audit, i.user.username);

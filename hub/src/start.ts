@@ -53,7 +53,10 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left open when the hub last stopped
   const touch = setInterval(() => db.touch(), 60_000);
 
-  const hub = new ServerHub(config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft?.tokens[s.id] })));
+  const hub = new ServerHub(
+    config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft?.tokens[s.id] })),
+    { audit: (entry) => db.audit(entry) },
+  );
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
 
   const restarts = new RestartScheduler(hub);

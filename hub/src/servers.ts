@@ -51,7 +51,18 @@ export type Announcement =
   | { type: 'summary'; name: string; summary: Summary };
 export type HubEvent = { serverId: string } & (GameMsg | { type: Lifecycle } | ({ type: 'notice' } & Notice) | Announcement);
 
-export type HubOptions = { hungMs?: number; cmdTimeoutMs?: number; helloTimeoutMs?: number; graceMs?: number; lateMs?: number };
+/** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
+export type AuditEntry = { actor: string; action: string; target: string; details: string };
+
+export type HubOptions = {
+  hungMs?: number;
+  cmdTimeoutMs?: number;
+  helloTimeoutMs?: number;
+  graceMs?: number;
+  lateMs?: number;
+  /** Where audit entries go (the hub's database). */
+  audit?: (entry: AuditEntry) => void;
+};
 
 type Late = { onLate: (output: string[]) => void; timer: NodeJS.Timeout };
 
@@ -105,6 +116,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   #late = new Map<string, Late>(); // command id -> handler for output that arrives after the result
   #helloTimeoutMs: number;
   #graceMs: number;
+  #audit: (entry: AuditEntry) => void;
 
   constructor(servers: ServerConfig[], opts: HubOptions = {}) {
     super();
@@ -118,6 +130,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     this.#lateMs = opts.lateMs ?? 15 * 60_000; // Discord allows interaction follow-ups for 15 minutes
     this.#helloTimeoutMs = opts.helloTimeoutMs ?? 5_000;
     this.#graceMs = opts.graceMs ?? 60_000; // longer than the mod's 30 s max reconnect backoff
+    this.#audit = opts.audit ?? (() => {});
   }
 
   /** Starts listening. Resolves with the bound port (pass 0 for a random one). */
@@ -182,6 +195,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     return true;
   }
 
+  /** Records an action on server `target` in the audit log. */
+  audit(actor: string, action: string, target: string, details = ''): void {
+    this.#audit({ actor, action, target, details });
+  }
+
   /**
    * Runs a console command. `by` names who asked, for the audit log. `onLate` gets output that arrives after
    * the result (e.g. spark's profiler link), for 15 minutes.
@@ -191,7 +209,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
     const cmd = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().replace(/^\//, '');
     if (!cmd) return Promise.reject(new Error('empty command'));
-    console.log(`[cmd] ${by} on ${id}: ${cmd}`);
+    this.audit(by, 'command', id, cmd);
     const cmdId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

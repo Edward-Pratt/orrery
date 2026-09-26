@@ -19,25 +19,28 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const events = new EventEmitter<{ event: [HubEvent] }>();
   const commands: string[] = [];
   const audit: string[] = []; // "command|by"
+  const log: string[] = []; // "actor|action|target|details", from hub.audit
   const notices: Notice[] = []; // published on the hub's event stream
   const state = { online: true, stopError: null as Error | null };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     get: (id: string) => (state.online ? ({ id, online: true } as ServerState) : undefined),
-    runCommand: async (_id: string, command: string, by: string) => {
+    runCommand: async (id: string, command: string, by: string) => {
       commands.push(command);
       audit.push(`${command}|${by}`);
+      log.push(`${by}|command|${id}|${command}`); // ServerHub audits every command it sends
       if (command === 'stop' && state.stopError) throw state.stopError;
       return [];
     },
+    audit: (actor: string, action: string, target: string, details = '') => void log.push(`${actor}|${action}|${target}|${details}`),
     publish: (serverId: string, notice: Notice) => {
       notices.push(notice);
       events.emit('event', { ...notice, type: 'notice', serverId });
     },
-  } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish'>;
+  } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
   const restarts = new RestartScheduler(hub);
   t.after(() => restarts.stop());
-  return { restarts, events, commands, audit, notices, state };
+  return { restarts, events, commands, audit, log, notices, state };
 }
 
 test('a 10 minute restart warns at 10m, 5m, 1m, 30s and 10s, then stops', (t) => {
@@ -193,4 +196,25 @@ test('calling daily() again replaces the earlier daily restart instead of stacki
   t.mock.timers.tick(50 * MIN); // 05:50: exactly one countdown, and no "already scheduled" skip logged
   assert.deepEqual(notices, [scheduled(10, 'daily')]);
   assert.equal(errors.mock.callCount(), 0);
+});
+
+test('scheduling, cancelling and the daily restart leave audit entries naming who', (t) => {
+  const { restarts, log } = setup(t, Date.UTC(2026, 8, 24, 4, 0)); // 05:00 BST
+  restarts.schedule('gtnh', 5, 'discord:alice (1)', 'alice');
+  restarts.cancel('gtnh', 'discord:bob (2)', 'bob');
+  restarts.cancel('gtnh', 'discord:bob (2)', 'bob'); // nothing pending: no entry
+  assert.throws(() => restarts.schedule('gtnh', 99, 'discord:alice (1)'));
+  restarts.daily('gtnh', '06:00');
+  t.mock.timers.tick(50 * MIN); // 05:50: the countdown starts
+  t.mock.timers.tick(10 * MIN);
+  assert.deepEqual(
+    log.filter((l) => !l.includes('|say ')),
+    [
+      'discord:alice (1)|restart|gtnh|in 5 min',
+      'discord:bob (2)|restart cancel|gtnh|',
+      'hub:daily|restart|gtnh|in 10 min',
+      'hub:daily|command|gtnh|stop',
+    ],
+  );
+  assert.ok(log.includes('hub:restart|command|gtnh|say Restart cancelled'));
 });

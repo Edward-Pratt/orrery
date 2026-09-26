@@ -64,6 +64,11 @@ Spec: #26 · Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes
 Minecraft, host) are switched on by config, and the dashboard is a separate Angular app in `web/`. The table
 below is the original feature list. What ships in v2.0 hasn't been decided yet.
 
+**Step 1 — done (`hub-v2.0.0`, deployed 2026-09-26):** renamed to orrery (#28); the hub starts through `startHub`
+(#27); `config.json` grouped by integration, with `check-config` guiding the move from the old shape (#29);
+Discord and Minecraft switched on by config, and the health ping follows the hub instead of Discord (#30);
+production cutover and smoke test (#31).
+
 | Feature | Where | Size |
 |---|---|---|
 | HTTP API and live event stream (`hub/src/web/`, calling `ServerHub`, `RestartScheduler`, stats) | hub | M |

@@ -7,9 +7,9 @@ import type { Lifecycle, LiveEvent, ServerCard } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents } from '../events';
 
-/** Events that change a card beyond its TPS: it is fetched again. */
+/** Events that change a card beyond its TPS: it is fetched again (and a server page's detail). */
 const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
-const changesCard = (e: LiveEvent) =>
+export const changesCard = (e: LiveEvent) =>
   'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && e.kind.startsWith('restart')));
 
 @Component({

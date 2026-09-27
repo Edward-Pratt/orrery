@@ -1,16 +1,18 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { ServerCard, ServerDetail, ServiceStatus } from '@hub/api';
-import { filter } from 'rxjs';
-import { LiveEvents, ofTarget } from '../events';
+import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
+import { LiveEvents, ofServer, ofTarget } from '../events';
+import { changesCard } from './cards';
 import { ServiceActions } from '../services/actions';
 
 /** The server page's sections (child routes), each shown only when the server has what it needs. */
 const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
   { path: 'chat', label: 'Chat', has: (c) => c.features.chat },
+  { path: 'console', label: 'Console', has: (c) => c.features.chat },
   { path: 'history', label: 'History', has: () => true },
 ];
 
@@ -49,29 +51,54 @@ export default class ServerPage {
   protected readonly sections = SECTIONS;
   readonly #http = inject(HttpClient);
   readonly id = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
-  /** Set before any section is shown. */
-  readonly card = signal<ServerCard | undefined>(undefined);
+  /** Set before any section is shown, and fetched again when an event changes it. */
+  readonly detail = signal<ServerDetail | undefined>(undefined);
+  readonly card = computed(() => this.detail()?.card);
   /** The service this server runs as, if linked. */
   readonly service = signal<ServiceStatus | null>(null);
   /** Why the server can't be shown: unknown, or the hub didn't answer. */
   readonly missing = signal<string | null>(null);
 
+  readonly #refetch = new Subject<void>();
+
   constructor() {
-    this.#http.get<ServerDetail>(`/api/servers/${encodeURIComponent(this.id)}`).subscribe({
-      next: (detail) => {
-        this.card.set(detail.card);
+    // Debounced: the stream's replay can hold many changes at once.
+    this.#refetch
+      .pipe(
+        debounceTime(50),
+        startWith(undefined),
+        switchMap(() =>
+          this.#http.get<ServerDetail>(`/api/servers/${encodeURIComponent(this.id)}`).pipe(
+            catchError((err: HttpErrorResponse) => {
+              if (!this.detail()) {
+                this.missing.set(err.status === 404 ? 'No such server.' : `The hub didn't answer (HTTP ${err.status}). Reload to try again.`);
+              }
+              return EMPTY;
+            }),
+          ),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((detail) => {
+        this.detail.set(detail);
         this.service.set(detail.service);
-      },
-      error: (err: HttpErrorResponse) =>
-        this.missing.set(err.status === 404 ? 'No such server.' : `The hub didn't answer (HTTP ${err.status}). Reload to try again.`),
-    });
+      });
+    // One stream: each subscription opens its own.
     inject(LiveEvents)
-      .all$.pipe(filter(ofTarget('service')), takeUntilDestroyed())
-      .subscribe(({ event }) => {
-        if (event.type === 'state' && event.id === this.service()?.id) {
-          const { state, sub } = event;
-          this.service.update((s) => s && { ...s, state, sub });
+      .all$.pipe(takeUntilDestroyed())
+      .subscribe((live) => {
+        if (ofServer(this.id)(live)) {
+          const e = live.event;
+          if (changesCard(e) || (e.type === 'notice' && e.kind.startsWith('backup'))) this.refresh();
+        } else if (ofTarget('service')(live)) {
+          const e = live.event;
+          if (e.type === 'state' && e.id === this.service()?.id) this.service.update((s) => s && { ...s, state: e.state, sub: e.sub });
         }
       });
+  }
+
+  /** Fetches the detail again, e.g. after an action changed it. */
+  refresh(): void {
+    this.#refetch.next();
   }
 }

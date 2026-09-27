@@ -9,6 +9,7 @@ export default [
     children: [
       { path: '', loadComponent: () => import('./overview') },
       { path: 'chat', loadComponent: () => import('./chat') },
+      { path: 'console', loadComponent: () => import('./console') },
       { path: 'history', loadComponent: () => import('./history') },
     ],
   },

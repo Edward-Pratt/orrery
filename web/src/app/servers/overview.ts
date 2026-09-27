@@ -1,11 +1,12 @@
-import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { DecimalPipe, PercentPipe } from '@angular/common';
 import { Component, inject } from '@angular/core';
+import { Restart } from './restart';
 import ServerPage from './server';
 
-/** A server's Overview section: what its card shows, as of opening the page. */
+/** A server's Overview section: what its card shows, and with the mod, countdown restarts. */
 @Component({
   selector: 'app-server-overview',
-  imports: [DatePipe, DecimalPipe, PercentPipe],
+  imports: [DecimalPipe, PercentPipe, Restart],
   template: `
     @let c = server.card()!;
     <dl class="grid max-w-md grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
@@ -17,11 +18,13 @@ import ServerPage from './server';
       <dd data-players>{{ c.players.length ? c.players.join(', ') : 'none' }}</dd>
       <dt class="text-muted-foreground">Uptime 24 h</dt>
       <dd>{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd>
-      @if (c.restart; as r) {
-        <dt class="text-muted-foreground">{{ r.stop ? 'Stop' : 'Restart' }}</dt>
-        <dd>at {{ r.at | date: 'HH:mm' }} by {{ r.by }}</dd>
-      }
     </dl>
+    @if (c.features.chat) {
+      <section class="mt-6 max-w-3xl rounded-lg border p-4">
+        <h2 class="mb-2 text-sm font-semibold">Countdown restart</h2>
+        <app-restart />
+      </section>
+    }
   `,
 })
 export default class Overview {

@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { By } from '@angular/platform-browser';
-import type { ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
+import type { PendingRestart, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { fakeEvents, settle } from '../testing';
@@ -57,7 +57,7 @@ describe('server page', () => {
   it('shows an overview, with a Chat section for a server with the mod', async () => {
     const { el, tabs, text } = await setup('/gtnh');
     expect(text(el.querySelector('h1'))).toBe('GTNH Online');
-    expect(tabs()).toEqual(['Overview', 'Chat', 'History']);
+    expect(tabs()).toEqual(['Overview', 'Chat', 'Console', 'History']);
     expect(text(el.querySelector('[data-players]'))).toBe('Steve');
     expect(el.querySelector('[data-chat]')).toBeNull();
   });
@@ -175,7 +175,7 @@ describe('server history section', () => {
     expect(values('TPS')).toEqual([19.5, 12, 18]);
     expect(values('Players')).toEqual([0, 1, 1, 2, 1, 0]);
     expect(values('Uptime')).toEqual([NaN, 1, 0.5, 1, 0, 0]);
-    backend.verify();
+    backend.expectNone('/api/servers/gtnh/history?hours=24');
   });
 
   it('has no TPS graph without the mod', async () => {
@@ -189,5 +189,103 @@ describe('server history section', () => {
   it('links to the audit log filtered to this server', async () => {
     const { el } = await setup('/gtnh');
     expect(el.querySelector('a[data-audit]')?.getAttribute('href')).toBe('/audit?server=gtnh');
+  });
+});
+
+/** Waits out the server page's debounced refetch. */
+const debounce = () => new Promise((r) => setTimeout(r, 80));
+
+describe('server console section', () => {
+  const submit = (el: HTMLElement, command: string) => {
+    el.querySelector<HTMLInputElement>('[data-console-form] input')!.value = command;
+    el.querySelector('[data-console-form]')!.dispatchEvent(new Event('submit'));
+  };
+  const entries = (el: HTMLElement) =>
+    [...el.querySelectorAll('[data-console] > li')].map((li) => [...li.querySelectorAll('b, [data-by], [data-line]')].map((e) => e.textContent).join(' | '));
+
+  it('posts a command and shows its output, then later output and others\' commands from the stream', async () => {
+    const { backend, events, el, render, tabs } = await setup('/gtnh/console');
+    expect(tabs()).toContain('Console');
+    events.push(1, { serverId: 'gtnh', type: 'console', command: 'list', by: 'discord:bob (2)', output: ['1 player online'] });
+    submit(el, 'spark profiler');
+    const req = backend.expectOne('/api/servers/gtnh/command');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ command: 'spark profiler' });
+    // The hub puts the output on the stream too, just before it answers: that copy is the one shown.
+    events.push(2, { serverId: 'gtnh', type: 'console', command: 'spark profiler', by: 'web:alex (5)', output: ['Profiler started'] });
+    req.flush({ output: ['Profiler started'] });
+    await render();
+    expect(el.querySelector<HTMLInputElement>('[data-console-form] input')!.value).toBe('');
+    events.push(3, { serverId: 'gtnh', type: 'console', command: 'spark profiler', by: 'web:alex (5)', output: ['https://spark.lucko.me/abc'], late: true });
+    await render();
+    expect(entries(el)).toEqual([
+      '> list | discord:bob (2) | 1 player online',
+      '> spark profiler | web:alex (5) | Profiler started',
+      '> spark profiler (later) | web:alex (5) | https://spark.lucko.me/abc',
+    ]);
+  });
+
+  it('explains offline, timed out and empty commands', async () => {
+    const { backend, el, render } = await setup('/gtnh/console');
+    const alert = () => el.querySelector('[role=alert]')?.textContent?.trim();
+    for (const [status, body, shown] of [
+      [409, 'GTNH is offline', 'GTNH is offline: the command wasn\'t run.'],
+      [502, 'Command timed out', 'No answer from GTNH: Command timed out'],
+      [400, 'Give a command', 'Give a command.'],
+    ] as const) {
+      submit(el, 'list');
+      backend.expectOne('/api/servers/gtnh/command').flush(body, { status, statusText: 'Error' });
+      await render();
+      expect(alert()).toBe(shown);
+    }
+  });
+
+  it('has no Console section for a server without the mod', async () => {
+    const { el, tabs } = await setup('/site/console', NO_MOD);
+    expect(tabs()).not.toContain('Console');
+    expect(el.querySelector('[data-console-form]')).toBeNull();
+  });
+});
+
+describe('server restarts', () => {
+  const PENDING: PendingRestart = { at: new Date(2026, 8, 27, 18, 30).getTime(), by: 'bob', stop: false };
+  const restartText = (el: HTMLElement) => el.querySelector('[data-restart-pending]')?.textContent?.replace(/\s+/g, ' ').trim();
+
+  it('schedules a countdown restart in whole minutes, shows it, and cancels it', async () => {
+    const { backend, el, render } = await setup('/gtnh');
+    const minutes = el.querySelector<HTMLInputElement>('[data-restart-form] input')!;
+    minutes.value = '10';
+    el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
+    const req = backend.expectOne('/api/servers/gtnh/restart');
+    expect(req.request.body).toEqual({ minutes: 10 });
+    req.flush(null, { status: 204, statusText: 'No Content' });
+    await debounce();
+    backend.expectOne('/api/servers/gtnh').flush({ card: { ...CARD, restart: { ...PENDING, by: 'alex' } }, service: null } as ServerDetail);
+    await render();
+    expect(restartText(el)).toBe('Restart at 18:30:00 by alex');
+
+    el.querySelector<HTMLButtonElement>('[data-restart-cancel]')!.click();
+    backend.expectOne('/api/servers/gtnh/restart/cancel').flush(null, { status: 204, statusText: 'No Content' });
+    await debounce();
+    backend.expectOne('/api/servers/gtnh').flush({ card: CARD, service: null } as ServerDetail);
+    await render();
+    expect(restartText(el)).toBeUndefined();
+  });
+
+  it("shows the hub's 409 when one is already pending", async () => {
+    const { backend, el, render } = await setup('/gtnh');
+    el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
+    backend.expectOne('/api/servers/gtnh/restart').flush('A restart is already scheduled: cancel it first.', { status: 409, statusText: 'Conflict' });
+    await render();
+    expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('A restart is already scheduled: cancel it first.');
+  });
+
+  it('shows a countdown scheduled elsewhere, a service stop included, from the stream', async () => {
+    const { backend, events, el, render } = await setup('/gtnh');
+    events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'info', kind: 'restartScheduled', ms: 300_000, by: 'bob', stop: true });
+    await debounce();
+    backend.expectOne('/api/servers/gtnh').flush({ card: { ...CARD, restart: { ...PENDING, stop: true } }, service: null } as ServerDetail);
+    await render();
+    expect(restartText(el)).toBe('Stop at 18:30:00 by bob');
   });
 });

@@ -6,3 +6,6 @@ hub/*.db*
 hub/db-backups/
 .env
 # mod/ keeps the GTNH template's own .gitignore
+# Claude Code: per-user settings and scratch worktrees
+.claude/settings.local.json
+.claude/worktrees/

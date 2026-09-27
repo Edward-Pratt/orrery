@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "spartan-ui": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@spartan-ng/mcp"
+      ],
+      "env": {}
+    },
+    "angular-cli": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@angular/cli", "mcp"]
+    },
+    "grafana": {
+      "type": "stdio",
+      "command": "go",
+      "args": ["run", "github.com/grafana/mcp-grafana/cmd/mcp-grafana@latest"],
+      "env": {
+        "GRAFANA_URL": "https://grafana.orrery.run",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "${GRAFANA_SERVICE_ACCOUNT_TOKEN}"
+      }
+    }
+  }
+}

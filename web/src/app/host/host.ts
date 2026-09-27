@@ -1,16 +1,26 @@
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { HostNow, HostSample } from '@hub/api';
-import { filter } from 'rxjs';
+import { Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import type { HostHistory, HostNow, HostSample } from '@hub/api';
+import { HlmButton } from '@spartan-ng/helm/button';
+import { catchError, filter, of, switchMap } from 'rxjs';
+import { type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofTarget } from '../events';
 
 const GB = 1024 ** 3;
+const PERIODS = [
+  { label: '1 h', hours: 1 },
+  { label: '24 h', hours: 24 },
+  { label: '7 d', hours: 7 * 24 },
+  { label: '90 d', hours: 90 * 24 },
+];
+const percent = (share: number) => `${Math.round(share * 100)}%`;
+const gb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} GB`;
 
 @Component({
   selector: 'app-host',
-  imports: [DatePipe, DecimalPipe, PercentPipe],
+  imports: [DatePipe, DecimalPipe, PercentPipe, HlmButton, TimeSeries],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Host {{ id() }}</h1>
     @if (sample(); as s) {
@@ -30,26 +40,71 @@ const GB = 1024 ** 3;
     } @else {
       <p class="text-muted-foreground">No sample yet: the first comes a minute after the hub starts.</p>
     }
+    <div class="mt-6 mb-4 flex gap-2" role="group" aria-label="Period">
+      @for (p of periods; track p.hours) {
+        <button hlmBtn size="sm" [variant]="hours() === p.hours ? 'default' : 'outline'" [attr.aria-pressed]="hours() === p.hours" (click)="hours.set(p.hours)" data-period>{{ p.label }}</button>
+      }
+    </div>
+    <div class="grid gap-4 lg:grid-cols-2">
+      @for (c of charts(); track c.title) {
+        <section class="rounded-lg border p-3" [attr.data-chart]="c.title">
+          <h2 class="text-sm font-semibold">{{ c.title }}</h2>
+          <app-time-series [series]="c.series" [format]="c.format" [max]="c.max" />
+        </section>
+      }
+    </div>
   `,
 })
 export default class Host {
   protected readonly gb = GB;
   protected readonly fixed = (n: number) => n.toFixed(2);
+  protected readonly periods = PERIODS;
   readonly id = signal('');
   readonly sample = signal<HostSample | null>(null);
+  /** The graphed period, in hours. */
+  readonly hours = signal(24);
+  /** The period's samples (averaged by the hub over 25 hours), then each live one. */
+  readonly history = signal<HostSample[]>([]);
+  protected readonly charts = computed(() => {
+    const h = this.history();
+    const line = (name: string, f: (s: HostSample) => number): Series => ({ name, points: h.map((s) => [s.ts, f(s)]) });
+    const mounts = [...new Set(h.flatMap((s) => s.disks.map((d) => d.mount)))];
+    return [
+      { title: 'CPU', format: percent, max: 1, series: [line('CPU', (s) => s.cpu)] },
+      { title: 'Load', format: (n: number) => n.toFixed(2), max: undefined, series: [line('1 min', (s) => s.load[0])] },
+      { title: 'Memory', format: percent, max: 1, series: [line('Used', (s) => s.memory.used / s.memory.total)] },
+      {
+        title: 'Disk free',
+        format: gb,
+        max: undefined,
+        series: mounts.map((mount): Series => ({
+          name: mount,
+          points: h.flatMap((s) => s.disks.filter((d) => d.mount === mount).map((d): [number, number] => [s.ts, d.free])),
+        })),
+      },
+    ];
+  });
 
   constructor() {
-    inject(HttpClient)
-      .get<HostNow>('/api/host')
-      .subscribe((now) => {
-        this.id.set(now.id);
-        if (!this.sample() || (now.sample && now.sample.ts > this.sample()!.ts)) this.sample.set(now.sample);
-      });
+    const http = inject(HttpClient);
+    http.get<HostNow>('/api/host').subscribe((now) => {
+      this.id.set(now.id);
+      if (!this.sample() || (now.sample && now.sample.ts > this.sample()!.ts)) this.sample.set(now.sample);
+    });
+    // A newer choice drops a period still loading.
+    toObservable(this.hours)
+      .pipe(
+        switchMap((hours) => http.get<HostHistory>(`/api/host/samples?hours=${hours}`).pipe(catchError(() => of([])))),
+        takeUntilDestroyed(),
+      )
+      .subscribe((history) => this.history.set(history));
     // The replay brings the latest sample, then a new one arrives each minute.
     inject(LiveEvents)
       .all$.pipe(filter(ofTarget('host')), takeUntilDestroyed())
       .subscribe(({ event }) => {
-        if (event.type === 'sample') this.sample.set(event.sample);
+        if (event.type !== 'sample') return;
+        this.sample.set(event.sample);
+        this.history.update((h) => (h.length && h.at(-1)!.ts >= event.sample.ts ? h : [...h, event.sample]));
       });
   }
 }

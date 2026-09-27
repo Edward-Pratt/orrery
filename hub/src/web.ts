@@ -190,7 +190,6 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     app.get('/host/samples', (c) => {
       const hours = Number(c.req.query('hours') ?? 24);
       if (!Number.isInteger(hours) || hours < 1 || hours > 90 * 24) return c.text('Give hours from 1 to 2160', 400);
-      // ponytail: every sample, up to 129,600 for 90 days; downsample if the graphs need long periods.
       return c.json(host.history(hours) satisfies HostHistory);
     });
   }

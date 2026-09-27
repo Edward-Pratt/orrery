@@ -29,6 +29,7 @@ import { formatTargetEvent, type Post } from '../src/format.ts';
 import type { Run } from '../src/services.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
 import type { HubEvent, ServerHub } from '../src/servers.ts';
+import { HISTORY_POINTS } from '../src/host.ts';
 import { startHub } from '../src/start.ts';
 import type { OAuth, WebApi } from '../src/web.ts';
 import { online, sleep, TOKEN, until } from './fake-mod.ts';
@@ -882,7 +883,7 @@ async function hostHub(t: TestContext) {
     assert.equal(res.status, 200, path);
     return res.json() as Promise<T>;
   };
-  return { use, next, notices, events, get, app, cookie };
+  return { use, next, notices, events, get, app, cookie, dbPath: cfg.dbPath };
 }
 
 test('a host sample is stored, served as the latest and in the history, and streamed', async (t) => {
@@ -905,6 +906,43 @@ test('a host sample is stored, served as the latest and in the history, and stre
   assert.deepEqual(history.map((s) => s.cpu), [0.3, 0.1]);
   assert.deepEqual(await get<HostSample[]>('/api/host/samples'), history); // 24 hours by default
   assert.deepEqual((await get<Integrations>('/api/integrations')).host, true);
+});
+
+test('a long history period is averaged into at most HISTORY_POINTS buckets; short ones stay raw', async (t) => {
+  const { get, dbPath } = await hostHub(t);
+  // A week of minutes, busy and idle in turn, disk free 0 and 2 GB in turn.
+  const db = new Db(dbPath);
+  const now = Date.now();
+  for (let k = 7 * 24 * 60 - 1; k >= 0; k--) {
+    const on = k % 2;
+    db.recordHostSample('oracle', {
+      ts: now - k * 60_000 - 30_000,
+      cpu: on,
+      load: [on, 2 * on, 3 * on],
+      memory: { used: on * GB, total: 16 * GB },
+      disks: [{ mount: '/', free: 2 * on * GB, total: 100 * GB }],
+    });
+  }
+  db.close();
+  assert.equal((await get<HostSample[]>('/api/host/samples?hours=1')).length, 60);
+  const day = await get<HostSample[]>('/api/host/samples?hours=24');
+  assert.equal(day.length, 24 * 60);
+  assert.deepEqual(new Set(day.map((s) => s.cpu)), new Set([0, 1]));
+
+  const week = await get<HostSample[]>('/api/host/samples?hours=168');
+  const width = Math.ceil((168 * 60) / HISTORY_POINTS); // minutes in a bucket: 7, so 3 or 4 of them busy
+  assert.ok(week.length <= HISTORY_POINTS);
+  assert.ok(Math.abs(week.length - (168 * 60) / width) <= 1, String(week.length)); // 1440, or one more split at the ends
+  for (const b of week.slice(1, -1)) {
+    const busy = Math.round(b.cpu * width);
+    assert.ok(busy === 3 || busy === 4, String(b.cpu));
+    const share = busy / width;
+    assert.deepEqual(b.load.map((l) => +(l / share).toFixed(9)), [1, 2, 3]);
+    assert.equal(+(b.memory.used / GB / share).toFixed(9), 1);
+    assert.equal(b.memory.total, 16 * GB);
+    assert.deepEqual(b.disks.map((d) => [d.mount, +(d.free / GB / share).toFixed(9), d.total]), [['/', 2, 100 * GB]]);
+  }
+  assert.ok(week.every((b, i) => i === 0 || b.ts > week[i - 1].ts));
 });
 
 test('a bad history period is refused', async (t) => {

@@ -48,7 +48,11 @@ export type Integrations = { minecraft: boolean; discord: boolean; web: boolean;
  */
 export type HostNow = { id: string; sample: HostSample | null };
 
-/** `GET /api/host/samples[?hours=1–2160]`: the host's samples over the last `hours` (default 24), oldest first. */
+/**
+ * `GET /api/host/samples[?hours=1–2160]`: the host's samples over the last `hours` (default 24), oldest first. Up to
+ * 25 hours they are the raw minutes; a longer period is at most `HISTORY_POINTS` (1500, `host.ts`) equal time buckets,
+ * each the average of its samples (`ts` too; a mount over the samples that have it).
+ */
 export type HostHistory = HostSample[];
 
 

@@ -6,6 +6,8 @@ import type { Db } from './db.ts';
 import type { HostSample, ServerHub } from './servers.ts';
 
 const GB = 1024 ** 3;
+/** The most samples `history` returns: a longer period (over 25 hours of minutes) is averaged into this many buckets. */
+export const HISTORY_POINTS = 1500;
 
 /** Where host numbers come from, passed in so tests need no real machine. */
 export type HostReaders = {
@@ -76,7 +78,18 @@ export class HostMonitor {
 
   /** The samples of the last `hours`, oldest first. */
   history(hours: number): HostSample[] {
-    return this.#db.hostSamples(this.#cfg.id, Date.now() - hours * 3600_000);
+    const since = Date.now() - hours * 3600_000;
+    // ponytail: reads and parses every sample, up to 129,600 for 90 days; aggregate in SQL if that gets slow.
+    const samples = this.#db.hostSamples(this.#cfg.id, since);
+    const width = Math.ceil((hours * 60) / HISTORY_POINTS) * 60_000;
+    if (width <= 60_000) return samples; // one a minute already fits
+    const buckets = new Map<number, HostSample[]>();
+    for (const s of samples) {
+      const i = Math.min(Math.floor((s.ts - since) / width), HISTORY_POINTS - 1);
+      if (buckets.has(i)) buckets.get(i)!.push(s);
+      else buckets.set(i, [s]);
+    }
+    return [...buckets.values()].map(average);
   }
 
   async #sample(): Promise<void> {
@@ -122,4 +135,21 @@ export class HostMonitor {
       }
     }
   }
+}
+
+const mean = <T>(of: T[], f: (x: T) => number) => of.reduce((sum, x) => sum + f(x), 0) / of.length;
+
+/** One sample from several: every number averaged, each mount's over the samples that have it. */
+function average(bucket: HostSample[]): HostSample {
+  const mounts = [...new Set(bucket.flatMap((s) => s.disks.map((d) => d.mount)))];
+  return {
+    ts: Math.round(mean(bucket, (s) => s.ts)),
+    cpu: mean(bucket, (s) => s.cpu),
+    load: bucket[0].load.map((_, i) => mean(bucket, (s) => s.load[i])),
+    memory: { used: mean(bucket, (s) => s.memory.used), total: mean(bucket, (s) => s.memory.total) },
+    disks: mounts.map((mount) => {
+      const of = bucket.flatMap((s) => s.disks.filter((d) => d.mount === mount));
+      return { mount, free: mean(of, (d) => d.free), total: mean(of, (d) => d.total) };
+    }),
+  };
 }

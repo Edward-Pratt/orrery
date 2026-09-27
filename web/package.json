@@ -19,6 +19,8 @@
     "@spartan-ng/brain": "^1.5.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "echarts": "^6.1.0",
+    "ngx-echarts": "^22.0.0",
     "rxjs": "~7.8.0",
     "tailwind-merge": "^3.5.0",
     "tslib": "^2.3.0"

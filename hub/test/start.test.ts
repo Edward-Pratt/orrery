@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
-import type { AuditLog, CommandOutput, Integrations, LiveEvent, PlayerAnswer, ServerCard, ServerDetail } from '../src/api.ts';
+import type { AuditLog, CheckStatus, CommandOutput, Integrations, LiveEvent, PlayerAnswer, ServerCard, ServerDetail, TargetEvent } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
@@ -490,7 +490,7 @@ const NO_MOD = { chat: false, tps: false, quests: false };
 
 test('the API says which integrations are on, and nothing else about them', async (t) => {
   const { get } = await apiHub(t);
-  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true });
+  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false });
 });
 
 test('server cards while offline: features only for the server with the mod', async (t) => {
@@ -720,4 +720,101 @@ test('a notice about a check reaches the stream, its replay and a resume, keyed 
   t.after(() => resumed.close());
   await until(() => resumed.events.length === 1);
   assert.deepEqual(resumed.events, [stream.events[2]]);
+});
+
+const SITE = { id: 'site', url: 'https://site.example', intervalSeconds: 60 };
+type Answer = { ok: boolean; status: number } | Error;
+const timeout = () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+const refused = () => new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+
+/** A web hub with one check (no health ping); `answers` are the check's results in order, the first at startup. */
+async function checksHub(t: TestContext, answers: Answer[]) {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const cfg = config(t, { web: WEB, checks: [SITE] });
+  delete cfg.healthcheckUrl;
+  const requests: string[] = [];
+  const handle = await startHub(cfg, {
+    startFrontend: () => assert.fail('Discord is off'),
+    get: async (url) => {
+      requests.push(url);
+      const answer = answers[requests.length - 1] ?? assert.fail('no more answers');
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  const notices: TargetEvent[] = [];
+  const add = (e: LiveEvent) => void ('target' in e && notices.push(e));
+  handle.live.since().forEach(([, e]) => add(e)); // from the startup request
+  handle.live.on('event', (_, e) => add(e));
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  /** Waits for the check's `n`th request to be answered. */
+  const answered = async (n: number) => (await until(() => requests.length === n), await new Promise((r) => setImmediate(r)));
+  const next = async () => {
+    const n = requests.length + 1;
+    t.mock.timers.tick(60_000);
+    await answered(n);
+  };
+  const checks = async () => (await app.request('/api/checks', { headers: { cookie } })).json() as Promise<CheckStatus[]>;
+  await answered(1);
+  return { requests, notices, next, checks, app, cookie };
+}
+
+const UP = { ok: true, status: 200 };
+const kinds = (notices: TargetEvent[]) => notices.map((n) => [n.id, n.kind, n.kind === 'checkDown' ? n.error : null]);
+
+test('a check that goes down publishes one notice, and one when it is back up', async (t) => {
+  const { requests, notices, next, checks } = await checksHub(t, [UP, UP, { ok: false, status: 503 }, { ok: false, status: 500 }, refused(), { ok: true, status: 204 }, UP]);
+  const [first] = await checks();
+  assert.deepEqual({ ...first, ms: typeof first!.ms, checkedAt: typeof first!.checkedAt }, {
+    id: 'site',
+    url: 'https://site.example',
+    up: true,
+    ms: 'number',
+    error: null,
+    checkedAt: 'number',
+  });
+  await next();
+  assert.equal(notices.length, 0); // up at startup and still up: nothing to say
+  await next();
+  assert.deepEqual(kinds(notices), [['site', 'checkDown', 'HTTP 503']]);
+  assert.deepEqual(notices[0], { target: 'check', id: 'site', type: 'notice', severity: 'problem', kind: 'checkDown', url: SITE.url, error: 'HTTP 503' });
+  assert.equal((await checks())[0]!.up, false);
+  await next();
+  await next();
+  assert.equal(notices.length, 1); // still down, however it fails
+  assert.equal((await checks())[0]!.error, 'ECONNREFUSED');
+  await next();
+  assert.deepEqual(kinds(notices), [['site', 'checkDown', 'HTTP 503'], ['site', 'checkUp', null]]);
+  assert.equal(notices[1]!.severity, 'good');
+  await next();
+  assert.equal(notices.length, 2);
+  assert.deepEqual((await checks()).map((c) => [c.up, c.error]), [[true, null]]);
+  assert.deepEqual(new Set(requests), new Set([SITE.url]));
+});
+
+test('a check that times out or cannot connect is down', async (t) => {
+  const { notices, next } = await checksHub(t, [timeout(), UP, refused()]);
+  await next();
+  await next();
+  assert.deepEqual(kinds(notices), [['site', 'checkDown', 'timed out'], ['site', 'checkUp', null], ['site', 'checkDown', 'ECONNREFUSED']]);
+});
+
+test('without checks nothing is requested and there is no checks API', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const cfg = config(t, { web: WEB });
+  delete cfg.healthcheckUrl;
+  const handle = await startHub(cfg, {
+    startFrontend: () => assert.fail('Discord is off'),
+    get: () => assert.fail('nothing to request'),
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  t.mock.timers.tick(60 * 60_000);
+  const cookie = await loginCookie(handle.web!.app);
+  assert.equal((await handle.web!.app.request('/api/checks', { headers: { cookie } })).status, 404);
+  const on = (await (await handle.web!.app.request('/api/integrations', { headers: { cookie } })).json()) as Integrations;
+  assert.equal(on.checks, false);
 });

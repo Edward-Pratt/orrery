@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
+import { Checks } from './checks.ts';
 import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
@@ -27,7 +28,7 @@ export type HubDeps = {
     links: Links,
     cfg: DiscordConfig,
   ) => Promise<Frontend>;
-  /** The health ping's HTTP GET. */
+  /** The HTTP GET of the health ping and of checks. */
   get: Get;
   /** Discord OAuth for dashboard logins; needed only with the web integration. */
   oauth?: OAuth;
@@ -46,7 +47,7 @@ export type HubHandle = {
 
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
-  const { minecraft, discord, web } = config.integrations;
+  const { minecraft, discord, web, checks: checkList } = config.integrations;
   if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   const backupDirs: Record<string, string> = Object.fromEntries(
     config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
@@ -89,6 +90,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   lag.start();
   quests.start();
 
+  const checks = checkList && new Checks(hub, checkList, deps.get);
+  checks?.start();
+
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
@@ -98,7 +102,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -114,6 +118,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       lag.stop();
       quests.flush(); // don't lose a pending roll-up
       quests.stop();
+      checks?.stop();
       stopSummaries();
       upkeep();
       stopPing();

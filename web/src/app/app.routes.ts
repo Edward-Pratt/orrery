@@ -11,6 +11,7 @@ export class Nothing {}
 /** One lazy route per integration with pages, matched only when the hub has it on. */
 export const routes: Routes = [
   { path: 'servers', canMatch: [enabled('minecraft')], loadChildren: () => import('./servers/routes') },
+  { path: 'checks', canMatch: [enabled('checks')], loadChildren: () => import('./checks/routes') },
   { path: '', pathMatch: 'full', redirectTo: 'servers' },
   { path: '**', component: Nothing },
 ];

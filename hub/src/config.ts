@@ -62,12 +62,15 @@ export type WebIntegration = {
   sessionDays: number;
 };
 
+/** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. */
+export type CheckConfig = { id: string; url: string; intervalSeconds: number };
+
 export type Config = {
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
   /** Each integration is on when its section is present; none is required. */
-  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration };
+  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[] };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -137,9 +140,33 @@ export function validateConfig(raw: unknown): string[] {
     return entries;
   };
 
+  /** An optional http(s) URL. */
+  const httpUrl = (o: Obj, key: string, where: string, required = false) => {
+    const url = str(o, key, where, required);
+    if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err(where, `"${key}" must be an http(s) URL`);
+  };
+  /** An integration's list of entries, each with its own id; `each` checks the rest of an entry. */
+  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void) => {
+    const v = o[key];
+    if (!Array.isArray(v)) return void err('integrations', `"${key}" must be a list`);
+    const seen = new Set<string>();
+    for (const [i, e] of v.entries()) {
+      if (!isObj(e)) {
+        err(`${key}[${i}]`, 'must be an object');
+        continue;
+      }
+      const eid = str(e, 'id', `${key}[${i}]`);
+      const where = eid === undefined ? `${key}[${i}]` : `${what} "${eid}"`;
+      each(e, where);
+      if (eid !== undefined) {
+        if (seen.has(eid)) err(where, 'duplicate id');
+        seen.add(eid);
+      }
+    }
+  };
+
   str(raw, 'dbPath', '');
-  const url = str(raw, 'healthcheckUrl', '', false);
-  if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err('', '"healthcheckUrl" must be an http(s) URL');
+  httpUrl(raw, 'healthcheckUrl', '');
 
   let ids: Set<string> | undefined;
   if (!Array.isArray(raw.servers) || raw.servers.length === 0) {
@@ -214,6 +241,13 @@ export function validateConfig(raw: unknown): string[] {
         err(`${where}.channels`, `"${sid}" must be a Discord ID (17–20 digits)`);
       }
     }
+  }
+  if (integrations.checks !== undefined) {
+    list(integrations, 'checks', 'check', (c, where) => {
+      httpUrl(c, 'url', where, true);
+      const n = c.intervalSeconds;
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 30) err(where, '"intervalSeconds" must be a whole number of at least 30');
+    });
   }
   const web = integrations.web;
   if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');

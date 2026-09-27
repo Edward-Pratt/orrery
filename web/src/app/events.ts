@@ -1,5 +1,5 @@
 import { inject, Injectable, InjectionToken } from '@angular/core';
-import type { HubEvent, LiveEvent } from '@hub/api';
+import type { HubEvent, LiveEvent, Target, TargetEvent } from '@hub/api';
 import { Observable } from 'rxjs';
 import { Session } from './session';
 
@@ -16,6 +16,12 @@ export const ofServer =
   (serverId: string) =>
   (live: Live): live is { id: number; event: HubEvent } =>
     'serverId' in live.event && live.event.serverId === serverId;
+
+/** Events about the host, services or checks (`target`), never a server's. */
+export const ofTarget =
+  (target: Target) =>
+  (live: Live): live is { id: number; event: TargetEvent } =>
+    'target' in live.event && live.event.target === target;
 
 /**
  * The hub's live event stream (`GET /api/events`). Fetch rather than EventSource, so a reconnect after any drop,

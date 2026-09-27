@@ -60,7 +60,9 @@ optional: leave out `discord` to run without the bot (and without a token), or
 `127.0.0.1` (Discord login for admins, no bot needed; it uses its own `guildId` and
 `adminRoleId`, else those under `discord`, and the OAuth app's redirect set to `<publicUrl>/api/callback`). A server needs a token when `minecraft` is on,
 but a Discord channel is optional: one left out of `channels` just isn't
-bridged to Discord. `npm run check-config` checks the file
+bridged to Discord. `checks` lists URLs the hub requests on a schedule (`id`, `url`,
+`intervalSeconds` ≥ 30); up means HTTP 2xx within 10 s, and going down or back up is a
+notice in the dashboard and, if `discord.alertsChannel` is set, in that channel. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see

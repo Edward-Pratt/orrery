@@ -26,7 +26,13 @@ export type {
 export type Me = { id: string; username: string };
 
 /** `GET /api/integrations`: which integrations are switched on. */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean };
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean };
+
+/**
+ * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null
+ * until its first answer; `ms` is how long that took, `error` why it was down ("HTTP 503", "timed out", ECONNREFUSED).
+ */
+export type CheckStatus = { id: string; url: string; up: boolean | null; ms: number | null; error: string | null; checkedAt: number | null };
 
 /** What a server has; chat, TPS and quests only for a Minecraft server with the mod (a token configured). */
 export type Features = { chat: boolean; tps: boolean; quests: boolean };

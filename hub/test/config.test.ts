@@ -111,6 +111,31 @@ test('Discord may name an alerts channel for the host, services and checks', asy
   assert.deepEqual(validateConfig(discord('')), ['integrations.discord: "alertsChannel" must be a non-empty string']);
 });
 
+test('checks each need their own id, an http(s) URL and an interval of at least 30 s', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...c } = valid(dir);
+  const checks = (list: unknown) => validateConfig({ ...c, integrations: { checks: list } });
+  const site = { id: 'site', url: 'https://orrery.run', intervalSeconds: 60 };
+  assert.deepEqual(checks([site, { ...site, id: 'api', url: 'http://127.0.0.1:8080/health', intervalSeconds: 30 }]), []);
+  assert.deepEqual(checks([]), []);
+  assert.deepEqual(checks({ site }), ['integrations: "checks" must be a list']);
+  assert.deepEqual(
+    checks([{ ...site, url: 'ftp://orrery.run' }, { ...site, url: 'not a url', intervalSeconds: 29 }, { ...site, intervalSeconds: 1.5 }, { url: site.url }, 'x']),
+    [
+      'check "site": "url" must be an http(s) URL',
+      'check "site": "url" must be an http(s) URL',
+      'check "site": "intervalSeconds" must be a whole number of at least 30',
+      'check "site": duplicate id',
+      'check "site": "intervalSeconds" must be a whole number of at least 30',
+      'check "site": duplicate id',
+      'checks[3]: "id" is required',
+      'checks[3]: "intervalSeconds" must be a whole number of at least 30',
+      'checks[4]: must be an object',
+    ],
+  );
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

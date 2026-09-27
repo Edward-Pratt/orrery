@@ -1,6 +1,11 @@
 export type Get = (url: string) => Promise<{ ok: boolean; status: number }>;
 
-export const httpGet: Get = (url) => fetch(url, { signal: AbortSignal.timeout(10_000) });
+/** A GET that gives up after 10 s (a `TimeoutError`); the body is discarded, so the connection is freed. */
+export const httpGet: Get = async (url) => {
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  await res.body?.cancel();
+  return { ok: res.ok, status: res.status };
+};
 
 /**
  * GETs `url` every `everyMs` from the hub's own timer, so an outside monitor (e.g. healthchecks.io) alerts when the

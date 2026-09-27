@@ -4,7 +4,8 @@ import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { AuditLog, CommandOutput, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type { AuditLog, CheckStatus, CommandOutput, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type { Checks } from './checks.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
@@ -47,11 +48,13 @@ export type WebDeps = {
   hub: ServerHub;
   stats: Stats;
   restarts: RestartScheduler;
+  /** Only with the checks integration. */
+  checks?: Checks;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
@@ -127,8 +130,14 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     return c.body(null, 204);
   });
   app.get('/integrations', (c) =>
-    c.json({ minecraft: !!integrations.minecraft, discord: !!integrations.discord, web: true } satisfies Integrations),
+    c.json({
+      minecraft: !!integrations.minecraft,
+      discord: !!integrations.discord,
+      web: true,
+      checks: !!integrations.checks,
+    } satisfies Integrations),
   );
+  if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
   app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
   app.get('/servers/:id', async (c) => {
     const id = c.req.param('id');

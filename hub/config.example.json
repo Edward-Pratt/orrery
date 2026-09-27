@@ -23,8 +23,12 @@
     "discord": {
       "guildId": "YOUR_DISCORD_SERVER_ID",
       "adminRoleId": "ROLE_ID_ALLOWED_TO_USE_CMD",
-      "channels": { "gtnh": "CHANNEL_ID_FOR_THIS_SERVER" }
+      "channels": { "gtnh": "CHANNEL_ID_FOR_THIS_SERVER" },
+      "alertsChannel": "CHANNEL_ID_FOR_HOST_SERVICE_AND_CHECK_ALERTS"
     },
+    "checks": [
+      { "id": "dashboard", "url": "https://dash.orrery.run", "intervalSeconds": 60 }
+    ],
     "web": {
       "listenPort": 25581,
       "publicUrl": "https://dash.orrery.run",

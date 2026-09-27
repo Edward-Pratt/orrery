@@ -28,7 +28,7 @@ jobs:
         run: |
           # An empty, all-zeros (new branch) or unfetched (force-push) base isn't a commit here: run everything.
           if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            git diff --name-only "$BASE...HEAD" | bash .github/changes.sh
+            git diff --name-only --no-renames "$BASE...HEAD" | bash .github/changes.sh # --no-renames: a move lists both sides
           else
             bash .github/changes.sh unknown
           fi | tee -a "$GITHUB_OUTPUT"

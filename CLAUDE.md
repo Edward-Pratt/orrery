@@ -60,7 +60,7 @@ smoke test in the release's tickets — say so rather than claiming it works.
 ## Releases
 
 Hub, mod and dashboard are versioned separately (`docs/adr/0001`). Tag `hub-vX.Y.Z`, `mod-vX.Y.Z` or `web-vX.Y.Z`
-on `main` and push the tag: `.github/workflows/release.yml` runs CI, then creates the GitHub release. Its notes are
+on `main` and push the tag: `.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`), then creates the GitHub release. Its notes are
 that part's commits; for the mod it attaches the jar, for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished). The hub is deployed with
 `git checkout hub-vX.Y.Z` on the server, the dashboard with `sudo bash deploy/install-web.sh web-vX.Y.Z`.

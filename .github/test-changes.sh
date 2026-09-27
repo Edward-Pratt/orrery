@@ -7,7 +7,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # run REF_TYPE REF_NAME [unknown] <<< files  →  "hub mod web deploy" as 1/0
 run() {
   REF_TYPE=$1 REF_NAME=$2 bash "$HERE/changes.sh" ${3:-} |
-    sed -n 's/^\(hub\|mod\|web\|deploy\)=//p' | sed 's/true/1/;s/false/0/' | tr '\n' ' ' | sed 's/ $//'
+    sed -nE 's/^(hub|mod|web|deploy)=//p' | sed 's/true/1/;s/false/0/' | tr '\n' ' ' | sed 's/ $//'
 }
 check() {
   local got; got=$(run "${@:3}" <<< "$2")

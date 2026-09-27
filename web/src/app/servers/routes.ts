@@ -11,6 +11,7 @@ export default [
       { path: 'chat', loadComponent: () => import('./chat') },
       { path: 'console', loadComponent: () => import('./console') },
       { path: 'history', loadComponent: () => import('./history') },
+      { path: 'stats', loadComponent: () => import('./stats') },
     ],
   },
 ] satisfies Routes;

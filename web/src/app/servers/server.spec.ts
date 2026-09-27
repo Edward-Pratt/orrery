@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { By } from '@angular/platform-browser';
-import type { PendingRestart, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
+import type { PendingRestart, PlayerAnswer, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { fakeEvents, settle } from '../testing';
@@ -24,7 +24,7 @@ const CARD: ServerCard = {
 const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false } };
 
 /** Opens `url` (e.g. `/gtnh/chat`) straight away, as a reload would, and answers the server's detail. */
-async function setup(url: string, card = CARD, service: ServiceStatus | null = null) {
+async function setup(url: string, card = CARD, service: ServiceStatus | null = null, more: Partial<ServerDetail> = {}) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [
@@ -38,7 +38,7 @@ async function setup(url: string, card = CARD, service: ServiceStatus | null = n
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);
   await harness.navigateByUrl(url);
-  backend.expectOne(`/api/servers/${card.id}`).flush({ card, service } as ServerDetail);
+  backend.expectOne(`/api/servers/${card.id}`).flush({ card, service, ...more } as ServerDetail);
   const el = harness.routeNativeElement as HTMLElement;
   const render = async () => (await settle(), harness.fixture.detectChanges(), await harness.fixture.whenStable());
   await render();
@@ -57,14 +57,14 @@ describe('server page', () => {
   it('shows an overview, with a Chat section for a server with the mod', async () => {
     const { el, tabs, text } = await setup('/gtnh');
     expect(text(el.querySelector('h1'))).toBe('GTNH Online');
-    expect(tabs()).toEqual(['Overview', 'Chat', 'Console', 'History']);
+    expect(tabs()).toEqual(['Overview', 'Chat', 'Console', 'History', 'Stats']);
     expect(text(el.querySelector('[data-players]'))).toBe('Steve');
     expect(el.querySelector('[data-chat]')).toBeNull();
   });
 
   it('has no Chat section for a server without the mod, even when linked to', async () => {
     const { el, tabs } = await setup('/site/chat', NO_MOD);
-    expect(tabs()).toEqual(['Overview', 'History']);
+    expect(tabs()).toEqual(['Overview', 'History', 'Stats']);
     expect(el.querySelector('[data-chat]')).toBeNull();
     expect(el.querySelector('[data-no-chat]')).not.toBeNull();
   });
@@ -287,5 +287,65 @@ describe('server restarts', () => {
     backend.expectOne('/api/servers/gtnh').flush({ card: { ...CARD, restart: { ...PENDING, stop: true } }, service: null } as ServerDetail);
     await render();
     expect(restartText(el)).toBe('Stop at 18:30:00 by bob');
+  });
+});
+
+describe('server stats section', () => {
+  const H = 3_600_000;
+  const TOP: ServerDetail['top'] = {
+    day: [{ player: 'Steve', ms: 2 * H + 5 * 60_000 }, { player: 'Alex', ms: 45_000 }],
+    week: [{ player: 'Steve', ms: 30 * H }],
+    all: [],
+  };
+  const lists = (el: HTMLElement) =>
+    Object.fromEntries(
+      [...el.querySelectorAll('[data-top]')].map((l) => [
+        l.getAttribute('data-top'),
+        [...l.querySelectorAll('li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim()),
+      ]),
+    );
+  const lookup = async (el: HTMLElement, name: string) => {
+    el.querySelector<HTMLInputElement>('[data-lookup] input')!.value = name;
+    el.querySelector('[data-lookup]')!.dispatchEvent(new Event('submit'));
+  };
+  const found = (el: HTMLElement) => {
+    const card = el.querySelector('[data-player]');
+    return card ? [...card.querySelectorAll('h3, dt, dd')].map((e) => e.textContent?.trim()).join(' ') : undefined;
+  };
+
+  it('lists the most-played for the last day, week and all time, with durations', async () => {
+    const { el, tabs } = await setup('/gtnh/stats', CARD, null, { top: TOP });
+    expect(tabs()).toContain('Stats');
+    expect(lists(el)).toEqual({
+      day: ['1. Steve 2 h 5 m', '2. Alex 45 s'],
+      week: ['1. Steve 1 d 6 h'],
+      all: ['No playtime recorded.'],
+    });
+  });
+
+  it('looks a player up: playtime and last seen, online or not; a name never seen is said so', async () => {
+    const { backend, el, render } = await setup('/gtnh/stats', CARD, null, { top: TOP });
+    await lookup(el, 'Steve');
+    backend.expectOne('/api/servers/gtnh/players/Steve').flush({ found: true, player: 'Steve', totalMs: 30 * H, weekMs: 3 * H, lastSeen: { online: true } } satisfies PlayerAnswer);
+    await render();
+    expect(found(el)).toBe('Steve Total 1 d 6 h Last 7 days 3 h Last seen online now');
+
+    const seen = new Date(2026, 8, 20, 21, 15).getTime();
+    await lookup(el, 'alex');
+    backend.expectOne('/api/servers/gtnh/players/alex').flush({ found: true, player: 'Alex', totalMs: 60_000, weekMs: 0, lastSeen: seen } satisfies PlayerAnswer);
+    await render();
+    expect(found(el)).toBe('Alex Total 1 m Last 7 days 0 s Last seen 2026-09-20 21:15');
+
+    await lookup(el, 'Nobody');
+    backend.expectOne('/api/servers/gtnh/players/Nobody').flush('Not Found', { status: 404, statusText: 'Not Found' });
+    await render();
+    expect(found(el)).toBeUndefined();
+    expect(el.querySelector('[data-never]')?.textContent?.trim()).toBe('Nobody: never seen here.');
+  });
+
+  it('opens a top player in the lookup', async () => {
+    const { backend, el } = await setup('/gtnh/stats', CARD, null, { top: TOP });
+    el.querySelector<HTMLButtonElement>('[data-top=day] li button')!.click();
+    backend.expectOne('/api/servers/gtnh/players/Steve');
   });
 });

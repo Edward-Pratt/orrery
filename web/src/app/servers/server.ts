@@ -14,6 +14,7 @@ const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }
   { path: 'chat', label: 'Chat', has: (c) => c.features.chat },
   { path: 'console', label: 'Console', has: (c) => c.features.chat },
   { path: 'history', label: 'History', has: () => true },
+  { path: 'stats', label: 'Stats', has: () => true },
 ];
 
 /** A server's page: its name, state and linked service, then its sections, which read the detail from here. */

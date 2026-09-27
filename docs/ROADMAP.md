@@ -82,6 +82,12 @@ Discord's `alertsChannel` (#43); checks (#44); host metrics (#45); services with
 start/stop/restart through a polkit rule, with a clean countdown stop for a linked server, and `gtnh.socket` no longer
 `PartOf` its service (#47); production smoke test (#48).
 
+**Step 5 — built (`hub-v2.4.0` + `web-v0.3.0`); deployment and smoke test pending (#56):** server page sections
+(#49); graphs with ECharts, starting with the host (#50); server history (TPS, players, uptime) and the audit log page
+(#51); console and countdown restarts, on the server page and the cards (#52); player stats (#53); the backups
+section, with the hub reporting the free-space minimum (#54); restoring a backup from the dashboard, wrapping
+`deploy/restore-backup.sh`, only while the linked service is stopped (#55).
+
 | Feature | Where | Size |
 |---|---|---|
 | HTTP API and live event stream (`hub/src/web/`, calling `ServerHub`, `RestartScheduler`, stats) | hub | M |

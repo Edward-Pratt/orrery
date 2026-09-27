@@ -205,7 +205,6 @@ export class Db {
       .map((r) => ({ ts: r.ts as number, tps: r.tps as number }));
   }
 
-  /** Average and minimum TPS over [from, to), or null without samples. */
   /** TPS samples since `from`, oldest first, averaged into `width`-ms buckets (the last one no later than `maxBucket`). */
   tpsAveraged(serverId: string, from: number, width: number, maxBucket: number): { ts: number; tps: number }[] {
     return this.#db
@@ -217,6 +216,7 @@ export class Db {
       .map((r) => ({ ts: r.ts as number, tps: r.tps as number }));
   }
 
+  /** Average and minimum TPS over [from, to), or null without samples. */
   tpsStats(serverId: string, from: number, to: number): { avg: number; min: number } | null {
     const row = this.#db
       .prepare('SELECT AVG(tps) AS avg, MIN(tps) AS min FROM tps WHERE server_id = ? AND ts >= ? AND ts < ?')

@@ -25,7 +25,7 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
   (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
-  (`HostMonitor`, `Checks`, `Services`); they
+  (`HostMonitor`, `Checks`, `Services`, `Restores`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same

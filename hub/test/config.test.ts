@@ -136,6 +136,31 @@ test('checks each need their own id, an http(s) URL and an interval of at least 
   );
 });
 
+test('the host needs an id; its mounts must exist and its limits be sensible, with defaults', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...c } = valid(dir);
+  const host = (h: unknown) => validateConfig({ ...c, integrations: { host: h } });
+  assert.deepEqual(host({ id: 'oracle' }), []);
+  assert.deepEqual(host({ id: 'oracle', mounts: ['/', dir], memoryMaxPercent: 95, memoryMinutes: 10, diskMinFreeGB: 5 }), []);
+  assert.deepEqual(host('oracle'), ['integrations: "host" must be an object']);
+  assert.deepEqual(host({ mounts: [], memoryMaxPercent: 101, memoryMinutes: 0.5, diskMinFreeGB: -1 }), [
+    'integrations.host: "id" is required',
+    'integrations.host: "mounts" must be a non-empty list of folders',
+    'integrations.host: "memoryMaxPercent" must be a number from 1 to 100',
+    'integrations.host: "memoryMinutes" must be a whole number of at least 1',
+    'integrations.host: "diskMinFreeGB" must be a positive number',
+  ]);
+  assert.deepEqual(host({ id: 'oracle', mounts: ['/', join(dir, 'missing'), 3] }), [
+    `integrations.host: mount "${join(dir, 'missing')}" is not an existing folder`,
+    'integrations.host: "mounts" must be a non-empty list of folders',
+  ]);
+
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify({ ...c, integrations: { host: { id: 'oracle' } } }));
+  assert.deepEqual(loadConfig(path).integrations.host, { id: 'oracle', mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 });
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

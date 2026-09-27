@@ -160,7 +160,7 @@ test('a session opened after the last stamp never ends before it started', () =>
   db.close();
 });
 
-test('maintain prunes old TPS samples, copies the database and keeps 7 copies', async (t) => {
+test('maintain prunes old TPS samples and host samples, copies the database and keeps 7 copies', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'db-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const DAY = 24 * 3600_000;
@@ -168,6 +168,9 @@ test('maintain prunes old TPS samples, copies the database and keeps 7 copies', 
   const db = new Db(':memory:');
   db.recordTps('gtnh', now - 91 * DAY, 20, null, null);
   db.recordTps('gtnh', now - 89 * DAY, 19, null, null);
+  const sample = (ts: number) => ({ ts, cpu: 0.5, load: [1, 1, 1], memory: { used: 1, total: 2 }, disks: [] });
+  db.recordHostSample('oracle', sample(now - 91 * DAY));
+  db.recordHostSample('oracle', sample(now - 89 * DAY));
   db.openSession('gtnh', 'Old', now - 400 * DAY);
   const copies = join(dir, 'db-backups');
   await mkdir(copies);
@@ -177,6 +180,7 @@ test('maintain prunes old TPS samples, copies the database and keeps 7 copies', 
   db.maintain(copies, now);
 
   assert.deepEqual(db.tpsSince('gtnh', 0).map((r) => r.tps), [19]);
+  assert.deepEqual(db.hostSamples('oracle', 0), [sample(now - 89 * DAY)]);
   assert.deepEqual((await readdir(copies)).sort(), [
     'hub-2026-09-03.db',
     'hub-2026-09-04.db',

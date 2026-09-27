@@ -1,6 +1,7 @@
 import { loadConfig } from './config.ts';
 import { startDiscord } from './discord.ts';
 import { httpGet } from './health.ts';
+import { localHost } from './host.ts';
 import { startHub } from './start.ts';
 import { discordOAuth } from './web.ts';
 
@@ -23,6 +24,7 @@ const handle = await startHub(config, {
     return { stop: () => void discord.client.destroy() };
   },
   get: httpGet,
+  host: localHost,
   oauth: web && clientSecret ? discordOAuth(web.clientId, clientSecret) : undefined,
 });
 

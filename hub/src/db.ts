@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { AuditEntry, Lifecycle } from './servers.ts';
+import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
 import { localDay } from './units.ts';
 
 const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;
@@ -54,6 +54,8 @@ export class Db {
       CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS audit (ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, details TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS audit_target_ts ON audit (target, ts);
+      CREATE TABLE IF NOT EXISTS host_samples (host_id TEXT NOT NULL, ts INTEGER NOT NULL, sample TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS host_samples_host_ts ON host_samples (host_id, ts);
     `);
   }
 
@@ -236,12 +238,26 @@ export class Db {
     return row ? { discordId: row.discord_id, player: row.player } : null;
   }
 
+  /** A host's sample, kept as JSON. */
+  recordHostSample(hostId: string, sample: HostSample): void {
+    this.#write('host sample', 'INSERT INTO host_samples (host_id, ts, sample) VALUES (?, ?, ?)', hostId, sample.ts, JSON.stringify(sample));
+  }
+
+  /** A host's samples taken at or after `since`, oldest first. */
+  hostSamples(hostId: string, since: number): HostSample[] {
+    return this.#db
+      .prepare('SELECT sample FROM host_samples WHERE host_id = ? AND ts >= ? ORDER BY ts')
+      .all(hostId, since)
+      .map((r) => JSON.parse(r.sample as string) as HostSample);
+  }
+
   /**
-   * Nightly upkeep: drops TPS samples older than 90 days (every other table is small and kept for all-time
+   * Nightly upkeep: drops TPS and host samples older than 90 days (every other table is small and kept for all-time
    * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies. Never throws.
    */
   maintain(copyDir: string, now = Date.now()): void {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - TPS_KEEP_MS);
+    this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - TPS_KEEP_MS);
     this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
     try {
       mkdirSync(copyDir, { recursive: true });

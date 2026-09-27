@@ -2,11 +2,12 @@
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
  * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
  */
-import type { AuditEntry, BackupsAnswer, LiveEvent as AnyLiveEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+import type { AuditEntry, BackupsAnswer, HostSample, LiveEvent as AnyLiveEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
 
 export type {
   Backup,
   BackupsAnswer,
+  HostSample,
   HubEvent,
   Lifecycle,
   Notice,
@@ -26,7 +27,16 @@ export type {
 export type Me = { id: string; username: string };
 
 /** `GET /api/integrations`: which integrations are switched on. */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean };
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean };
+
+/**
+ * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
+ * minute after the hub starts). Each new sample is also a `sample` event on the stream.
+ */
+export type HostNow = { id: string; sample: HostSample | null };
+
+/** `GET /api/host/samples[?hours=1–2160]`: the host's samples over the last `hours` (default 24), oldest first. */
+export type HostHistory = HostSample[];
 
 /**
  * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null

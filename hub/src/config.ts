@@ -65,12 +65,18 @@ export type WebIntegration = {
 /** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. */
 export type CheckConfig = { id: string; url: string; intervalSeconds: number };
 
+/**
+ * The machine the hub runs on, by id: the mounts whose disk is watched, and when to warn: memory use at or over
+ * `memoryMaxPercent` for `memoryMinutes`, and a mount under `diskMinFreeGB` free.
+ */
+export type HostIntegration = { id: string; mounts: string[]; memoryMaxPercent: number; memoryMinutes: number; diskMinFreeGB: number };
+
 export type Config = {
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
   /** Each integration is on when its section is present; none is required. */
-  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[] };
+  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[]; host?: HostIntegration };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -249,6 +255,24 @@ export function validateConfig(raw: unknown): string[] {
       if (typeof n !== 'number' || !Number.isInteger(n) || n < 30) err(where, '"intervalSeconds" must be a whole number of at least 30');
     });
   }
+  const host = integrations.host;
+  if (host !== undefined && !isObj(host)) err('integrations', '"host" must be an object');
+  else if (host) {
+    const where = 'integrations.host';
+    str(host, 'id', where);
+    const mounts = host.mounts;
+    if (mounts !== undefined) {
+      for (const m of Array.isArray(mounts) ? mounts : []) {
+        if (typeof m === 'string' && m !== '' && !isDir(m)) err(where, `mount "${m}" is not an existing folder`);
+      }
+      if (!Array.isArray(mounts) || !mounts.length || !mounts.every((m) => typeof m === 'string' && m !== '')) {
+        err(where, '"mounts" must be a non-empty list of folders');
+      }
+    }
+    num(host, 'memoryMaxPercent', where, (n) => n >= 1 && n <= 100, 'a number from 1 to 100');
+    num(host, 'memoryMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
+    num(host, 'diskMinFreeGB', where, (n) => n > 0, 'a positive number');
+  }
   const web = integrations.web;
   if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
   else if (web) {
@@ -306,7 +330,11 @@ export function loadConfig(path: string): Config {
   }
   const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
   const integrations = { ...c.integrations };
-  const { web, discord } = integrations;
+  const { web, discord, host } = integrations;
+  if (host) {
+    const defaults = { mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
+    integrations.host = { ...defaults, ...(host as Partial<HostIntegration> & { id: string }) };
+  }
   if (web) {
     integrations.web = {
       ...web,

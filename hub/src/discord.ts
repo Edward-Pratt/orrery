@@ -197,7 +197,9 @@ export async function startDiscord(
   });
 
   hub.on('target', (e) => {
-    postTo(channelFor(e, cfg), formatTargetEvent(e)).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
+    const message = formatTargetEvent(e);
+    if (!message) return;
+    postTo(channelFor(e, cfg), message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
   });
 
   client.on(Events.MessageCreate, (m) => {

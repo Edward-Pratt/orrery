@@ -62,7 +62,9 @@ optional: leave out `discord` to run without the bot (and without a token), or
 but a Discord channel is optional: one left out of `channels` just isn't
 bridged to Discord. `checks` lists URLs the hub requests on a schedule (`id`, `url`,
 `intervalSeconds` ≥ 30); up means HTTP 2xx within 10 s, and going down or back up is a
-notice in the dashboard and, if `discord.alertsChannel` is set, in that channel. `npm run check-config` checks the file
+notice in the dashboard and, if `discord.alertsChannel` is set, in that channel. `host` (`id`; optional `mounts`,
+default `["/"]`, `memoryMaxPercent` 90, `memoryMinutes` 5, `diskMinFreeGB` 10) samples this machine's CPU, load,
+memory and disks every minute (kept 90 days), warning on memory that stays high and on a low mount. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see

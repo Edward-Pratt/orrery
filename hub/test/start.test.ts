@@ -6,7 +6,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
-import type { AuditLog, CheckStatus, CommandOutput, Integrations, LiveEvent, PlayerAnswer, ServerCard, ServerDetail, TargetEvent } from '../src/api.ts';
+import type {
+  AuditLog,
+  CheckStatus,
+  CommandOutput,
+  HostNow,
+  HostSample,
+  Integrations,
+  LiveEvent,
+  PlayerAnswer,
+  ServerCard,
+  ServerDetail,
+  TargetEvent,
+} from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
@@ -490,7 +502,7 @@ const NO_MOD = { chat: false, tps: false, quests: false };
 
 test('the API says which integrations are on, and nothing else about them', async (t) => {
   const { get } = await apiHub(t);
-  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false });
+  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false, host: false });
 });
 
 test('server cards while offline: features only for the server with the mod', async (t) => {
@@ -708,7 +720,7 @@ test('a notice about a check reaches the stream, its replay and a resume, keyed 
   t.after(() => stream.close());
   const down = (n: number) => ({ severity: 'problem', kind: 'checkDown', url: `https://site.example/${n}`, error: 'HTTP 503' }) as const;
   // Named like the server: a check's events are its own, never the server's.
-  for (const n of [1, 2, 3]) hub.publishTarget('check', 'gtnh', down(n));
+  for (const n of [1, 2, 3]) hub.publishTarget({ target: 'check', id: 'gtnh', type: 'notice', ...down(n) });
   await until(() => stream.events.length === 3);
   assert.deepEqual(stream.events[0]!.data, { target: 'check', id: 'gtnh', type: 'notice', ...down(1) });
 
@@ -744,8 +756,8 @@ async function checksHub(t: TestContext, answers: Answer[]) {
     oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
-  const notices: TargetEvent[] = [];
-  const add = (e: LiveEvent) => void ('target' in e && notices.push(e));
+  const notices: TargetNotice[] = [];
+  const add = (e: LiveEvent) => void ('target' in e && e.type === 'notice' && notices.push(e));
   handle.live.since().forEach(([, e]) => add(e)); // from the startup request
   handle.live.on('event', (_, e) => add(e));
   const app = handle.web!.app;
@@ -763,7 +775,8 @@ async function checksHub(t: TestContext, answers: Answer[]) {
 }
 
 const UP = { ok: true, status: 200 };
-const kinds = (notices: TargetEvent[]) => notices.map((n) => [n.id, n.kind, n.kind === 'checkDown' ? n.error : null]);
+type TargetNotice = Extract<TargetEvent, { type: 'notice' }>;
+const kinds = (notices: TargetNotice[]) => notices.map((n) => [n.id, n.kind, n.kind === 'checkDown' ? n.error : null]);
 
 test('a check that goes down publishes one notice, and one when it is back up', async (t) => {
   const { requests, notices, next, checks } = await checksHub(t, [UP, UP, { ok: false, status: 503 }, { ok: false, status: 500 }, refused(), { ok: true, status: 204 }, UP]);
@@ -817,4 +830,140 @@ test('without checks nothing is requested and there is no checks API', async (t)
   assert.equal((await handle.web!.app.request('/api/checks', { headers: { cookie } })).status, 404);
   const on = (await (await handle.web!.app.request('/api/integrations', { headers: { cookie } })).json()) as Integrations;
   assert.equal(on.checks, false);
+});
+
+const GB = 1024 ** 3;
+
+/**
+ * A web hub measuring host `oracle` (mount `/`, memory warning at 90% for 2 minutes, disk at 10 GB) with fake readers;
+ * `use` sets what they read next. `next` takes one sample.
+ */
+async function hostHub(t: TestContext) {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const cfg = config(t, {
+    web: WEB,
+    host: { id: 'oracle', mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 2, diskMinFreeGB: 10 },
+  });
+  delete cfg.healthcheckUrl;
+  const now = { busy: 0, idle: 0, memUsed: 1 * GB, free: 50 * GB };
+  const use = (next: Partial<typeof now>) => Object.assign(now, next);
+  const handle = await startHub(cfg, {
+    startFrontend: () => assert.fail('Discord is off'),
+    get: () => assert.fail('nothing to request'),
+    oauth: fakeOAuth().oauth,
+    host: {
+      cpu: () => ({ idle: now.idle, total: now.idle + now.busy }),
+      load: () => [0.5, 0.25, 0.125],
+      memory: async () => ({ total: 16 * GB, available: 16 * GB - now.memUsed }),
+      disk: async (mount) => ({ free: mount === '/' ? now.free : assert.fail(mount), total: 100 * GB }),
+    },
+  });
+  t.after(() => handle.close());
+  const events: TargetEvent[] = [];
+  handle.live.on('event', (_, e) => void ('target' in e && events.push(e)));
+  const samples = () => events.filter((e) => e.type === 'sample').length;
+  const next = async () => {
+    const n = samples() + 1;
+    t.mock.timers.tick(60_000);
+    await until(() => samples() === n);
+  };
+  const notices = () => events.flatMap((e) => (e.type === 'notice' ? [e.kind] : []));
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async <T>(path: string) => {
+    const res = await app.request(path, { headers: { cookie } });
+    assert.equal(res.status, 200, path);
+    return res.json() as Promise<T>;
+  };
+  return { use, next, notices, events, get, app, cookie };
+}
+
+test('a host sample is stored, served as the latest and in the history, and streamed', async (t) => {
+  const { use, next, events, get } = await hostHub(t);
+  assert.deepEqual(await get<HostNow>('/api/host'), { id: 'oracle', sample: null });
+  use({ busy: 30, idle: 70, memUsed: 4 * GB });
+  await next();
+  const { sample } = await get<HostNow>('/api/host');
+  assert.deepEqual({ ...sample!, ts: typeof sample!.ts }, {
+    ts: 'number',
+    cpu: 0.3,
+    load: [0.5, 0.25, 0.125],
+    memory: { used: 4 * GB, total: 16 * GB },
+    disks: [{ mount: '/', free: 50 * GB, total: 100 * GB }],
+  });
+  assert.deepEqual(events, [{ target: 'host', id: 'oracle', type: 'sample', sample }]);
+  use({ busy: 40, idle: 160 }); // 10 busy of 100 since the last sample
+  await next();
+  const history = await get<HostSample[]>('/api/host/samples?hours=1');
+  assert.deepEqual(history.map((s) => s.cpu), [0.3, 0.1]);
+  assert.deepEqual(await get<HostSample[]>('/api/host/samples'), history); // 24 hours by default
+  assert.deepEqual((await get<Integrations>('/api/integrations')).host, true);
+});
+
+test('a bad history period is refused', async (t) => {
+  const { app, cookie } = await hostHub(t);
+  for (const hours of ['0', '2161', 'x', '1.5']) {
+    assert.equal((await app.request(`/api/host/samples?hours=${hours}`, { headers: { cookie } })).status, 400, hours);
+  }
+});
+
+test('sustained high memory warns once and recovers once', async (t) => {
+  const { use, next, notices } = await hostHub(t);
+  use({ memUsed: 15 * GB }); // 94%
+  await next();
+  assert.deepEqual(notices(), []); // one minute is not sustained
+  await next();
+  await next();
+  assert.deepEqual(notices(), ['memoryHigh']);
+  use({ memUsed: 8 * GB });
+  await next();
+  await next();
+  assert.deepEqual(notices(), ['memoryHigh', 'memoryOk']);
+});
+
+test('low disk on a mount warns once and recovers once', async (t) => {
+  const { use, next, notices, events } = await hostHub(t);
+  use({ free: 5 * GB });
+  await next();
+  await next();
+  assert.deepEqual(notices(), ['diskLow']);
+  assert.deepEqual(events.find((e) => e.type === 'notice'), {
+    target: 'host',
+    id: 'oracle',
+    type: 'notice',
+    severity: 'warning',
+    kind: 'diskLow',
+    mount: '/',
+    free: 5 * GB,
+    minFreeGB: 10,
+  });
+  use({ free: 20 * GB });
+  await next();
+  await next();
+  assert.deepEqual(notices(), ['diskLow', 'diskOk']);
+});
+
+test("a stream's replay holds only the host's latest sample", async (t) => {
+  const { use, next, app, cookie } = await hostHub(t);
+  use({ free: 5 * GB });
+  for (let i = 0; i < 3; i++) await next();
+  const replay = await openStream(app, cookie);
+  t.after(() => replay.close());
+  await until(() => replay.events.length === 2);
+  assert.deepEqual(replay.events.map((e) => ('kind' in e.data ? e.data.kind : e.data.type)), ['diskLow', 'sample']);
+});
+
+test('without the host integration nothing is sampled and there is no host API', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const cfg = config(t, { web: WEB });
+  const handle = await startHub(cfg, {
+    startFrontend: () => assert.fail('Discord is off'),
+    get: async () => ({ ok: true, status: 200 }),
+    oauth: fakeOAuth().oauth,
+    host: { cpu: () => assert.fail(), load: () => assert.fail(), memory: () => assert.fail(), disk: () => assert.fail() },
+  });
+  t.after(() => handle.close());
+  t.mock.timers.tick(60 * 60_000);
+  const cookie = await loginCookie(handle.web!.app);
+  assert.equal((await handle.web!.app.request('/api/host', { headers: { cookie } })).status, 404);
 });

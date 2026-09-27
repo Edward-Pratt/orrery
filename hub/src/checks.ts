@@ -55,9 +55,9 @@ export class Checks {
     const was = state.up;
     Object.assign(state, { up: error === null, ms: Date.now() - start, error, checkedAt: Date.now() });
     if (error !== null && was !== false) {
-      this.#hub.publishTarget('check', c.id, { severity: 'problem', kind: 'checkDown', url: c.url, error });
+      this.#hub.publishTarget({ target: 'check', id: c.id, type: 'notice', severity: 'problem', kind: 'checkDown', url: c.url, error });
     } else if (error === null && was === false) {
-      this.#hub.publishTarget('check', c.id, { severity: 'good', kind: 'checkUp', url: c.url, ms: state.ms! });
+      this.#hub.publishTarget({ target: 'check', id: c.id, type: 'notice', severity: 'good', kind: 'checkUp', url: c.url, ms: state.ms! });
     }
   }
 }

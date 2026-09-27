@@ -27,20 +27,28 @@ async function open(url: string, on: Integrations) {
 
 describe('routing by enabled integrations', () => {
   it('opens the servers page when Minecraft is on', async () => {
-    const harness = await open('/', { minecraft: true, discord: false, web: true, checks: false });
+    const harness = await open('/', { minecraft: true, discord: false, web: true, checks: false, host: false });
     expect(harness.routeNativeElement?.textContent).toContain('Servers');
   });
 
   it('opens the checks page only when checks are on', async () => {
-    const on = await open('/checks', { minecraft: false, discord: false, web: true, checks: true });
+    const on = await open('/checks', { minecraft: false, discord: false, web: true, checks: true, host: false });
     expect(on.routeNativeElement?.textContent).toContain('Checks');
     TestBed.resetTestingModule();
-    const off = await open('/checks', { minecraft: true, discord: false, web: true, checks: false });
+    const off = await open('/checks', { minecraft: true, discord: false, web: true, checks: false, host: false });
+    expect(off.routeNativeElement?.textContent).toContain('Nothing here');
+  });
+
+  it('opens the host page only when the host integration is on', async () => {
+    const on = await open('/host', { minecraft: false, discord: false, web: true, checks: false, host: true });
+    expect(on.routeNativeElement?.textContent).toContain('Host');
+    TestBed.resetTestingModule();
+    const off = await open('/host', { minecraft: true, discord: false, web: true, checks: false, host: false });
     expect(off.routeNativeElement?.textContent).toContain('Nothing here');
   });
 
   it('has no servers page when Minecraft is off', async () => {
-    const harness = await open('/servers', { minecraft: false, discord: true, web: true, checks: false });
+    const harness = await open('/servers', { minecraft: false, discord: true, web: true, checks: false, host: false });
     expect(harness.routeNativeElement?.textContent).toContain('Nothing here');
   });
 });

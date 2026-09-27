@@ -26,6 +26,7 @@
       "channels": { "gtnh": "CHANNEL_ID_FOR_THIS_SERVER" },
       "alertsChannel": "CHANNEL_ID_FOR_HOST_SERVICE_AND_CHECK_ALERTS"
     },
+    "host": { "id": "oracle", "mounts": ["/"], "memoryMaxPercent": 90, "memoryMinutes": 5, "diskMinFreeGB": 10 },
     "checks": [
       { "id": "dashboard", "url": "https://dash.orrery.run", "intervalSeconds": 60 }
     ],

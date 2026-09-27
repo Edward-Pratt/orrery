@@ -10,6 +10,7 @@ import { Session } from './session';
 /** A page per switched-on integration that has one. */
 const PAGES: { path: string; label: string; on: keyof IntegrationsOn }[] = [
   { path: 'servers', label: 'Servers', on: 'minecraft' },
+  { path: 'host', label: 'Host', on: 'host' },
   { path: 'checks', label: 'Checks', on: 'checks' },
 ];
 

@@ -4,8 +4,9 @@ import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { AuditLog, CheckStatus, CommandOutput, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type { AuditLog, CheckStatus, CommandOutput, HostHistory, HostNow, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
 import type { Checks } from './checks.ts';
+import type { HostMonitor } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
@@ -50,11 +51,13 @@ export type WebDeps = {
   restarts: RestartScheduler;
   /** Only with the checks integration. */
   checks?: Checks;
+  /** Only with the host integration. */
+  host?: HostMonitor;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
@@ -135,9 +138,20 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       discord: !!integrations.discord,
       web: true,
       checks: !!integrations.checks,
+      host: !!integrations.host,
     } satisfies Integrations),
   );
   if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
+  const hostId = integrations.host?.id;
+  if (host && hostId) {
+    app.get('/host', (c) => c.json({ id: hostId, sample: host.latest() } satisfies HostNow));
+    app.get('/host/samples', (c) => {
+      const hours = Number(c.req.query('hours') ?? 24);
+      if (!Number.isInteger(hours) || hours < 1 || hours > 90 * 24) return c.text('Give hours from 1 to 2160', 400);
+      // ponytail: every sample, up to 129,600 for 90 days; downsample if the graphs need long periods.
+      return c.json(db.hostSamples(hostId, Date.now() - hours * 3600_000) satisfies HostHistory);
+    });
+  }
   app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
   app.get('/servers/:id', async (c) => {
     const id = c.req.param('id');

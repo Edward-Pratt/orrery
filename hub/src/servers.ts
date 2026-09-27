@@ -3,12 +3,13 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
-import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState, Target, TargetEvent, TargetNotice } from './types.ts';
+import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
 export type {
   Announcement,
   AuditEntry,
   GameMsg,
   HubEvent,
+  HostSample,
   HubOutput,
   Lifecycle,
   LiveEvent,
@@ -163,9 +164,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.emit('event', { ...notice, type: 'notice', serverId });
   }
 
-  /** Puts a hub-core notice about the host, a service or a check (`id`: its config id) on the event stream. */
-  publishTarget(target: Target, id: string, notice: TargetNotice): void {
-    this.emit('target', { ...notice, type: 'notice', target, id });
+  /** Puts a hub-core event about the host, a service or a check (a notice, a host sample) on the event stream. */
+  publishTarget(e: TargetEvent): void {
+    this.emit('target', e);
   }
 
   /** Puts a hub-core announcement (a quest batch, a new link, the daily summary) about a server on the event stream. */

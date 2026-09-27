@@ -105,11 +105,31 @@ export function formatEvent(e: HubEvent): Post | null {
   }
 }
 
-/** The alerts channel's post for an event about the host, a service or a check; it names what it is about. */
-export function formatTargetEvent(e: TargetEvent): Post {
-  const what = `Check ${e.id}`;
-  const text = e.kind === 'checkDown' ? `❌ ${what} is down: ${e.error}` : `✅ ${what} is back up (${e.ms} ms)`;
-  return embed({ title: title(text), description: truncate(e.url, DESCRIPTION), color: SEVERITY_COLORS[e.severity] });
+function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
+  switch (e.kind) {
+    case 'checkDown':
+      return `❌ Check ${e.id} is down: ${e.error}`;
+    case 'checkUp':
+      return `✅ Check ${e.id} is back up (${e.ms} ms)`;
+    case 'memoryHigh':
+      return `⚠️ Host ${e.id}: memory at ${e.percent}% for ${e.minutes} min`;
+    case 'memoryOk':
+      return `✅ Host ${e.id}: memory back to ${e.percent}%`;
+    case 'diskLow':
+      return `⚠️ Host ${e.id}: low disk on ${e.mount}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`;
+    case 'diskOk':
+      return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
+  }
+}
+
+/**
+ * The alerts channel's post for an event about the host, a service or a check, naming what it is about (the channel
+ * is shared); null for events that aren't announced.
+ */
+export function formatTargetEvent(e: TargetEvent): Post | null {
+  if (e.type === 'sample') return null; // for the dashboard
+  const url = 'url' in e ? { description: truncate(e.url, DESCRIPTION) } : {};
+  return embed({ title: title(targetText(e)), ...url, color: SEVERITY_COLORS[e.severity] });
 }
 
 /** A short informational line as an embed (e.g. a command's "server is offline" reply). */

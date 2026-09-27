@@ -24,7 +24,7 @@ import {
   topicDue,
   type Post,
 } from '../src/format.ts';
-import type { Notice, ServerState, Severity } from '../src/servers.ts';
+import type { Notice, ServerState, Severity, TargetEvent } from '../src/servers.ts';
 
 test('formatEvent keeps chat-like events as escaped plain text', () => {
   assert.deepEqual(formatEvent({ serverId: 's', type: 'chat', player: 'x_y_z', message: '**hi** [a](http://x) §cred' }), {
@@ -330,6 +330,25 @@ test('a notice is coloured by its severity, not its text', () => {
   assert.equal(color('warning'), COLORS.orange);
   assert.equal(color('good'), COLORS.green);
   assert.equal(color('info'), COLORS.blue);
+});
+
+test('formatTargetEvent names the host, and skips its samples', () => {
+  const at = { target: 'host', id: 'oracle', type: 'notice' } as const;
+  const GB = 1024 ** 3;
+  const titles = [
+    { ...at, severity: 'warning', kind: 'memoryHigh', percent: 94, minutes: 5 },
+    { ...at, severity: 'good', kind: 'memoryOk', percent: 60 },
+    { ...at, severity: 'warning', kind: 'diskLow', mount: '/', free: 5 * GB, minFreeGB: 10 },
+    { ...at, severity: 'good', kind: 'diskOk', mount: '/', free: 20 * GB },
+  ].map((e) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title);
+  assert.deepEqual(titles, [
+    '⚠️ Host oracle: memory at 94% for 5 min',
+    '✅ Host oracle: memory back to 60%',
+    '⚠️ Host oracle: low disk on /: 5.0 GB free (limit 10 GB)',
+    '✅ Host oracle: disk on / back to 20.0 GB free',
+  ]);
+  const sample = { ts: 1, cpu: 0, load: [0, 0, 0], memory: { used: 1, total: 2 }, disks: [] };
+  assert.equal(formatTargetEvent({ target: 'host', id: 'oracle', type: 'sample', sample }), null);
 });
 
 test('formatTargetEvent names the check, since the alerts channel is shared', () => {

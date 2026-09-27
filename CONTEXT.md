@@ -54,3 +54,34 @@ _Avoid_: rollback
 **Pre-restore world**:
 The world folder a restore moved aside, kept until someone deletes it by hand.
 _Avoid_: old world, backup (it is not one)
+
+### Packs
+
+**Pack**:
+The versioned base content a server runs: a modpack release (GTNH 2.7.4) or plain Minecraft. Not always GTNH.
+_Avoid_: modpack (for the general term), instance
+
+**Extra**:
+A third-party mod jar or config file added on top of a server's pack and tracked by the hub. Orrery's own mod is the Mod, not an extra unless decided otherwise.
+_Avoid_: addon, overlay, custom mod, mod (the Mod is orrery's own)
+
+**Pack update**:
+Moving a server to another version of its pack, with its extras applied again.
+_Avoid_: upgrade, reinstall
+
+### Releases
+
+**Release**:
+A tagged version of one part (hub, mod or dashboard), e.g. `hub-v2.4.0`.
+_Avoid_: build, version (a version is the number)
+
+**Deploy**:
+Putting a release onto a host.
+_Avoid_: install, rollout, push
+
+**Production**:
+The hub and dashboard people really use, with the real servers.
+
+**Staging**:
+A second hub and dashboard for trying changes before production, with no game server of its own.
+_Avoid_: pre-production, test, dev

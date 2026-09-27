@@ -367,7 +367,7 @@ describe('server backups section', () => {
     minFree: 10 * GB,
   };
   const rows = (el: HTMLElement) =>
-    [...el.querySelectorAll('[data-backup]')].map((r) => [...r.querySelectorAll('td')].map((td) => td.textContent?.trim()));
+    [...el.querySelectorAll('[data-backup]')].map((r) => [...r.querySelectorAll('td')].slice(0, 3).map((td) => td.textContent?.trim()));
   const summary = (el: HTMLElement) => [...el.querySelectorAll('[data-backup-summary] dd')].map((d) => d.textContent?.trim());
 
   it('lists backups newest first with sizes, the total, free space and growth', async () => {
@@ -420,5 +420,75 @@ describe('server backups section', () => {
     backend.expectOne('/api/servers/gtnh/backup').flush('GTNH is offline', { status: 409, statusText: 'Conflict' });
     await render();
     expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('GTNH is offline: a backup needs it running.');
+  });
+});
+
+describe('restoring a backup', () => {
+  const GB = 1024 ** 3;
+  const BACKUPS: BackupsAnswer = {
+    configured: true,
+    backups: [{ name: '2026-09-27-06-00-00.zip', size: GB, mtimeMs: 0 }],
+    free: 40 * GB,
+    growth: null,
+    minFree: 10 * GB,
+  };
+  const GTNH: ServiceStatus = { id: 'gtnh', unit: 'gtnh.service', state: 'active', sub: 'running', checks: [] };
+  const restoreButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-backup] [data-restore]')!;
+  const type = (input: HTMLInputElement, value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+  };
+
+  it('is disabled with a reason until the linked service is stopped, following live state', async () => {
+    const { events, el, render } = await setup('/gtnh/backups', { ...CARD, online: false }, GTNH, { backups: BACKUPS });
+    expect(restoreButton(el).disabled).toBe(true);
+    expect(el.querySelector('[data-restore-why]')?.textContent?.trim()).toBe('To restore a backup, stop gtnh.service first.');
+    events.push(1, { target: 'service', id: 'gtnh', type: 'state', state: 'inactive', sub: 'dead' });
+    await render();
+    expect(restoreButton(el).disabled).toBe(false);
+    expect(el.querySelector('[data-restore-why]')).toBeNull();
+  });
+
+  it('is disabled without a linked service', async () => {
+    const { el } = await setup('/gtnh/backups', CARD, null, { backups: BACKUPS });
+    expect(restoreButton(el).disabled).toBe(true);
+    expect(el.querySelector('[data-restore-why]')?.textContent?.trim()).toContain('no linked service');
+  });
+
+  it("asks for the server's name before restoring, then shows the script's output", async () => {
+    const stopped = { ...GTNH, state: 'inactive', sub: 'dead' };
+    const { backend, el, render } = await setup('/gtnh/backups', { ...CARD, online: false }, stopped, { backups: BACKUPS });
+    restoreButton(el).click();
+    await render();
+    const dialog = el.querySelector('[role=dialog]')!;
+    expect(dialog.textContent).toContain('pre-restore');
+    const confirm = dialog.querySelector<HTMLButtonElement>('[data-restore-confirm]')!;
+    expect(confirm.disabled).toBe(true);
+    type(dialog.querySelector('input')!, 'gtnh');
+    await render();
+    expect(confirm.disabled).toBe(true);
+    type(dialog.querySelector('input')!, 'GTNH');
+    await render();
+    expect(confirm.disabled).toBe(false);
+    confirm.click();
+    const req = backend.expectOne('/api/servers/gtnh/restore');
+    expect(req.request.body).toEqual({ name: '2026-09-27-06-00-00.zip' });
+    req.flush({ output: ['Restored 2026-09-27-06-00-00.zip into /srv/GTNH/World.', 'Next: sudo systemctl start gtnh.service'] });
+    await render();
+    expect(el.querySelector('[role=dialog]')).toBeNull();
+    expect(el.querySelector('[data-restore-output]')?.textContent).toContain('Next: sudo systemctl start gtnh.service');
+  });
+
+  it("shows the hub's refusal", async () => {
+    const stopped = { ...GTNH, state: 'inactive', sub: 'dead' };
+    const { backend, el, render } = await setup('/gtnh/backups', { ...CARD, online: false }, stopped, { backups: BACKUPS });
+    restoreButton(el).click();
+    await render();
+    type(el.querySelector<HTMLInputElement>('[role=dialog] input')!, 'GTNH');
+    await render();
+    el.querySelector<HTMLButtonElement>('[data-restore-confirm]')!.click();
+    backend.expectOne('/api/servers/gtnh/restore').flush('The restore failed: restore-backup: unzip failed', { status: 502, statusText: 'Bad Gateway' });
+    await render();
+    expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('The restore failed: restore-backup: unzip failed');
   });
 });

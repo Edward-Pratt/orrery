@@ -26,6 +26,7 @@ import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
+import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
 import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
@@ -79,11 +80,13 @@ export type WebDeps = {
   host?: HostMonitor;
   /** Only with the systemd integration. */
   services?: Services;
+  /** Only with the systemd integration and a restore runner. */
+  restores?: Restores;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, services, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, services, restores, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
@@ -235,6 +238,20 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     if (server !== undefined && !hub.get(server)) return c.notFound();
     return c.json(stats.audit(AUDIT_LIMIT, server) satisfies AuditLog);
   });
+  // Restore needs the server down, so it comes before the online check below, with checks of its own.
+  if (restores) {
+    app.post('/servers/:id/restore', async (c) => {
+      const name = (await jsonBody(c.req)).name;
+      if (typeof name !== 'string') return c.text('Give a backup name', 400);
+      try {
+        const output = await restores.restore(c.req.param('id'), name, actor(c.get('user')));
+        return c.json({ output: output.split('\n').filter((line) => line !== '') } satisfies CommandOutput);
+      } catch (err) {
+        if (err instanceof RestoreRefused) return c.text(err.message, err.status);
+        return c.text(`The restore failed: ${(err as Error).message}`, 502);
+      }
+    });
+  }
   // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
   app.post('/servers/:id/*', async (c, next) => {
     c.set('body', await jsonBody(c.req));

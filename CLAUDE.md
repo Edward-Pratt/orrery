@@ -8,7 +8,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
-  there; tested by `test-install-web.sh`) and `restore-backup.sh` (puts a backup back over a stopped server's world;
+  there; tested by `test-install-web.sh`) and `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
   tested by `test-restore-backup.sh`).
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).

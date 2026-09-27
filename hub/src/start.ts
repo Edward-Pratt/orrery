@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
+import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
 import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
@@ -38,6 +39,8 @@ export type HubDeps = {
   host?: HostReaders;
   /** Runs systemctl and journalctl; needed only with the systemd integration. */
   run?: Run;
+  /** Runs the restore script; without it (or systemd) the dashboard can't restore backups. */
+  restore?: RunRestore;
 };
 
 export type HubHandle = {
@@ -104,6 +107,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   host?.start();
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
+  const restores = services && deps.restore && new Restores(hub, services, config.servers, deps.restore);
 
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
@@ -114,7 +118,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, host, services, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, host, services, restores, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

@@ -138,5 +138,14 @@ export type CommandRequest = { command: string };
 /** `POST /api/servers/:id/restart`: a countdown restart in 0–60 whole minutes. 204; cancel with `POST …/restart/cancel`. */
 export type RestartRequest = { minutes: number };
 
-/** The answer to a command and to `POST /api/servers/:id/backup`. */
+/**
+ * `POST /api/servers/:id/restore` (only with systemd): puts the named backup (one of the server's listed ones) back over
+ * its world with `deploy/restore-backup.sh`, keeping the current world as a pre-restore copy; answered with the
+ * script's output (`CommandOutput`: its next steps). Only while the server's linked service is stopped (inactive or
+ * failed), else 409, as without a linked service or with a restore already running; 404 for an unknown server or
+ * backup; 502 with the script's error output if it fails. Every attempt is audited.
+ */
+export type RestoreRequest = { name: string };
+
+/** The answer to a command, to `POST /api/servers/:id/backup` and to a restore. */
 export type CommandOutput = { output: string[] };

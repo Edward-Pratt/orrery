@@ -51,6 +51,7 @@ cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && npm test && npm run build       # the build also type-checks against the hub's API types
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
+bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual

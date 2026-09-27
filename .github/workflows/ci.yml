@@ -6,7 +6,36 @@ on:
   workflow_call:
 
 jobs:
+  # Decides which parts run; see .github/changes.sh for the mapping.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      hub: ${{ steps.parts.outputs.hub }}
+      mod: ${{ steps.parts.outputs.mod }}
+      web: ${{ steps.parts.outputs.web }}
+      deploy: ${{ steps.parts.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: bash .github/test-changes.sh
+      - id: parts
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        shell: bash # with pipefail, so a failing diff or script fails the job instead of skipping every part
+        run: |
+          # An empty, all-zeros (new branch) or unfetched (force-push) base isn't a commit here: run everything.
+          if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BASE...HEAD" | bash .github/changes.sh
+          else
+            bash .github/changes.sh unknown
+          fi | tee -a "$GITHUB_OUTPUT"
+
   hub:
+    needs: changes
+    if: needs.changes.outputs.hub == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,6 +55,8 @@ jobs:
       - run: npm run typecheck
 
   mod:
+    needs: changes
+    if: needs.changes.outputs.mod == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,6 +80,8 @@ jobs:
             !mod/build/libs/*-sources.jar
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,6 +102,8 @@ jobs:
           path: web/dist/web/browser
 
   deploy:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

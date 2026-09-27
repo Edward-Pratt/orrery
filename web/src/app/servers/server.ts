@@ -11,6 +11,7 @@ import { ServiceActions } from '../services/actions';
 const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
   { path: 'chat', label: 'Chat', has: (c) => c.features.chat },
+  { path: 'history', label: 'History', has: () => true },
 ];
 
 /** A server's page: its name, state and linked service, then its sections, which read the detail from here. */
@@ -22,7 +23,10 @@ const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }
     @if (missing(); as why) {
       <p class="pt-8">{{ why }}</p>
     } @else if (card(); as c) {
-      <h1 class="mt-2 mb-4 text-lg font-semibold">{{ c.name }} <span class="text-sm font-normal text-muted-foreground">{{ c.online ? 'Online' : 'Offline' }}</span></h1>
+      <div class="mt-2 mb-4 flex items-baseline justify-between gap-4">
+        <h1 class="text-lg font-semibold">{{ c.name }} <span class="text-sm font-normal text-muted-foreground">{{ c.online ? 'Online' : 'Offline' }}</span></h1>
+        <a routerLink="/audit" [queryParams]="{ server: id }" class="text-sm text-muted-foreground hover:underline" data-audit>Audit log</a>
+      </div>
       @if (service(); as s) {
         <section class="mb-4 max-w-3xl rounded-lg border p-4" data-service-actions>
           <h2 class="mb-1 text-sm font-semibold">Service {{ s.unit }} <span class="font-normal text-muted-foreground">{{ s.state }} ({{ s.sub }})</span></h2>

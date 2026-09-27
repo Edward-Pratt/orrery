@@ -181,5 +181,17 @@ export type PlaytimeAnswer =
 export type BackupsAnswer =
   | { configured: false }
   | { configured: true; backups: Backup[]; free: number | null; /** Bytes per day. */ growth: number | null };
+/** A server's state over time: up, down (stopped, crashed, offline), hung, or unknown (the hub wasn't running). */
+export type UptimeState = 'up' | 'down' | 'hung' | 'unknown';
+/**
+ * A server's history over a period, each series oldest first. `tps` is its samples (averaged into time buckets over
+ * 25 hours), null without the mod; `players` and `uptime` are step series: a point wherever the value changes, the
+ * first at the period's start (uptime: if known), `players` ending with the live count.
+ */
+export type HistoryAnswer = {
+  tps: { ts: number; tps: number }[] | null;
+  players: { ts: number; count: number }[];
+  uptime: { ts: number; state: UptimeState }[];
+};
 /** `/top` periods: the last 24 hours, the last 7 days, all time. */
 export type Period = 'day' | 'week' | 'all';

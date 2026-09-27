@@ -15,6 +15,7 @@ import type {
   PlayerAnswer,
   ServerCard,
   ServerDetail,
+  ServerHistory,
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
@@ -48,6 +49,14 @@ const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } a
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
 const AUDIT_LIMIT = 200;
+const MAX_HOURS = 90 * 24;
+
+/** A history period's `hours` query (default 24); undefined unless a whole number from 1 to 2160. */
+function hoursOf(c: Context): number | undefined {
+  const hours = Number(c.req.query('hours') ?? 24);
+  return Number.isInteger(hours) && hours >= 1 && hours <= MAX_HOURS ? hours : undefined;
+}
+const BAD_HOURS = `Give hours from 1 to ${MAX_HOURS}`;
 
 /** A request's JSON object body; empty if it has none (or isn't an object). */
 async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown>> {
@@ -188,9 +197,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   if (host && hostId) {
     app.get('/host', (c) => c.json({ id: hostId, sample: host.latest() } satisfies HostNow));
     app.get('/host/samples', (c) => {
-      const hours = Number(c.req.query('hours') ?? 24);
-      if (!Number.isInteger(hours) || hours < 1 || hours > 90 * 24) return c.text('Give hours from 1 to 2160', 400);
-      return c.json(host.history(hours) satisfies HostHistory);
+      const hours = hoursOf(c);
+      return hours ? c.json(host.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
     });
   }
   app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
@@ -207,6 +215,14 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
     } satisfies ServerDetail);
+  });
+  app.get('/servers/:id/history', (c) => {
+    const id = c.req.param('id');
+    if (!hub.get(id)) return c.notFound();
+    const hours = hoursOf(c);
+    if (!hours) return c.text(BAD_HOURS, 400);
+    const asOf = live.lastId; // read first: an event after it may or may not be in the history, so it is replayed
+    return c.json({ ...stats.history(id, hours, hasMod(id))!, asOf } satisfies ServerHistory);
   });
   app.get('/servers/:id/players/:name', (c) => {
     const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });

@@ -3,25 +3,18 @@ import { HttpClient } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import type { HostHistory, HostNow, HostSample } from '@hub/api';
-import { HlmButton } from '@spartan-ng/helm/button';
 import { catchError, filter, of, switchMap } from 'rxjs';
-import { type Series, TimeSeries } from '../chart';
+import { PeriodPicker, type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofTarget } from '../events';
 
 const GB = 1024 ** 3;
-const PERIODS = [
-  { label: '1 h', hours: 1 },
-  { label: '24 h', hours: 24 },
-  { label: '7 d', hours: 7 * 24 },
-  { label: '90 d', hours: 90 * 24 },
-];
 const fixed = (n: number) => n.toFixed(2);
 const percent = (share: number) => `${Math.round(share * 100)}%`;
 const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} GB`;
 
 @Component({
   selector: 'app-host',
-  imports: [DatePipe, DecimalPipe, PercentPipe, HlmButton, TimeSeries],
+  imports: [DatePipe, DecimalPipe, PercentPipe, PeriodPicker, TimeSeries],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Host {{ id() }}</h1>
     @if (sample(); as s) {
@@ -41,11 +34,7 @@ const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 
     } @else {
       <p class="text-muted-foreground">No sample yet: the first comes a minute after the hub starts.</p>
     }
-    <div class="mt-6 mb-4 flex gap-2" role="group" aria-label="Period">
-      @for (p of periods; track p.hours) {
-        <button hlmBtn size="sm" [variant]="hours() === p.hours ? 'default' : 'outline'" [attr.aria-pressed]="hours() === p.hours" (click)="hours.set(p.hours)" data-period>{{ p.label }}</button>
-      }
-    </div>
+    <app-period class="mt-6 mb-4 block" [(hours)]="hours" />
     <div class="grid gap-4 lg:grid-cols-2">
       @for (c of charts(); track c.title) {
         <section class="rounded-lg border p-3" [attr.data-chart]="c.title">
@@ -59,7 +48,6 @@ const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 
 export default class Host {
   protected readonly gb = GB;
   protected readonly fixed = fixed;
-  protected readonly periods = PERIODS;
   readonly id = signal('');
   readonly sample = signal<HostSample | null>(null);
   /** The graphed period, in hours. */

@@ -17,6 +17,7 @@ import type {
   PlayerAnswer,
   ServerCard,
   ServerDetail,
+  ServerHistory,
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
@@ -501,7 +502,7 @@ async function apiHub(t: TestContext) {
     assert.equal(res.status, 200, path);
     return res.json() as Promise<T>;
   };
-  return { app, cookie, get, hub: hub!, restarts: restarts!, port: handle.port! };
+  return { app, cookie, get, hub: hub!, restarts: restarts!, port: handle.port!, live: handle.live };
 }
 
 const MOD = { chat: true, tps: true, quests: true };
@@ -586,6 +587,53 @@ test('the audit log reads newest first, for all servers or one', async (t) => {
   ]);
   assert.deepEqual(byPeople(await get<AuditLog>('/api/audit?server=gtnh')), log);
   assert.deepEqual(await get<AuditLog>('/api/audit?server=web'), []);
+});
+
+test("a server's history: TPS samples, player counts from sessions, and up/down periods", async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] }); // TPS is sampled each minute, sessions synced every 10 s
+  const { get, hub, port, live } = await apiHub(t);
+  let lastId = 0;
+  live.on('event', (id) => void (lastId = id));
+  const beat = async (tps: number, players: string[]) => {
+    mod.send({ type: 'heartbeat', tps, players });
+    await until(() => hub.get('gtnh')?.tps === tps);
+    t.mock.timers.tick(60_000);
+    await sleep(5); // the next change lands on a later millisecond
+  };
+  let mod = await online(port);
+  await beat(19.5, ['Steve']);
+  await beat(12, ['Steve', 'Alex']);
+  mod.send({ type: 'stopping' });
+  mod.socket.end();
+  await until(() => hub.get('gtnh')?.online === false);
+  t.mock.timers.tick(10_000);
+  await sleep(5);
+  mod = await online(port);
+  mod.send({ type: 'heartbeat', tps: 20, players: ['Alex'] });
+  await until(() => hub.get('gtnh')?.players.length === 1);
+
+  const history = await get<ServerHistory>('/api/servers/gtnh/history?hours=1');
+  assert.deepEqual(history.tps!.map((p) => p.tps), [19.5, 12]);
+  // From nobody an hour ago, up to the live count (Alex's session isn't synced yet).
+  assert.deepEqual(history.players.map((p) => p.count), [0, 1, 2, 0, 1]);
+  assert.deepEqual(history.uptime.map((p) => p.state), ['unknown', 'up', 'down', 'up']);
+  for (const series of [history.tps!, history.players, history.uptime]) {
+    assert.ok(series.every((p, i) => i === 0 || p.ts >= series[i - 1]!.ts));
+  }
+  assert.equal(history.asOf, lastId);
+  const day = await get<ServerHistory>('/api/servers/gtnh/history'); // 24 h by default
+  assert.deepEqual(day.uptime.map((p) => p.state), ['unknown', 'up', 'down', 'up']);
+});
+
+test('a server without the mod has no TPS history; unknown servers are 404 and bad periods 400', async (t) => {
+  const { get, app, cookie } = await apiHub(t);
+  const history = await get<ServerHistory>('/api/servers/web/history');
+  assert.equal(history.tps, null);
+  assert.deepEqual(history.players.map((p) => p.count), [0, 0]);
+  assert.equal((await app.request('/api/servers/nope/history', { headers: { cookie } })).status, 404);
+  for (const hours of ['0', '2161', 'x', '1.5']) {
+    assert.equal((await app.request(`/api/servers/gtnh/history?hours=${hours}`, { headers: { cookie } })).status, 400, hours);
+  }
 });
 
 test('unknown servers and players get 404, and every read needs a session', async (t) => {

@@ -5,6 +5,7 @@
 import type {
   AuditEntry,
   BackupsAnswer,
+  HistoryAnswer,
   HostSample,
   LiveEvent as AnyLiveEvent,
   Period,
@@ -18,6 +19,7 @@ export type {
   Backup,
   BackupsAnswer,
   CheckStatus,
+  HistoryAnswer,
   HostSample,
   HubEvent,
   Lifecycle,
@@ -34,6 +36,7 @@ export type {
   TargetNotice,
   Tps,
   TpsAnswer,
+  UptimeState,
 } from './types.ts';
 
 /** `GET /api/me`: the logged-in admin. */
@@ -104,6 +107,12 @@ export type ServerDetail = {
 
 /** `GET /api/servers/:id/players/:name`: playtime and last seen; 404 for a name never seen on the server. */
 export type PlayerAnswer = PlaytimeAnswer;
+
+/**
+ * `GET /api/servers/:id/history[?hours=1–2160]`: the last `hours` (default 24), see `HistoryAnswer`. `asOf` is the
+ * newest event id when it was read: stream events up to it are already counted in. 404 unknown, 400 bad hours.
+ */
+export type ServerHistory = HistoryAnswer & { asOf: number };
 
 /** `GET /api/audit[?server=id]`: newest first. */
 export type AuditLog = (AuditEntry & { ts: number })[];

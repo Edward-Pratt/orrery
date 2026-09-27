@@ -136,6 +136,18 @@ test('session and peak writes never throw either', () => {
   assert.doesNotThrow(() => db.recordPeak('s', '2026-09-24', 1));
 });
 
+test('tps samples averaged into time buckets, the last bucket taking any overflow', () => {
+  const db = new Db(':memory:');
+  for (const [ts, tps] of [[1000, 20], [1500, 10], [2000, 16], [2600, 18], [9000, 4]]) db.recordTps('s', ts, tps, null, null);
+  db.recordTps('other', 1000, 1, null, null);
+  // Buckets of 1000 ms from 1000: [1000, 2000), [2000, 3000), then 9000 folded into bucket 1, the last allowed.
+  assert.deepEqual(db.tpsAveraged('s', 1000, 1000, 1), [
+    { ts: 1250, tps: 15 },
+    { ts: 4533, tps: 38 / 3 },
+  ]);
+  db.close();
+});
+
 test('tps samples: since, average and minimum', () => {
   const db = new Db(':memory:');
   db.recordTps('s', 1000, 20, null, null);

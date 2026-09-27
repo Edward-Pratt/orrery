@@ -107,13 +107,18 @@ export class Db {
   }
 
   uptime(serverId: string, from: number, to = Date.now()): number | null {
+    return computeUptime(this.states(serverId, from, to), from, to);
+  }
+
+  /** State changes in [from, to], oldest first, starting with the state at `from` if one was recorded before it. */
+  states(serverId: string, from: number, to = Date.now()): (Row & { reason: string })[] {
     const before = this.#db
-      .prepare('SELECT state FROM events WHERE server_id = ? AND ts <= ? ORDER BY ts DESC, rowid DESC LIMIT 1')
-      .get(serverId, from) as { state: State } | undefined;
+      .prepare('SELECT state, reason FROM events WHERE server_id = ? AND ts <= ? ORDER BY ts DESC, rowid DESC LIMIT 1')
+      .get(serverId, from) as { state: State; reason: string } | undefined;
     const rows = this.#db
-      .prepare('SELECT ts, state FROM events WHERE server_id = ? AND ts > ? AND ts <= ? ORDER BY ts, rowid')
-      .all(serverId, from, to) as Row[];
-    return computeUptime(before ? [{ ts: from, state: before.state }, ...rows] : rows, from, to);
+      .prepare('SELECT ts, state, reason FROM events WHERE server_id = ? AND ts > ? AND ts <= ? ORDER BY ts, rowid')
+      .all(serverId, from, to) as (Row & { reason: string })[];
+    return before ? [{ ts: from, ...before }, ...rows] : rows;
   }
 
   countEvents(serverId: string, reason: string, from: number, to: number): number {
@@ -149,6 +154,13 @@ export class Db {
       .get(serverId, player) as { last: number | null; open: number | null };
     if (row.open) return { online: true };
     return row.last;
+  }
+
+  /** Sessions overlapping [from, now]; `end` null while open. */
+  sessionsSince(serverId: string, from: number): { start: number; end: number | null }[] {
+    return this.#db
+      .prepare('SELECT start, end FROM sessions WHERE server_id = ? AND (end IS NULL OR end > ?)')
+      .all(serverId, from) as { start: number; end: number | null }[];
   }
 
   /** Players by playtime in [from, to], most first. */
@@ -194,6 +206,17 @@ export class Db {
   }
 
   /** Average and minimum TPS over [from, to), or null without samples. */
+  /** TPS samples since `from`, oldest first, averaged into `width`-ms buckets (the last one no later than `maxBucket`). */
+  tpsAveraged(serverId: string, from: number, width: number, maxBucket: number): { ts: number; tps: number }[] {
+    return this.#db
+      .prepare(
+        `SELECT ROUND(AVG(ts)) AS ts, AVG(tps) AS tps FROM tps WHERE server_id = ?1 AND ts >= ?2
+         GROUP BY MIN(CAST((ts - ?2) / ?3 AS INTEGER), ?4) ORDER BY ts`,
+      )
+      .all(serverId, from, width, maxBucket)
+      .map((r) => ({ ts: r.ts as number, tps: r.tps as number }));
+  }
+
   tpsStats(serverId: string, from: number, to: number): { avg: number; min: number } | null {
     const row = this.#db
       .prepare('SELECT AVG(tps) AS avg, MIN(tps) AS min FROM tps WHERE server_id = ? AND ts >= ? AND ts < ?')

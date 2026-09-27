@@ -13,6 +13,7 @@ const PAGES: { path: string; label: string; on: keyof IntegrationsOn }[] = [
   { path: 'host', label: 'Host', on: 'host' },
   { path: 'services', label: 'Services', on: 'systemd' },
   { path: 'checks', label: 'Checks', on: 'checks' },
+  { path: 'audit', label: 'Audit log', on: 'web' },
 ];
 
 /** Links to the pages of the integrations that are on; only shown once logged in. */

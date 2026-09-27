@@ -9,6 +9,9 @@ const GB = 1024 ** 3;
 /** The most samples `history` returns: a longer period (over 25 hours of minutes) is averaged into this many buckets. */
 export const HISTORY_POINTS = 1500;
 
+/** The width of a history bucket for a period of `hours`, in whole minutes; one minute means the raw samples fit. */
+export const bucketMs = (hours: number) => Math.ceil((hours * 60) / HISTORY_POINTS) * 60_000;
+
 /** Where host numbers come from, passed in so tests need no real machine. */
 export type HostReaders = {
   /** CPU time since boot, all cores together: idle and total, in any one unit. */
@@ -81,7 +84,7 @@ export class HostMonitor {
     const since = Date.now() - hours * 3600_000;
     // ponytail: reads and parses every sample, up to 129,600 for 90 days; aggregate in SQL if that gets slow.
     const samples = this.#db.hostSamples(this.#cfg.id, since);
-    const width = Math.ceil((hours * 60) / HISTORY_POINTS) * 60_000;
+    const width = bucketMs(hours);
     if (width <= 60_000) return samples; // one a minute already fits
     const buckets = new Map<number, HostSample[]>();
     for (const s of samples) {

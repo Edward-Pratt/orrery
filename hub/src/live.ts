@@ -37,6 +37,11 @@ export class LiveFeed extends EventEmitter<{ event: [number, LiveEvent] }> {
     });
   }
 
+  /** The newest event's id (one below the first if there is none yet). */
+  get lastId(): number {
+    return this.#next - 1;
+  }
+
   /** Buffered events with an id after `lastId`, oldest first. */
   since(lastId = 0): [number, LiveEvent][] {
     return [...this.#buffers.values(), [...this.#latest.values()]]

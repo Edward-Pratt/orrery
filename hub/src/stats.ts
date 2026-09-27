@@ -4,8 +4,9 @@ import { findCrashLogs } from './crashlogs.ts';
 import type { Db } from './db.ts';
 import type { AuditEntry, ServerHub } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
-import type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
-export type { BackupsAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, TpsStats } from './types.ts';
+import { bucketMs, HISTORY_POINTS } from './host.ts';
+import type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+export type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, TpsStats } from './types.ts';
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
@@ -100,6 +101,40 @@ export class Stats {
       crashes: this.#db.countEvents(serverId, 'crashed', from, to),
       ...(backups ? { backups } : {}),
     };
+  }
+
+  /** TPS (null without it), player counts and up/down periods over the last `hours`; see `HistoryAnswer`. */
+  history(serverId: string, hours: number, withTps: boolean, now = Date.now()): HistoryAnswer | undefined {
+    const state = this.#hub.get(serverId);
+    if (!state) return undefined;
+    const from = now - hours * HOUR;
+    const width = bucketMs(hours);
+    const tps = !withTps
+      ? null
+      : width <= 60_000
+        ? this.#db.tpsSince(serverId, from)
+        : this.#db.tpsAveraged(serverId, from, width, HISTORY_POINTS - 1);
+    // Players: those already on at `from`, then +1 at each session's start and -1 at its end, a point per change.
+    const deltas = new Map<number, number>();
+    let count = 0;
+    for (const s of this.#db.sessionsSince(serverId, from)) {
+      if (s.start <= from) count++;
+      else deltas.set(s.start, (deltas.get(s.start) ?? 0) + 1);
+      if (s.end !== null && s.end <= now) deltas.set(s.end, (deltas.get(s.end) ?? 0) - 1);
+    }
+    const players = [{ ts: from, count }];
+    for (const [ts, d] of [...deltas].sort(([a], [b]) => a - b)) {
+      if (d === 0) continue; // a leave and a join in the same millisecond
+      players.push({ ts, count: (count += d) });
+    }
+    // Sessions sync every 10 s, so the end is the live count.
+    players.push({ ts: now, count: state.online ? state.players.length : 0 });
+    const uptime: HistoryAnswer['uptime'] = [];
+    for (const r of this.#db.states(serverId, from, now)) {
+      const s = r.reason === 'hung' ? 'hung' : r.state;
+      if (uptime.at(-1)?.state !== s) uptime.push({ ts: r.ts, state: s });
+    }
+    return { tps, players, uptime };
   }
 
   /** The newest audit log entries, for every server or one. */

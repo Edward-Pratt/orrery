@@ -1,4 +1,5 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, model } from '@angular/core';
+import { HlmButton } from '@spartan-ng/helm/button';
 import type { EChartsCoreOption } from 'echarts/core';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 
@@ -21,6 +22,8 @@ export class TimeSeries {
   readonly format = input<(value: number) => string>(String);
   /** The axis's top, e.g. 1 for a share; else fitted to the data. */
   readonly max = input<number>();
+  /** Draws each value flat until the next, for values that change in steps (a count, a state). */
+  readonly step = input(false);
 
   protected readonly options = computed((): EChartsCoreOption => {
     const css = getComputedStyle(document.documentElement);
@@ -30,6 +33,7 @@ export class TimeSeries {
     const palette = [1, 2, 3, 4, 5].flatMap((i) => token(`--chart-${i}`) ?? []);
     const format = this.format();
     const series = this.series();
+    const step = this.step() && 'end';
     return {
       ...(palette.length && { color: palette }),
       animation: false,
@@ -45,7 +49,32 @@ export class TimeSeries {
       xAxis: { type: 'time', axisLabel: { color: text }, axisLine: { lineStyle: { color: line } } },
       yAxis: { type: 'value', min: 0, max: this.max(), axisLabel: { color: text, formatter: format }, splitLine: { lineStyle: { color: line } } },
       // Colours are the tokens as given (oklch), so nothing derives shades from them.
-      series: series.map((s) => ({ type: 'line', name: s.name, data: s.points, showSymbol: false, emphasis: { disabled: true } })),
+      series: series.map((s) => ({ type: 'line', name: s.name, data: s.points, step, showSymbol: false, emphasis: { disabled: true } })),
     };
   });
+}
+
+/** The graphable periods: the hub keeps 90 days. */
+export const PERIODS = [
+  { label: '1 h', hours: 1 },
+  { label: '24 h', hours: 24 },
+  { label: '7 d', hours: 7 * 24 },
+  { label: '90 d', hours: 90 * 24 },
+];
+
+/** Buttons choosing a graphed period, in hours. */
+@Component({
+  selector: 'app-period',
+  imports: [HlmButton],
+  template: `
+    <div class="flex gap-2" role="group" aria-label="Period">
+      @for (p of periods; track p.hours) {
+        <button hlmBtn size="sm" [variant]="hours() === p.hours ? 'default' : 'outline'" [attr.aria-pressed]="hours() === p.hours" (click)="hours.set(p.hours)" data-period>{{ p.label }}</button>
+      }
+    </div>
+  `,
+})
+export class PeriodPicker {
+  protected readonly periods = PERIODS;
+  readonly hours = model.required<number>();
 }

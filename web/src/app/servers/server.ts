@@ -2,10 +2,10 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { ChatRequest, LiveEvent, ServerCard, ServerDetail } from '@hub/api';
+import type { ChatRequest, LiveEvent, ServerCard, ServerDetail, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
-import { filter } from 'rxjs';
-import { LiveEvents, ofServer } from '../events';
+import { LiveEvents, ofServer, ofTarget } from '../events';
+import { ServiceActions } from '../services/actions';
 
 type ChatLine = Extract<LiveEvent, { type: 'chat' | 'join' | 'leave' | 'death' | 'say' }>;
 const CHAT_TYPES: LiveEvent['type'][] = ['chat', 'join', 'leave', 'death', 'say'] satisfies ChatLine['type'][];
@@ -13,13 +13,20 @@ const MAX_LINES = 500;
 
 @Component({
   selector: 'app-server',
-  imports: [RouterLink, HlmButton],
+  imports: [RouterLink, HlmButton, ServiceActions],
   template: `
     <a routerLink=".." class="text-sm text-muted-foreground hover:underline">← Servers</a>
     @if (missing(); as why) {
       <p class="pt-8">{{ why }}</p>
     } @else if (card(); as c) {
       <h1 class="mt-2 mb-4 text-lg font-semibold">{{ c.name }} <span class="text-sm font-normal text-muted-foreground">{{ c.online ? 'Online' : 'Offline' }}</span></h1>
+      @if (service(); as s) {
+        <section class="mb-4 max-w-3xl rounded-lg border p-4" data-service-actions>
+          <h2 class="mb-1 text-sm font-semibold">Service {{ s.unit }} <span class="font-normal text-muted-foreground">{{ s.state }} ({{ s.sub }})</span></h2>
+          <p class="mb-3 text-sm text-muted-foreground">The systemd unit this server runs as. Stopping it keeps the server down; with players online they get a countdown first.</p>
+          <app-service-actions [service]="s" />
+        </section>
+      }
       @if (c.features.chat) {
         <section class="flex max-w-3xl flex-col gap-2">
           <ol class="h-96 overflow-y-auto rounded-lg border p-3 font-mono text-sm" data-chat>
@@ -55,6 +62,8 @@ export default class ServerPage {
   readonly #http = inject(HttpClient);
   readonly #id = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
   readonly card = signal<ServerCard | undefined>(undefined);
+  /** The service this server runs as, if linked. */
+  readonly service = signal<ServiceStatus | null>(null);
   /** Why the server can't be shown: unknown, or the hub didn't answer. */
   readonly missing = signal<string | null>(null);
   readonly lines = signal<ChatLine[]>([]);
@@ -62,18 +71,24 @@ export default class ServerPage {
 
   constructor() {
     this.#http.get<ServerDetail>(`/api/servers/${encodeURIComponent(this.#id)}`).subscribe({
-      next: (detail) => this.card.set(detail.card),
+      next: (detail) => {
+        this.card.set(detail.card);
+        this.service.set(detail.service);
+      },
       error: (err: HttpErrorResponse) =>
         this.missing.set(err.status === 404 ? 'No such server.' : `The hub didn't answer (HTTP ${err.status}). Reload to try again.`),
     });
-    // The stream's replay brings recent chat first, then new lines arrive live.
+    // One stream: the replay brings recent chat first, then new lines arrive live; also the linked service's state.
     inject(LiveEvents)
-      .all$.pipe(
-        filter(ofServer(this.#id)),
-        filter(({ event }) => CHAT_TYPES.includes(event.type)),
-        takeUntilDestroyed(),
-      )
-      .subscribe(({ event }) => this.lines.update((lines) => [...lines, event as ChatLine].slice(-MAX_LINES)));
+      .all$.pipe(takeUntilDestroyed())
+      .subscribe((live) => {
+        if (ofServer(this.#id)(live)) {
+          if (CHAT_TYPES.includes(live.event.type)) this.lines.update((lines) => [...lines, live.event as ChatLine].slice(-MAX_LINES));
+        } else if (ofTarget('service')(live) && live.event.type === 'state' && live.event.id === this.service()?.id) {
+          const { state, sub } = live.event;
+          this.service.update((s) => s && { ...s, state, sub });
+        }
+      });
   }
 
   send(input: HTMLInputElement): void {

@@ -12,7 +12,8 @@
       "backupMinFreeGB": 10,
       "lagTps": 15,
       "lagMinutes": 2,
-      "quests": "batched"
+      "quests": "batched",
+      "service": "gtnh"
     }
   ],
   "integrations": {

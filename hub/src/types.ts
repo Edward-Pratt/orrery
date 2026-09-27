@@ -70,8 +70,8 @@ export type GameMsg = Extract<
 export type Severity = 'problem' | 'warning' | 'good' | 'info';
 /** Something a hub-core module wants people to know about a server. Never sent by a mod. */
 export type Notice = { severity: Severity } & (
-  | { kind: 'restartScheduled'; ms: number; by: string }
-  | { kind: 'restartNow' }
+  | { kind: 'restartScheduled'; ms: number; by: string; stop?: true }
+  | { kind: 'restartNow'; stop?: true }
   | { kind: 'restartCancelled'; by: string }
   | { kind: 'restartCancelledDown' }
   | { kind: 'restartFailed'; error: string }

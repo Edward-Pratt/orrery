@@ -1,0 +1,23 @@
+// Lets the orrery hub's user start, stop and restart exactly the services listed in the hub's config, and nothing else.
+// KEEP IN SYNC with integrations.systemd in hub/config.json: UNITS must list the same unit names, no more.
+// A listed unit missing here makes the dashboard's actions answer 502; one here but not in config is reachable by
+// anything running as the hub's user, so remove units from here when they leave the config.
+//
+// Install: sudo install -m 644 -o root -g root deploy/orrery-hub.rules /etc/polkit-1/rules.d/50-orrery-hub.rules
+// (polkit picks it up without a restart). Check as the hub's user: `systemctl stop --no-block <unit>` works for a
+// listed unit and is refused ("Interactive authentication required") for any other.
+// Edit USER if the hub runs as someone else (User= in orrery-hub.service).
+polkit.addRule(function (action, subject) {
+  // Inside the rule: every rules file shares one JavaScript scope.
+  var USER = 'opc';
+  var UNITS = ['gtnh.service'];
+  var VERBS = ['start', 'stop', 'restart'];
+  if (
+    action.id === 'org.freedesktop.systemd1.manage-units' &&
+    subject.user === USER &&
+    UNITS.indexOf(action.lookup('unit')) >= 0 &&
+    VERBS.indexOf(action.lookup('verb')) >= 0
+  ) {
+    return polkit.Result.YES;
+  }
+});

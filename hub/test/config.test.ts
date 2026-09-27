@@ -195,6 +195,28 @@ test('services are listed systemd units with their own ids; a check may link to 
   ]);
 });
 
+test("a server's linked service must be a listed service, linked to no other server", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...c } = valid(dir);
+  const systemd = [{ id: 'gtnh', unit: 'gtnh.service' }];
+  const servers = (...links: unknown[]) => links.map((service, i) => ({ id: `s${i}`, name: `S${i}`, service }));
+  assert.deepEqual(validateConfig({ ...c, servers: servers('gtnh'), integrations: { systemd } }), []);
+  assert.deepEqual(validateConfig({ ...c, servers: servers('nope', 4), integrations: { systemd } }), [
+    'server "s0": "service" must be the id of a service in integrations.systemd',
+    'server "s1": "service" must be the id of a service in integrations.systemd',
+  ]);
+  assert.deepEqual(validateConfig({ ...c, servers: servers('gtnh', 'gtnh'), integrations: { systemd } }), [
+    'server "s1": service "gtnh" is linked to server "s0" already',
+  ]);
+  assert.deepEqual(validateConfig({ ...c, servers: servers('gtnh') }), [
+    'server "s0": "service" must be the id of a service in integrations.systemd',
+  ]);
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify({ ...c, servers: servers('gtnh'), integrations: { systemd } }));
+  assert.equal(loadConfig(path).servers[0]!.service, 'gtnh');
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

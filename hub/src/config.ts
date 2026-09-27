@@ -18,6 +18,7 @@ type ServerEntry = {
   lagMinutes?: number;
   lagAlerts?: boolean;
   quests?: QuestMode;
+  service?: string;
 };
 
 /** What a server is configured to do, with every default applied. */
@@ -34,6 +35,8 @@ export type ServerSettings = {
   backupMinFreeGB: number;
   lag: LagConfig;
   quests: QuestMode;
+  /** The id of the service (in `integrations.systemd`) this server runs as. */
+  service?: string;
 };
 
 /** The bot's guild, the role allowed to run admin commands, and a channel per server id. */
@@ -267,6 +270,14 @@ export function validateConfig(raw: unknown): string[] {
       else if (units.has(unit)) err(where, `"${unit}" is listed already`);
       units.add(unit);
     });
+  }
+  const linked = new Map<string, string>(); // service id -> server id
+  for (const s of Array.isArray(raw.servers) ? raw.servers : []) {
+    if (!isObj(s) || s.service === undefined || typeof s.id !== 'string') continue;
+    const where = `server "${s.id}"`;
+    if (!services.has(s.service as string)) err(where, '"service" must be the id of a service in integrations.systemd');
+    else if (linked.has(s.service as string)) err(where, `service "${s.service}" is linked to server "${linked.get(s.service as string)}" already`);
+    else linked.set(s.service as string, s.id);
   }
   if (integrations.checks !== undefined) {
     list(integrations, 'checks', 'check', (c, where) => {

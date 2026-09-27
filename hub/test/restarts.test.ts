@@ -218,3 +218,36 @@ test('scheduling, cancelling and the daily restart leave audit entries naming wh
   );
   assert.ok(log.includes('hub:restart|command|gtnh|say Restart cancelled'));
 });
+
+test('a stop countdown warns of a stop, then runs its own action instead of the stop command', async (t) => {
+  const { restarts, commands, notices, log } = setup(t);
+  const fired: string[] = [];
+  restarts.schedule('gtnh', 1, 'web:alex (5)', 'alex', { stop: true, fire: async () => void fired.push('systemctl stop') });
+  assert.deepEqual(restarts.pending('gtnh'), { at: Date.now() + MIN, by: 'alex', stop: true });
+  t.mock.timers.tick(MIN);
+  assert.deepEqual(commands, ['say Server stopping in 1 minute', 'say Server stopping in 30 seconds', 'say Server stopping in 10 seconds']);
+  assert.deepEqual(fired, ['systemctl stop']);
+  assert.deepEqual(notices, [
+    { severity: 'info', kind: 'restartScheduled', ms: MIN, by: 'alex', stop: true },
+    { severity: 'info', kind: 'restartNow', stop: true },
+  ]);
+  assert.equal(log[0], 'web:alex (5)|stop|gtnh|in 1 min');
+  assert.equal(restarts.pending('gtnh'), undefined);
+});
+
+test("a stop countdown's failing action is reported", async (t) => {
+  const { restarts, notices } = setup(t);
+  restarts.schedule('gtnh', 0, 'alice', 'alice', { stop: true, fire: () => Promise.reject(new Error('permission denied')) });
+  t.mock.timers.tick(0);
+  await flush();
+  assert.deepEqual(notices.at(-1), failed('permission denied'));
+});
+
+test('cancelling a stop countdown says the stop is cancelled', (t) => {
+  const { restarts, commands } = setup(t);
+  restarts.schedule('gtnh', 5, 'alice', 'alice', { stop: true, fire: async () => {} });
+  restarts.cancel('gtnh', 'bob');
+  t.mock.timers.tick(0);
+  assert.deepEqual(commands.at(-1), 'say Stop cancelled');
+  assert.equal(restarts.pending('gtnh'), undefined);
+});

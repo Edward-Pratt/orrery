@@ -36,7 +36,7 @@ const changesCard = (e: LiveEvent) =>
             <dt class="text-muted-foreground">Uptime 24 h</dt>
             <dd>{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd>
             @if (c.restart; as r) {
-              <dt class="text-muted-foreground">Restart</dt>
+              <dt class="text-muted-foreground">{{ r.stop ? 'Stop' : 'Restart' }}</dt>
               <dd>at {{ r.at | date: 'HH:mm' }} by {{ r.by }}</dd>
             }
           </dl>

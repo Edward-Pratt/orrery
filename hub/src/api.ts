@@ -63,11 +63,20 @@ export type ServiceStatus = { id: string; unit: string; state: string | null; su
 /** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
 export type ServiceLogs = { lines: string[] };
 
+/**
+ * The answer to `POST /api/services/:id/start`, `/stop` and `/restart` (no body; audited as the admin). The action
+ * doesn't wait for systemd: the new state follows as `state` events. Stopping or restarting a service whose linked
+ * server has players online first counts down in game (the server card's `restart`, cancelled like a restart): `at`
+ * is when it will run, null if it ran at once. 404 for an unlisted id, 409 if a countdown is already running on the
+ * server, 502 if systemctl fails.
+ */
+export type ServiceActionAnswer = { at: number | null };
+
 /** What a server has; chat, TPS and quests only for a Minecraft server with the mod (a token configured). */
 export type Features = { chat: boolean; tps: boolean; quests: boolean };
 
-/** A countdown restart in progress: when it fires and who scheduled it. */
-export type PendingRestart = { at: number; by: string };
+/** A countdown restart (or, with `stop`, a countdown stop of its service) in progress: when it fires and who scheduled it. */
+export type PendingRestart = { at: number; by: string; stop: boolean };
 
 /** `GET /api/servers`: one card per server. `tps` is null without the TPS feature. */
 export type ServerCard = {
@@ -83,9 +92,13 @@ export type ServerCard = {
   features: Features;
 };
 
-/** `GET /api/servers/:id`. `tps` is null without the TPS feature; `top` is the 10 most-played per period. */
+/**
+ * `GET /api/servers/:id`. `tps` is null without the TPS feature; `top` is the 10 most-played per period; `service`
+ * is the service it runs as, if linked.
+ */
 export type ServerDetail = {
   card: ServerCard;
+  service: ServiceStatus | null;
   status: StatusAnswer;
   tps: TpsAnswer | null;
   top: Record<Period, { player: string; ms: number }[]>;

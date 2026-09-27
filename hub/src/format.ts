@@ -33,9 +33,9 @@ const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning
 function noticeText(n: Notice): string {
   switch (n.kind) {
     case 'restartScheduled':
-      return `🔄 Restart in ${countdownText(n.ms)} (by ${n.by})`;
+      return n.stop ? `🛑 Stop in ${countdownText(n.ms)} (by ${n.by})` : `🔄 Restart in ${countdownText(n.ms)} (by ${n.by})`;
     case 'restartNow':
-      return '🔄 Restarting now';
+      return n.stop ? '🛑 Stopping now' : '🔄 Restarting now';
     case 'restartCancelled':
       return `❎ Restart cancelled (by ${n.by})`;
     case 'restartCancelledDown':

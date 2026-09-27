@@ -6,10 +6,11 @@ import type { ServiceLogs, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { catchError, debounceTime, EMPTY, filter, startWith, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
+import { ServiceActions } from './actions';
 
 @Component({
   selector: 'app-services',
-  imports: [RouterLink, HlmButton],
+  imports: [RouterLink, HlmButton, ServiceActions],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Services</h1>
     <div class="flex max-w-3xl flex-col gap-3">
@@ -32,7 +33,8 @@ import { LiveEvents, ofTarget } from '../events';
               }
             </p>
           }
-          <div class="mt-3 flex gap-2">
+          <div class="mt-3 flex flex-wrap items-start gap-2">
+            <app-service-actions [service]="s" />
             <button hlmBtn variant="outline" size="sm" (click)="toggleLogs(s.id)" data-logs-button>
               {{ logs()[s.id] ? 'Hide logs' : 'Logs' }}
             </button>

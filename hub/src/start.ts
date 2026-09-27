@@ -102,7 +102,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   checks?.start();
   const host = hostCfg && deps.host && new HostMonitor(hub, db, hostCfg, deps.host);
   host?.start();
-  const services = systemd && deps.run && new Services(hub, systemd, checkList ?? [], deps.run);
+  const services = systemd && deps.run && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run);
   services?.start();
 
   const stats = new Stats(hub, db, config.servers);

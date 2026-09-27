@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import type { ServiceStatus } from './api.ts';
-import type { CheckConfig, ServiceConfig } from './config.ts';
+import type { CheckConfig, ServerSettings, ServiceConfig } from './config.ts';
+import type { RestartScheduler } from './restarts.ts';
 import type { ServerHub } from './servers.ts';
 
 /** Runs systemctl or journalctl (no shell): resolves with its output, rejects with its error output. */
@@ -15,25 +16,44 @@ export const execRun: Run = (command, args) =>
 
 const WATCH_MS = 5_000;
 const LOG_LINES = 200;
+/** The in-game countdown before a linked server with players online is stopped or restarted. */
+const CLEAN_STOP_MINUTES = 5;
+
+export type Verb = 'start' | 'stop' | 'restart';
+export const VERBS: Verb[] = ['start', 'stop', 'restart'];
+
+type Hub = Pick<ServerHub, 'publishTarget' | 'audit' | 'get'>;
 
 /**
  * The listed systemd units: reads each one's state at startup and every 5 s, and puts changes on the event stream
- * (a failure is also a notice); reads their recent logs from journald. Only listed units are ever passed to `run`,
- * after `--` or as `--unit=`. Hub core.
+ * (a failure is also a notice); reads their recent logs from journald; starts, stops and restarts them. Stopping or
+ * restarting one whose linked server has players online runs the server's countdown first. Only listed units are
+ * ever passed to `run`, after `--` or as `--unit=`. Hub core.
  */
 export class Services {
-  #hub: Pick<ServerHub, 'publishTarget'>;
+  #hub: Hub;
   #run: Run;
+  #restarts: RestartScheduler;
   #services: Map<string, ServiceConfig>;
   #checks: CheckConfig[];
+  #servers = new Map<string, string>(); // service id -> the id of the server that runs as it
   #states = new Map<string, { state: string; sub: string }>();
   #timer: NodeJS.Timeout | undefined;
   #watching = false;
 
-  constructor(hub: Pick<ServerHub, 'publishTarget'>, services: ServiceConfig[], checks: CheckConfig[], run: Run) {
+  constructor(
+    hub: Hub,
+    restarts: RestartScheduler,
+    services: ServiceConfig[],
+    servers: Pick<ServerSettings, 'id' | 'service'>[],
+    checks: CheckConfig[],
+    run: Run,
+  ) {
     this.#hub = hub;
+    this.#restarts = restarts;
     this.#run = run;
     this.#services = new Map(services.map((s) => [s.id, s]));
+    for (const s of servers) if (s.service) this.#servers.set(s.service, s.id);
     this.#checks = checks;
   }
 
@@ -45,6 +65,38 @@ export class Services {
 
   stop(): void {
     clearInterval(this.#timer);
+  }
+
+  has(id: string): boolean {
+    return this.#services.has(id);
+  }
+
+  /** The service a server runs as, if it is linked to one. */
+  ofServer(serverId: string): ServiceStatus | undefined {
+    const id = [...this.#servers].find(([, server]) => server === serverId)?.[0];
+    return this.list().find((s) => s.id === id);
+  }
+
+  /**
+   * Starts, stops or restarts a listed service (`by` goes to the audit log, `byName` to players), without waiting
+   * for systemd to finish. With players online on its linked server, a stop or restart first counts down in game,
+   * and it resolves with when the action will run; otherwise at once, with null. Rejects if systemctl fails, or a
+   * countdown is already running on that server.
+   */
+  async act(id: string, verb: Verb, by: string, byName: string): Promise<number | null> {
+    const s = this.#services.get(id)!;
+    const serverId = this.#servers.get(id);
+    const server = serverId === undefined ? undefined : this.#hub.get(serverId);
+    const run = async () => void (await this.#run('systemctl', [verb, '--no-block', '--', s.unit]));
+    if (verb !== 'start' && server?.online && server.players.length) {
+      // systemctl stop, not the game's own stop: systemd's Restart=always must not bring the server back.
+      this.#restarts.schedule(server.id, CLEAN_STOP_MINUTES, by, byName, { stop: verb === 'stop', fire: run });
+      this.#hub.audit(by, `service ${verb}`, id, s.unit);
+      return this.#restarts.pending(server.id)!.at;
+    }
+    await run();
+    this.#hub.audit(by, `service ${verb}`, id, s.unit);
+    return null;
   }
 
   list(): ServiceStatus[] {

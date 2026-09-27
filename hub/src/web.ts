@@ -15,6 +15,7 @@ import type {
   PlayerAnswer,
   ServerCard,
   ServerDetail,
+  ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
 } from './api.ts';
@@ -24,7 +25,7 @@ import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { Services } from './services.ts';
+import { VERBS, type Services } from './services.ts';
 import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
@@ -169,6 +170,20 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         return c.text(`journalctl failed: ${(err as Error).message}`, 502);
       }
     });
+    for (const verb of VERBS) {
+      app.post(`/services/:id/${verb}`, async (c) => {
+        const id = c.req.param('id');
+        if (!services.has(id)) return c.notFound();
+        const user = c.get('user');
+        try {
+          return c.json({ at: await services.act(id, verb, actor(user), user.username) } satisfies ServiceActionAnswer);
+        } catch (err) {
+          const message = (err as Error).message;
+          if (message.startsWith('a restart is already scheduled')) return c.text('A countdown is already running: cancel it first.', 409);
+          return c.text(`systemctl failed: ${message}`, 502);
+        }
+      });
+    }
   }
   const hostId = integrations.host?.id;
   if (host && hostId) {
@@ -188,6 +203,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const status = stats.status(id)!;
     return c.json({
       card: card(state, status),
+      service: services?.ofServer(id) ?? null,
       status,
       tps: hasMod(id) ? stats.tps(id)! : null,
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },

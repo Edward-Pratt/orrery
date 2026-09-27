@@ -284,6 +284,10 @@ test("formatEvent posts restart notices with today's wording", () => {
     embeds: [{ title: '🔄 Restart in 1 minute (by bob)', color: COLORS.blue }],
   });
   assert.deepEqual(post({ severity: 'info', kind: 'restartNow' }), { embeds: [{ title: '🔄 Restarting now', color: COLORS.blue }] });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 300_000, by: 'alex', stop: true }), {
+    embeds: [{ title: '🛑 Stop in 5 minutes (by alex)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartNow', stop: true }), { embeds: [{ title: '🛑 Stopping now', color: COLORS.blue }] });
   assert.deepEqual(post({ severity: 'info', kind: 'restartCancelled', by: 'bob' }), {
     embeds: [{ title: '❎ Restart cancelled (by bob)', color: COLORS.blue }],
   });

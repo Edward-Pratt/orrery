@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import type { ServerCard, ServerDetail } from '@hub/api';
+import type { ServerCard, ServerDetail, ServiceStatus } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { fakeEvents, settle } from '../testing';
 import ServerPage from './server';
@@ -19,7 +19,7 @@ const CARD: ServerCard = {
   features: { chat: true, tps: true, quests: true },
 };
 
-async function setup(card = CARD) {
+async function setup(card = CARD, service: ServiceStatus | null = null) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [
@@ -33,7 +33,7 @@ async function setup(card = CARD) {
   });
   const fixture = TestBed.createComponent(ServerPage);
   const backend = TestBed.inject(HttpTestingController);
-  backend.expectOne(`/api/servers/${card.id}`).flush({ card } as ServerDetail);
+  backend.expectOne(`/api/servers/${card.id}`).flush({ card, service } as ServerDetail);
   await settle();
   const el = fixture.nativeElement as HTMLElement;
   const render = async () => (await settle(), await fixture.whenStable());
@@ -82,5 +82,21 @@ describe('server page chat', () => {
     await render();
     expect(el.querySelector('[data-chat]')).toBeNull();
     expect(el.querySelector('[data-no-chat]')).not.toBeNull();
+  });
+
+  it('shows the labelled service actions only when a service is linked', async () => {
+    const unlinked = await setup();
+    await unlinked.render();
+    expect(unlinked.el.querySelector('[data-service-actions]')).toBeNull();
+    TestBed.resetTestingModule();
+    const gtnh: ServiceStatus = { id: 'gtnh', unit: 'gtnh.service', state: 'active', sub: 'running', checks: [] };
+    const linked = await setup(CARD, gtnh);
+    await linked.render();
+    const section = linked.el.querySelector('[data-service-actions]');
+    expect(section?.querySelector('h2')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Service gtnh.service active (running)');
+    expect([...section!.querySelectorAll('[data-action]')].map((b) => b.textContent)).toEqual(['Start', 'Stop', 'Restart']);
+    linked.events.push(1, { target: 'service', id: 'gtnh', type: 'state', state: 'inactive', sub: 'dead' });
+    await linked.render();
+    expect(section?.querySelector('h2')?.textContent).toContain('inactive (dead)');
   });
 });

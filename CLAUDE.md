@@ -6,7 +6,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
-- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), the `Caddyfile` (TLS for the dashboard and Grafana;
+- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
   there; tested by `test-install-web.sh`) and `restore-backup.sh` (puts a backup back over a stopped server's world;
   tested by `test-restore-backup.sh`).

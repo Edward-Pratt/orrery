@@ -2,7 +2,9 @@ import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
 type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
-type Pending = { at: number; by: string; byName: string; timers: NodeJS.Timeout[] };
+type Pending = { at: number; by: string; byName: string; stop: boolean; fire?: () => Promise<void>; timers: NodeJS.Timeout[] };
+/** A stop countdown (`stop`) and what it runs at the end instead of the `stop` command (`fire`). */
+export type CountdownOptions = { stop?: boolean; fire?: () => Promise<void> };
 
 /** In-game warnings, as time left before the restart. */
 const WARNINGS_MS = [600_000, 300_000, 60_000, 30_000, 10_000];
@@ -15,7 +17,8 @@ export function countdownText(ms: number): string {
 }
 
 /**
- * Countdown restarts: in-game warnings, then `stop` (systemd's Restart=always brings the server back).
+ * Countdown restarts: in-game warnings, then `stop` (systemd's Restart=always brings the server back). A countdown
+ * can instead be a stop that ends in its own action (stopping the server's service, so it stays down).
  * Lives in the hub core so the web dashboard can use it too; its notices go on the hub's event stream. Pending
  * restarts are in memory only.
  */
@@ -37,7 +40,7 @@ export class RestartScheduler {
    * `by` goes to the audit log, now and with the `stop` command (e.g. "discord:alice (123)"); `byName` is shown
    * to people. Throws if minutes isn't a whole number 0–60, the server is offline, or a restart is already pending.
    */
-  schedule(serverId: string, minutes: number, by: string, byName = by): void {
+  schedule(serverId: string, minutes: number, by: string, byName = by, { stop = false, fire }: CountdownOptions = {}): void {
     if (!Number.isInteger(minutes) || minutes < 0 || minutes > 60) {
       throw new Error('minutes must be a whole number from 0 to 60');
     }
@@ -46,23 +49,24 @@ export class RestartScheduler {
     const delay = minutes * 60_000;
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
-    this.#pending.set(serverId, { at: Date.now() + delay, by, byName, timers });
-    this.#hub.audit(by, 'restart', serverId, `in ${minutes} min`);
-    if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName });
+    this.#pending.set(serverId, { at: Date.now() + delay, by, byName, stop, fire, timers });
+    this.#hub.audit(by, stop ? 'stop' : 'restart', serverId, `in ${minutes} min`);
+    if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName, ...this.#stop(stop) });
   }
 
   /** False if nothing was pending. `by` and `byName` as for `schedule`. */
   cancel(serverId: string, by: string, byName = by): boolean {
+    const stop = this.#pending.get(serverId)?.stop;
     if (!this.#clear(serverId)) return false;
     this.#hub.audit(by, 'restart cancel', serverId);
     this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by: byName });
-    this.#say(serverId, 'say Restart cancelled');
+    this.#say(serverId, stop ? 'say Stop cancelled' : 'say Restart cancelled');
     return true;
   }
 
-  pending(serverId: string): { at: number; by: string } | undefined {
+  pending(serverId: string): { at: number; by: string; stop: boolean } | undefined {
     const p = this.#pending.get(serverId);
-    return p && { at: p.at, by: p.byName };
+    return p && { at: p.at, by: p.byName, stop: p.stop };
   }
 
   /** Arms (or re-arms) a daily restart at local "HH:MM"; the countdown starts 10 minutes before. Throws on a bad time. */
@@ -100,16 +104,22 @@ export class RestartScheduler {
       .catch((err: Error) => console.error(`[restart] "${command}" on ${serverId} failed: ${err.message}`));
   }
 
+  /** Marks a notice as about a stop; restart notices stay as they were. */
+  #stop(stop: boolean): { stop?: true } {
+    return stop ? { stop } : {};
+  }
+
   #warn(serverId: string, msLeft: number): void {
-    this.#say(serverId, `say Server restarting in ${countdownText(msLeft)}`);
+    const verb = this.#pending.get(serverId)?.stop ? 'stopping' : 'restarting';
+    this.#say(serverId, `say Server ${verb} in ${countdownText(msLeft)}`);
   }
 
   #fire(serverId: string): void {
     const p = this.#pending.get(serverId);
     if (!p) return;
     this.#clear(serverId); // first, so the `stopped` event this causes isn't reported as a cancellation
-    this.#hub.publish(serverId, { severity: 'info', kind: 'restartNow' });
-    this.#hub.runCommand(serverId, 'stop', p.by).catch((err: Error) => {
+    this.#hub.publish(serverId, { severity: 'info', kind: 'restartNow', ...this.#stop(p.stop) });
+    (p.fire?.() ?? this.#hub.runCommand(serverId, 'stop', p.by)).catch((err: Error) => {
       if (err.message === 'server disconnected') return; // it shut down before replying: that's success
       console.error(`[restart] stop on ${serverId} failed: ${err.message}`);
       this.#hub.publish(serverId, { severity: 'problem', kind: 'restartFailed', error: err.message });

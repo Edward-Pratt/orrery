@@ -21,11 +21,12 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 |---|---|
 | `src/app/session.ts` | `Session` (who is logged in, logout) and the `loggedOutOn401` interceptor. |
 | `src/app/integrations.ts` | `Integrations` (`GET /api/integrations`, asked once) and `enabled(name)`, the `canMatch` guard. |
-| `src/app/app.routes.ts` | One lazy route per integration with pages, matched only when it is on (Minecraft: `servers`; `host`; `checks`). |
+| `src/app/app.routes.ts` | One lazy route per integration with pages, matched only when it is on (Minecraft: `servers`; `host`; systemd: `services`; `checks`). |
 | `src/app/app.ts` | The shell: header, `Nav` (links to the switched-on integrations' pages), login prompt. |
 | `src/app/events.ts` | `LiveEvents.all$`: `GET /api/events` as an observable (fetch, not EventSource: a reconnect sends Last-Event-ID and skips ids already seen). Ends on 401. `ofServer(id)` keeps one server's events (not a same-named check's), `ofTarget(target)` the host's, services' or checks'. |
 | `src/app/host/` | The host page: CPU, load, memory and disks from its latest sample, replaced by each live `sample` event. No graphs yet. |
-| `src/app/checks/` | The checks page: each check's state and response time, fetched again on a check's down/up notice. |
+| `src/app/checks/` | The checks page: each check's state, response time and linked service, fetched again on a check's down/up notice. |
+| `src/app/services/` | The services page: each listed unit's state and linked checks (fetched again on a service event), its recent logs on demand. |
 | `src/app/servers/` | The Minecraft integration's pages: server cards (live TPS from `tps` events, re-fetched on lifecycle, join/leave and restart notices; nothing polls) and a server page with live chat. |
 | `src/app/testing.ts` | `fakeEvents()`: a fake `/api/events` for the `FETCH` token. |
 

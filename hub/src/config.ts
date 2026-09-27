@@ -62,8 +62,11 @@ export type WebIntegration = {
   sessionDays: number;
 };
 
-/** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. */
-export type CheckConfig = { id: string; url: string; intervalSeconds: number };
+/** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. May name its service. */
+export type CheckConfig = { id: string; url: string; intervalSeconds: number; service?: string };
+
+/** A systemd unit the hub may see (and later control), by id. Only listed units exist to the hub. */
+export type ServiceConfig = { id: string; unit: string };
 
 /**
  * The machine the hub runs on, by id: the mounts whose disk is watched, and when to warn: memory use at or over
@@ -76,7 +79,7 @@ export type Config = {
   healthcheckUrl?: string;
   servers: ServerSettings[];
   /** Each integration is on when its section is present; none is required. */
-  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[]; host?: HostIntegration };
+  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[]; host?: HostIntegration; systemd?: ServiceConfig[] };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -93,6 +96,8 @@ function resolve(s: ServerEntry): ServerSettings {
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const SNOWFLAKE = /^\d{17,20}$/;
+/** A systemd unit name (with systemd's `\x2d`-style escapes); never an option, since it is passed to systemctl. */
+const UNIT = /^\w[\w:.@\\-]*\.(service|socket|timer|target|path|mount)$/;
 
 function isDir(path: string): boolean {
   try {
@@ -151,11 +156,14 @@ export function validateConfig(raw: unknown): string[] {
     const url = str(o, key, where, required);
     if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err(where, `"${key}" must be an http(s) URL`);
   };
-  /** An integration's list of entries, each with its own id; `each` checks the rest of an entry. */
-  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void) => {
-    const v = o[key];
-    if (!Array.isArray(v)) return void err('integrations', `"${key}" must be a list`);
+  /** An integration's list of entries, each with its own id; `each` checks the rest of an entry. Returns the ids. */
+  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void): Set<string> => {
     const seen = new Set<string>();
+    const v = o[key];
+    if (!Array.isArray(v)) {
+      err('integrations', `"${key}" must be a list`);
+      return seen;
+    }
     for (const [i, e] of v.entries()) {
       if (!isObj(e)) {
         err(`${key}[${i}]`, 'must be an object');
@@ -169,6 +177,7 @@ export function validateConfig(raw: unknown): string[] {
         seen.add(eid);
       }
     }
+    return seen;
   };
 
   str(raw, 'dbPath', '');
@@ -248,9 +257,23 @@ export function validateConfig(raw: unknown): string[] {
       }
     }
   }
+  let services = new Set<string>();
+  if (integrations.systemd !== undefined) {
+    const units = new Set<string>();
+    services = list(integrations, 'systemd', 'service', (s, where) => {
+      const unit = str(s, 'unit', where);
+      if (unit === undefined) return;
+      if (!UNIT.test(unit)) err(where, '"unit" must be a systemd unit name, like gtnh.service');
+      else if (units.has(unit)) err(where, `"${unit}" is listed already`);
+      units.add(unit);
+    });
+  }
   if (integrations.checks !== undefined) {
     list(integrations, 'checks', 'check', (c, where) => {
       httpUrl(c, 'url', where, true);
+      if (c.service !== undefined && !services.has(c.service as string)) {
+        err(where, '"service" must be the id of a service in integrations.systemd');
+      }
       const n = c.intervalSeconds;
       if (typeof n !== 'number' || !Number.isInteger(n) || n < 30) err(where, '"intervalSeconds" must be a whole number of at least 30');
     });

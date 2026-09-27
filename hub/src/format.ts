@@ -119,6 +119,8 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: low disk on ${e.mount}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`;
     case 'diskOk':
       return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
+    case 'serviceFailed':
+      return `❌ Service ${e.id} failed (${e.unit})`;
   }
 }
 
@@ -127,7 +129,7 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
  * is shared); null for events that aren't announced.
  */
 export function formatTargetEvent(e: TargetEvent): Post | null {
-  if (e.type === 'sample') return null; // for the dashboard
+  if (e.type !== 'notice') return null; // samples and service states are for the dashboard
   const url = 'url' in e ? { description: truncate(e.url, DESCRIPTION) } : {};
   return embed({ title: title(targetText(e)), ...url, color: SEVERITY_COLORS[e.severity] });
 }

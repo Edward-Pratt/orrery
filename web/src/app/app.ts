@@ -11,6 +11,7 @@ import { Session } from './session';
 const PAGES: { path: string; label: string; on: keyof IntegrationsOn }[] = [
   { path: 'servers', label: 'Servers', on: 'minecraft' },
   { path: 'host', label: 'Host', on: 'host' },
+  { path: 'services', label: 'Services', on: 'systemd' },
   { path: 'checks', label: 'Checks', on: 'checks' },
 ];
 

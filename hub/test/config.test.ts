@@ -161,6 +161,40 @@ test('the host needs an id; its mounts must exist and its limits be sensible, wi
   assert.deepEqual(loadConfig(path).integrations.host, { id: 'oracle', mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 });
 });
 
+test('services are listed systemd units with their own ids; a check may link to one', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...c } = valid(dir);
+  const units = [
+    { id: 'gtnh', unit: 'gtnh.service' },
+    { id: 'caddy', unit: 'caddy.service' },
+    { id: 'dump', unit: 'db-dump@nightly.timer' },
+  ];
+  const site = { id: 'site', url: 'https://orrery.run', intervalSeconds: 60 };
+  assert.deepEqual(validateConfig({ ...c, integrations: { systemd: units, checks: [{ ...site, service: 'caddy' }] } }), []);
+  assert.deepEqual(validateConfig({ ...c, integrations: { systemd: 'gtnh.service' } }), ['integrations: "systemd" must be a list']);
+  assert.deepEqual(
+    validateConfig({
+      ...c,
+      integrations: {
+        systemd: [...units, { id: 'gtnh', unit: 'other.service' }, { id: 'again', unit: 'caddy.service' }, { id: 'bad', unit: '--now' }, { id: 'none' }],
+        checks: [{ ...site, service: 'nope' }, { ...site, id: 'api', service: 3 }],
+      },
+    }),
+    [
+      'service "gtnh": duplicate id',
+      'service "again": "caddy.service" is listed already',
+      'service "bad": "unit" must be a systemd unit name, like gtnh.service',
+      'service "none": "unit" is required',
+      'check "site": "service" must be the id of a service in integrations.systemd',
+      'check "api": "service" must be the id of a service in integrations.systemd',
+    ],
+  );
+  assert.deepEqual(validateConfig({ ...c, integrations: { checks: [{ ...site, service: 'caddy' }] } }), [
+    'check "site": "service" must be the id of a service in integrations.systemd',
+  ]);
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

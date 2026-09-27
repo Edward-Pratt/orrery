@@ -332,7 +332,7 @@ test('a notice is coloured by its severity, not its text', () => {
   assert.equal(color('info'), COLORS.blue);
 });
 
-test('formatTargetEvent names the host, and skips its samples', () => {
+test('formatTargetEvent names the host and services, and skips samples and states', () => {
   const at = { target: 'host', id: 'oracle', type: 'notice' } as const;
   const GB = 1024 ** 3;
   const titles = [
@@ -349,6 +349,9 @@ test('formatTargetEvent names the host, and skips its samples', () => {
   ]);
   const sample = { ts: 1, cpu: 0, load: [0, 0, 0], memory: { used: 1, total: 2 }, disks: [] };
   assert.equal(formatTargetEvent({ target: 'host', id: 'oracle', type: 'sample', sample }), null);
+  assert.equal(formatTargetEvent({ target: 'service', id: 'gtnh', type: 'state', state: 'active', sub: 'running' }), null);
+  const failed = formatTargetEvent({ target: 'service', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'serviceFailed', unit: 'gtnh.service' });
+  assert.deepEqual(failed, { embeds: [{ title: '❌ Service gtnh failed (gtnh.service)', color: COLORS.red }] });
 });
 
 test('formatTargetEvent names the check, since the alerts channel is shared', () => {

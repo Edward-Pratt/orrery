@@ -27,7 +27,7 @@ export type {
 export type Me = { id: string; username: string };
 
 /** `GET /api/integrations`: which integrations are switched on. */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean };
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean };
 
 /**
  * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
@@ -41,8 +41,27 @@ export type HostHistory = HostSample[];
 /**
  * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null
  * until its first answer; `ms` is how long that took, `error` why it was down ("HTTP 503", "timed out", ECONNREFUSED).
+ * `service` is the id of its linked service, if any.
  */
-export type CheckStatus = { id: string; url: string; up: boolean | null; ms: number | null; error: string | null; checkedAt: number | null };
+export type CheckStatus = {
+  id: string;
+  url: string;
+  up: boolean | null;
+  ms: number | null;
+  error: string | null;
+  checkedAt: number | null;
+  service: string | null;
+};
+
+/**
+ * `GET /api/services` (only with the systemd integration): each listed unit's systemd ActiveState (`state`: active,
+ * inactive, failed, activating…) and SubState (`sub`), null until first read, and the ids of the checks linked to
+ * it. Changes come as `state` events on the stream; a failure is also a notice.
+ */
+export type ServiceStatus = { id: string; unit: string; state: string | null; sub: string | null; checks: string[] };
+
+/** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
+export type ServiceLogs = { lines: string[] };
 
 /** What a server has; chat, TPS and quests only for a Minecraft server with the mod (a token configured). */
 export type Features = { chat: boolean; tps: boolean; quests: boolean };

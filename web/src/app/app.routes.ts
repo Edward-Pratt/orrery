@@ -13,6 +13,7 @@ export const routes: Routes = [
   { path: 'servers', canMatch: [enabled('minecraft')], loadChildren: () => import('./servers/routes') },
   { path: 'checks', canMatch: [enabled('checks')], loadChildren: () => import('./checks/routes') },
   { path: 'host', canMatch: [enabled('host')], loadChildren: () => import('./host/routes') },
+  { path: 'services', canMatch: [enabled('systemd')], loadChildren: () => import('./services/routes') },
   { path: '', pathMatch: 'full', redirectTo: 'servers' },
   { path: '**', component: Nothing },
 ];

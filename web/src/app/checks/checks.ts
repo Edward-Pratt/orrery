@@ -1,12 +1,14 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 import type { CheckStatus } from '@hub/api';
 import { catchError, debounceTime, EMPTY, filter, startWith, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 
 @Component({
   selector: 'app-checks',
+  imports: [RouterLink],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Checks</h1>
     <table class="w-full max-w-3xl text-sm">
@@ -19,6 +21,9 @@ import { LiveEvents, ofTarget } from '../events';
             <td class="py-2">
               <div class="font-medium">{{ c.id }}</div>
               <a class="text-muted-foreground hover:underline" [href]="c.url" target="_blank" rel="noopener">{{ c.url }}</a>
+              @if (c.service; as s) {
+                <div class="text-muted-foreground" data-service>Service: <a routerLink="/services" [fragment]="s" class="hover:underline">{{ s }}</a></div>
+              }
             </td>
             <td data-state [class.text-destructive]="c.up === false">
               {{ c.up === null ? 'Not checked yet' : c.up ? 'Up' : 'Down: ' + c.error }}

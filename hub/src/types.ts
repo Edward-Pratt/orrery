@@ -116,6 +116,7 @@ export type TargetNotice = { severity: Severity } & (
   | { kind: 'memoryOk'; percent: number }
   | { kind: 'diskLow'; mount: string; free: number; minFreeGB: number }
   | { kind: 'diskOk'; mount: string; free: number }
+  | { kind: 'serviceFailed'; unit: string }
 );
 /**
  * One minute of a host: the share of CPU time busy since the previous sample (0–1), the 1/5/15-minute load averages,
@@ -128,8 +129,15 @@ export type HostSample = {
   memory: { used: number; total: number };
   disks: { mount: string; free: number; total: number }[];
 };
-/** An event about the host, a service or a check. The live feed keeps only a host's latest `sample`. */
-export type TargetEvent = { target: Target; id: string } & (({ type: 'notice' } & TargetNotice) | { type: 'sample'; sample: HostSample });
+/**
+ * An event about the host, a service or a check: a notice, a host's `sample` (the live feed keeps only the latest),
+ * or a service's new systemd `state` (ActiveState, e.g. active, failed) and `sub` (SubState, e.g. running, dead).
+ */
+export type TargetEvent = { target: Target; id: string } & (
+  | ({ type: 'notice' } & TargetNotice)
+  | { type: 'sample'; sample: HostSample }
+  | { type: 'state'; state: string; sub: string }
+);
 /** Everything on the live stream: server events and the rest. */
 export type LiveEvent = HubEvent | TargetEvent;
 

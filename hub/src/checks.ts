@@ -24,7 +24,9 @@ export class Checks {
     this.#hub = hub;
     this.#get = get;
     this.#checks = checks;
-    for (const c of checks) this.#states.set(c.id, { id: c.id, url: c.url, up: null, ms: null, error: null, checkedAt: null });
+    for (const c of checks) {
+      this.#states.set(c.id, { id: c.id, url: c.url, up: null, ms: null, error: null, checkedAt: null, service: c.service ?? null });
+    }
   }
 
   start(): void {

@@ -19,7 +19,7 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 ## Architecture rules
 
 - The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
-  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks` and `host`.
+  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host` and `systemd`.
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public

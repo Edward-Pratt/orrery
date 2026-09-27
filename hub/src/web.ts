@@ -4,13 +4,27 @@ import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { AuditLog, CheckStatus, CommandOutput, HostHistory, HostNow, Integrations, Me, PlayerAnswer, ServerCard, ServerDetail } from './api.ts';
+import type {
+  AuditLog,
+  CheckStatus,
+  CommandOutput,
+  HostHistory,
+  HostNow,
+  Integrations,
+  Me,
+  PlayerAnswer,
+  ServerCard,
+  ServerDetail,
+  ServiceLogs,
+  ServiceStatus,
+} from './api.ts';
 import type { Checks } from './checks.ts';
 import type { HostMonitor } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
+import type { Services } from './services.ts';
 import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
@@ -53,11 +67,13 @@ export type WebDeps = {
   checks?: Checks;
   /** Only with the host integration. */
   host?: HostMonitor;
+  /** Only with the systemd integration. */
+  services?: Services;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, services, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
@@ -139,9 +155,21 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       web: true,
       checks: !!integrations.checks,
       host: !!integrations.host,
+      systemd: !!integrations.systemd,
     } satisfies Integrations),
   );
   if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
+  if (services) {
+    app.get('/services', (c) => c.json(services.list() satisfies ServiceStatus[]));
+    app.get('/services/:id/logs', async (c) => {
+      try {
+        const lines = await services.logs(c.req.param('id'));
+        return lines ? c.json({ lines } satisfies ServiceLogs) : c.notFound();
+      } catch (err) {
+        return c.text(`journalctl failed: ${(err as Error).message}`, 502);
+      }
+    });
+  }
   const hostId = integrations.host?.id;
   if (host && hostId) {
     app.get('/host', (c) => c.json({ id: hostId, sample: host.latest() } satisfies HostNow));

@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
+import { Services, type Run } from './services.ts';
 import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
 import { Db } from './db.ts';
@@ -35,6 +36,8 @@ export type HubDeps = {
   oauth?: OAuth;
   /** Readers of this machine's CPU, memory and disks; needed only with the host integration. */
   host?: HostReaders;
+  /** Runs systemctl and journalctl; needed only with the systemd integration. */
+  run?: Run;
 };
 
 export type HubHandle = {
@@ -50,9 +53,10 @@ export type HubHandle = {
 
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
-  const { minecraft, discord, web, checks: checkList, host: hostCfg } = config.integrations;
+  const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd } = config.integrations;
   if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
+  if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
   const backupDirs: Record<string, string> = Object.fromEntries(
     config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
   );
@@ -98,6 +102,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   checks?.start();
   const host = hostCfg && deps.host && new HostMonitor(hub, db, hostCfg, deps.host);
   host?.start();
+  const services = systemd && deps.run && new Services(hub, systemd, checkList ?? [], deps.run);
+  services?.start();
 
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
@@ -108,7 +114,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, host, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, host, services, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -126,6 +132,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       quests.stop();
       checks?.stop();
       host?.stop();
+      services?.stop();
       stopSummaries();
       upkeep();
       stopPing();

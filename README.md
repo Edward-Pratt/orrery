@@ -64,7 +64,10 @@ bridged to Discord. `checks` lists URLs the hub requests on a schedule (`id`, `u
 `intervalSeconds` ≥ 30); up means HTTP 2xx within 10 s, and going down or back up is a
 notice in the dashboard and, if `discord.alertsChannel` is set, in that channel. `host` (`id`; optional `mounts`,
 default `["/"]`, `memoryMaxPercent` 90, `memoryMinutes` 5, `diskMinFreeGB` 10) samples this machine's CPU, load,
-memory and disks every minute (kept 90 days), warning on memory that stays high and on a low mount. `npm run check-config` checks the file
+memory and disks every minute (kept 90 days), warning on memory that stays high and on a low mount. `systemd` lists
+the units the hub may see (`id`, `unit`); no other unit exists to it. It watches their state (a failure is a notice)
+and reads their logs, so the hub's user needs journal access (e.g. the `systemd-journal` group); a check may name one
+as its `service`. `npm run check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see

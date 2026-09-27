@@ -77,6 +77,11 @@ sessions (#37); an audit log of frontend actions (#32); the live event stream (#
 dashboard in `web/` with Discord login and logout against the hub's API types (#39); live server cards and chat
 (#40); `web-v*` releases, `deploy/install-web.sh` and Caddy serving the dashboard (#41); production smoke test (#42).
 
+**Step 4 — done (`hub-v2.3.0` + `web-v0.2.0`, deployed 2026-09-27):** events for the host, services and checks, with
+Discord's `alertsChannel` (#43); checks (#44); host metrics (#45); services with state and logs (#46); service
+start/stop/restart through a polkit rule, with a clean countdown stop for a linked server, and `gtnh.socket` no longer
+`PartOf` its service (#47); production smoke test (#48).
+
 | Feature | Where | Size |
 |---|---|---|
 | HTTP API and live event stream (`hub/src/web/`, calling `ServerHub`, `RestartScheduler`, stats) | hub | M |

@@ -10,7 +10,7 @@
 polkit.addRule(function (action, subject) {
   // Inside the rule: every rules file shares one JavaScript scope.
   var USER = 'opc';
-  var UNITS = ['gtnh.service'];
+  var UNITS = ['gtnh.service', 'orrery-test.service']; // production's integrations.systemd
   var VERBS = ['start', 'stop', 'restart'];
   if (
     action.id === 'org.freedesktop.systemd1.manage-units' &&

@@ -37,6 +37,28 @@ describe('LiveEvents', () => {
   });
 });
 
+describe('LiveEvents streams', () => {
+  it('bypass the HTTP cache, so two open at once (a page and its section) never wait on each other', async () => {
+    const backend = fakeEvents();
+    const caches: (RequestCache | undefined)[] = [];
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: FETCH, useValue: ((url, init) => (caches.push(init?.cache), backend.fetch(url, init))) as typeof fetch },
+        { provide: RETRY_MS, useValue: 0 },
+      ],
+    });
+    const live = TestBed.inject(LiveEvents);
+    const seen: string[] = [];
+    const subs = ['page', 'section'].map((who) => live.all$.subscribe(() => seen.push(who)));
+    await settle();
+    backend.push(1, chat('hi'));
+    await settle();
+    subs.forEach((s) => s.unsubscribe());
+    expect(caches).toEqual(['no-store', 'no-store']);
+    expect(seen.sort()).toEqual(['page', 'section']);
+  });
+});
+
 describe('ofServer', () => {
   it("keeps a server's own events, not a check's with the same id", () => {
     const check: LiveEvent = { target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: 'https://x', error: 'HTTP 503' };

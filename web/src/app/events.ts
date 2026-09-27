@@ -45,6 +45,9 @@ export class LiveEvents {
         try {
           const res = await this.#fetch('/api/events', {
             headers: lastId ? { 'last-event-id': String(lastId) } : {},
+            // Past the HTTP cache: its lock on a URL makes a second identical request wait for the first to finish,
+            // which a stream never does, so a section's stream would hang behind its page's.
+            cache: 'no-store',
             signal: abort.signal,
           });
           if (res.status === 401) {

@@ -113,6 +113,19 @@ export function channelFor(e: LiveEvent, cfg: DiscordConfig): string | undefined
   return Object.hasOwn(cfg.channels, e.serverId) ? cfg.channels[e.serverId] : undefined;
 }
 
+/**
+ * Posts each announced event about the host, a service or a check to the alerts channel (none: not posted). Server
+ * events never come this way: they go to their own server's channel.
+ */
+export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId: string, message: Post) => Promise<void>): void {
+  hub.on('target', (e) => {
+    const channelId = channelFor(e, cfg);
+    const message = formatTargetEvent(e);
+    if (!channelId || !message) return;
+    post(channelId, message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
+  });
+}
+
 const errorCode = (err: unknown) => (err as { code?: number }).code;
 
 export async function startDiscord(
@@ -196,11 +209,7 @@ export async function startDiscord(
     else postSafe(e.serverId, message);
   });
 
-  hub.on('target', (e) => {
-    const message = formatTargetEvent(e);
-    if (!message) return;
-    postTo(channelFor(e, cfg), message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
-  });
+  postTargets(hub, cfg, postTo);
 
   client.on(Events.MessageCreate, (m) => {
     const serverId = serverByChannel.get(m.channelId);

@@ -1,5 +1,6 @@
-import { readFile, statfs } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { cpus, loadavg } from 'node:os';
+import { diskSpace } from './backups.ts';
 import type { HostIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { HostSample, ServerHub } from './servers.ts';
@@ -14,8 +15,8 @@ export type HostReaders = {
   load: () => number[];
   /** Bytes of memory: total, and available to start new work without swapping. */
   memory: () => Promise<{ total: number; available: number }>;
-  /** A mount's bytes: free to unprivileged users, and total. */
-  disk: (mount: string) => Promise<{ free: number; total: number }>;
+  /** A mount's bytes: free to unprivileged users, and total; null if it can't be read. */
+  disk: (mount: string) => Promise<{ free: number; total: number } | null>;
 };
 
 /** The machine the hub runs on, from Node built-ins and `/proc`. */
@@ -31,10 +32,7 @@ export const localHost: HostReaders = {
     const kB = (key: string) => Number(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm').exec(info)?.[1] ?? 0) * 1024;
     return { total: kB('MemTotal'), available: kB('MemAvailable') };
   },
-  disk: async (mount) => {
-    const s = await statfs(mount);
-    return { free: s.bavail * s.bsize, total: s.blocks * s.bsize };
-  },
+  disk: diskSpace, // the backup watcher's low-disk reading
 };
 
 /**
@@ -76,6 +74,11 @@ export class HostMonitor {
     return this.#latest;
   }
 
+  /** The samples of the last `hours`, oldest first. */
+  history(hours: number): HostSample[] {
+    return this.#db.hostSamples(this.#cfg.id, Date.now() - hours * 3600_000);
+  }
+
   async #sample(): Promise<void> {
     const cpu = this.#read.cpu();
     const busy = cpu.total - this.#cpu!.total - (cpu.idle - this.#cpu!.idle);
@@ -84,11 +87,9 @@ export class HostMonitor {
     const memory = await this.#read.memory();
     const disks: HostSample['disks'] = [];
     for (const mount of this.#cfg.mounts) {
-      try {
-        disks.push({ mount, ...(await this.#read.disk(mount)) });
-      } catch (err) {
-        console.error(`[host] reading disk ${mount} failed:`, (err as Error).message);
-      }
+      const space = await this.#read.disk(mount);
+      if (space) disks.push({ mount, ...space });
+      else console.error(`[host] reading disk ${mount} failed`);
     }
     const sample: HostSample = {
       ts: Date.now(),

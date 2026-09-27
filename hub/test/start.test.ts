@@ -24,6 +24,8 @@ import type {
 } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
+import { postTargets } from '../src/discord.ts';
+import { formatTargetEvent, type Post } from '../src/format.ts';
 import type { Run } from '../src/services.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
 import type { HubEvent, ServerHub } from '../src/servers.ts';
@@ -1160,40 +1162,77 @@ test('stopping a service whose server has players online counts down in game fir
   mod.send({ type: 'heartbeat', tps: 20, players: ['Steve'] });
   await sleep(20);
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  /** Answers the mod's next command and returns it. */
-  const command = async () => {
-    const cmd = (await mod.next()) as { id: string; command: string };
-    mod.send({ type: 'cmdResult', id: cmd.id, output: [] });
-    return cmd.command;
-  };
+  try {
+    /** Answers the mod's next command and returns it. */
+    const command = async () => {
+      const cmd = (await mod.next()) as { id: string; command: string };
+      mod.send({ type: 'cmdResult', id: cmd.id, output: [] });
+      return cmd.command;
+    };
 
-  const res = await post(app, cookie, '/api/services/gtnh/stop');
-  assert.equal(res.status, 200);
-  const { at } = (await res.json()) as ServiceActionAnswer;
-  assert.ok(at! > Date.now());
-  assert.deepEqual((await get<ServerCard[]>('/api/servers'))[0]!.restart, { at, by: 'alex', stop: true });
-  assert.equal((await post(app, cookie, '/api/services/gtnh/restart')).status, 409); // one countdown at a time
-  t.mock.timers.tick(0);
-  assert.equal(await command(), 'say Server stopping in 5 minutes');
-  assert.deepEqual(actions(), []);
-  t.mock.timers.tick(5 * 60_000);
+    const res = await post(app, cookie, '/api/services/gtnh/stop');
+    assert.equal(res.status, 200);
+    const { at } = (await res.json()) as ServiceActionAnswer;
+    assert.ok(at! > Date.now());
+    assert.deepEqual((await get<ServerCard[]>('/api/servers'))[0]!.restart, { at, by: 'alex', stop: true });
+    assert.equal((await post(app, cookie, '/api/services/gtnh/restart')).status, 409); // one countdown at a time
+    t.mock.timers.tick(0);
+    assert.equal(await command(), 'say Server stopping in 5 minutes');
+    assert.deepEqual(actions(), []);
+    t.mock.timers.tick(5 * 60_000);
+    assert.deepEqual(
+      [await command(), await command(), await command()],
+      ['say Server stopping in 1 minute', 'say Server stopping in 30 seconds', 'say Server stopping in 10 seconds'],
+    );
+    await new Promise((r) => setImmediate(r)); // setTimeout is mocked here
+    assert.deepEqual(actions(), [['systemctl', 'stop', '--no-block', '--', 'gtnh.service']]); // not `stop` in game
+    // systemd's ExecStop saves and stops the server; nothing brings it back.
+    mod.send({ type: 'stopping' });
+    mod.socket.end();
+    await mod.closed;
+    t.mock.timers.tick(60 * 60_000);
+    await new Promise((r) => setImmediate(r)); // setTimeout is mocked here
+    assert.equal(actions().length, 1);
+    assert.equal((await get<ServerCard[]>('/api/servers'))[0]!.restart, null);
+    assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
+      { actor: ACTOR, action: 'service stop', target: 'gtnh', details: 'gtnh.service, after a 5 min countdown' },
+    ]);
+  } finally {
+    t.mock.timers.reset(); // before the hub closes: closing waits on real timers
+  }
+});
+
+test("Discord posts a check's notices only in the alerts channel, and without one posts nothing", async (t) => {
+  for (const alertsChannel of ['4'.repeat(18), undefined]) {
+    const cfg = config(t, { minecraft: MINECRAFT, discord: { ...DISCORD, alertsChannel }, checks: [{ ...SITE, id: 'gtnh' }] });
+    delete cfg.healthcheckUrl;
+    const posted: [string, Post][] = [];
+    const handle = await startHub(cfg, {
+      startFrontend: async (hub, _s, _r, _l, discord) => {
+        postTargets(hub, discord, async (channelId, message) => void posted.push([channelId, message]));
+        return { stop: () => {} };
+      },
+      get: async () => ({ ok: false, status: 503 }),
+    });
+    await until(() => handle.live.since().some(([, e]) => 'target' in e && e.type === 'notice'));
+    await handle.close();
+    // Named like the server, still only in the alerts channel (the server's channel is 3…).
+    assert.deepEqual(posted, alertsChannel ? [[alertsChannel, formatTargetEvent({ target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: SITE.url, error: 'HTTP 503' })]] : []);
+  }
+});
+
+test("each check result is streamed, and a replay holds only a check's latest", async (t) => {
+  const { next, app, cookie } = await checksHub(t, [UP, { ok: false, status: 503 }, UP]);
+  await next();
+  await next();
+  const replay = await openStream(app, cookie);
+  t.after(() => replay.close());
+  await until(() => replay.events.length === 3);
+  const checked = replay.events.filter((e) => e.data.type === 'checked');
+  assert.equal(checked.length, 1);
+  assert.deepEqual((checked[0]!.data as { status: CheckStatus }).status.up, true);
   assert.deepEqual(
-    [await command(), await command(), await command()],
-    ['say Server stopping in 1 minute', 'say Server stopping in 30 seconds', 'say Server stopping in 10 seconds'],
+    replay.events.map((e) => ('kind' in e.data ? e.data.kind : e.data.type)),
+    ['checkDown', 'checked', 'checkUp'], // a result, then what it changed
   );
-  await new Promise((r) => setImmediate(r)); // setTimeout is mocked here
-  assert.deepEqual(actions(), [['systemctl', 'stop', '--no-block', '--', 'gtnh.service']]); // not `stop` in game
-  // systemd's ExecStop saves and stops the server; nothing brings it back.
-  mod.send({ type: 'stopping' });
-  mod.socket.end();
-  await mod.closed;
-  t.mock.timers.tick(60 * 60_000);
-  await new Promise((r) => setImmediate(r)); // setTimeout is mocked here
-  assert.equal(actions().length, 1);
-  assert.equal((await get<ServerCard[]>('/api/servers'))[0]!.restart, null);
-  assert.deepEqual(
-    webAudit(await get<AuditLog>('/api/audit')).map((e) => e.action),
-    ['service stop', 'stop'],
-  );
-  t.mock.timers.reset(); // before the hub closes: closing waits on real timers
 });

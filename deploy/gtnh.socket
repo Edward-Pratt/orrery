@@ -1,9 +1,11 @@
 # Console input for the GTNH server: whatever is written to /run/gtnh.stdin is typed into the server console.
 #   echo "say hello" > /run/gtnh.stdin     (as the User below)
 # Install alongside gtnh.service: sudo cp deploy/gtnh.socket /etc/systemd/system/
+# Not PartOf=gtnh.service: stopping the server (`systemctl stop gtnh`, or from the dashboard) leaves the console
+# socket up. gtnh.service's Requires= still starts it. While the server is stopped, writing to the FIFO starts it
+# again (socket activation), so only write to it while the server runs.
 [Unit]
 Description=GTNH server console input
-PartOf=gtnh.service
 
 [Socket]
 ListenFIFO=/run/gtnh.stdin

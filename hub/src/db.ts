@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
 import { localDay } from './units.ts';
 
-const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;
+/** How long TPS and host samples are kept. */
+const SAMPLES_KEEP_MS = 90 * 24 * 60 * 60_000;
 const COPIES_KEPT = 7;
 
 export type State = 'up' | 'down' | 'unknown';
@@ -256,8 +257,8 @@ export class Db {
    * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies. Never throws.
    */
   maintain(copyDir: string, now = Date.now()): void {
-    this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - TPS_KEEP_MS);
-    this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - TPS_KEEP_MS);
+    this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - SAMPLES_KEEP_MS);
+    this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
     try {
       mkdirSync(copyDir, { recursive: true });

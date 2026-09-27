@@ -3,13 +3,23 @@ import type { ServerHub } from './servers.ts';
 
 type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
 type Pending = { at: number; by: string; byName: string; stop: boolean; fire?: () => Promise<void>; timers: NodeJS.Timeout[] };
-/** A stop countdown (`stop`) and what it runs at the end instead of the `stop` command (`fire`). */
+/**
+ * A stop countdown (`stop`), and what it runs at the end instead of the `stop` command (`fire`). A countdown with its
+ * own `fire` is audited by whoever owns that action, not here.
+ */
 export type CountdownOptions = { stop?: boolean; fire?: () => Promise<void> };
 
 /** In-game warnings, as time left before the restart. */
 const WARNINGS_MS = [600_000, 300_000, 60_000, 30_000, 10_000];
 /** A daily restart starts its countdown this long before the configured time. */
 const DAILY_LEAD_MS = 10 * 60_000;
+
+/** What players read for a restart countdown and a stop countdown. */
+const WORDS = {
+  restart: { going: 'restarting', cancelled: 'Restart cancelled' },
+  stop: { going: 'stopping', cancelled: 'Stop cancelled' },
+};
+const words = (stop: boolean | undefined) => (stop ? WORDS.stop : WORDS.restart);
 
 export function countdownText(ms: number): string {
   if (ms >= 60_000) return `${ms / 60_000} minute${ms === 60_000 ? '' : 's'}`;
@@ -50,7 +60,7 @@ export class RestartScheduler {
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
     this.#pending.set(serverId, { at: Date.now() + delay, by, byName, stop, fire, timers });
-    this.#hub.audit(by, stop ? 'stop' : 'restart', serverId, `in ${minutes} min`);
+    if (!fire) this.#hub.audit(by, 'restart', serverId, `in ${minutes} min`);
     if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName, ...this.#stop(stop) });
   }
 
@@ -60,7 +70,7 @@ export class RestartScheduler {
     if (!this.#clear(serverId)) return false;
     this.#hub.audit(by, 'restart cancel', serverId);
     this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by: byName });
-    this.#say(serverId, stop ? 'say Stop cancelled' : 'say Restart cancelled');
+    this.#say(serverId, `say ${words(stop).cancelled}`);
     return true;
   }
 
@@ -110,8 +120,7 @@ export class RestartScheduler {
   }
 
   #warn(serverId: string, msLeft: number): void {
-    const verb = this.#pending.get(serverId)?.stop ? 'stopping' : 'restarting';
-    this.#say(serverId, `say Server ${verb} in ${countdownText(msLeft)}`);
+    this.#say(serverId, `say Server ${words(this.#pending.get(serverId)?.stop).going} in ${countdownText(msLeft)}`);
   }
 
   #fire(serverId: string): void {

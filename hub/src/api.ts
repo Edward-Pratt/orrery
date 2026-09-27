@@ -2,11 +2,22 @@
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
  * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
  */
-import type { AuditEntry, BackupsAnswer, HostSample, LiveEvent as AnyLiveEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+import type {
+  AuditEntry,
+  BackupsAnswer,
+  HostSample,
+  LiveEvent as AnyLiveEvent,
+  Period,
+  PlaytimeAnswer,
+  ServiceStatus,
+  StatusAnswer,
+  TpsAnswer,
+} from './types.ts';
 
 export type {
   Backup,
   BackupsAnswer,
+  CheckStatus,
   HostSample,
   HubEvent,
   Lifecycle,
@@ -14,6 +25,8 @@ export type {
   Period,
   PlaytimeAnswer,
   ServerState,
+  ServiceStatus,
+  ServiceVerb,
   Severity,
   StatusAnswer,
   Target,
@@ -38,27 +51,7 @@ export type HostNow = { id: string; sample: HostSample | null };
 /** `GET /api/host/samples[?hours=1–2160]`: the host's samples over the last `hours` (default 24), oldest first. */
 export type HostHistory = HostSample[];
 
-/**
- * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null
- * until its first answer; `ms` is how long that took, `error` why it was down ("HTTP 503", "timed out", ECONNREFUSED).
- * `service` is the id of its linked service, if any.
- */
-export type CheckStatus = {
-  id: string;
-  url: string;
-  up: boolean | null;
-  ms: number | null;
-  error: string | null;
-  checkedAt: number | null;
-  service: string | null;
-};
 
-/**
- * `GET /api/services` (only with the systemd integration): each listed unit's systemd ActiveState (`state`: active,
- * inactive, failed, activating…) and SubState (`sub`), null until first read, and the ids of the checks linked to
- * it. Changes come as `state` events on the stream; a failure is also a notice.
- */
-export type ServiceStatus = { id: string; unit: string; state: string | null; sub: string | null; checks: string[] };
 
 /** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
 export type ServiceLogs = { lines: string[] };

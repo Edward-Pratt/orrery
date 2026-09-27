@@ -25,7 +25,7 @@ import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
-import { VERBS, type Services } from './services.ts';
+import { CountdownRunning, VERBS, type Services } from './services.ts';
 import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
@@ -57,7 +57,7 @@ async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<s
 
 type Env = { Variables: { user: Me; body: Record<string, unknown> } };
 
-/** What the API reads from; `db` only for its own sessions. */
+/** What the API reads from; `db` only for its own sessions. The host, checks and services only when they are on. */
 export type WebDeps = {
   db: Db;
   live: LiveFeed;
@@ -178,9 +178,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         try {
           return c.json({ at: await services.act(id, verb, actor(user), user.username) } satisfies ServiceActionAnswer);
         } catch (err) {
-          const message = (err as Error).message;
-          if (message.startsWith('a restart is already scheduled')) return c.text('A countdown is already running: cancel it first.', 409);
-          return c.text(`systemctl failed: ${message}`, 502);
+          if (err instanceof CountdownRunning) return c.text(`${err.message}: cancel it first.`, 409);
+          return c.text(`systemctl failed: ${(err as Error).message}`, 502);
         }
       });
     }
@@ -192,7 +191,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       const hours = Number(c.req.query('hours') ?? 24);
       if (!Number.isInteger(hours) || hours < 1 || hours > 90 * 24) return c.text('Give hours from 1 to 2160', 400);
       // ponytail: every sample, up to 129,600 for 90 days; downsample if the graphs need long periods.
-      return c.json(db.hostSamples(hostId, Date.now() - hours * 3600_000) satisfies HostHistory);
+      return c.json(host.history(hours) satisfies HostHistory);
     });
   }
   app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));

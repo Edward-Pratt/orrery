@@ -106,6 +106,31 @@ export type HubEvent = { serverId: string } & (
 /** A server's TPS, from heartbeats, only when it moved by 0.1 or more. The live feed keeps just the latest. */
 export type Tps = { type: 'tps'; tps: number };
 
+/**
+ * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null
+ * until its first answer; `ms` is how long that took, `error` why it was down ("HTTP 503", "timed out", ECONNREFUSED).
+ * `service` is the id of its linked service, if any.
+ */
+export type CheckStatus = {
+  id: string;
+  url: string;
+  up: boolean | null;
+  ms: number | null;
+  error: string | null;
+  checkedAt: number | null;
+  service: string | null;
+};
+
+/**
+ * `GET /api/services` (only with the systemd integration): each listed unit's systemd ActiveState (`state`: active,
+ * inactive, failed, activating…) and SubState (`sub`), null until first read, and the ids of the checks linked to
+ * it. Changes come as `state` events on the stream; a failure is also a notice.
+ */
+export type ServiceStatus = { id: string; unit: string; state: string | null; sub: string | null; checks: string[] };
+
+/** What `POST /api/services/:id/<verb>` does to a service. */
+export type ServiceVerb = 'start' | 'stop' | 'restart';
+
 /** What an event that isn't about a server is about; its `id` is that thing's config id. */
 export type Target = 'host' | 'service' | 'check';
 /** Something a hub-core module wants people to know about the host, a service or a check. */
@@ -130,13 +155,14 @@ export type HostSample = {
   disks: { mount: string; free: number; total: number }[];
 };
 /**
- * An event about the host, a service or a check: a notice, a host's `sample` (the live feed keeps only the latest),
- * or a service's new systemd `state` (ActiveState, e.g. active, failed) and `sub` (SubState, e.g. running, dead).
+ * An event about the host, a service or a check: a notice, a host's `sample` or a check's `checked` result after
+ * each request (the live feed keeps only the latest of each), or a service's new systemd `state` (ActiveState, e.g. active, failed) and `sub` (SubState, e.g. running, dead).
  */
 export type TargetEvent = { target: Target; id: string } & (
   | ({ type: 'notice' } & TargetNotice)
   | { type: 'sample'; sample: HostSample }
   | { type: 'state'; state: string; sub: string }
+  | { type: 'checked'; status: CheckStatus }
 );
 /** Everything on the live stream: server events and the rest. */
 export type LiveEvent = HubEvent | TargetEvent;

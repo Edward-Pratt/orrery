@@ -3,8 +3,8 @@ import type { LiveEvent, ServerHub } from './servers.ts';
 
 /**
  * Numbers every hub event and keeps the last `perTarget` of each server's (and each host's, service's and check's)
- * in memory, so a live stream can replay them and resume after a given id. TPS events and host samples stay out of
- * that buffer (they would push chat and notices out): only the latest of each is kept, a server's TPS until it goes
+ * in memory, so a live stream can replay them and resume after a given id. TPS events, host samples and check results stay
+ * out of that buffer (they would push chat and notices out): only the latest of each is kept, a server's TPS until it goes
  * down. Ids start at the clock, so a client's id from before a hub restart stays older than new ones. Nothing
  * survives a restart.
  */
@@ -31,7 +31,7 @@ export class LiveFeed extends EventEmitter<{ event: [number, LiveEvent] }> {
     });
     hub.on('target', (e) => {
       const entry: [number, LiveEvent] = [this.#next++, e];
-      if (e.type === 'sample') this.#latest.set(`${e.target}:${e.id}`, entry);
+      if (e.type === 'sample' || e.type === 'checked') this.#latest.set(`${e.target}:${e.id}`, entry);
       else buffer(`${e.target}:${e.id}`, entry);
       this.emit('event', ...entry);
     });

@@ -231,7 +231,7 @@ test('a stop countdown warns of a stop, then runs its own action instead of the 
     { severity: 'info', kind: 'restartScheduled', ms: MIN, by: 'alex', stop: true },
     { severity: 'info', kind: 'restartNow', stop: true },
   ]);
-  assert.equal(log[0], 'web:alex (5)|stop|gtnh|in 1 min');
+  assert.ok(!log.some((l) => l.includes('|restart|'))); // its own action: audited by whoever owns it
   assert.equal(restarts.pending('gtnh'), undefined);
 });
 

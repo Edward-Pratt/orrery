@@ -1,7 +1,6 @@
-import type { CheckStatus } from './api.ts';
 import type { CheckConfig } from './config.ts';
 import type { Get } from './health.ts';
-import type { ServerHub } from './servers.ts';
+import type { CheckStatus, ServerHub } from './servers.ts';
 
 /** Why a request failed, briefly: "timed out", a network error code such as ECONNREFUSED, or a message. */
 function failure(err: unknown): string {
@@ -11,7 +10,8 @@ function failure(err: unknown): string {
 
 /**
  * Requests each check's URL at startup and then every interval: up means HTTP 2xx before `get` times out. Keeps only
- * the current state; going down, and coming back up, is a notice (never repeated while the state holds). Hub core.
+ * the current state, and puts each result on the event stream (`checked`); going down, and coming back up, is also a
+ * notice (never repeated while the state holds). Hub core.
  */
 export class Checks {
   #hub: Pick<ServerHub, 'publishTarget'>;
@@ -56,6 +56,7 @@ export class Checks {
     const state = this.#states.get(c.id)!;
     const was = state.up;
     Object.assign(state, { up: error === null, ms: Date.now() - start, error, checkedAt: Date.now() });
+    this.#hub.publishTarget({ target: 'check', id: c.id, type: 'checked', status: { ...state } });
     if (error !== null && was !== false) {
       this.#hub.publishTarget({ target: 'check', id: c.id, type: 'notice', severity: 'problem', kind: 'checkDown', url: c.url, error });
     } else if (error === null && was === false) {

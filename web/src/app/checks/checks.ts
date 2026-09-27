@@ -3,7 +3,7 @@ import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import type { CheckStatus } from '@hub/api';
-import { catchError, debounceTime, EMPTY, filter, startWith, switchMap } from 'rxjs';
+import { filter } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 
 @Component({
@@ -41,16 +41,14 @@ export default class Checks {
   readonly checks = signal<CheckStatus[]>([]);
 
   constructor() {
-    const http = inject(HttpClient);
-    // Fetched again when a check goes down or comes back up (debounced: the replay can hold several).
-    inject(LiveEvents)
-      .all$.pipe(
-        filter(ofTarget('check')),
-        debounceTime(50),
-        startWith(undefined),
-        switchMap(() => http.get<CheckStatus[]>('/api/checks').pipe(catchError(() => EMPTY))),
-        takeUntilDestroyed(),
-      )
+    // Fetched once; then each check's result arrives live (the replay brings the latest of each).
+    inject(HttpClient)
+      .get<CheckStatus[]>('/api/checks')
       .subscribe((checks) => this.checks.set(checks));
+    inject(LiveEvents)
+      .all$.pipe(filter(ofTarget('check')), takeUntilDestroyed())
+      .subscribe(({ event }) => {
+        if (event.type === 'checked') this.checks.update((checks) => checks.map((c) => (c.id === event.id ? event.status : c)));
+      });
   }
 }

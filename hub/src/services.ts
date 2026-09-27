@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process';
-import type { ServiceStatus } from './api.ts';
 import type { CheckConfig, ServerSettings, ServiceConfig } from './config.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { ServerHub } from './servers.ts';
+import type { ServerHub, ServiceStatus, ServiceVerb } from './servers.ts';
 
 /** Runs systemctl or journalctl (no shell): resolves with its output, rejects with its error output. */
 export type Run = (command: 'systemctl' | 'journalctl', args: string[]) => Promise<string>;
@@ -19,8 +18,14 @@ const LOG_LINES = 200;
 /** The in-game countdown before a linked server with players online is stopped or restarted. */
 const CLEAN_STOP_MINUTES = 5;
 
-export type Verb = 'start' | 'stop' | 'restart';
-export const VERBS: Verb[] = ['start', 'stop', 'restart'];
+export const VERBS: ServiceVerb[] = ['start', 'stop', 'restart'];
+
+/** A stop or restart was asked for while a countdown already runs on the linked server. */
+export class CountdownRunning extends Error {
+  constructor(serverName: string) {
+    super(`a countdown is already running on ${serverName}`);
+  }
+}
 
 type Hub = Pick<ServerHub, 'publishTarget' | 'audit' | 'get'>;
 
@@ -80,23 +85,25 @@ export class Services {
   /**
    * Starts, stops or restarts a listed service (`by` goes to the audit log, `byName` to players), without waiting
    * for systemd to finish. With players online on its linked server, a stop or restart first counts down in game,
-   * and it resolves with when the action will run; otherwise at once, with null. Rejects if systemctl fails, or a
-   * countdown is already running on that server.
+   * and it resolves with when the action will run; otherwise at once, with null. Audited once it is run or counting
+   * down. Rejects if systemctl fails, or with `CountdownRunning`.
    */
-  async act(id: string, verb: Verb, by: string, byName: string): Promise<number | null> {
+  async act(id: string, verb: ServiceVerb, by: string, byName: string): Promise<number | null> {
     const s = this.#services.get(id)!;
     const serverId = this.#servers.get(id);
     const server = serverId === undefined ? undefined : this.#hub.get(serverId);
     const run = async () => void (await this.#run('systemctl', [verb, '--no-block', '--', s.unit]));
+    let at: number | null = null;
     if (verb !== 'start' && server?.online && server.players.length) {
+      if (this.#restarts.pending(server.id)) throw new CountdownRunning(server.name);
       // systemctl stop, not the game's own stop: systemd's Restart=always must not bring the server back.
       this.#restarts.schedule(server.id, CLEAN_STOP_MINUTES, by, byName, { stop: verb === 'stop', fire: run });
-      this.#hub.audit(by, `service ${verb}`, id, s.unit);
-      return this.#restarts.pending(server.id)!.at;
+      at = this.#restarts.pending(server.id)!.at;
+    } else {
+      await run();
     }
-    await run();
-    this.#hub.audit(by, `service ${verb}`, id, s.unit);
-    return null;
+    this.#hub.audit(by, `service ${verb}`, id, at === null ? s.unit : `${s.unit}, after a ${CLEAN_STOP_MINUTES} min countdown`);
+    return at;
   }
 
   list(): ServiceStatus[] {

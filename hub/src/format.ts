@@ -30,12 +30,15 @@ const embed = (e: APIEmbed): Post => ({ embeds: [e] });
 
 const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
 
+/** A countdown's words: a restart's, or a stop's (of a server's service). */
+const COUNTDOWN = { restart: { in: '🔄 Restart in', now: '🔄 Restarting now' }, stop: { in: '🛑 Stop in', now: '🛑 Stopping now' } };
+
 function noticeText(n: Notice): string {
   switch (n.kind) {
     case 'restartScheduled':
-      return n.stop ? `🛑 Stop in ${countdownText(n.ms)} (by ${n.by})` : `🔄 Restart in ${countdownText(n.ms)} (by ${n.by})`;
+      return `${COUNTDOWN[n.stop ? 'stop' : 'restart'].in} ${countdownText(n.ms)} (by ${n.by})`;
     case 'restartNow':
-      return n.stop ? '🛑 Stopping now' : '🔄 Restarting now';
+      return COUNTDOWN[n.stop ? 'stop' : 'restart'].now;
     case 'restartCancelled':
       return `❎ Restart cancelled (by ${n.by})`;
     case 'restartCancelledDown':

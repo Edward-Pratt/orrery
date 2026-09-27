@@ -1,11 +1,10 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, input, signal } from '@angular/core';
-import type { ServiceActionAnswer, ServiceStatus } from '@hub/api';
+import type { ServiceActionAnswer, ServiceStatus, ServiceVerb } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 
-type Verb = 'start' | 'stop' | 'restart';
-const LABELS: Record<Verb, string> = { start: 'Start', stop: 'Stop', restart: 'Restart' };
+const LABELS: Record<ServiceVerb, string> = { start: 'Start', stop: 'Stop', restart: 'Restart' };
 
 /** Start, stop and restart buttons for a service, each asking for confirmation first. */
 @Component({
@@ -27,13 +26,13 @@ const LABELS: Record<Verb, string> = { start: 'Start', stop: 'Stop', restart: 'R
 export class ServiceActions {
   readonly #http = inject(HttpClient);
   readonly service = input.required<ServiceStatus>();
-  protected readonly verbs: Verb[] = ['start', 'stop', 'restart'];
+  protected readonly verbs: ServiceVerb[] = ['start', 'stop', 'restart'];
   protected readonly labels = LABELS;
   readonly result = signal<string | null>(null);
   readonly failed = signal(false);
   readonly countdownAt = signal<number | null>(null);
 
-  act(verb: Verb): void {
+  act(verb: ServiceVerb): void {
     const { id, unit } = this.service();
     if (!confirm(`${LABELS[verb]} ${unit}?`)) return;
     this.countdownAt.set(null);

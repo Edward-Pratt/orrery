@@ -41,14 +41,19 @@ export function growthPerDay(backups: Backup[]): number | null {
   return days < 1 ? null : (newest.size - oldest.size) / days;
 }
 
-/** Free bytes (for non-root users) on the filesystem holding `dir`; null if it can't be read. Never throws. */
-export async function freeBytes(dir: string): Promise<number | null> {
+/** Bytes free (for non-root users) and in total on the filesystem holding `dir`; null if it can't be read. Never throws. */
+export async function diskSpace(dir: string): Promise<{ free: number; total: number } | null> {
   try {
     const s = await statfs(dir);
-    return s.bavail * s.bsize;
+    return { free: s.bavail * s.bsize, total: s.blocks * s.bsize };
   } catch {
     return null;
   }
+}
+
+/** Free bytes (for non-root users) on the filesystem holding `dir`; null if it can't be read. Never throws. */
+export async function freeBytes(dir: string): Promise<number | null> {
+  return (await diskSpace(dir))?.free ?? null;
 }
 
 /** Count, total size, free space and growth; null if `dir` isn't a folder (no backups line at all). Never throws. */

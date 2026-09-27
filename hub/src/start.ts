@@ -100,9 +100,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   const checks = checkList && new Checks(hub, checkList, deps.get);
   checks?.start();
-  const host = hostCfg && deps.host && new HostMonitor(hub, db, hostCfg, deps.host);
+  const host = hostCfg && new HostMonitor(hub, db, hostCfg, deps.host!); // checked above
   host?.start();
-  const services = systemd && deps.run && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run);
+  const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
 
   const stats = new Stats(hub, db, config.servers);

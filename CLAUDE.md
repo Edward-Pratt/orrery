@@ -23,9 +23,10 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
-  API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`) and `LiveFeed`
-  (`hub/src/live.ts`, numbered events with replay); they
-  never talk to mods. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
+  API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
+  (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
+  (`HostMonitor`, `Checks`, `Services`); they
+  never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same
   frontend rule as Discord, plus its own session rows in `Db`. Off: no HTTP port and no `DISCORD_CLIENT_SECRET` needed.

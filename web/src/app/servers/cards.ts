@@ -1,4 +1,4 @@
-import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { DecimalPipe, PercentPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -6,6 +6,7 @@ import { RouterLink } from '@angular/router';
 import type { Lifecycle, LiveEvent, ServerCard } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents } from '../events';
+import { Restart } from './restart';
 
 /** Events that change a card beyond its TPS: it is fetched again (and a server page's detail). */
 const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
@@ -14,14 +15,14 @@ export const changesCard = (e: LiveEvent) =>
 
 @Component({
   selector: 'app-cards',
-  imports: [RouterLink, DatePipe, DecimalPipe, PercentPipe],
+  imports: [RouterLink, DecimalPipe, PercentPipe, Restart],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Servers</h1>
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       @for (c of cards(); track c.id) {
-        <a [routerLink]="c.id" class="block rounded-lg border p-4 hover:bg-muted/50" [attr.data-server]="c.id">
+        <div class="rounded-lg border p-4" [attr.data-server]="c.id">
           <div class="flex items-center justify-between">
-            <span class="font-medium">{{ c.name }}</span>
+            <a [routerLink]="c.id" class="font-medium hover:underline">{{ c.name }}</a>
             <span class="text-sm" [class.text-destructive]="!c.online || c.hung">
               {{ c.hung ? 'Not responding' : c.online ? 'Online' : 'Offline' }}
             </span>
@@ -35,12 +36,11 @@ export const changesCard = (e: LiveEvent) =>
             <dd data-players>{{ c.players.length ? c.players.join(', ') : 'none' }}</dd>
             <dt class="text-muted-foreground">Uptime 24 h</dt>
             <dd>{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd>
-            @if (c.restart; as r) {
-              <dt class="text-muted-foreground">{{ r.stop ? 'Stop' : 'Restart' }}</dt>
-              <dd>at {{ r.at | date: 'HH:mm' }} by {{ r.by }}</dd>
-            }
           </dl>
-        </a>
+          @if (c.features.chat) {
+            <app-restart class="mt-3 block border-t pt-3" [serverId]="c.id" [pending]="c.restart" (changed)="refetch.next()" />
+          }
+        </div>
       } @empty {
         <p class="text-muted-foreground">No servers.</p>
       }
@@ -49,10 +49,12 @@ export const changesCard = (e: LiveEvent) =>
 })
 export default class Cards {
   readonly cards = signal<ServerCard[]>([]);
+  /** Fetches the cards again. */
+  protected readonly refetch = new Subject<void>();
 
   constructor() {
     const http = inject(HttpClient);
-    const refetch = new Subject<void>();
+    const refetch = this.refetch;
     // Debounced: the stream's replay can hold many joins and leaves at once.
     refetch
       .pipe(

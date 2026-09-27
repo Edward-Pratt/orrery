@@ -22,7 +22,7 @@ import ServerPage from './server';
     @if (c.features.chat) {
       <section class="mt-6 max-w-3xl rounded-lg border p-4">
         <h2 class="mb-2 text-sm font-semibold">Countdown restart</h2>
-        <app-restart />
+        <app-restart [serverId]="c.id" [pending]="c.restart" (changed)="server.refresh()" />
       </section>
     }
   `,

@@ -284,6 +284,15 @@ describe('server restarts', () => {
     expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('A restart is already scheduled: cancel it first.');
   });
 
+  it('counts down to it, second by second', async () => {
+    const { el, render } = await setup('/gtnh', { ...CARD, restart: { at: Date.now() + 90_400, by: 'bob', stop: false } });
+    const left = () => el.querySelector('[data-restart-left]')?.textContent?.trim();
+    expect(left()).toBe('in 1 m 30 s');
+    await new Promise((r) => setTimeout(r, 1_000));
+    await render();
+    expect(left()).toBe('in 1 m 29 s');
+  });
+
   it('shows a countdown scheduled elsewhere, a service stop included, from the stream', async () => {
     const { backend, events, el, render } = await setup('/gtnh');
     events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'info', kind: 'restartScheduled', ms: 300_000, by: 'bob', stop: true });

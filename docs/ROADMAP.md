@@ -58,7 +58,7 @@ Spec: `docs/archive/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `
 | External liveness ping (`healthcheckUrl`, e.g. healthchecks.io), only while Discord is connected, so you're told when the hub or the whole host dies | hub | S |
 | `npm run check-config`: validate `config.json` offline with the same rules as startup, all errors at once | hub | S |
 
-## v2 — web dashboard (being designed)
+## v2 — web dashboard (all five steps deployed)
 
 Spec: #26 · Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes a platform whose integrations (Discord,
 Minecraft, host) are switched on by config, and the dashboard is a separate Angular app in `web/`. The table
@@ -82,11 +82,13 @@ Discord's `alertsChannel` (#43); checks (#44); host metrics (#45); services with
 start/stop/restart through a polkit rule, with a clean countdown stop for a linked server, and `gtnh.socket` no longer
 `PartOf` its service (#47); production smoke test (#48).
 
-**Step 5 — built (`hub-v2.4.0` + `web-v0.3.0`); deployment and smoke test pending (#56):** server page sections
+**Step 5 — done (`hub-v2.4.0` + `web-v0.3.1`, deployed 2026-09-27):** server page sections
 (#49); graphs with ECharts, starting with the host (#50); server history (TPS, players, uptime) and the audit log page
 (#51); console and countdown restarts, on the server page and the cards (#52); player stats (#53); the backups
 section, with the hub reporting the free-space minimum (#54); restoring a backup from the dashboard, wrapping
-`deploy/restore-backup.sh`, only while the linked service is stopped (#55).
+`deploy/restore-backup.sh`, only while the linked service is stopped (#55); production smoke test (#56), which found
+that a section's event stream hung behind its page's in the browser's HTTP cache (fixed in `web-v0.3.1`). The
+restore wasn't run live in that test.
 
 | Feature | Where | Size |
 |---|---|---|
@@ -95,7 +97,7 @@ section, with the hub reporting the free-space minimum (#54); restoring a backup
 | Pages: server cards; uptime, TPS and player graphs; live chat; console with command input | web | L |
 | Server management: start/stop/restart via a narrowly scoped polkit rule for `gtnh.service` | hub + deploy | M |
 | Backups page: list, sizes, trend; **restore button** (wraps the v1.3 script, with confirmation) | hub + web | M |
-| Base stats (LSC power, AE2 storage, crafting CPUs) from the existing `oc-influxdb-exporter` | hub | M |
+| Base stats (LSC power, AE2 storage, crafting CPUs) from the existing `oc-influxdb-exporter` (later: not in step 5) | hub | M |
 
 ## Later / if needed
 

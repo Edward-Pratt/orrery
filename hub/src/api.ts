@@ -2,7 +2,7 @@
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
  * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
  */
-import type { AuditEntry, BackupsAnswer, HubEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+import type { AuditEntry, BackupsAnswer, LiveEvent as AnyLiveEvent, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
 
 export type {
   Backup,
@@ -15,6 +15,9 @@ export type {
   ServerState,
   Severity,
   StatusAnswer,
+  Target,
+  TargetEvent,
+  TargetNotice,
   Tps,
   TpsAnswer,
 } from './types.ts';
@@ -61,10 +64,11 @@ export type PlayerAnswer = PlaytimeAnswer;
 export type AuditLog = (AuditEntry & { ts: number })[];
 
 /**
- * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. `tps` events come
- * from heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest.
+ * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. A server's events
+ * have `serverId`; the host's, a service's and a check's have `target` and `id` instead. `tps` events come from
+ * heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest.
  */
-export type LiveEvent = HubEvent;
+export type LiveEvent = AnyLiveEvent;
 
 /**
  * Every request but GET/HEAD — the actions below, logout too — must send `Origin` (the dashboard's) and

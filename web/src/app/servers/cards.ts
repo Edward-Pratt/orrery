@@ -10,8 +10,7 @@ import { LiveEvents } from '../events';
 /** Events that change a card beyond its TPS: it is fetched again. */
 const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
 const changesCard = (e: LiveEvent) =>
-  CARD_EVENTS.includes(e.type) ||
-  (e.type === 'notice' && e.kind.startsWith('restart'));
+  'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && e.kind.startsWith('restart')));
 
 @Component({
   selector: 'app-cards',

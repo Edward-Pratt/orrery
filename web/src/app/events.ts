@@ -1,5 +1,5 @@
 import { inject, Injectable, InjectionToken } from '@angular/core';
-import type { LiveEvent } from '@hub/api';
+import type { HubEvent, LiveEvent } from '@hub/api';
 import { Observable } from 'rxjs';
 import { Session } from './session';
 
@@ -10,6 +10,12 @@ export const RETRY_MS = new InjectionToken<number>('retry', { factory: () => 3_0
 
 /** A hub event with its stream id. */
 export type Live = { id: number; event: LiveEvent };
+
+/** A server's own events: never the host's, a service's or a check's, even one with the same id. */
+export const ofServer =
+  (serverId: string) =>
+  (live: Live): live is { id: number; event: HubEvent } =>
+    'serverId' in live.event && live.event.serverId === serverId;
 
 /**
  * The hub's live event stream (`GET /api/events`). Fetch rather than EventSource, so a reconnect after any drop,

@@ -21,6 +21,7 @@ import {
   formatPlaytime,
   formatPresence,
   formatStatus,
+  formatTargetEvent,
   formatTop,
   formatTopic,
   formatTps,
@@ -32,7 +33,7 @@ import {
 import type { DiscordConfig } from './config.ts';
 import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { HubEvent, ServerHub } from './servers.ts';
+import type { HubEvent, LiveEvent, ServerHub } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
 
 export type DiscordFrontend = {
@@ -106,6 +107,12 @@ export function shouldRelay(m: Pick<Message, 'author' | 'webhookId' | 'system'>)
   return !m.author.bot && !m.webhookId && !m.system;
 }
 
+/** Where an event is posted: its server's channel, or the alerts channel for the host, services and checks. */
+export function channelFor(e: LiveEvent, cfg: DiscordConfig): string | undefined {
+  if ('target' in e) return cfg.alertsChannel;
+  return Object.hasOwn(cfg.channels, e.serverId) ? cfg.channels[e.serverId] : undefined;
+}
+
 const errorCode = (err: unknown) => (err as { code?: number }).code;
 
 export async function startDiscord(
@@ -128,7 +135,10 @@ export async function startDiscord(
   });
 
   async function post(serverId: string, message: Post, files: string[] = []): Promise<void> {
-    const channelId = channels.get(serverId);
+    await postTo(channels.get(serverId), message, files);
+  }
+
+  async function postTo(channelId: string | undefined, message: Post, files: string[] = []): Promise<void> {
     if (!channelId) return;
     const channel = await client.channels.fetch(channelId);
     if (channel?.isSendable()) await channel.send({ ...message, files });
@@ -184,6 +194,10 @@ export async function startDiscord(
     if (!message) return;
     if (e.type === 'crashed') postCrash(e.serverId, message).catch((err) => console.error('[discord] crash post failed:', err));
     else postSafe(e.serverId, message);
+  });
+
+  hub.on('target', (e) => {
+    postTo(channelFor(e, cfg), formatTargetEvent(e)).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
   });
 
   client.on(Events.MessageCreate, (m) => {

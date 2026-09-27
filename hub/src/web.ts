@@ -9,7 +9,7 @@ import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
-import { mcText, type HubEvent, type ServerHub, type ServerState } from './servers.ts';
+import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
@@ -205,8 +205,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
   app.get('/events', (c) =>
     streamSSE(c, async (stream) => {
-      const send = (id: number, e: HubEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
-      const onEvent = (id: number, e: HubEvent) => void send(id, e);
+      const send = (id: number, e: LiveEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
+      const onEvent = (id: number, e: LiveEvent) => void send(id, e);
       // ponytail: a client that stops reading queues events in memory until its connection drops.
       for (const [id, e] of live.since(Number(c.req.header('last-event-id')) || 0)) void send(id, e);
       live.on('event', onEvent);

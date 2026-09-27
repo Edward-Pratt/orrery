@@ -6,6 +6,7 @@ import {
   formatBackupList,
   formatBackupStatus,
   formatEvent,
+  formatTargetEvent,
   formatLastSeen,
   formatLinked,
   formatNotice,
@@ -329,4 +330,14 @@ test('a notice is coloured by its severity, not its text', () => {
   assert.equal(color('warning'), COLORS.orange);
   assert.equal(color('good'), COLORS.green);
   assert.equal(color('info'), COLORS.blue);
+});
+
+test('formatTargetEvent names the check, since the alerts channel is shared', () => {
+  const at = { target: 'check', id: 'site', type: 'notice' } as const;
+  assert.deepEqual(formatTargetEvent({ ...at, severity: 'problem', kind: 'checkDown', url: 'https://site.example', error: 'HTTP 503' }), {
+    embeds: [{ title: '❌ Check site is down: HTTP 503', description: 'https://site.example', color: COLORS.red }],
+  });
+  assert.deepEqual(formatTargetEvent({ ...at, severity: 'good', kind: 'checkUp', url: 'https://site.example', ms: 120 }), {
+    embeds: [{ title: '✅ Check site is back up (120 ms)', description: 'https://site.example', color: COLORS.green }],
+  });
 });

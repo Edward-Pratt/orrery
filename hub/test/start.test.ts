@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
-import type { AuditLog, CommandOutput, Integrations, PlayerAnswer, ServerCard, ServerDetail } from '../src/api.ts';
+import type { AuditLog, CommandOutput, Integrations, LiveEvent, PlayerAnswer, ServerCard, ServerDetail } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
@@ -314,7 +314,7 @@ async function liveHub(t: TestContext) {
   return { app, cookie: await loginCookie(app), hub: hub!, live: handle.live, port: handle.port! };
 }
 
-type Sse = { id: number; data: HubEvent };
+type Sse = { id: number; data: LiveEvent };
 
 /** Opens /api/events and reads its frames (comments skipped) as they arrive. */
 async function openStream(app: WebApi, cookie: string, lastEventId?: number) {
@@ -700,4 +700,24 @@ test('a state-changing request needs a session, the dashboard origin and JSON', 
   assert.equal((await chat({ 'content-type': 'application/json; charset=utf-8' })).status, 204);
   assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi' });
   assert.equal((await app.request('/api/logout', { method: 'POST', headers: { cookie } })).status, 403);
+});
+
+test('a notice about a check reaches the stream, its replay and a resume, keyed apart from servers', async (t) => {
+  const { app, cookie, hub } = await liveHub(t);
+  const stream = await openStream(app, cookie);
+  t.after(() => stream.close());
+  const down = (n: number) => ({ severity: 'problem', kind: 'checkDown', url: `https://site.example/${n}`, error: 'HTTP 503' }) as const;
+  // Named like the server: a check's events are its own, never the server's.
+  for (const n of [1, 2, 3]) hub.publishTarget('check', 'gtnh', down(n));
+  await until(() => stream.events.length === 3);
+  assert.deepEqual(stream.events[0]!.data, { target: 'check', id: 'gtnh', type: 'notice', ...down(1) });
+
+  const replay = await openStream(app, cookie);
+  t.after(() => replay.close());
+  await until(() => replay.events.length === 3);
+  assert.deepEqual(replay.events, stream.events);
+  const resumed = await openStream(app, cookie, stream.events[1]!.id);
+  t.after(() => resumed.close());
+  await until(() => resumed.events.length === 1);
+  assert.deepEqual(resumed.events, [stream.events[2]]);
 });

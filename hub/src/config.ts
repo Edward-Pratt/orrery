@@ -42,6 +42,8 @@ export type DiscordConfig = {
   adminRoleId: string;
   /** serverId -> channelId. A server with no channel gets no chat or posts in Discord. */
   channels: Record<string, string>;
+  /** Where notices about the host, services and checks go; unset: they aren't posted. */
+  alertsChannel?: string;
 };
 
 /** The mod port and a token per server id. */
@@ -108,8 +110,8 @@ export function validateConfig(raw: unknown): string[] {
     }
     return v;
   };
-  const id = (o: Obj, key: string, where: string) => {
-    const v = str(o, key, where);
+  const id = (o: Obj, key: string, where: string, required = true) => {
+    const v = str(o, key, where, required);
     if (v !== undefined && !SNOWFLAKE.test(v)) err(where, `"${key}" must be a Discord ID (17–20 digits)`);
   };
   const num = (o: Obj, key: string, where: string, ok: (n: number) => boolean, rule: string) => {
@@ -206,6 +208,7 @@ export function validateConfig(raw: unknown): string[] {
     const where = 'integrations.discord';
     id(discord, 'guildId', where);
     id(discord, 'adminRoleId', where);
+    id(discord, 'alertsChannel', where, false);
     for (const [sid, channel] of byServer(discord, 'channels', where, ids)) {
       if (typeof channel !== 'string' || !SNOWFLAKE.test(channel)) {
         err(`${where}.channels`, `"${sid}" must be a Discord ID (17–20 digits)`);

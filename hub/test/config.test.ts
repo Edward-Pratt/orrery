@@ -101,6 +101,16 @@ test('every integration is optional', async (t) => {
   assert.deepEqual(validateConfig({ ...none, integrations: { minecraft: integrations.minecraft } }), []);
 });
 
+test('Discord may name an alerts channel for the host, services and checks', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = valid(dir);
+  const discord = (alertsChannel: unknown) => ({ ...c, integrations: { discord: { ...c.integrations.discord, alertsChannel } } });
+  assert.deepEqual(validateConfig(discord(ID)), []);
+  assert.deepEqual(validateConfig(discord('general')), ['integrations.discord: "alertsChannel" must be a Discord ID (17–20 digits)']);
+  assert.deepEqual(validateConfig(discord('')), ['integrations.discord: "alertsChannel" must be a non-empty string']);
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

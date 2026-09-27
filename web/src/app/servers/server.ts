@@ -5,7 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { ChatRequest, LiveEvent, ServerCard, ServerDetail } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { filter } from 'rxjs';
-import { LiveEvents } from '../events';
+import { LiveEvents, ofServer } from '../events';
 
 type ChatLine = Extract<LiveEvent, { type: 'chat' | 'join' | 'leave' | 'death' | 'say' }>;
 const CHAT_TYPES: LiveEvent['type'][] = ['chat', 'join', 'leave', 'death', 'say'] satisfies ChatLine['type'][];
@@ -69,7 +69,8 @@ export default class ServerPage {
     // The stream's replay brings recent chat first, then new lines arrive live.
     inject(LiveEvents)
       .all$.pipe(
-        filter(({ event }) => event.serverId === this.#id && CHAT_TYPES.includes(event.type)),
+        filter(ofServer(this.#id)),
+        filter(({ event }) => CHAT_TYPES.includes(event.type)),
         takeUntilDestroyed(),
       )
       .subscribe(({ event }) => this.lines.update((lines) => [...lines, event as ChatLine].slice(-MAX_LINES)));

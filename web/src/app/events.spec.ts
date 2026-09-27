@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import type { LiveEvent } from '@hub/api';
-import { FETCH, Live, LiveEvents, RETRY_MS } from './events';
+import { FETCH, Live, LiveEvents, ofServer, RETRY_MS } from './events';
 import { fakeEvents, settle } from './testing';
 
 const chat = (message: string): LiveEvent => ({ serverId: 'gtnh', type: 'chat', player: 'Steve', message });
@@ -34,5 +34,17 @@ describe('LiveEvents', () => {
       { id: 2, event: chat('live') },
       { id: 3, event: chat('after the drop') },
     ]);
+  });
+});
+
+describe('ofServer', () => {
+  it("keeps a server's own events, not a check's with the same id", () => {
+    const check: LiveEvent = { target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: 'https://x', error: 'HTTP 503' };
+    const events: Live[] = [
+      { id: 1, event: chat('mine') },
+      { id: 2, event: check },
+      { id: 3, event: { serverId: 'other', type: 'started' } },
+    ];
+    expect(events.filter(ofServer('gtnh')).map((l) => l.id)).toEqual([1]);
   });
 });

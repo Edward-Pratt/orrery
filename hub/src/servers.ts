@@ -3,8 +3,23 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
-import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState } from './types.ts';
-export type { Announcement, AuditEntry, GameMsg, HubEvent, HubOutput, Lifecycle, Notice, ServerState, Severity, Tps } from './types.ts';
+import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState, Target, TargetEvent, TargetNotice } from './types.ts';
+export type {
+  Announcement,
+  AuditEntry,
+  GameMsg,
+  HubEvent,
+  HubOutput,
+  Lifecycle,
+  LiveEvent,
+  Notice,
+  ServerState,
+  Severity,
+  Target,
+  TargetEvent,
+  TargetNotice,
+  Tps,
+} from './types.ts';
 
 /** No token: the server can't connect (the Minecraft integration is off). */
 export type ServerConfig = { id: string; name: string; token?: string };
@@ -63,8 +78,9 @@ function tokenMatches(expected: string, got: string): boolean {
 /**
  * Owns the mod connections and every configured server's state.
  * Frontends (Discord now, a web dashboard later) use only this public API.
+ * Server events are `event`s; events about the host, services and checks are `target`s, so server handlers never see them.
  */
-export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
+export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [TargetEvent] }> {
   #configs = new Map<string, ServerConfig>();
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
@@ -145,6 +161,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
   /** Puts a hub-core notice about a server on the event stream. */
   publish(serverId: string, notice: Notice): void {
     this.emit('event', { ...notice, type: 'notice', serverId });
+  }
+
+  /** Puts a hub-core notice about the host, a service or a check (`id`: its config id) on the event stream. */
+  publishTarget(target: Target, id: string, notice: TargetNotice): void {
+    this.emit('target', { ...notice, type: 'notice', target, id });
   }
 
   /** Puts a hub-core announcement (a quest batch, a new link, the daily summary) about a server on the event stream. */

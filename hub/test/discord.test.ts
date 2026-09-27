@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Message } from 'discord.js';
-import { COMMANDS, shouldRelay } from '../src/discord.ts';
+import { channelFor, COMMANDS, shouldRelay } from '../src/discord.ts';
+import type { TargetEvent } from '../src/servers.ts';
 
 const msg = (over: { bot?: boolean; webhookId?: string | null; system?: boolean }) =>
   ({ author: { bot: over.bot ?? false }, webhookId: over.webhookId ?? null, system: over.system ?? false }) as unknown as Message;
@@ -33,4 +34,14 @@ test('the command set includes stats and backup subcommands', () => {
     (byName.top.options?.[0] as { choices?: { value: string }[] }).choices?.map((c) => c.value),
     ['day', 'week', 'all'],
   );
+});
+
+test('notices about the host, services and checks go only to the alerts channel, if there is one', () => {
+  const cfg = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
+  // A check named like a server is still not that server's.
+  const check: TargetEvent = { target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: 'https://x', error: 'HTTP 503' };
+  assert.equal(channelFor(check, cfg), undefined);
+  assert.equal(channelFor(check, { ...cfg, alertsChannel: '4'.repeat(18) }), '4'.repeat(18));
+  assert.equal(channelFor({ serverId: 'gtnh', type: 'started' }, { ...cfg, alertsChannel: '4'.repeat(18) }), '3'.repeat(18));
+  assert.equal(channelFor({ serverId: 'toString', type: 'started' }, cfg), undefined);
 });

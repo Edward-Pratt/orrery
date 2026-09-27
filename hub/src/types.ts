@@ -106,6 +106,18 @@ export type HubEvent = { serverId: string } & (
 /** A server's TPS, from heartbeats, only when it moved by 0.1 or more. The live feed keeps just the latest. */
 export type Tps = { type: 'tps'; tps: number };
 
+/** What an event that isn't about a server is about; its `id` is that thing's config id. */
+export type Target = 'host' | 'service' | 'check';
+/** Something a hub-core module wants people to know about the host, a service or a check. */
+export type TargetNotice = { severity: Severity } & (
+  | { kind: 'checkDown'; url: string; error: string }
+  | { kind: 'checkUp'; url: string; ms: number }
+);
+/** An event about the host, a service or a check. */
+export type TargetEvent = { target: Target; id: string } & ({ type: 'notice' } & TargetNotice);
+/** Everything on the live stream: server events and the rest. */
+export type LiveEvent = HubEvent | TargetEvent;
+
 /** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
 export type AuditEntry = { actor: string; action: string; target: string; details: string };
 

@@ -2,7 +2,7 @@ import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
 import { sparkline } from './lag.ts';
 import { countdownText } from './restarts.ts';
-import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity } from './servers.ts';
+import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity, type TargetEvent } from './servers.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
 
@@ -103,6 +103,13 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'tps': // for the dashboard; /tps and lag notices cover Discord
       return null;
   }
+}
+
+/** The alerts channel's post for an event about the host, a service or a check; it names what it is about. */
+export function formatTargetEvent(e: TargetEvent): Post {
+  const what = `Check ${e.id}`;
+  const text = e.kind === 'checkDown' ? `❌ ${what} is down: ${e.error}` : `✅ ${what} is back up (${e.ms} ms)`;
+  return embed({ title: title(text), description: truncate(e.url, DESCRIPTION), color: SEVERITY_COLORS[e.severity] });
 }
 
 /** A short informational line as an embed (e.g. a command's "server is offline" reply). */

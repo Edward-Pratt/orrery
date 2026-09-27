@@ -27,8 +27,8 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 | `src/app/host/` | The host page: CPU, load, memory and disks from its latest sample, replaced by each live `sample` event. No graphs yet. |
 | `src/app/checks/` | The checks page: each check's state, response time and linked service, fetched once, then replaced by each live `checked` result. |
 | `src/app/services/` | The services page: each listed unit's state and linked checks (fetched again on a service event), its recent logs on demand; `ServiceActions` (start/stop/restart after `confirm()`, also on a linked server's page). |
-| `src/app/servers/` | The Minecraft integration's pages: server cards (live TPS from `tps` events, re-fetched on lifecycle, join/leave and restart notices; nothing polls) and a server page with live chat. |
-| `src/app/testing.ts` | `fakeEvents()`: a fake `/api/events` for the `FETCH` token. |
+| `src/app/servers/` | The Minecraft integration's pages: server cards (live TPS from `tps` events, re-fetched on lifecycle, join/leave and restart notices; nothing polls) and a server page: a shell (`server.ts`: name, state, linked service, links to the sections in `SECTIONS` the server has) over lazy child routes, one per section (`overview.ts`, `chat.ts`; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new section is a child route plus a `SECTIONS` row. |
+| `src/app/testing.ts` | `fakeEvents()`: a fake `/api/events` for the `FETCH` token (each push reaches every open stream). |
 
 ## Rules
 

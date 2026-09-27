@@ -15,8 +15,9 @@ const PERIODS = [
   { label: '7 d', hours: 7 * 24 },
   { label: '90 d', hours: 90 * 24 },
 ];
+const fixed = (n: number) => n.toFixed(2);
 const percent = (share: number) => `${Math.round(share * 100)}%`;
-const gb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} GB`;
+const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} GB`;
 
 @Component({
   selector: 'app-host',
@@ -57,7 +58,7 @@ const gb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} 
 })
 export default class Host {
   protected readonly gb = GB;
-  protected readonly fixed = (n: number) => n.toFixed(2);
+  protected readonly fixed = fixed;
   protected readonly periods = PERIODS;
   readonly id = signal('');
   readonly sample = signal<HostSample | null>(null);
@@ -71,11 +72,11 @@ export default class Host {
     const mounts = [...new Set(h.flatMap((s) => s.disks.map((d) => d.mount)))];
     return [
       { title: 'CPU', format: percent, max: 1, series: [line('CPU', (s) => s.cpu)] },
-      { title: 'Load', format: (n: number) => n.toFixed(2), max: undefined, series: [line('1 min', (s) => s.load[0])] },
+      { title: 'Load', format: fixed, max: undefined, series: [line('1 min', (s) => s.load[0])] },
       { title: 'Memory', format: percent, max: 1, series: [line('Used', (s) => s.memory.used / s.memory.total)] },
       {
         title: 'Disk free',
-        format: gb,
+        format: formatGb,
         max: undefined,
         series: mounts.map((mount): Series => ({
           name: mount,

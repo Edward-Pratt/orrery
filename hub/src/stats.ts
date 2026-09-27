@@ -10,6 +10,7 @@ export type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
+const GB = 1024 ** 3;
 
 const PERIOD_MS: Record<Period, number> = { day: DAY, week: 7 * DAY, all: Infinity };
 const TOP_LIMIT = 10;
@@ -21,9 +22,9 @@ const TOP_LIMIT = 10;
 export class Stats {
   #hub: Pick<ServerHub, 'get'>;
   #db: Db;
-  #folders: Map<string, Pick<ServerSettings, 'dir' | 'backupDir'>>;
+  #folders: Map<string, Pick<ServerSettings, 'dir' | 'backupDir' | 'backupMinFreeGB'>>;
 
-  constructor(hub: Pick<ServerHub, 'get'>, db: Db, servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir'>[]) {
+  constructor(hub: Pick<ServerHub, 'get'>, db: Db, servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir' | 'backupMinFreeGB'>[]) {
     this.#hub = hub;
     this.#db = db;
     this.#folders = new Map(servers.map((s) => [s.id, s]));
@@ -71,10 +72,11 @@ export class Stats {
   /** Finished Backups newest first, free space on their disk, and growth per day. Never throws. */
   async backups(serverId: string): Promise<BackupsAnswer | undefined> {
     if (!this.#hub.get(serverId)) return undefined;
-    const dir = this.#folders.get(serverId)?.backupDir;
+    const folders = this.#folders.get(serverId);
+    const dir = folders?.backupDir;
     if (!dir) return { configured: false };
     const backups = await listBackups(dir);
-    return { configured: true, backups, free: await freeBytes(dir), growth: growthPerDay(backups) };
+    return { configured: true, backups, free: await freeBytes(dir), growth: growthPerDay(backups), minFree: folders.backupMinFreeGB * GB };
   }
 
   /** Crash logs written at or after `sinceMs` in the server folder (none without one). Never throws. */

@@ -2,19 +2,20 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import type { ServerCard, ServerDetail, ServiceStatus } from '@hub/api';
+import type { ServerDetail, ServiceStatus } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { changesCard } from './cards';
 import { ServiceActions } from '../services/actions';
 
 /** The server page's sections (child routes), each shown only when the server has what it needs. */
-const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }[] = [
+const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
-  { path: 'chat', label: 'Chat', has: (c) => c.features.chat },
-  { path: 'console', label: 'Console', has: (c) => c.features.chat },
+  { path: 'chat', label: 'Chat', has: (d) => d.card.features.chat },
+  { path: 'console', label: 'Console', has: (d) => d.card.features.chat },
   { path: 'history', label: 'History', has: () => true },
   { path: 'stats', label: 'Stats', has: () => true },
+  { path: 'backups', label: 'Backups', has: (d) => d.backups.configured },
 ];
 
 /** A server's page: its name, state and linked service, then its sections, which read the detail from here. */
@@ -39,7 +40,7 @@ const SECTIONS: { path: string; label: string; has: (c: ServerCard) => boolean }
       }
       <nav class="mb-4 flex gap-4 border-b text-sm" data-sections>
         @for (s of sections; track s.path) {
-          @if (s.has(c)) {
+          @if (s.has(detail()!)) {
             <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px pb-2 hover:underline">{{ s.label }}</a>
           }
         }

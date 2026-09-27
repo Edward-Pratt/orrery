@@ -550,6 +550,7 @@ test('one server: status, TPS, top players per period and backups', async (t) =>
     ['2026-09-24-06-00-00.zip', 100],
   ]);
   assert.equal(offline.backups.growth, 200);
+  assert.equal(offline.backups.minFree, 10 * 1024 ** 3); // the server's backupMinFreeGB, for the low-space warning
   assert.equal(typeof offline.backups.free, 'number');
 
   const mod = await online(port);

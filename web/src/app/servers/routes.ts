@@ -12,6 +12,7 @@ export default [
       { path: 'console', loadComponent: () => import('./console') },
       { path: 'history', loadComponent: () => import('./history') },
       { path: 'stats', loadComponent: () => import('./stats') },
+      { path: 'backups', loadComponent: () => import('./backups') },
     ],
   },
 ] satisfies Routes;

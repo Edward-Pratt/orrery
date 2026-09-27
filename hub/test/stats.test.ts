@@ -20,7 +20,7 @@ const gtnh: ServerState = { id: 'gtnh', name: 'GTNH', online: true, hung: false,
 function setup(folders: { dir?: string; backupDir?: string } = {}) {
   const db = new Db(':memory:');
   const hub = { get: (id: string) => (id === 'gtnh' ? gtnh : undefined) } as unknown as Pick<ServerHub, 'get'>;
-  return { db, stats: new Stats(hub, db, [{ id: 'gtnh', ...folders }]) };
+  return { db, stats: new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10, ...folders }]) };
 }
 
 async function tempDir(t: TestContext): Promise<string> {
@@ -172,7 +172,7 @@ test('audit reads the log newest first, all servers or one', () => {
 
 test('backups in a folder that has gone away: none listed, free space unknown', async () => {
   const { stats } = setup({ backupDir: '/nonexistent/stats-test' });
-  assert.deepEqual(await stats.backups('gtnh'), { configured: true, backups: [], free: null, growth: null });
+  assert.deepEqual(await stats.backups('gtnh'), { configured: true, backups: [], free: null, growth: null, minFree: 10 * 1024 ** 3 });
 });
 
 test('crash logs come from the server folder; none without one', async (t) => {

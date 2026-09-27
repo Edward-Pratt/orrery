@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { By } from '@angular/platform-browser';
-import type { PendingRestart, PlayerAnswer, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
+import type { BackupsAnswer, PendingRestart, PlayerAnswer, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { fakeEvents, settle } from '../testing';
@@ -23,6 +23,10 @@ const CARD: ServerCard = {
 };
 const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false } };
 
+/** A server's detail, as the hub answers it, with nothing in it but the card. */
+const detail = (card: ServerCard, more: Partial<ServerDetail> = {}) =>
+  ({ card, service: null, top: { day: [], week: [], all: [] }, backups: { configured: false }, ...more }) as ServerDetail;
+
 /** Opens `url` (e.g. `/gtnh/chat`) straight away, as a reload would, and answers the server's detail. */
 async function setup(url: string, card = CARD, service: ServiceStatus | null = null, more: Partial<ServerDetail> = {}) {
   const events = fakeEvents();
@@ -38,7 +42,7 @@ async function setup(url: string, card = CARD, service: ServiceStatus | null = n
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);
   await harness.navigateByUrl(url);
-  backend.expectOne(`/api/servers/${card.id}`).flush({ card, service, ...more } as ServerDetail);
+  backend.expectOne(`/api/servers/${card.id}`).flush({ ...detail(card), service, ...more });
   const el = harness.routeNativeElement as HTMLElement;
   const render = async () => (await settle(), harness.fixture.detectChanges(), await harness.fixture.whenStable());
   await render();
@@ -260,14 +264,14 @@ describe('server restarts', () => {
     expect(req.request.body).toEqual({ minutes: 10 });
     req.flush(null, { status: 204, statusText: 'No Content' });
     await debounce();
-    backend.expectOne('/api/servers/gtnh').flush({ card: { ...CARD, restart: { ...PENDING, by: 'alex' } }, service: null } as ServerDetail);
+    backend.expectOne('/api/servers/gtnh').flush(detail({ ...CARD, restart: { ...PENDING, by: 'alex' } }));
     await render();
     expect(restartText(el)).toBe('Restart at 18:30:00 by alex');
 
     el.querySelector<HTMLButtonElement>('[data-restart-cancel]')!.click();
     backend.expectOne('/api/servers/gtnh/restart/cancel').flush(null, { status: 204, statusText: 'No Content' });
     await debounce();
-    backend.expectOne('/api/servers/gtnh').flush({ card: CARD, service: null } as ServerDetail);
+    backend.expectOne('/api/servers/gtnh').flush(detail(CARD));
     await render();
     expect(restartText(el)).toBeUndefined();
   });
@@ -284,7 +288,7 @@ describe('server restarts', () => {
     const { backend, events, el, render } = await setup('/gtnh');
     events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'info', kind: 'restartScheduled', ms: 300_000, by: 'bob', stop: true });
     await debounce();
-    backend.expectOne('/api/servers/gtnh').flush({ card: { ...CARD, restart: { ...PENDING, stop: true } }, service: null } as ServerDetail);
+    backend.expectOne('/api/servers/gtnh').flush(detail({ ...CARD, restart: { ...PENDING, stop: true } }));
     await render();
     expect(restartText(el)).toBe('Stop at 18:30:00 by bob');
   });
@@ -347,5 +351,74 @@ describe('server stats section', () => {
     const { backend, el } = await setup('/gtnh/stats', CARD, null, { top: TOP });
     el.querySelector<HTMLButtonElement>('[data-top=day] li button')!.click();
     backend.expectOne('/api/servers/gtnh/players/Steve');
+  });
+});
+
+describe('server backups section', () => {
+  const GB = 1024 ** 3;
+  const BACKUPS: BackupsAnswer = {
+    configured: true,
+    backups: [
+      { name: '2026-09-27-06-00-00.zip', size: 3 * GB, mtimeMs: new Date(2026, 8, 27, 6, 5).getTime() },
+      { name: '2026-09-26-06-00-00.zip', size: 2.5 * GB, mtimeMs: new Date(2026, 8, 26, 6, 4).getTime() },
+    ],
+    free: 40 * GB,
+    growth: 0.5 * GB,
+    minFree: 10 * GB,
+  };
+  const rows = (el: HTMLElement) =>
+    [...el.querySelectorAll('[data-backup]')].map((r) => [...r.querySelectorAll('td')].map((td) => td.textContent?.trim()));
+  const summary = (el: HTMLElement) => [...el.querySelectorAll('[data-backup-summary] dd')].map((d) => d.textContent?.trim());
+
+  it('lists backups newest first with sizes, the total, free space and growth', async () => {
+    const { el, tabs } = await setup('/gtnh/backups', CARD, null, { backups: BACKUPS });
+    expect(tabs()).toContain('Backups');
+    expect(rows(el)).toEqual([
+      ['2026-09-27-06-00-00.zip', '2026-09-27 06:05', '3.0 GB'],
+      ['2026-09-26-06-00-00.zip', '2026-09-26 06:04', '2.5 GB'],
+    ]);
+    expect(summary(el)).toEqual(['2', '5.5 GB', '40.0 GB', '+512.0 MB/day']);
+    expect(el.querySelector('[data-low-space]')).toBeNull();
+  });
+
+  it('warns when free space is under the minimum', async () => {
+    const { el } = await setup('/gtnh/backups', CARD, null, { backups: { ...BACKUPS, free: 4 * GB } });
+    expect(el.querySelector('[data-low-space]')?.textContent).toContain('under the 10.0 GB minimum');
+  });
+
+  it('has no Backups section without a backup folder', async () => {
+    const { el, tabs } = await setup('/gtnh/backups');
+    expect(tabs()).not.toContain('Backups');
+    expect(el.querySelector('[data-backup-start]')).toBeNull();
+  });
+
+  it("starts a backup and shows the command's reply; a finished notice refreshes the list", async () => {
+    const { backend, events, el, render } = await setup('/gtnh/backups', CARD, null, { backups: BACKUPS });
+    el.querySelector<HTMLButtonElement>('[data-backup-start]')!.click();
+    const req = backend.expectOne('/api/servers/gtnh/backup');
+    expect(req.request.method).toBe('POST');
+    req.flush({ output: ['Backup started'] });
+    await render();
+    expect(el.querySelector('[data-backup-reply]')?.textContent?.trim()).toBe('Backup started');
+
+    events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'good', kind: 'backupFinished', detail: 'done' });
+    await debounce();
+    const newer = { name: '2026-09-27-18-00-00.zip', size: GB, mtimeMs: new Date(2026, 8, 27, 18, 1).getTime() };
+    backend.expectOne('/api/servers/gtnh').flush(detail(CARD, { backups: { ...BACKUPS, backups: [newer, ...BACKUPS.backups] } }));
+    await render();
+    expect(rows(el).map((r) => r[0])).toEqual(['2026-09-27-18-00-00.zip', '2026-09-27-06-00-00.zip', '2026-09-26-06-00-00.zip']);
+  });
+
+  it('explains offline: the button is disabled, and a 409 is shown', async () => {
+    const offline = await setup('/gtnh/backups', { ...CARD, online: false }, null, { backups: BACKUPS });
+    expect(offline.el.querySelector<HTMLButtonElement>('[data-backup-start]')!.disabled).toBe(true);
+    expect(offline.el.textContent).toContain('GTNH is offline: a backup needs it running.');
+    TestBed.resetTestingModule();
+
+    const { backend, el, render } = await setup('/gtnh/backups', CARD, null, { backups: BACKUPS });
+    el.querySelector<HTMLButtonElement>('[data-backup-start]')!.click();
+    backend.expectOne('/api/servers/gtnh/backup').flush('GTNH is offline', { status: 409, statusText: 'Conflict' });
+    await render();
+    expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('GTNH is offline: a backup needs it running.');
   });
 });

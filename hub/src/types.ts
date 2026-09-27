@@ -180,7 +180,15 @@ export type PlaytimeAnswer =
 /** A Server without a Backup folder has no Backup answers at all, rather than an empty list. */
 export type BackupsAnswer =
   | { configured: false }
-  | { configured: true; backups: Backup[]; free: number | null; /** Bytes per day. */ growth: number | null };
+  | {
+      configured: true;
+      backups: Backup[];
+      free: number | null;
+      /** Bytes per day. */
+      growth: number | null;
+      /** The free space (bytes) under which the hub warns: the server's `backupMinFreeGB`. */
+      minFree: number;
+    };
 /** A server's state over time: up, down (stopped, crashed, offline), hung, or unknown (the hub wasn't running). */
 export type UptimeState = 'up' | 'down' | 'hung' | 'unknown';
 /**

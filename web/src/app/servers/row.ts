@@ -21,7 +21,7 @@ import { ServerActions } from './actions';
       (click)="open($event)"
     >
       <div class="flex min-w-0 items-center justify-between gap-3 sm:w-64 sm:justify-start">
-        <a [routerLink]="c.id" class="truncate font-medium hover:underline">{{ c.name }}</a>
+        <a [routerLink]="['/servers', c.id]" class="truncate font-medium hover:underline">{{ c.name }}</a>
         <app-status data-state [health]="state().health" [label]="state().label" class="text-sm" />
       </div>
       <dl class="flex flex-wrap gap-x-4 text-sm text-muted-foreground sm:flex-1">
@@ -43,6 +43,6 @@ export class ServerRow {
   protected readonly state = computed(() => serverState(this.card()));
 
   open(e: Event): void {
-    if (!(e.target as Element).closest('a, button')) void this.#router.navigate([this.card().id]);
+    if (!(e.target as Element).closest('a, button')) void this.#router.navigate(['/servers', this.card().id]);
   }
 }

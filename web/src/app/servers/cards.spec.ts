@@ -207,7 +207,7 @@ describe('server rows', () => {
     expect(nav).not.toHaveBeenCalled();
     el.querySelector<HTMLElement>('[data-server=gtnh] [data-tps]')!.click();
     await render();
-    expect(nav).toHaveBeenCalledWith(['gtnh']);
-    expect(el.querySelector('[data-server=gtnh] a')?.getAttribute('href')).toBe('/gtnh');
+    expect(nav).toHaveBeenCalledWith(['/servers', 'gtnh']);
+    expect(el.querySelector('[data-server=gtnh] a')?.getAttribute('href')).toBe('/servers/gtnh');
   });
 });

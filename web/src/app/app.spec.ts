@@ -43,18 +43,37 @@ describe('the shell', () => {
     expect(labels(some.el)).toEqual(['Services', 'Audit log']);
   });
 
-  it('offers Theme and Log out in the avatar menu, and Log out logs out', async () => {
-    const { fixture, backend, el } = await open(ALEX);
-    (el.querySelector('aside button[aria-label="Account menu"]') as HTMLElement).click();
-    fixture.detectChanges();
+  const openMenu = async (r: Awaited<ReturnType<typeof open>>) => {
+    (r.el.querySelector('aside button[aria-label="Account menu"]') as HTMLElement).click();
+    r.fixture.detectChanges();
     await settle();
-    const items = [...document.body.querySelectorAll('[hlmDropdownMenuItem], [data-slot="dropdown-menu-item"]')].map((i) => i.textContent!.trim());
+    return [...document.body.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]')];
+  };
+
+  it('offers Theme and Log out in the avatar menu, and Log out logs out', async () => {
+    const r = await open(ALEX);
+    const items = await openMenu(r);
     expect(document.body.textContent).toContain('Theme');
-    expect(items).toContain('Log out');
-    ([...document.body.querySelectorAll('button')].find((b) => b.textContent!.trim() === 'Log out') as HTMLElement).click();
-    backend.expectOne('/api/logout').flush(null, { status: 204, statusText: 'No Content' });
-    fixture.detectChanges();
-    expect(el.querySelector('aside')).toBeNull();
+    expect(items.map((i) => i.textContent!.replace(/\s+/g, ' ').trim().replace(/on$/, ''))).toEqual(['light', 'system', 'dark', 'Log out']);
+    items.find((i) => i.textContent!.includes('Log out'))!.click();
+    r.backend.expectOne('/api/logout').flush(null, { status: 204, statusText: 'No Content' });
+    r.fixture.detectChanges();
+    expect(r.el.querySelector('aside')).toBeNull();
+  });
+
+  it('picks a theme from the menu', async () => {
+    const r = await open(ALEX);
+    (await openMenu(r)).find((i) => i.textContent!.includes('dark'))!.click();
+    r.fixture.detectChanges();
+    TestBed.tick();
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(localStorage.getItem('theme')).toBe('dark');
+  });
+
+  it('has a phone tab bar with the same pages', async () => {
+    const { el } = await open(ALEX);
+    const tabs = [...el.querySelectorAll('nav.fixed a')].map((a) => a.textContent!.trim());
+    expect(tabs).toEqual(['Servers', 'Services', 'Checks', 'Host', 'Audit log']);
   });
 
   it('shows the Discord image with an avatar hash, initials without', async () => {
@@ -110,5 +129,14 @@ describe('Theme', () => {
     expect(theme.mode()).toBe('system');
     theme.set('light');
     expect(theme.mode()).toBe('light');
+  });
+
+  it('still works when the storage accessor itself throws', () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const theme = TestBed.inject(Theme);
+    expect(theme.mode()).toBe('system');
+    expect(() => theme.set('dark')).not.toThrow();
   });
 });

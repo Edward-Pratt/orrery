@@ -28,3 +28,9 @@ export function fakeEvents() {
 
 /** Lets pending promises and stream reads run. */
 export const settle = () => new Promise((r) => setTimeout(r, 10));
+
+/** The confirmation dialog (it lives in the overlay, outside the component under test) and its parts. */
+export const dialog = () => document.querySelector<HTMLElement>('[data-slot=alert-dialog-content]');
+export const dialogButton = (which: 'ok' | 'cancel') => document.querySelector<HTMLButtonElement>(`[data-confirm-${which}]`)!;
+/** The toasts on screen, as their text. */
+export const toasts = () => [...document.querySelectorAll('[data-sonner-toast]')].map((t) => t.textContent?.trim() ?? '');

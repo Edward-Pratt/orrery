@@ -6,6 +6,7 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCheck, lucideCpu, lucideLayers, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun } from '@ng-icons/lucide';
 import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
+import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { catchError, of } from 'rxjs';
 import { Integrations } from './integrations';
 import { Login } from './login';
@@ -75,9 +76,10 @@ export class UserMenu {
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster],
   viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideScrollText })],
   template: `
+    <hlm-toaster />
     @switch (session.user()) {
       @case (undefined) {}
       @case (null) {

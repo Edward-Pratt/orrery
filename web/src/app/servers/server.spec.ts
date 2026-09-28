@@ -7,7 +7,8 @@ import { By } from '@angular/platform-browser';
 import type { BackupsAnswer, PendingRestart, PlayerAnswer, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
-import { fakeEvents, settle } from '../testing';
+import { Feedback } from '../feedback';
+import { dialog, dialogButton, fakeEvents, settle } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -93,7 +94,7 @@ describe('server page', () => {
     const linked = await setup('/gtnh/chat', CARD, gtnh);
     const section = linked.el.querySelector('[data-service-actions]');
     expect(linked.text(section?.querySelector('h2'))).toBe('Service gtnh.service active (running)');
-    expect([...section!.querySelectorAll('[data-action]')].map((b) => b.textContent)).toEqual(['Start', 'Stop', 'Restart']);
+    expect([...section!.querySelectorAll('[data-action]')].map((b) => b.textContent?.trim())).toEqual(['Start', 'Stop', 'Restart']);
     linked.events.push(1, { target: 'service', id: 'gtnh', type: 'state', state: 'inactive', sub: 'dead' });
     await linked.render();
     expect(section?.querySelector('h2')?.textContent).toContain('inactive (dead)');
@@ -469,35 +470,37 @@ describe('restoring a backup', () => {
     const { backend, el, render } = await setup('/gtnh/backups', { ...CARD, online: false }, stopped, { backups: BACKUPS });
     restoreButton(el).click();
     await render();
-    const dialog = el.querySelector('[role=dialog]')!;
-    expect(dialog.textContent).toContain('pre-restore');
-    const confirm = dialog.querySelector<HTMLButtonElement>('[data-restore-confirm]')!;
+    expect(dialog()?.textContent).toContain('pre-restore');
+    const confirm = dialogButton('ok');
     expect(confirm.disabled).toBe(true);
-    type(dialog.querySelector('input')!, 'gtnh');
+    type(document.querySelector<HTMLInputElement>('[data-confirm-typed]')!, 'gtnh');
     await render();
     expect(confirm.disabled).toBe(true);
-    type(dialog.querySelector('input')!, 'GTNH');
+    type(document.querySelector<HTMLInputElement>('[data-confirm-typed]')!, 'GTNH');
     await render();
     expect(confirm.disabled).toBe(false);
     confirm.click();
+    await render();
     const req = backend.expectOne('/api/servers/gtnh/restore');
     expect(req.request.body).toEqual({ name: '2026-09-27-06-00-00.zip' });
+    expect(restoreButton(el).disabled).toBe(true); // in flight
     req.flush({ output: ['Restored 2026-09-27-06-00-00.zip into /srv/GTNH/World.', 'Next: sudo systemctl start gtnh.service'] });
     await render();
-    expect(el.querySelector('[role=dialog]')).toBeNull();
     expect(el.querySelector('[data-restore-output]')?.textContent).toContain('Next: sudo systemctl start gtnh.service');
   });
 
   it("shows the hub's refusal", async () => {
     const stopped = { ...GTNH, state: 'inactive', sub: 'dead' };
     const { backend, el, render } = await setup('/gtnh/backups', { ...CARD, online: false }, stopped, { backups: BACKUPS });
+    const failed = vi.spyOn(TestBed.inject(Feedback), 'failed');
     restoreButton(el).click();
     await render();
-    type(el.querySelector<HTMLInputElement>('[role=dialog] input')!, 'GTNH');
+    type(document.querySelector<HTMLInputElement>('[data-confirm-typed]')!, 'GTNH');
     await render();
-    el.querySelector<HTMLButtonElement>('[data-restore-confirm]')!.click();
+    dialogButton('ok').click();
+    await render();
     backend.expectOne('/api/servers/gtnh/restore').flush('The restore failed: restore-backup: unzip failed', { status: 502, statusText: 'Bad Gateway' });
     await render();
-    expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('The restore failed: restore-backup: unzip failed');
+    expect(failed).toHaveBeenCalledWith('Restoring 2026-09-27-06-00-00.zip', expect.objectContaining({ error: 'The restore failed: restore-backup: unzip failed' }));
   });
 });

@@ -1,50 +1,60 @@
-import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, input, signal } from '@angular/core';
 import type { ServiceActionAnswer, ServiceStatus, ServiceVerb } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
+import { HlmSpinner } from '@spartan-ng/helm/spinner';
+import { Feedback } from '../feedback';
 
 const LABELS: Record<ServiceVerb, string> = { start: 'Start', stop: 'Stop', restart: 'Restart' };
 
-/** Start, stop and restart buttons for a service, each asking for confirmation first. */
+/** Start, stop and restart buttons for a service; Stop and Restart ask first, and the outcome is a toast. */
 @Component({
   selector: 'app-service-actions',
-  imports: [HlmButton, DatePipe],
+  imports: [HlmButton, HlmSpinner],
   template: `
     <div class="flex flex-wrap items-center gap-2">
       @for (verb of verbs; track verb) {
-        <button hlmBtn variant="outline" size="sm" [attr.data-action]="verb" (click)="act(verb)">{{ labels[verb] }}</button>
+        <button hlmBtn variant="outline" size="sm" [attr.data-action]="verb" [disabled]="!!busy()" (click)="act(verb)">
+          @if (busy() === verb) {
+            <hlm-spinner />
+          }
+          {{ labels[verb] }}
+        </button>
       }
     </div>
-    @if (countdownAt(); as at) {
-      <p class="mt-2 text-sm text-muted-foreground" data-result>Players are online: they're warned in game, and it happens at {{ at | date: 'HH:mm:ss' }}.</p>
-    } @else if (result(); as r) {
-      <p class="mt-2 text-sm" [class.text-destructive]="failed()" [attr.role]="failed() ? 'alert' : null" data-result>{{ r }}</p>
-    }
   `,
 })
 export class ServiceActions {
   readonly #http = inject(HttpClient);
+  readonly #feedback = inject(Feedback);
   readonly service = input.required<ServiceStatus>();
   protected readonly verbs: ServiceVerb[] = ['start', 'stop', 'restart'];
   protected readonly labels = LABELS;
-  readonly result = signal<string | null>(null);
-  readonly failed = signal(false);
-  readonly countdownAt = signal<number | null>(null);
+  /** The verb in flight, so it can't be sent twice. */
+  readonly busy = signal<ServiceVerb | null>(null);
 
-  act(verb: ServiceVerb): void {
+  async act(verb: ServiceVerb): Promise<void> {
     const { id, unit } = this.service();
-    if (!confirm(`${LABELS[verb]} ${unit}?`)) return;
-    this.countdownAt.set(null);
+    // Starting harms nothing; the rest can disconnect players.
+    if (verb !== 'start') {
+      const ok = await this.#feedback.confirm({
+        title: `${LABELS[verb]} ${unit}? Players online are disconnected, after a warning in game.`,
+        verb: `${LABELS[verb]} ${unit}`,
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    this.busy.set(verb);
     this.#http.post<ServiceActionAnswer>(`/api/services/${encodeURIComponent(id)}/${verb}`, {}).subscribe({
       next: ({ at }) => {
-        this.failed.set(false);
-        this.countdownAt.set(at);
-        this.result.set(`${LABELS[verb]} sent to ${unit}.`);
+        this.busy.set(null);
+        this.#feedback.ok(
+          at ? `${LABELS[verb]} of ${unit} at ${new Date(at).toLocaleTimeString('en-GB')}: players are warned in game.` : `${LABELS[verb]} sent to ${unit}.`,
+        );
       },
       error: (err: HttpErrorResponse) => {
-        this.failed.set(true);
-        this.result.set(`${LABELS[verb]} failed (HTTP ${err.status}): ${typeof err.error === 'string' ? err.error : ''}`);
+        this.busy.set(null);
+        this.#feedback.failed(`${LABELS[verb]} of ${unit}`, err);
       },
     });
   }

@@ -3,6 +3,8 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import type { Backup, CommandOutput, RestoreRequest } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
+import { HlmSpinner } from '@spartan-ng/helm/spinner';
+import { Feedback } from '../feedback';
 import { formatBytes } from '../units';
 import ServerPage from './server';
 
@@ -13,7 +15,7 @@ import ServerPage from './server';
  */
 @Component({
   selector: 'app-server-backups',
-  imports: [DatePipe, HlmButton],
+  imports: [DatePipe, HlmButton, HlmSpinner],
   template: `
     @if (backups(); as b) {
       <section class="max-w-3xl">
@@ -31,7 +33,12 @@ import ServerPage from './server';
           <p class="mb-4 text-sm text-destructive" data-low-space>Low on space: {{ bytes(b.free) }} free, under the {{ bytes(b.minFree) }} minimum.</p>
         }
         <div class="mb-4 flex flex-wrap items-center gap-3">
-          <button hlmBtn size="sm" [disabled]="!online() || starting()" (click)="start()" data-backup-start>Start backup</button>
+          <button hlmBtn size="sm" [disabled]="!online() || starting()" (click)="start()" data-backup-start>
+            @if (starting()) {
+              <hlm-spinner />
+            }
+            Start backup
+          </button>
           @if (!online()) {
             <span class="text-sm text-muted-foreground">{{ offline() }}</span>
           }
@@ -44,29 +51,7 @@ import ServerPage from './server';
         @if (restoreWhy(); as why) {
           <p class="mb-2 text-sm text-muted-foreground" data-restore-why>{{ why }}</p>
         }
-        @if (confirming(); as name) {
-          <div class="mb-4 rounded-lg border border-destructive p-4 text-sm" role="dialog" aria-labelledby="restore-title">
-            <h3 id="restore-title" class="mb-2 font-semibold">Restore {{ name }}?</h3>
-            <p class="mb-3">
-              This puts the backup back as {{ serverName() }}'s world. The current world isn't deleted: it's kept next to it
-              as a pre-restore copy (<code>World.pre-restore-&lt;time&gt;</code>), to remove by hand later. Start the server
-              again afterwards.
-            </p>
-            <label class="mb-3 block">
-              Type <b>{{ serverName() }}</b> to confirm
-              <input class="mt-1 block w-full rounded-md border px-3 py-1.5" autocomplete="off" (input)="typed.set($any($event.target).value)" />
-            </label>
-            <div class="flex gap-2">
-              <button hlmBtn variant="destructive" size="sm" [disabled]="typed() !== serverName() || restoring()" (click)="restore(name)" data-restore-confirm>
-                {{ restoring() ? 'Restoring…' : 'Restore' }}
-              </button>
-              <button hlmBtn variant="outline" size="sm" [disabled]="restoring()" (click)="confirming.set(null)">Cancel</button>
-            </div>
-          </div>
-        }
-        @if (restoreError(); as e) {
-          <p class="mb-4 text-sm text-destructive" role="alert">{{ e }}</p>
-        } @else if (restoreOutput(); as out) {
+        @if (restoreOutput(); as out) {
           <pre class="mb-4 rounded-lg border p-3 text-sm whitespace-pre-wrap" data-restore-output>{{ out.join('\n') }}</pre>
         }
         <table class="w-full text-left text-sm">
@@ -80,7 +65,12 @@ import ServerPage from './server';
                 <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
                 <td class="pr-4">{{ bytes(backup.size) }}</td>
                 <td class="py-1 text-right">
-                  <button hlmBtn variant="outline" size="sm" [disabled]="!!restoreWhy() || restoring()" (click)="ask(backup.name)" data-restore>Restore</button>
+                  <button hlmBtn variant="outline" size="sm" [disabled]="!!restoreWhy() || restoring()" (click)="restore(backup.name)" data-restore>
+                    @if (restoring() === backup.name) {
+                      <hlm-spinner />
+                    }
+                    Restore
+                  </button>
                 </td>
               </tr>
             } @empty {
@@ -97,6 +87,7 @@ import ServerPage from './server';
 export default class Backups {
   readonly #server = inject(ServerPage);
   readonly #http = inject(HttpClient);
+  readonly #feedback = inject(Feedback);
   protected readonly bytes = formatBytes;
   protected readonly abs = Math.abs;
   protected readonly backups = computed(() => {
@@ -113,35 +104,33 @@ export default class Backups {
     if (!service) return `${this.serverName()} has no linked service: restore it on the host with deploy/restore-backup.sh.`;
     return service.state === 'inactive' || service.state === 'failed' ? null : `To restore a backup, stop ${service.unit} first.`;
   });
-  /** The backup whose restore is being confirmed. */
-  readonly confirming = signal<string | null>(null);
-  readonly typed = signal('');
-  readonly restoring = signal(false);
+  /** The backup being restored, so it can't be sent twice. */
+  readonly restoring = signal<string | null>(null);
   readonly restoreOutput = signal<string[] | null>(null);
-  readonly restoreError = signal<string | null>(null);
   readonly reply = signal<string[] | null>(null);
   readonly error = signal<string | null>(null);
   readonly starting = signal(false);
 
-  ask(name: string): void {
-    this.typed.set('');
-    this.confirming.set(name);
-  }
-
-  restore(name: string): void {
-    this.restoring.set(true);
-    this.restoreError.set(null);
+  async restore(name: string): Promise<void> {
+    const ok = await this.#feedback.confirm({
+      title: `Restore ${name}?`,
+      verb: `Restore ${name}`,
+      description: `This puts the backup back as ${this.serverName()}'s world. The current world isn't deleted: it's kept next to it as a pre-restore copy (World.pre-restore-<time>), to remove by hand later. Start the server again afterwards.`,
+      destructive: true,
+      typeName: this.serverName(),
+    });
+    if (!ok) return;
+    this.restoring.set(name);
     this.restoreOutput.set(null);
     this.#http.post<CommandOutput>(`/api/servers/${encodeURIComponent(this.#server.id)}/restore`, { name } satisfies RestoreRequest).subscribe({
       next: ({ output }) => {
-        this.restoring.set(false);
-        this.confirming.set(null);
+        this.restoring.set(null);
         this.restoreOutput.set(output);
+        this.#feedback.ok(`Restored ${name}. Start ${this.serverName()} again.`);
       },
       error: (err: HttpErrorResponse) => {
-        this.restoring.set(false);
-        this.confirming.set(null);
-        this.restoreError.set(typeof err.error === 'string' && err.error ? err.error : `The restore failed (HTTP ${err.status}).`);
+        this.restoring.set(null);
+        this.#feedback.failed(`Restoring ${name}`, err);
       },
     });
   }

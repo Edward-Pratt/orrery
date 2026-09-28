@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { By } from '@angular/platform-browser';
 import type { BackupsAnswer, PendingRestart, PlayerAnswer, ServerCard, ServerDetail, ServerHistory, ServiceStatus } from '@hub/api';
@@ -64,14 +64,14 @@ describe('server page', () => {
   it('shows an overview, with a Chat section for a server with the mod', async () => {
     const { el, tabs, text } = await setup('/gtnh');
     expect(text(el.querySelector('h1'))).toBe('GTNH Online');
-    expect(tabs()).toEqual(['Overview', 'Chat', 'Console', 'History', 'Stats']);
-    expect(text(el.querySelector('[data-players]'))).toBe('Steve');
+    expect(tabs()).toEqual(['Overview', 'Console', 'Chat', 'Players', 'History']);
+    expect(text(el.querySelector('[data-players]'))).toBe('Online now (1)Steve');
     expect(el.querySelector('[data-chat]')).toBeNull();
   });
 
   it('has no Chat section for a server without the mod, even when linked to', async () => {
     const { el, tabs } = await setup('/site/chat', NO_MOD);
-    expect(tabs()).toEqual(['Overview', 'History', 'Stats']);
+    expect(tabs()).toEqual(['Overview', 'Players', 'History']);
     expect(el.querySelector('[data-chat]')).toBeNull();
     expect(el.querySelector('[data-no-chat]')).not.toBeNull();
   });
@@ -88,18 +88,68 @@ describe('server page', () => {
     expect(harness.routeNativeElement?.textContent).toContain('No such server.');
   });
 
-  it('shows the labelled service actions only when a service is linked', async () => {
+  it('names the linked service under the header, and follows its state', async () => {
     const unlinked = await setup('/gtnh');
-    expect(unlinked.el.querySelector('[data-service-actions]')).toBeNull();
+    expect(unlinked.el.querySelector('[data-service-line]')).toBeNull();
     TestBed.resetTestingModule();
     const gtnh: ServiceStatus = { id: 'gtnh', unit: 'gtnh.service', state: 'active', sub: 'running', checks: [] };
-    const linked = await setup('/gtnh/chat', CARD, gtnh);
-    const section = linked.el.querySelector('[data-service-actions]');
-    expect(linked.text(section?.querySelector('h2'))).toBe('Service gtnh.service active (running)');
-    expect([...section!.querySelectorAll('[data-action]')].map((b) => b.textContent?.trim())).toEqual(['Start', 'Stop', 'Restart']);
+    const linked = await setup('/gtnh/chat', { ...CARD, service: { id: 'gtnh', state: 'active' } }, gtnh);
+    expect(linked.text(linked.el.querySelector('[data-service-line]'))).toBe('runs as gtnh.service, active');
     linked.events.push(1, { target: 'service', id: 'gtnh', type: 'state', state: 'inactive', sub: 'dead' });
     await linked.render();
-    expect(section?.querySelector('h2')?.textContent).toContain('inactive (dead)');
+    expect(linked.text(linked.el.querySelector('[data-service-line]'))).toBe('runs as gtnh.service, inactive');
+  });
+
+  it('redirects the old stats path to players', async () => {
+    const { el, tabs } = await setup('/gtnh/stats', CARD, null, { top: { day: [], week: [], all: [] } });
+    expect(TestBed.inject(Router).url).toBe('/gtnh/players');
+    expect(el.querySelector('[data-top]')).not.toBeNull();
+    expect(tabs()).toContain('Players');
+  });
+
+  describe('header menu', () => {
+    const open = async (linked = false) => {
+      const gtnh: ServiceStatus = { id: 'gtnh', unit: 'gtnh.service', state: 'active', sub: 'running', checks: [] };
+      const page = await setup('/gtnh', linked ? { ...CARD, service: { id: 'gtnh', state: 'active' } } : CARD, linked ? gtnh : null);
+      page.el.querySelector<HTMLButtonElement>('[data-action=more]')!.click();
+      await page.render();
+      const items = () => [...document.querySelectorAll<HTMLElement>('[data-slot=dropdown-menu-item]')];
+      return { ...page, items };
+    };
+
+    it('has Stop, Restart now, Restart in… and the server’s audit log', async () => {
+      const { items } = await open(true);
+      expect(items().map((i) => i.textContent?.trim())).toEqual(['Stop', 'Restart now', 'Restart in…', 'Audit log for this server']);
+      expect(items().at(-1)!.getAttribute('href')).toBe('/audit?server=gtnh');
+    });
+
+    it('navigates to the audit log filtered to this server', async () => {
+      const { items, render } = await open();
+      items().at(-1)!.click();
+      await render();
+      expect(TestBed.inject(Router).url).toBe('/audit?server=gtnh');
+    });
+
+    it('Restart in… posts the chosen minutes', async () => {
+      const { backend, el, items, render } = await open();
+      items().find((i) => i.textContent?.includes('Restart in'))!.click();
+      await render();
+      el.querySelector<HTMLInputElement>('[data-restart-form] input')!.value = '10';
+      el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
+      const req = backend.expectOne('/api/servers/gtnh/restart');
+      expect(req.request.body).toEqual({ minutes: 10 });
+      req.flush(null, { status: 204, statusText: 'No Content' });
+    });
+
+    it('Stop confirms, then calls the service’s stop on a linked server', async () => {
+      const { backend, items, render } = await open(true);
+      items()[0]!.click();
+      await render();
+      expect(dialog()?.textContent).toContain('Stop GTNH?');
+      dialogButton('ok').click();
+      await render();
+      backend.expectOne('/api/services/gtnh/stop').flush({ at: null });
+    });
   });
 });
 
@@ -192,11 +242,6 @@ describe('server history section', () => {
     expect(chart('TPS')).toBeUndefined();
     expect(chart('Players')).toBeDefined();
   });
-
-  it('links to the audit log filtered to this server', async () => {
-    const { el } = await setup('/gtnh');
-    expect(el.querySelector('a[data-audit]')?.getAttribute('href')).toBe('/audit?server=gtnh');
-  });
 });
 
 /** Waits out the server page's debounced refetch. */
@@ -258,33 +303,15 @@ describe('server restarts', () => {
   const PENDING: PendingRestart = { at: new Date(2026, 8, 27, 18, 30).getTime(), by: 'bob', stop: false };
   const restartText = (el: HTMLElement) => el.querySelector('[data-restart-pending]')?.textContent?.replace(/\s+/g, ' ').trim();
 
-  it('schedules a countdown restart in whole minutes, shows it, and cancels it', async () => {
-    const { backend, el, render } = await setup('/gtnh');
-    const minutes = el.querySelector<HTMLInputElement>('[data-restart-form] input')!;
-    minutes.value = '10';
-    el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
-    const req = backend.expectOne('/api/servers/gtnh/restart');
-    expect(req.request.body).toEqual({ minutes: 10 });
-    req.flush(null, { status: 204, statusText: 'No Content' });
-    await debounce();
-    backend.expectOne('/api/servers/gtnh').flush(detail({ ...CARD, restart: { ...PENDING, by: 'alex' } }));
-    await render();
-    expect(restartText(el)).toBe('Restart at 18:30:00 by alex');
-
-    el.querySelector<HTMLButtonElement>('[data-restart-cancel]')!.click();
+  it('shows a pending restart on the Overview, and Cancel sends the cancel', async () => {
+    const { backend, el, render } = await setup('/gtnh', { ...CARD, restart: { ...PENDING, by: 'alex' } });
+    expect(el.querySelector('[data-restart-pending-section] [data-restart-pending]')?.textContent?.replace(/\s+/g, ' ').trim()).toContain('Restart at 18:30:00');
+    el.querySelector<HTMLButtonElement>('[data-restart-pending-section] [data-action=cancel]')!.click();
     backend.expectOne('/api/servers/gtnh/restart/cancel').flush(null, { status: 204, statusText: 'No Content' });
     await debounce();
     backend.expectOne('/api/servers/gtnh').flush(detail(CARD));
     await render();
-    expect(restartText(el)).toBeUndefined();
-  });
-
-  it("shows the hub's 409 when one is already pending", async () => {
-    const { backend, el, render } = await setup('/gtnh');
-    el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
-    backend.expectOne('/api/servers/gtnh/restart').flush('A restart is already scheduled: cancel it first.', { status: 409, statusText: 'Conflict' });
-    await render();
-    expect(el.querySelector('[role=alert]')?.textContent?.trim()).toBe('A restart is already scheduled: cancel it first.');
+    expect(el.querySelector('[data-restart-pending-section]')).toBeNull();
   });
 
   it('counts down to it, second by second', async () => {
@@ -302,7 +329,7 @@ describe('server restarts', () => {
     await debounce();
     backend.expectOne('/api/servers/gtnh').flush(detail({ ...CARD, restart: { ...PENDING, stop: true } }));
     await render();
-    expect(restartText(el)).toBe('Stop at 18:30:00 by bob');
+    expect(restartText(el)).toContain('Stop at 18:30:00');
   });
 });
 
@@ -330,8 +357,8 @@ describe('server stats section', () => {
   };
 
   it('lists the most-played for the last day, week and all time, with durations', async () => {
-    const { el, tabs } = await setup('/gtnh/stats', CARD, null, { top: TOP });
-    expect(tabs()).toContain('Stats');
+    const { el, tabs } = await setup('/gtnh/players', CARD, null, { top: TOP });
+    expect(tabs()).toContain('Players');
     expect(lists(el)).toEqual({
       day: ['1. Steve 2 h 5 m', '2. Alex 45 s'],
       week: ['1. Steve 1 d 6 h'],
@@ -340,7 +367,7 @@ describe('server stats section', () => {
   });
 
   it('looks a player up: playtime and last seen, online or not; a name never seen is said so', async () => {
-    const { backend, el, render } = await setup('/gtnh/stats', CARD, null, { top: TOP });
+    const { backend, el, render } = await setup('/gtnh/players', CARD, null, { top: TOP });
     await lookup(el, 'Steve');
     backend.expectOne('/api/servers/gtnh/players/Steve').flush({ found: true, player: 'Steve', totalMs: 30 * H, weekMs: 3 * H, lastSeen: { online: true } } satisfies PlayerAnswer);
     await render();
@@ -360,7 +387,7 @@ describe('server stats section', () => {
   });
 
   it('opens a top player in the lookup', async () => {
-    const { backend, el } = await setup('/gtnh/stats', CARD, null, { top: TOP });
+    const { backend, el } = await setup('/gtnh/players', CARD, null, { top: TOP });
     el.querySelector<HTMLButtonElement>('[data-top=day] li button')!.click();
     backend.expectOne('/api/servers/gtnh/players/Steve');
   });

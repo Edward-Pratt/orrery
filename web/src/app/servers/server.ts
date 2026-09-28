@@ -4,40 +4,43 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { ServerDetail, ServiceStatus } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
+import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { changesCard } from './cards';
-import { ServiceActions } from '../services/actions';
+import { Status } from '../status';
+import { ServerActions } from './actions';
 
-/** The server page's sections (child routes), each shown only when the server has what it needs. */
+/** The server page's tabs (child routes), each shown only when the server has what it needs. */
 const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
-  { path: 'chat', label: 'Chat', has: (d) => d.card.features.chat },
   { path: 'console', label: 'Console', has: (d) => d.card.features.chat },
+  { path: 'chat', label: 'Chat', has: (d) => d.card.features.chat },
+  { path: 'players', label: 'Players', has: () => true },
   { path: 'history', label: 'History', has: () => true },
-  { path: 'stats', label: 'Stats', has: () => true },
   { path: 'backups', label: 'Backups', has: (d) => d.backups.configured },
 ];
 
-/** A server's page: its name, state and linked service, then its sections, which read the detail from here. */
+/** A server's page: header (name, state, linked service, actions), tabs, and the sections, which read the detail from here. */
 @Component({
   selector: 'app-server',
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, ServiceActions],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, ServerActions, Status, HlmSkeleton],
   template: `
     <a routerLink=".." class="text-sm text-muted-foreground hover:underline">← Servers</a>
     @if (missing(); as why) {
       <p class="pt-8">{{ why }}</p>
     } @else if (card(); as c) {
-      <div class="mt-2 mb-4 flex items-baseline justify-between gap-4">
-        <h1 class="text-lg font-semibold">{{ c.name }} <span class="text-sm font-normal text-muted-foreground">{{ c.online ? 'Online' : 'Offline' }}</span></h1>
-        <a routerLink="/audit" [queryParams]="{ server: id }" class="text-sm text-muted-foreground hover:underline" data-audit>Audit log</a>
-      </div>
-      @if (service(); as s) {
-        <section class="mb-4 max-w-3xl rounded-lg border p-4" data-service-actions>
-          <h2 class="mb-1 text-sm font-semibold">Service {{ s.unit }} <span class="font-normal text-muted-foreground">{{ s.state }} ({{ s.sub }})</span></h2>
-          <p class="mb-3 text-sm text-muted-foreground">The systemd unit this server runs as. Stopping it keeps the server down; with players online they get a countdown first.</p>
-          <app-service-actions [service]="s" />
-        </section>
-      }
+      <header class="mt-2 mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 class="flex items-center gap-3 text-lg font-semibold">
+            {{ c.name }}
+            <app-status data-state [health]="c.hung || !c.online ? 'down' : c.lagging ? 'warn' : 'ok'" [label]="c.hung ? 'Not responding' : !c.online ? 'Offline' : c.lagging ? 'Lagging' : 'Online'" class="text-sm font-normal" />
+          </h1>
+          @if (service(); as s) {
+            <p class="text-sm text-muted-foreground" data-service-line>runs as {{ s.unit }}, {{ s.state }}</p>
+          }
+        </div>
+        <app-server-actions [card]="c" [full]="true" (changed)="refresh()" />
+      </header>
       <nav class="mb-4 flex gap-4 border-b text-sm" data-sections>
         @for (s of sections; track s.path) {
           @if (s.has(detail()!)) {
@@ -46,6 +49,11 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
         }
       </nav>
       <router-outlet />
+    } @else {
+      <div class="mt-2 mb-4 flex flex-col gap-3" data-skeleton>
+        <hlm-skeleton class="h-7 w-64" />
+        <hlm-skeleton class="h-9 w-full max-w-md" />
+      </div>
     }
   `,
 })

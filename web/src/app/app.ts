@@ -72,7 +72,7 @@ export class UserMenu {
   protected readonly initials = computed(() => this.user().username.slice(0, 2).toUpperCase());
 }
 
-/** Links to the pages of the integrations that are on. */
+/** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login],

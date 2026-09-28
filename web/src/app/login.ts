@@ -2,11 +2,11 @@ import { Component } from '@angular/core';
 import { HlmButton } from '@spartan-ng/helm/button';
 
 /** Why the hub sent a failed login back here (`/?login=<why>`). */
-const REASONS: Record<string, string> = {
-  admin: 'That account is not an admin.',
-  state: 'The login expired or was interrupted. Try again.',
-  discord: 'Discord did not answer. Try again.',
-};
+const REASONS = new Map([
+  ['admin', 'That account is not an admin.'],
+  ['state', 'The login expired or was interrupted. Try again.'],
+  ['discord', 'Discord did not answer. Try again.'],
+]);
 
 /** The logged-out view: a centred card, no sidebar. */
 @Component({
@@ -19,7 +19,7 @@ const REASONS: Record<string, string> = {
           <span class="size-3 rounded-full bg-brand ring-4 ring-brand/20"></span>
           orrery
         </span>
-        <p class="text-muted-foreground">Admins of {{ guild }} only</p>
+        <p class="text-muted-foreground">Admins of this Discord server only</p>
         <a hlmBtn class="w-full" href="/api/login">Log in with Discord</a>
         @if (reason) {
           <p class="text-sm text-muted-foreground">{{ reason }}</p>
@@ -29,7 +29,5 @@ const REASONS: Record<string, string> = {
   `,
 })
 export class Login {
-  // ponytail: the hub has no guild name in its API; "this Discord server" until a ticket needs the real one
-  protected readonly guild = 'this Discord server';
-  protected readonly reason = REASONS[new URLSearchParams(location.search).get('login') ?? ''];
+  protected readonly reason = REASONS.get(new URLSearchParams(location.search).get('login') ?? '');
 }

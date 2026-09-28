@@ -3,7 +3,8 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { Integrations, Me } from '@hub/api';
-import { App } from './app';
+import { By } from '@angular/platform-browser';
+import { App, UserMenu } from './app';
 import { FETCH } from './events';
 import { fakeEvents, settle } from './testing';
 import { Theme } from './theme';
@@ -56,7 +57,12 @@ describe('the shell', () => {
     expect(el.querySelector('aside')).toBeNull();
   });
 
-  it('shows initials without an avatar, and the image with one', async () => {
+  it('shows the Discord image with an avatar hash, initials without', async () => {
+    const withImg = await open({ ...ALEX, avatar: 'abc' });
+    // the <img> is only rendered once the browser has loaded it, which jsdom never does
+    const menu = withImg.fixture.debugElement.query(By.directive(UserMenu)).componentInstance as { avatarUrl(): string };
+    expect(menu.avatarUrl()).toBe('https://cdn.discordapp.com/avatars/5/abc.png?size=64');
+    TestBed.resetTestingModule();
     const plain = await open(ALEX);
     expect(plain.el.querySelector('aside img')).toBeNull();
     expect(plain.el.querySelector('aside [data-slot="avatar"]')!.textContent).toContain('AL');
@@ -70,16 +76,24 @@ describe('the shell', () => {
     TestBed.resetTestingModule();
     const plain = await open(null);
     expect(plain.el.textContent).not.toContain('not an admin');
+    TestBed.resetTestingModule();
+    expect((await open(null, ALL, '/?login=state')).el.textContent).toContain('expired');
+    TestBed.resetTestingModule();
+    expect((await open(null, ALL, '/?login=discord')).el.textContent).toContain('Discord did not answer');
+    TestBed.resetTestingModule();
+    expect((await open(null, ALL, '/?login=constructor')).el.textContent).not.toContain('function');
   });
 });
 
 describe('Theme', () => {
   beforeEach(() => localStorage.clear());
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => (vi.restoreAllMocks(), document.documentElement.classList.remove('dark')));
 
   it('follows the system by default, stores a choice and restores it', () => {
     expect(TestBed.inject(Theme).mode()).toBe('system');
     TestBed.inject(Theme).set('dark');
+    TestBed.tick();
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(localStorage.getItem('theme')).toBe('dark');
     TestBed.resetTestingModule();
     expect(TestBed.inject(Theme).mode()).toBe('dark');

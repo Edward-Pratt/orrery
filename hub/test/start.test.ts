@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -247,6 +248,18 @@ test('an admin logs in with Discord and /api/me returns them', async (t) => {
   const me = await app.request('/api/me', { headers: { cookie: session.split(';')[0] } });
   assert.equal(me.status, 200);
   assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex', avatar: 'a1b2c3' });
+});
+
+test('a session row from before avatars gives /api/me avatar null', async (t) => {
+  const cfg = config(t, { web: WEB });
+  const old = new DatabaseSync(cfg.dbPath);
+  old.exec('CREATE TABLE web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL)');
+  old.prepare('INSERT INTO web_sessions VALUES (?, ?, ?, ?)').run(createHash('sha256').update('old-cookie').digest('hex'), ADMIN.id, 'alex', Date.now() + 60_000);
+  old.close();
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  t.after(() => handle.close());
+  const me = await handle.web!.app.request('/api/me', { headers: { cookie: 'session=old-cookie' } });
+  assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex', avatar: null });
 });
 
 test('without a session every other /api route answers 401', async (t) => {

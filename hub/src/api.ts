@@ -39,8 +39,8 @@ export type {
   UptimeState,
 } from './types.ts';
 
-/** `GET /api/me`: the logged-in admin. */
-export type Me = { id: string; username: string };
+/** `GET /api/me`: the logged-in admin; `avatar` is their Discord avatar hash (null: none). */
+export type Me = { id: string; username: string; avatar: string | null };
 
 /** `GET /api/integrations`: which integrations are switched on. */
 export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean };

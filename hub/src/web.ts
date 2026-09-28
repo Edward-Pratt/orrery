@@ -32,7 +32,7 @@ import { mcText, type LiveEvent, type ServerHub, type ServerState } from './serv
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
-export type Member = { id: string; username: string; roles: string[] };
+export type Member = { id: string; username: string; avatar: string | null; roles: string[] };
 
 /** The Discord OAuth endpoints the login uses, passed in so tests need no network. */
 export type OAuth = {
@@ -122,17 +122,19 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const state = getCookie(c, 'state');
     deleteCookie(c, 'state', COOKIE); // one use
     const code = c.req.query('code');
-    if (!state || c.req.query('state') !== state || !code) return c.text('Login failed (bad state): try again.', 400);
+    // a failed login goes back to the dashboard's login card, which says why
+    const failed = (why: 'state' | 'discord' | 'admin') => c.redirect(new URL(`/?login=${why}`, web.publicUrl).href);
+    if (!state || c.req.query('state') !== state || !code) return failed('state');
     let member: Member | undefined;
     try {
       member = await oauth.member(await oauth.token(code, redirectUri), web.guildId);
     } catch (err) {
       console.error('[web] Discord login failed:', (err as Error).message);
-      return c.text('Login failed: Discord did not answer. Try again.', 502);
+      return failed('discord');
     }
-    if (!member?.roles.includes(web.adminRoleId)) return c.text('You are not allowed in: the dashboard is for admins.', 403);
+    if (!member?.roles.includes(web.adminRoleId)) return failed('admin');
     const id = randomBytes(32).toString('base64url');
-    db.addWebSession(hash(id), member.id, member.username, Date.now() + web.sessionDays * DAY_S * 1000);
+    db.addWebSession(hash(id), member.id, member.username, member.avatar, Date.now() + web.sessionDays * DAY_S * 1000);
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
     console.log(`[web] ${member.username} (${member.id}) logged in`);
     return c.redirect(new URL('/', web.publicUrl).href);
@@ -362,7 +364,7 @@ export function discordOAuth(clientId: string, clientSecret: string): OAuth {
       });
       if (res.status === 404) return undefined; // not in the guild
       const m = await json('guild member', res);
-      return { id: m.user.id, username: m.user.username, roles: m.roles };
+      return { id: m.user.id, username: m.user.username, avatar: m.user.avatar ?? null, roles: m.roles };
     },
   };
 }

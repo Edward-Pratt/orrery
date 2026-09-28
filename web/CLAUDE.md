@@ -22,7 +22,10 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 | `src/app/session.ts` | `Session` (who is logged in, logout) and the `loggedOutOn401` interceptor. |
 | `src/app/integrations.ts` | `Integrations` (`GET /api/integrations`, asked once) and `enabled(name)`, the `canMatch` guard. |
 | `src/app/app.routes.ts` | One lazy route per integration with pages, matched only when it is on (Minecraft: `servers`; `host`; systemd: `services`; `checks`). |
-| `src/app/app.ts` | The shell: header, `Nav` (links to the switched-on integrations' pages), login prompt. |
+| `src/app/app.ts` | The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages (`PAGES`), `UserMenu` (avatar → Theme, Log out); a room for the attention strip goes above `<router-outlet>`. |
+| `src/app/login.ts` | The logged-out card; shows the reason the hub gave in `?login=`. |
+| `src/app/theme.ts` | `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as `dark` on `<html>`. |
+| `src/app/status.ts` | `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`; teal `--brand`; Figtree). |
 | `src/app/events.ts` | `LiveEvents.all$`: `GET /api/events` as an observable (fetch, not EventSource: a reconnect sends Last-Event-ID and skips ids already seen; `cache: 'no-store'`, since the browser's cache lock would hold a second stream to the same URL behind the first forever). Ends on 401. `ofServer(id)` keeps one server's events (not a same-named check's), `ofTarget(target)` the host's, services' or checks'. |
 | `src/app/chart.ts` | `TimeSeries`: the one reusable graph, a line per `Series` (`[ms, value]` points; `step` for counts and states), coloured from the theme's tokens. It loads `echarts.ts` (only the parts it uses, SVG renderer) lazily. `PeriodPicker`: the period buttons (`PERIODS`) of every graph page. |
 | `src/app/units.ts` | `formatDuration` and `formatBytes`, as Discord's (the hub's `units.ts` isn't importable here). |

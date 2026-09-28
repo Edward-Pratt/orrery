@@ -246,3 +246,17 @@ test('the audit log reads newest first, limited, for all servers or one; writes 
   db.close();
   assert.doesNotThrow(() => db.audit({ actor: 'x', action: 'command', target: 'a', details: '' }));
 });
+
+test('a web session from before avatars reads as avatar null', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'orrery-db-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'old.db');
+  const old = new DatabaseSync(path);
+  old.exec('CREATE TABLE web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL)');
+  old.exec("INSERT INTO web_sessions VALUES ('s', '5', 'alex', 9999999999999)");
+  old.close();
+  const db = new Db(path);
+  assert.deepEqual(db.webSession('s'), { id: '5', username: 'alex', avatar: null });
+  db.addWebSession('t', '6', 'sam', 'abc', 9999999999999);
+  assert.equal(db.webSession('t')?.avatar, 'abc');
+});

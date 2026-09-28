@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import type { Me } from '@hub/api';
 import { loggedOutOn401, Session } from './session';
 
-const ALEX: Me = { id: '5', username: 'alex' };
+const ALEX: Me = { id: '5', username: 'alex', avatar: null };
 
 function setup() {
   TestBed.configureTestingModule({

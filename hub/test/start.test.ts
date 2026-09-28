@@ -169,8 +169,8 @@ const WEB = {
   adminRoleId: '8'.repeat(18),
   sessionDays: 7,
 };
-const ADMIN = { id: '5'.repeat(18), username: 'alex', roles: ['9'.repeat(18), WEB.adminRoleId] };
-const PLAYER = { id: '6'.repeat(18), username: 'sam', roles: ['9'.repeat(18)] };
+const ADMIN = { id: '5'.repeat(18), username: 'alex', avatar: 'a1b2c3', roles: ['9'.repeat(18), WEB.adminRoleId] };
+const PLAYER = { id: '6'.repeat(18), username: 'sam', avatar: null, roles: ['9'.repeat(18)] };
 
 /** A fake Discord OAuth backend: code `admin`/`player` logs in that member; records every call. */
 function fakeOAuth() {
@@ -246,7 +246,7 @@ test('an admin logs in with Discord and /api/me returns them', async (t) => {
 
   const me = await app.request('/api/me', { headers: { cookie: session.split(';')[0] } });
   assert.equal(me.status, 200);
-  assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex' });
+  assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex', avatar: 'a1b2c3' });
 });
 
 test('without a session every other /api route answers 401', async (t) => {
@@ -258,8 +258,8 @@ test('without a session every other /api route answers 401', async (t) => {
 test('a member without the admin role is not allowed in', async (t) => {
   const app = await webHub(t, fakeOAuth().oauth);
   const res = await login(app, 'player');
-  assert.equal(res.status, 403);
-  assert.match(await res.text(), /not allowed/);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), 'https://dash.orrery.run/?login=admin');
   assert.ok(!res.headers.getSetCookie().some((c) => c.startsWith('session=')));
 });
 
@@ -268,10 +268,10 @@ test('a callback with a bad or missing state is refused before Discord is asked'
   const app = await webHub(t, oauth);
   const { cookie } = await startLogin(app);
   const wrong = await app.request('/api/callback?code=admin&state=guessed', { headers: { cookie } });
-  assert.equal(wrong.status, 400);
+  assert.equal(wrong.headers.get('location'), 'https://dash.orrery.run/?login=state');
   const { authorize } = await startLogin(app);
   const noCookie = await app.request(`/api/callback?code=admin&state=${authorize.searchParams.get('state')}`);
-  assert.equal(noCookie.status, 400);
+  assert.equal(noCookie.headers.get('location'), 'https://dash.orrery.run/?login=state');
   assert.deepEqual(calls, []);
 });
 

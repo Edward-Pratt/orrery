@@ -52,12 +52,16 @@ export class Db {
       CREATE INDEX IF NOT EXISTS tps_server_ts ON tps (server_id, ts);
       CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
-      CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL, avatar TEXT);
       CREATE TABLE IF NOT EXISTS audit (ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, details TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS audit_target_ts ON audit (target, ts);
       CREATE TABLE IF NOT EXISTS host_samples (host_id TEXT NOT NULL, ts INTEGER NOT NULL, sample TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS host_samples_host_ts ON host_samples (host_id, ts);
     `);
+    // sessions from before the avatar column read as null
+    if (!(this.#db.prepare('PRAGMA table_info(web_sessions)').all() as { name: string }[]).some((c) => c.name === 'avatar')) {
+      this.#db.exec('ALTER TABLE web_sessions ADD COLUMN avatar TEXT');
+    }
   }
 
   /** Writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
@@ -300,22 +304,23 @@ export class Db {
   }
 
   /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. */
-  addWebSession(id: string, userId: string, username: string, expires: number): void {
+  addWebSession(id: string, userId: string, username: string, avatar: string | null, expires: number): void {
     this.#write(
       'add web session',
-      'INSERT INTO web_sessions (id, user_id, username, expires) VALUES (?, ?, ?, ?)',
+      'INSERT INTO web_sessions (id, user_id, username, avatar, expires) VALUES (?, ?, ?, ?, ?)',
       id,
       userId,
       username,
+      avatar,
       expires,
     );
   }
 
   /** The logged-in Discord user of an unexpired session. */
-  webSession(id: string, now = Date.now()): { id: string; username: string } | undefined {
+  webSession(id: string, now = Date.now()): { id: string; username: string; avatar: string | null } | undefined {
     const row = this.#db
-      .prepare('SELECT user_id AS id, username FROM web_sessions WHERE id = ? AND expires > ?')
-      .get(id, now) as { id: string; username: string } | undefined;
+      .prepare('SELECT user_id AS id, username, avatar FROM web_sessions WHERE id = ? AND expires > ?')
+      .get(id, now) as { id: string; username: string; avatar: string | null } | undefined;
     return row && { ...row };
   }
 

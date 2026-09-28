@@ -17,7 +17,9 @@
     "paths": {
       "@hub/api": ["../hub/src/api.ts"],
       "@spartan-ng/helm/button": ["./libs/ui/button/src/index.ts"],
-      "@spartan-ng/helm/utils": ["./libs/ui/utils/src/index.ts"]
+      "@spartan-ng/helm/utils": ["./libs/ui/utils/src/index.ts"],
+      "@spartan-ng/helm/avatar": ["./libs/ui/avatar/src/index.ts"],
+      "@spartan-ng/helm/dropdown-menu": ["./libs/ui/dropdown-menu/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

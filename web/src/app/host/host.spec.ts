@@ -18,7 +18,7 @@ const SAMPLE: HostSample = {
 };
 const EARLIER: HostSample = { ...SAMPLE, ts: 0, cpu: 0.5, disks: [...SAMPLE.disks, { mount: '/data', free: 1 * GB, total: 2 * GB }] };
 
-async function setup() {
+async function setup(sample: HostSample = SAMPLE, answer = true) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [
@@ -32,8 +32,9 @@ async function setup() {
   const backend = TestBed.inject(HttpTestingController);
   const render = async () => (await settle(), await fixture.whenStable());
   await render();
-  backend.expectOne('/api/host').flush({ id: 'oracle', sample: SAMPLE });
+  if (answer) backend.expectOne('/api/host').flush({ id: 'oracle', sample });
   const el = fixture.nativeElement as HTMLElement;
+  const tiles = () => [...el.querySelectorAll('[data-tile]')].map((t) => `${t.getAttribute('data-tile')}:${t.getAttribute('data-state')}`);
   const text = (sel: string) => el.querySelector(sel)?.textContent?.trim();
   /** What the chart titled `title` draws: each series' name and points. */
   const chart = (title: string) =>
@@ -41,25 +42,45 @@ async function setup() {
       .series()
       .map((s) => [s.name, s.points]);
   const period = (label: string) => [...el.querySelectorAll<HTMLButtonElement>('[data-period]')].find((b) => b.textContent?.trim() === label)!.click();
-  return { events, backend, render, text, chart, period };
+  return { events, backend, el, render, text, tiles, chart, period };
 }
 
 describe('host page', () => {
-  it('shows the latest sample, then each live one', async () => {
-    const { events, backend, render, text } = await setup();
+  it('shows a tile for CPU, load, memory and each disk, then updates them from each live sample', async () => {
+    const { events, backend, render, text, tiles } = await setup({ ...SAMPLE, disks: [...SAMPLE.disks, { mount: '/data', free: 30 * GB, total: 100 * GB }] });
     backend.expectOne('/api/host/samples?hours=24').flush([]);
     await render();
     expect(text('h1')).toBe('Host oracle');
-    expect(text('[data-cpu]')).toBe('25%');
-    expect(text('[data-load]')).toBe('0.50 · 0.25 · 0.13');
-    expect(text('[data-memory]')).toBe('4.0 of 16.0 GB (25%)');
-    expect(text('[data-disk="/"]')).toBe('50.0 GB free of 100 GB');
+    expect(tiles()).toEqual(['cpu:ok', 'load:ok', 'memory:ok', 'disk:/:ok', 'disk:/data:ok']);
+    expect(text('[data-value=cpu]')).toBe('25%');
+    expect(text('[data-value=load]')).toBe('0.50 · 0.25 · 0.13');
+    expect(text('[data-value=memory]')).toBe('25%');
+    expect(text('[data-detail=memory]')).toBe('4.0 of 16.0 GB');
+    expect(text('[data-value="disk:/"]')).toBe('50.0 GB free');
 
     const next = { ...SAMPLE, ts: 2, cpu: 0.9, memory: { used: 15 * GB, total: 16 * GB } };
     events.push(1, { target: 'host', id: 'oracle', type: 'sample', sample: next });
     await render();
-    expect(text('[data-cpu]')).toBe('90%');
-    expect(text('[data-memory]')).toBe('15.0 of 16.0 GB (94%)');
+    expect(text('[data-value=cpu]')).toBe('90%');
+    expect(text('[data-detail=memory]')).toBe('15.0 of 16.0 GB');
+    expect(tiles().slice(0, 3)).toEqual(['cpu:warn', 'load:ok', 'memory:warn']);
+  });
+
+  it('warns amber, then red, past a threshold; a disk when under 20%, then 10%, free', async () => {
+    const low = { ...SAMPLE, cpu: 0.97, disks: [{ mount: '/', free: 15 * GB, total: 100 * GB }, { mount: '/data', free: 5 * GB, total: 100 * GB }, { mount: '/big', free: 90 * GB, total: 100 * GB }] };
+    const { backend, render, tiles } = await setup(low);
+    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    await render();
+    expect(tiles()).toEqual(['cpu:down', 'load:ok', 'memory:ok', 'disk:/:warn', 'disk:/data:down', 'disk:/big:ok']);
+  });
+
+  it('shows skeleton tiles until the first answer', async () => {
+    const { el, backend, render } = await setup(SAMPLE, false);
+    expect(el.querySelector('[data-skeleton]')).not.toBeNull();
+    backend.expectOne('/api/host').flush({ id: 'oracle', sample: SAMPLE });
+    await render();
+    expect(el.querySelector('[data-skeleton]')).toBeNull();
+    backend.expectOne('/api/host/samples?hours=24').flush([]);
   });
 
   it('graphs the last 24 hours, then the chosen period, a series per mount', async () => {

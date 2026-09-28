@@ -58,7 +58,7 @@ Spec: `docs/archive/specs/2026-09-25-gtnh-discord-v1.3-design.md` · Decision: `
 | External liveness ping (`healthcheckUrl`, e.g. healthchecks.io), only while Discord is connected, so you're told when the hub or the whole host dies | hub | S |
 | `npm run check-config`: validate `config.json` offline with the same rules as startup, all errors at once | hub | S |
 
-## v2 — web dashboard (all five steps deployed)
+## v2 — web dashboard (five steps and the redesign deployed)
 
 Spec: #26 · Decision: `docs/adr/0002-hub-with-integrations.md`. The hub becomes a platform whose integrations (Discord,
 Minecraft, host) are switched on by config, and the dashboard is a separate Angular app in `web/`. The table
@@ -90,12 +90,13 @@ section, with the hub reporting the free-space minimum (#54); restoring a backup
 that a section's event stream hung behind its page's in the browser's HTTP cache (fixed in `web-v0.3.1`). The
 restore wasn't run live in that test.
 
-**Redesign — done (`hub-v2.5.0` + `web-v0.4.0`):** spec #73, from #59, #60 and #72. The shell: a sidebar (a
+**Redesign — done (`hub-v2.5.0` + `web-v0.4.1`, deployed 2026-09-28):** spec #73, from #59, #60 and #72. The shell: a sidebar (a
 bottom tab bar on a phone), theme, avatar menu and login card (#74); confirm tiers, toasts and in-flight spinners
 (#75); server rows with per-state actions, with lag and the linked service's state on each card (#76); the attention
 strip and sidebar badges (#77); the server page header, tabs and Overview (#78); the Console, Chat, Players (was
 Stats) and History tabs (#79); the Backups tab (#80); Services with the checks merged in, so the checks page is gone
-(#81); Host tiles (#82); audit log paging and actor filter (#83); production release and smoke test (#84).
+(#81); Host tiles (#82); audit log paging and actor filter (#83); production release and smoke test (#84), which found that a tap on a server row opened `/<id>` instead of
+`/servers/<id>` (fixed in `web-v0.4.1`).
 
 | Feature | Where | Size |
 |---|---|---|

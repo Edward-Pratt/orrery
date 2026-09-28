@@ -31,12 +31,8 @@ describe('routing by enabled integrations', () => {
     expect(harness.routeNativeElement?.textContent).toContain('Servers');
   });
 
-  it('opens the checks page only when checks are on', async () => {
-    const on = await open('/checks', { minecraft: false, discord: false, web: true, checks: true, host: false, systemd: false });
-    expect(on.routeNativeElement?.textContent).toContain('Checks');
-    TestBed.resetTestingModule();
-    const off = await open('/checks', { minecraft: true, discord: false, web: true, checks: false, host: false, systemd: false });
-    expect(off.routeNativeElement?.textContent).toContain('Nothing here');
+  it('has no checks route: the services page holds them', () => {
+    expect(routes.some((r) => r.path === 'checks')).toBe(false);
   });
 
   it('opens the host page only when the host integration is on', async () => {
@@ -47,10 +43,17 @@ describe('routing by enabled integrations', () => {
     expect(off.routeNativeElement?.textContent).toContain('Nothing here');
   });
 
-  it('opens the services page only when systemd is on', async () => {
+  it('opens the services page when systemd is on, titled Services', async () => {
     const on = await open('/services', { minecraft: false, discord: false, web: true, checks: false, host: false, systemd: true });
-    expect(on.routeNativeElement?.textContent).toContain('Services');
-    TestBed.resetTestingModule();
+    expect(on.routeNativeElement?.querySelector('h1')?.textContent).toBe('Services');
+  });
+
+  it('opens the services page as Checks when only checks are on', async () => {
+    const on = await open('/services', { minecraft: false, discord: false, web: true, checks: true, host: false, systemd: false });
+    expect(on.routeNativeElement?.querySelector('h1')?.textContent).toBe('Checks');
+  });
+
+  it('has no services page with neither systemd nor checks', async () => {
     const off = await open('/services', { minecraft: true, discord: false, web: true, checks: false, host: false, systemd: false });
     expect(off.routeNativeElement?.textContent).toContain('Nothing here');
   });

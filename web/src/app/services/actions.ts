@@ -38,7 +38,8 @@ export class ServiceActions {
     // Starting harms nothing; the rest can disconnect players.
     if (verb !== 'start') {
       const ok = await this.#feedback.confirm({
-        title: `${LABELS[verb]} ${unit}? Players online are disconnected, after a warning in game.`,
+        title: `${LABELS[verb]} ${unit}?`,
+        description: verb === 'stop' ? `${unit} stays down until it's started again.` : `${unit} is briefly down while it restarts.`,
         verb: `${LABELS[verb]} ${unit}`,
         destructive: true,
       });

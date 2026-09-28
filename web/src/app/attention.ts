@@ -16,7 +16,7 @@ import { restartLeft } from './units';
 /** One thing that needs a human now: what it is about (`page` is the sidebar entry it counts on), and the fix, if any. */
 export type AttentionItem = {
   key: string;
-  page: 'servers' | 'services' | 'checks';
+  page: 'servers' | 'services';
   target: string;
   message: string;
   /** For a pending restart: when it fires, shown as a countdown. */
@@ -82,7 +82,7 @@ export class Attention {
       }
     }
     for (const c of this.#checks()) {
-      if (c.up === false) items.push({ key: `check:${c.id}`, page: 'checks', target: c.id, message: `is down: ${c.error}` });
+      if (c.up === false) items.push({ key: `check:${c.id}`, page: 'services', target: c.id, message: `is down: ${c.error}` });
     }
     return items;
   });

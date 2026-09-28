@@ -158,6 +158,6 @@ describe('the attention strip', () => {
       [service('backup', 'failed')],
       [check('web', false)],
     );
-    expect(badges()).toEqual(['Servers 2', 'Services 1']); // a check has no badge
+    expect(badges()).toEqual(['Servers 2', 'Services 2']); // a down check counts on the page that shows it
   });
 });

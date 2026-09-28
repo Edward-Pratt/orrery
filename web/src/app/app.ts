@@ -15,10 +15,11 @@ import { Session } from './session';
 import { MODES, Theme } from './theme';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
-const PAGES: { path: string; label: string; icon: string; on: keyof IntegrationsOn }[] = [
+const PAGES: { path: string; label: string; icon: string; on: keyof IntegrationsOn; unless?: keyof IntegrationsOn }[] = [
   { path: 'servers', label: 'Servers', icon: 'lucideServer', on: 'minecraft' },
   { path: 'services', label: 'Services', icon: 'lucideLayers', on: 'systemd' },
-  { path: 'checks', label: 'Checks', icon: 'lucideCheck', on: 'checks' },
+  // The services page holds the checks; without systemd it is "Checks" and holds only those.
+  { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
   { path: 'host', label: 'Host', icon: 'lucideCpu', on: 'host' },
   { path: 'audit', label: 'Audit log', icon: 'lucideScrollText', on: 'web' },
 ];
@@ -147,9 +148,9 @@ export class App {
   protected readonly session = inject(Session);
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
-  protected readonly visible = computed(() => PAGES.filter((p) => this.#on()?.[p.on]));
+  protected readonly visible = computed(() => PAGES.filter((p) => this.#on()?.[p.on] && !(p.unless && this.#on()?.[p.unless])));
 
-  /** The count on a sidebar entry: only Servers and Services have one. */
+  /** The count on a sidebar entry: only Servers and Services (or Checks) have one. */
   protected badge(path: string): number {
     return path === 'servers' || path === 'services' ? this.#attention.count(path) : 0;
   }

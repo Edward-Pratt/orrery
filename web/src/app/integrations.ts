@@ -10,11 +10,11 @@ export class Integrations {
   readonly on$ = inject(HttpClient).get<IntegrationsOn>('/api/integrations').pipe(shareReplay(1));
 }
 
-/** Matches a route only when the hub has integration `name` on. */
+/** Matches a route only when the hub has at least one of the integrations `names` on. */
 export const enabled =
-  (name: keyof IntegrationsOn): CanMatchFn =>
+  (...names: (keyof IntegrationsOn)[]): CanMatchFn =>
   () =>
     inject(Integrations).on$.pipe(
-      map((on) => on[name]),
+      map((on) => names.some((name) => on[name])),
       catchError(() => of(false)),
     );

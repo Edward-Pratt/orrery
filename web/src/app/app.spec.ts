@@ -37,10 +37,13 @@ describe('the shell', () => {
 
   it('lists the pages of the integrations that are on, in order', async () => {
     const all = await open(ALEX);
-    expect(labels(all.el)).toEqual(['Servers', 'Services', 'Checks', 'Host', 'Audit log']);
+    expect(labels(all.el)).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
     TestBed.resetTestingModule();
     const some = await open(ALEX, { ...ALL, minecraft: false, checks: false, host: false });
     expect(labels(some.el)).toEqual(['Services', 'Audit log']);
+    TestBed.resetTestingModule();
+    const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, host: false });
+    expect(labels(checksOnly.el)).toEqual(['Checks', 'Audit log']); // the services page, without systemd
   });
 
   const openMenu = async (r: Awaited<ReturnType<typeof open>>) => {
@@ -73,7 +76,7 @@ describe('the shell', () => {
   it('has a phone tab bar with the same pages', async () => {
     const { el } = await open(ALEX);
     const tabs = [...el.querySelectorAll('nav.fixed a')].map((a) => a.textContent!.trim());
-    expect(tabs).toEqual(['Servers', 'Services', 'Checks', 'Host', 'Audit log']);
+    expect(tabs).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
   });
 
   it('shows the Discord image with an avatar hash, initials without', async () => {

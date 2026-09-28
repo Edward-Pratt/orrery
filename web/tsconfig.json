@@ -25,7 +25,8 @@
       "@spartan-ng/helm/spinner": ["./libs/ui/spinner/src/index.ts"],
       "@spartan-ng/helm/skeleton": ["./libs/ui/skeleton/src/index.ts"],
       "@spartan-ng/helm/input": ["./libs/ui/input/src/index.ts"],
-      "@spartan-ng/helm/table": ["./libs/ui/table/src/index.ts"]
+      "@spartan-ng/helm/table": ["./libs/ui/table/src/index.ts"],
+      "@spartan-ng/helm/sheet": ["./libs/ui/sheet/src/index.ts"]
     }
   },
   "angularCompilerOptions": {

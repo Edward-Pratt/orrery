@@ -2,7 +2,7 @@ import { DecimalPipe, PercentPipe } from '@angular/common';
 import { Component, computed, inject, input, output } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import type { ServerCard } from '@hub/api';
-import { Status, type Health } from '../status';
+import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
 
 /**
@@ -22,7 +22,7 @@ import { ServerActions } from './actions';
     >
       <div class="flex min-w-0 items-center justify-between gap-3 sm:w-64 sm:justify-start">
         <a [routerLink]="c.id" class="truncate font-medium hover:underline">{{ c.name }}</a>
-        <app-status data-state [health]="health()" [label]="label()" class="text-sm" />
+        <app-status data-state [health]="state().health" [label]="state().label" class="text-sm" />
       </div>
       <dl class="flex flex-wrap gap-x-4 text-sm text-muted-foreground sm:flex-1">
         @if (c.features.tps) {
@@ -40,14 +40,7 @@ export class ServerRow {
   readonly card = input.required<ServerCard>();
   /** After an action (or its failure), to fetch the cards again. */
   readonly changed = output<void>();
-  protected readonly health = computed<Health>(() => {
-    const c = this.card();
-    return !c.online || c.hung ? 'down' : c.lagging ? 'warn' : 'ok';
-  });
-  protected readonly label = computed(() => {
-    const c = this.card();
-    return c.hung ? 'Not responding' : !c.online ? 'Offline' : c.lagging ? 'Lagging' : 'Online';
-  });
+  protected readonly state = computed(() => serverState(this.card()));
 
   open(e: Event): void {
     if (!(e.target as Element).closest('a, button')) void this.#router.navigate([this.card().id]);

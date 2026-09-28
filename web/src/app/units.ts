@@ -27,3 +27,6 @@ export function formatBytes(bytes: number): string {
   }
   return i === 0 ? `${n} B` : `${n.toFixed(1)} ${units[i]}`;
 }
+
+/** How long until a countdown restart at `at`, as the dashboard words it. */
+export const restartLeft = (at: number, now: number): string => (at - now > 500 ? `in ${formatDuration(at - now)}` : 'any moment now');

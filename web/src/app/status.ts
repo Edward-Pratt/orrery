@@ -1,4 +1,5 @@
 import { Component, input } from '@angular/core';
+import type { ServerCard } from '@hub/api';
 
 export type Health = 'ok' | 'warn' | 'down';
 
@@ -18,3 +19,9 @@ export class Status {
   protected readonly dot = { ok: 'bg-status-ok', warn: 'bg-status-warn', down: 'bg-status-down' };
   protected readonly text = { ok: '', warn: 'text-status-warn', down: 'text-status-down' };
 }
+
+/** How a server's card is shown, on its row and its page. */
+export const serverState = (c: ServerCard): { health: Health; label: string } => ({
+  health: !c.online || c.hung ? 'down' : c.lagging ? 'warn' : 'ok',
+  label: c.hung ? 'Not responding' : !c.online ? 'Offline' : c.lagging ? 'Lagging' : 'Online',
+});

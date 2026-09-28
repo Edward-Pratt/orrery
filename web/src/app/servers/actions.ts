@@ -10,7 +10,7 @@ import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { Feedback } from '../feedback';
 import { ServiceControl } from '../services/actions';
-import { formatDuration } from '../units';
+import { restartLeft } from '../units';
 
 /** The countdown a Restart button starts, in minutes. */
 const RESTART_MINUTES = 5;
@@ -115,10 +115,7 @@ export class ServerActions {
     return this.#own() ?? (s && s.id === this.card().service?.id ? s.verb : null);
   });
   readonly #now = signal(Date.now());
-  protected readonly left = computed(() => {
-    const ms = (this.card().restart?.at ?? 0) - this.#now();
-    return ms > 500 ? `in ${formatDuration(ms)}` : 'any moment now';
-  });
+  protected readonly left = computed(() => restartLeft(this.card().restart?.at ?? 0, this.#now()));
   protected readonly startBlocked = computed(() => START_BLOCKED[this.card().service?.state ?? ''] ?? null);
 
   constructor() {

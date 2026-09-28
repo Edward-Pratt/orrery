@@ -7,7 +7,7 @@ import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from '
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { changesCard } from './cards';
-import { Status } from '../status';
+import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
 
 /** The server page's tabs (child routes), each shown only when the server has what it needs. */
@@ -33,7 +33,7 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
         <div>
           <h1 class="flex items-center gap-3 text-lg font-semibold">
             {{ c.name }}
-            <app-status data-state [health]="c.hung || !c.online ? 'down' : c.lagging ? 'warn' : 'ok'" [label]="c.hung ? 'Not responding' : !c.online ? 'Offline' : c.lagging ? 'Lagging' : 'Online'" class="text-sm font-normal" />
+            <app-status data-state [health]="state().health" [label]="state().label" class="text-sm font-normal" />
           </h1>
           @if (service(); as s) {
             <p class="text-sm text-muted-foreground" data-service-line>runs as {{ s.unit }}, {{ s.state }}</p>
@@ -64,6 +64,7 @@ export default class ServerPage {
   /** Set before any section is shown, and fetched again when an event changes it. */
   readonly detail = signal<ServerDetail | undefined>(undefined);
   readonly card = computed(() => this.detail()?.card);
+  protected readonly state = computed(() => serverState(this.card()!));
   /** The service this server runs as, if linked. */
   readonly service = signal<ServiceStatus | null>(null);
   /** Why the server can't be shown: unknown, or the hub didn't answer. */

@@ -100,6 +100,12 @@ describe('server page', () => {
     expect(linked.text(linked.el.querySelector('[data-service-line]'))).toBe('runs as gtnh.service, inactive');
   });
 
+  it('shows the Backups tab only when the server has a backup folder', async () => {
+    expect((await setup('/gtnh', CARD, null, { backups: { configured: true, backups: [], free: null, growth: 0, minFree: 0 } })).tabs()).toContain('Backups');
+    TestBed.resetTestingModule();
+    expect((await setup('/gtnh')).tabs()).not.toContain('Backups');
+  });
+
   it('redirects the old stats path to players', async () => {
     const { el, tabs } = await setup('/gtnh/stats', CARD, null, { top: { day: [], week: [], all: [] } });
     expect(TestBed.inject(Router).url).toBe('/gtnh/players');
@@ -121,6 +127,11 @@ describe('server page', () => {
       const { items } = await open(true);
       expect(items().map((i) => i.textContent?.trim())).toEqual(['Stop', 'Restart now', 'Restart in…', 'Audit log for this server']);
       expect(items().at(-1)!.getAttribute('href')).toBe('/audit?server=gtnh');
+    });
+
+    it('has no Stop without a linked service', async () => {
+      const { items } = await open();
+      expect(items().map((i) => i.textContent?.trim())).toEqual(['Restart now', 'Restart in…', 'Audit log for this server']);
     });
 
     it('navigates to the audit log filtered to this server', async () => {

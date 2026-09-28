@@ -116,6 +116,23 @@ describe('the attention strip', () => {
     expect(lines()).toEqual(['GTNH is offline: its service failed Start', 'backup.service failed Start']);
   });
 
+  it('shows a failed service whose server is online, since no server item covers it', async () => {
+    const { lines } = await open([card('gtnh', { service: { id: 'gtnh', state: 'failed' } })], [service('gtnh', 'failed')]);
+    expect(lines()).toEqual(['gtnh.service failed Start']);
+  });
+
+  it('clears an offline item when its server comes back, and a restart item when it is cancelled', async () => {
+    const { events, lines, refetch } = await open([
+      card('a', { online: false }),
+      card('b', { restart: { at: Date.now() + 60_000, by: 'bob', stop: false } }),
+    ]);
+    expect(lines()).toHaveLength(2);
+    events.push(1, { serverId: 'a', type: 'connected' } as never);
+    events.push(2, { serverId: 'b', type: 'notice', severity: 'info', kind: 'restartCancelled' } as never);
+    await refetch([card('a'), card('b')]);
+    expect(lines()).toEqual([]);
+  });
+
   it('clears an item when a live event clears its condition, and hides the strip when empty', async () => {
     const { el, events, lines, render, refetch } = await open(
       [card('gtnh', { lagging: true }), card('site')],

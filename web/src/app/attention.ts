@@ -11,7 +11,7 @@ import { Integrations } from './integrations';
 import { Session } from './session';
 import { changesCard } from './servers/cards';
 import { ServiceControl } from './services/actions';
-import { formatDuration } from './units';
+import { restartLeft } from './units';
 
 /** One thing that needs a human now: what it is about (`page` is the sidebar entry it counts on), and the fix, if any. */
 export type AttentionItem = {
@@ -70,8 +70,8 @@ export class Attention {
       }
     }
     for (const s of this.#services()) {
-      // A server's own failed service is its server's item.
-      if (s.state === 'failed' && !cards.some((c) => c.service?.id === s.id)) {
+      // A server's own failed service is its server's item, while that is offline; an online one has none.
+      if (s.state === 'failed' && !cards.some((c) => c.service?.id === s.id && !c.online)) {
         items.push({
           key: `service:${s.id}`,
           page: 'services',
@@ -170,7 +170,6 @@ export class AttentionStrip {
   }
 
   protected left(at: number): string {
-    const ms = at - this.#now();
-    return ms > 500 ? `in ${formatDuration(ms)}` : 'any moment now';
+    return restartLeft(at, this.#now());
   }
 }

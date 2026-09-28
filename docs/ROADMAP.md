@@ -90,6 +90,13 @@ section, with the hub reporting the free-space minimum (#54); restoring a backup
 that a section's event stream hung behind its page's in the browser's HTTP cache (fixed in `web-v0.3.1`). The
 restore wasn't run live in that test.
 
+**Redesign — done (`hub-v2.5.0` + `web-v0.4.0`):** spec #73, from #59, #60 and #72. The shell: a sidebar (a
+bottom tab bar on a phone), theme, avatar menu and login card (#74); confirm tiers, toasts and in-flight spinners
+(#75); server rows with per-state actions, with lag and the linked service's state on each card (#76); the attention
+strip and sidebar badges (#77); the server page header, tabs and Overview (#78); the Console, Chat, Players (was
+Stats) and History tabs (#79); the Backups tab (#80); Services with the checks merged in, so the checks page is gone
+(#81); Host tiles (#82); audit log paging and actor filter (#83); production release and smoke test (#84).
+
 | Feature | Where | Size |
 |---|---|---|
 | HTTP API and live event stream (`hub/src/web/`, calling `ServerHub`, `RestartScheduler`, stats) | hub | M |

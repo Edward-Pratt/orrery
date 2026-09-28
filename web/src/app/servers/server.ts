@@ -9,6 +9,7 @@ import { LiveEvents, ofServer, ofTarget } from '../events';
 import { changesCard } from './cards';
 import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
+import { BackupProgress } from './backup-progress';
 
 /** The server page's tabs (child routes), each shown only when the server has what it needs. */
 const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean }[] = [
@@ -95,9 +96,11 @@ export default class ServerPage {
         this.service.set(detail.service);
       });
     // One stream: each subscription opens its own.
+    const progress = inject(BackupProgress);
     inject(LiveEvents)
       .all$.pipe(takeUntilDestroyed())
       .subscribe((live) => {
+        progress.seen(live.event);
         if (ofServer(this.id)(live)) {
           const e = live.event;
           if (changesCard(e) || (e.type === 'notice' && e.kind.startsWith('backup'))) this.refresh();

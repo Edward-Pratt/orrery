@@ -9,6 +9,7 @@ import { Feedback } from './feedback';
 import { LiveEvents, ofTarget } from './events';
 import { Integrations } from './integrations';
 import { Session } from './session';
+import { BackupProgress } from './servers/backup-progress';
 import { changesCard } from './servers/cards';
 import { ServiceControl } from './services/actions';
 import { restartLeft } from './units';
@@ -33,6 +34,7 @@ export class Attention {
   readonly #http = inject(HttpClient);
   readonly #feedback = inject(Feedback);
   readonly #control = inject(ServiceControl);
+  readonly #progress = inject(BackupProgress);
   readonly #destroyRef = inject(DestroyRef);
   readonly #events = inject(LiveEvents);
   readonly #cards = signal<ServerCard[]>([]);
@@ -57,6 +59,8 @@ export class Attention {
           action: c.service ? { label: restart ? 'Restart' : 'Start', run: () => void this.#control.act(restart ? 'restart' : 'start', c.service!.id, c.name) } : undefined,
         });
       }
+      const doing = this.#progress.running()[c.id];
+      if (doing) items.push({ key: `${doing}:${c.id}`, page: 'servers', target: c.name, message: doing === 'backup' ? 'is backing up' : 'is being restored' });
       if (c.online && c.lagging) items.push({ key: `lagging:${c.id}`, page: 'servers', target: c.name, message: 'is lagging' });
       if (c.restart) {
         items.push({
@@ -115,6 +119,7 @@ export class Attention {
     this.#events.all$.pipe(takeUntilDestroyed(this.#destroyRef))
       .subscribe((live) => {
         const { event } = live;
+        this.#progress.seen(event);
         if (ofTarget('service')(live) && event.type === 'state') {
           this.#refetchServices.next();
           this.#refetchCards.next(); // a card carries its service's state

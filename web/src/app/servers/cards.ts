@@ -10,7 +10,7 @@ import { ServerRow } from './row';
 /** Events that change a card beyond its TPS: it is fetched again (and a server page's detail). */
 const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
 export const changesCard = (e: LiveEvent) =>
-  'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && /^(restart|lag)/.test(e.kind)));
+  'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && (e.kind.startsWith('restart') || e.kind === 'lag' || e.kind === 'lagRecovered')));
 
 @Component({
   selector: 'app-cards',
@@ -48,7 +48,10 @@ export default class Cards {
       .pipe(
         debounceTime(50),
         startWith(undefined),
-        switchMap(() => http.get<ServerCard[]>('/api/servers').pipe(catchError(() => EMPTY))),
+        switchMap(() => http.get<ServerCard[]>('/api/servers').pipe(catchError(() => {
+          this.cards.update((c) => c ?? []); // a first fetch that fails ends the skeleton
+          return EMPTY;
+        }))),
         takeUntilDestroyed(),
       )
       .subscribe((cards) => this.cards.set(cards));

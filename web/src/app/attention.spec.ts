@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { CheckStatus, Integrations, Me, ServerCard, ServiceStatus } from '@hub/api';
 import { App } from './app';
+import { BackupProgress } from './servers/backup-progress';
 import { FETCH } from './events';
 import { dialogButton, fakeEvents, settle } from './testing';
 
@@ -159,5 +160,15 @@ describe('the attention strip', () => {
       [check('web', false)],
     );
     expect(badges()).toEqual(['Servers 2', 'Services 2']); // a down check counts on the page that shows it
+  });
+
+  it('shows a backup started here while it runs, until its finished notice', async () => {
+    const { events, lines, render } = await open([card('gtnh')]);
+    TestBed.inject(BackupProgress).begin('gtnh', 'backup');
+    await render();
+    expect(lines()).toEqual(['GTNH is backing up']);
+    events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'good', kind: 'backupFinished', detail: 'done' });
+    await render();
+    expect(lines()).toEqual([]);
   });
 });

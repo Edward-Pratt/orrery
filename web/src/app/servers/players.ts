@@ -1,5 +1,6 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
+import type { Subscription } from 'rxjs';
 import type { Period, PlayerAnswer } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
@@ -80,6 +81,7 @@ export default class Players {
   readonly looking = signal(false);
   readonly player = signal<PlayerAnswer | null>(null);
   readonly error = signal<string | null>(null);
+  #request?: Subscription;
 
   protected choose(value: Period | Period[] | null | undefined): void {
     this.period.set([value].flat()[0] ?? 'day');
@@ -93,7 +95,8 @@ export default class Players {
     this.error.set(null);
     this.looking.set(true);
     const url = `/api/servers/${encodeURIComponent(this.server.id)}/players/${encodeURIComponent(name)}`;
-    this.#http.get<PlayerAnswer>(url).subscribe({
+    this.#request?.unsubscribe(); // an older lookup must not overwrite a newer one
+    this.#request = this.#http.get<PlayerAnswer>(url).subscribe({
       next: (answer) => (this.looking.set(false), this.player.set(answer)),
       error: (err: HttpErrorResponse) => (this.looking.set(false), this.error.set(lookupError(name, err))),
     });

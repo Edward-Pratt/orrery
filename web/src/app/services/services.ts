@@ -11,7 +11,7 @@ import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
-import { catchError, debounceTime, EMPTY, Observable, of, startWith, Subject, switchMap } from 'rxjs';
+import { catchError, debounceTime, EMPTY, Observable, of, startWith, Subject, Subscription, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
 import { ServerActions } from '../servers/actions';
@@ -160,7 +160,7 @@ export default class Services {
   protected readonly refetchCards = new Subject<void>();
 
   protected readonly services = computed(() => this.#services() ?? []);
-  protected readonly title = computed(() => (this.#on()?.systemd === false ? 'Checks' : 'Services'));
+  protected readonly title = computed(() => (this.#on() ? (this.#on()!.systemd ? 'Services' : 'Checks') : ''));
   protected readonly ready = computed(() => !!this.#services() && !!this.#checks() && !!this.#cards());
   /** Checks no listed service shows: all of them without systemd. */
   protected readonly standalone = computed(() => {
@@ -173,6 +173,7 @@ export default class Services {
   protected readonly logs = signal<string[] | null>(null);
   protected readonly logsError = signal<string | null>(null);
   protected readonly loadingLogs = signal(false);
+  #logsRequest?: Subscription;
 
   constructor() {
     this.#on$.pipe(takeUntilDestroyed()).subscribe((on) => this.#start(on));
@@ -241,7 +242,8 @@ export default class Services {
 
   protected fetchLogs(s: ServiceStatus): void {
     this.loadingLogs.set(true);
-    this.#http.get<ServiceLogs>(`/api/services/${encodeURIComponent(s.id)}/logs`).subscribe({
+    this.#logsRequest?.unsubscribe(); // a slower answer for another service must not land on this sheet
+    this.#logsRequest = this.#http.get<ServiceLogs>(`/api/services/${encodeURIComponent(s.id)}/logs`).subscribe({
       next: ({ lines }) => {
         this.loadingLogs.set(false);
         this.logsError.set(null);

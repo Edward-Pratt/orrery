@@ -46,6 +46,7 @@ async function setup(on: Integrations = ALL, data: { services?: ServiceStatus[];
   const fixture = TestBed.createComponent(Page);
   const backend = TestBed.inject(HttpTestingController);
   fixture.detectChanges();
+  const skeletonAtStart = !!(fixture.nativeElement as HTMLElement).querySelector('[data-skeleton]');
   backend.expectOne('/api/integrations').flush(on);
   await settle();
   if (on.systemd) backend.expectOne('/api/services').flush(data.services ?? [GRAFANA, CADDY]);
@@ -64,7 +65,7 @@ async function setup(on: Integrations = ALL, data: { services?: ServiceStatus[];
     document.querySelector<HTMLElement>(`[data-slot=dropdown-menu-item][data-action=${action}]`)!.click();
     await render();
   };
-  return { events, backend, el, render, text, row, button, menu, feedback: TestBed.inject(Feedback) };
+  return { skeletonAtStart, events, backend, el, render, text, row, button, menu, feedback: TestBed.inject(Feedback) };
 }
 
 describe('services page', () => {
@@ -178,7 +179,8 @@ describe('services page', () => {
   });
 
   it('shows skeletons until loaded, then an empty state', async () => {
-    const { el, text } = await setup(ALL, { services: [], checks: [], cards: [] });
+    const { skeletonAtStart, el, text } = await setup(ALL, { services: [], checks: [], cards: [] });
+    expect(skeletonAtStart).toBe(true);
     expect(el.querySelector('[data-skeleton]')).toBeNull();
     expect(text(el)).toContain('Nothing to show');
   });

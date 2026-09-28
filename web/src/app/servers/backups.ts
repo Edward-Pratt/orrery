@@ -37,8 +37,8 @@ import ServerPage from './server';
           }
         </div>
         <div class="mb-4 flex flex-wrap items-center gap-3">
-          <button hlmBtn size="sm" [disabled]="!online() || !!progress() || starting()" (click)="start()" data-backup-start>
-            @if (starting() || progress() === 'backup') {
+          <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start>
+            @if (progress() === 'backup') {
               <hlm-spinner />
             }
             {{ progress() === 'backup' ? 'Backing up…' : 'Start backup' }}
@@ -54,7 +54,7 @@ import ServerPage from './server';
         @if (b.backups.length) {
           <table class="w-full text-left text-sm">
             <thead class="text-muted-foreground">
-              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">Finished</th><th class="pr-4 font-normal">Size</th><th></th></tr>
+              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">Finished</th><th class="pr-4 font-normal">Size</th><th class="sr-only">Actions</th></tr>
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
@@ -126,8 +126,6 @@ export default class Backups {
   });
   /** The backup being restored. */
   readonly restoring = signal<string | null>(null);
-  /** The backup request is in flight. */
-  readonly starting = signal(false);
 
   async restore(name: string): Promise<void> {
     const ok = await this.#feedback.confirm({
@@ -158,14 +156,11 @@ export default class Backups {
   /** Runs without asking. The finished (or failed) notice follows on the stream, which ends the progress; the page then fetches the list again. */
   start(): void {
     const id = this.#server.id;
-    this.starting.set(true);
+    // Running from the click, so a finished notice that beats the reply still ends it.
+    this.#progress.begin(id, 'backup');
     this.#http.post<CommandOutput>(`/api/servers/${encodeURIComponent(id)}/backup`, {}).subscribe({
-      next: () => {
-        this.starting.set(false);
-        this.#progress.begin(id, 'backup');
-      },
       error: (err: HttpErrorResponse) => {
-        this.starting.set(false);
+        this.#progress.end(id);
         this.#feedback.failed('Starting the backup', err);
       },
     });

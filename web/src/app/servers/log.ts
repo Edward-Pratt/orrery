@@ -1,7 +1,7 @@
 import { DestroyRef, Directive, ElementRef, inject } from '@angular/core';
 
 /** A scrolling log that stays at the bottom as lines arrive, unless the reader has scrolled up. */
-@Directive({ selector: '[appStickBottom]', host: { class: 'overflow-y-auto', '(scroll)': 'track()' } })
+@Directive({ selector: '[appStickBottom]', host: { class: 'overflow-y-auto', role: 'log', '(scroll)': 'track()' } })
 export class StickBottom {
   readonly #el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   #pinned = true;

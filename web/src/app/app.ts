@@ -8,6 +8,7 @@ import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { catchError, of } from 'rxjs';
+import { Attention, AttentionStrip } from './attention';
 import { Integrations } from './integrations';
 import { Login } from './login';
 import { Session } from './session';
@@ -76,7 +77,7 @@ export class UserMenu {
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip],
   viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideScrollText })],
   template: `
     <hlm-toaster />
@@ -99,6 +100,9 @@ export class UserMenu {
                   class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
                 >
                   <ng-icon [name]="p.icon" class="text-lg" /> {{ p.label }}
+                  @if (badge(p.path); as n) {
+                    <span class="ml-auto rounded-full bg-amber-500 px-2 text-xs font-semibold text-black" data-badge>{{ n }}</span>
+                  }
                 </a>
               }
             </nav>
@@ -108,10 +112,12 @@ export class UserMenu {
             <span class="flex items-center gap-2 font-bold"><span class="size-2.5 rounded-full bg-brand"></span> orrery</span>
             <app-user-menu [user]="session.user()!" [showName]="false" />
           </header>
-          <!-- room for the attention strip -->
-          <main class="mx-auto w-full max-w-5xl px-4 pt-6 pb-28 md:px-10 md:pt-10 md:pb-10">
-            <router-outlet />
-          </main>
+          <div class="min-w-0 flex-1">
+            <app-attention-strip />
+            <main class="mx-auto w-full max-w-5xl px-4 pt-6 pb-28 md:px-10 md:pt-10 md:pb-10">
+              <router-outlet />
+            </main>
+          </div>
           <nav
             class="fixed inset-x-0 bottom-0 z-10 flex border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
             aria-label="Pages"
@@ -122,7 +128,13 @@ export class UserMenu {
                 routerLinkActive="text-brand-foreground"
                 class="flex flex-1 flex-col items-center gap-1 py-2 text-[11px] text-muted-foreground"
               >
-                <ng-icon [name]="p.icon" class="text-xl" /> {{ p.label }}
+                <span class="relative">
+                  <ng-icon [name]="p.icon" class="text-xl" />
+                  @if (badge(p.path); as n) {
+                    <span class="absolute -top-1 -right-2 rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-black" data-badge>{{ n }}</span>
+                  }
+                </span>
+                {{ p.label }}
               </a>
             }
           </nav>
@@ -134,7 +146,13 @@ export class UserMenu {
 export class App {
   protected readonly session = inject(Session);
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
+  readonly #attention = inject(Attention);
   protected readonly visible = computed(() => PAGES.filter((p) => this.#on()?.[p.on]));
+
+  /** The count on a sidebar entry: only Servers and Services have one. */
+  protected badge(path: string): number {
+    return path === 'servers' || path === 'services' ? this.#attention.count(path) : 0;
+  }
 
   constructor() {
     inject(Theme); // applies the remembered mode before the first page shows

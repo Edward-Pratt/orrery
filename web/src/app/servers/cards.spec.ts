@@ -202,6 +202,7 @@ describe('server rows', () => {
     const { el, button, render } = await setup();
     const router = TestBed.inject(Router);
     const nav = vi.spyOn(router, 'navigate');
+    expect(button('gtnh', 'console').getAttribute('href')).toBe('/servers/gtnh/console'); // the Console tab
     button('gtnh', 'console').click();
     expect(nav).not.toHaveBeenCalled();
     el.querySelector<HTMLElement>('[data-server=gtnh] [data-tps]')!.click();

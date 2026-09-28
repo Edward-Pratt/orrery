@@ -5,6 +5,7 @@ import type { CommandRequest, LiveEvent } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { filter } from 'rxjs';
 import { LiveEvents, ofServer } from '../events';
+import { StickBottom } from './log';
 import ServerPage from './server';
 
 type ConsoleEntry = Extract<LiveEvent, { type: 'console' }>;
@@ -17,11 +18,11 @@ const MAX_ENTRIES = 200;
  */
 @Component({
   selector: 'app-server-console',
-  imports: [HlmButton],
+  imports: [HlmButton, StickBottom],
   template: `
     @if (server.card()!.features.chat) {
-      <section class="flex max-w-3xl flex-col gap-2">
-        <ol class="h-96 overflow-y-auto rounded-lg border p-3 font-mono text-sm" data-console>
+      <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
+        <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-console>
           @for (e of entries(); track $index) {
             <li class="mb-2">
               <div><b>&gt; {{ e.command }}{{ e.late ? ' (later)' : '' }}</b><span class="ml-2 text-xs text-muted-foreground" data-by>{{ e.by }}</span></div>

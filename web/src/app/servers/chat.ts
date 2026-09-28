@@ -5,6 +5,8 @@ import type { ChatRequest, LiveEvent } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { filter } from 'rxjs';
 import { LiveEvents, ofServer } from '../events';
+import { StickBottom } from './log';
+import { PlayerName } from './player';
 import ServerPage from './server';
 
 type ChatLine = Extract<LiveEvent, { type: 'chat' | 'join' | 'leave' | 'death' | 'say' }>;
@@ -14,18 +16,18 @@ const MAX_LINES = 500;
 /** A server's Chat section: recent and live chat, and sending into the game. */
 @Component({
   selector: 'app-server-chat',
-  imports: [HlmButton],
+  imports: [HlmButton, PlayerName, StickBottom],
   template: `
     @if (server.card()!.features.chat) {
-      <section class="flex max-w-3xl flex-col gap-2">
-        <ol class="h-96 overflow-y-auto rounded-lg border p-3 font-mono text-sm" data-chat>
+      <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
+        <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-chat>
           @for (line of lines(); track $index) {
             <li>
               @switch (line.type) {
-                @case ('chat') { <b>{{ line.player }}</b>: {{ line.message }} }
+                @case ('chat') { <b><button [appPlayer]="line.player">{{ line.player }}</button></b>: {{ line.message }} }
                 @case ('say') { <b>{{ line.author }}</b><span class="text-muted-foreground"> (Discord or dashboard)</span>: {{ line.message }} }
-                @case ('join') { <span class="text-muted-foreground">{{ line.player }} joined</span> }
-                @case ('leave') { <span class="text-muted-foreground">{{ line.player }} left</span> }
+                @case ('join') { <span class="text-muted-foreground"><button [appPlayer]="line.player">{{ line.player }}</button> joined</span> }
+                @case ('leave') { <span class="text-muted-foreground"><button [appPlayer]="line.player">{{ line.player }}</button> left</span> }
                 @case ('death') { <span class="text-muted-foreground">{{ line.message }}</span> }
               }
             </li>

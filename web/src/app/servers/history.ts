@@ -3,6 +3,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import type { HubEvent, LiveEvent, ServerHistory, UptimeState } from '@hub/api';
 import { catchError, filter, of, switchMap } from 'rxjs';
+import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { PeriodPicker, type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofServer } from '../events';
 import ServerPage from './server';
@@ -26,17 +27,27 @@ const tpsOf = (tps: number) => tps.toFixed(1);
 /** A server's History section: TPS, player and uptime graphs over a chosen period, extended by live events. */
 @Component({
   selector: 'app-server-history',
-  imports: [PeriodPicker, TimeSeries],
+  imports: [HlmSkeleton, PeriodPicker, TimeSeries],
   template: `
     <app-period class="mb-4 block" [(hours)]="hours" />
-    <div class="grid gap-4 lg:grid-cols-2">
-      @for (c of charts(); track c.title) {
-        <section class="rounded-lg border p-3" [attr.data-chart]="c.title">
-          <h2 class="text-sm font-semibold">{{ c.title }}</h2>
-          <app-time-series [series]="c.series" [format]="c.format" [max]="c.max" [step]="c.step" />
-        </section>
-      }
-    </div>
+    @if (history()) {
+      <div class="grid gap-4 lg:grid-cols-2">
+        @for (c of charts(); track c.title) {
+          <section class="rounded-xl border p-3" [attr.data-chart]="c.title">
+            <h2 class="text-sm font-semibold">{{ c.title }}</h2>
+            <app-time-series [series]="c.series" [format]="c.format" [max]="c.max" [step]="c.step" />
+          </section>
+        }
+      </div>
+    } @else if (failed()) {
+      <p class="text-sm text-muted-foreground">The history couldn't be loaded. Reload to try again.</p>
+    } @else {
+      <div class="grid gap-4 lg:grid-cols-2" data-skeleton>
+        @for (i of [1, 2, 3]; track i) {
+          <hlm-skeleton class="h-48 rounded-xl" />
+        }
+      </div>
+    }
   `,
 })
 export default class History {
@@ -44,6 +55,8 @@ export default class History {
   /** The graphed period, in hours. */
   readonly hours = signal(24);
   readonly history = signal<ServerHistory | null>(null);
+  /** The last load failed, so the skeleton gives way to a message. */
+  protected readonly failed = signal(false);
   /** Stream events that change the graphs, with when they arrived; those up to the history's `asOf` are already in it. */
   readonly #live = signal<{ id: number; at: number; event: HubEvent }[]>([]);
   protected readonly charts = computed(() => {
@@ -85,6 +98,7 @@ export default class History {
       )
       .subscribe((history) => {
         this.history.set(history);
+        this.failed.set(!history);
         if (history) this.#live.update((live) => live.filter((l) => l.id > history.asOf));
       });
     inject(LiveEvents)

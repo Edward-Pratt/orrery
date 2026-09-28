@@ -5,12 +5,13 @@ import type { ServerHistory } from '@hub/api';
 import { catchError, of } from 'rxjs';
 import { TimeSeries } from '../chart';
 import { ServerActions } from './actions';
+import { PlayerName } from './player';
 import ServerPage from './server';
 
 /** A server's Overview: who's online, the last 24 h of TPS and players (linking to History), and a pending restart. */
 @Component({
   selector: 'app-server-overview',
-  imports: [RouterLink, TimeSeries, ServerActions],
+  imports: [RouterLink, TimeSeries, ServerActions, PlayerName],
   template: `
     @let c = server.card()!;
     <section class="mb-6" data-players>
@@ -18,7 +19,7 @@ import ServerPage from './server';
       @if (c.players.length) {
         <ul class="flex flex-wrap gap-2 text-sm">
           @for (p of c.players; track p) {
-            <li class="rounded-full border px-3 py-1" data-player-name>{{ p }}</li>
+            <li class="rounded-full border" data-player-name><button [appPlayer]="p" class="px-3 py-1">{{ p }}</button></li>
           }
         </ul>
       } @else {

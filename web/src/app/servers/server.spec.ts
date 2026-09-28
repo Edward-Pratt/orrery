@@ -12,6 +12,8 @@ import { dialog, dialogButton, fakeEvents, settle } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
+  lagging: false,
+  service: null,
   id: 'gtnh',
   name: 'GTNH',
   online: true,

@@ -519,6 +519,10 @@ async function apiHub(t: TestContext) {
   return { app, cookie, get, hub: hub!, restarts: restarts!, port: handle.port!, live: handle.live };
 }
 
+async function cardsOf(app: WebApi, cookie: string) {
+  return (await (await app.request('/api/servers', { headers: { cookie } })).json()) as ServerCard[];
+}
+
 const MOD = { chat: true, tps: true, quests: true };
 const NO_MOD = { chat: false, tps: false, quests: false };
 
@@ -529,7 +533,7 @@ test('the API says which integrations are on, and nothing else about them', asyn
 
 test('server cards while offline: features only for the server with the mod', async (t) => {
   const { get } = await apiHub(t);
-  const offline = { online: false, hung: false, tps: null, players: [], uptimeDay: null, restart: null };
+  const offline = { online: false, hung: false, tps: null, players: [], uptimeDay: null, restart: null, lagging: false, service: null };
   assert.deepEqual(await get<ServerCard[]>('/api/servers'), [
     { id: 'gtnh', name: 'GTNH', ...offline, features: MOD },
     { id: 'web', name: 'Website', ...offline, features: NO_MOD },
@@ -544,10 +548,44 @@ test('a connected server card shows TPS, players, uptime and a pending restart',
   restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
   const [card] = await get<ServerCard[]>('/api/servers');
   const { uptimeDay, restart, ...rest } = card!;
-  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], features: MOD });
+  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], lagging: false, service: null, features: MOD });
   assert.equal(uptimeDay, 1);
   assert.equal(restart?.by, 'alice');
   assert.ok(restart!.at > Date.now());
+});
+
+test("a card's lagging follows the lag and lagRecovered notices", async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] }); // the lag monitor samples on a 60 s interval
+  const { get, hub, port } = await apiHub(t);
+  const lagging = async () => (await get<ServerCard[]>('/api/servers'))[0]!.lagging;
+  const mod = await online(port);
+  const beat = async (tps: number) => {
+    mod.send({ type: 'heartbeat', tps, players: [] });
+    await until(() => hub.get('gtnh')?.tps === tps);
+    t.mock.timers.tick(60_000);
+  };
+  await beat(10);
+  assert.equal(await lagging(), false); // one low minute isn't lag yet
+  await beat(11);
+  assert.equal(await lagging(), true);
+  await beat(20);
+  assert.equal(await lagging(), false);
+});
+
+test("a card carries its linked service's id and state", async (t) => {
+  const { cards, stopService } = await restoreHub(t);
+  assert.deepEqual((await cards())[0]!.service, { id: 'gtnh', state: 'active' });
+  await stopService();
+  assert.deepEqual((await cards())[0]!.service, { id: 'gtnh', state: 'inactive' });
+});
+
+test('a card has no service without a link', async (t) => {
+  assert.equal((await (await restoreHub(t, false)).cards())[0]!.service, null);
+});
+
+test('a card has no service with systemd off', async (t) => {
+  const { get } = await apiHub(t);
+  assert.equal((await get<ServerCard[]>('/api/servers'))[0]!.service, null);
 });
 
 test('one server: status, TPS, top players per period and backups', async (t) => {
@@ -1262,7 +1300,7 @@ async function restoreHub(t: TestContext, linked = true) {
   const restoreOf = (name: unknown, server = 'gtnh') => post(app, cookie, `/api/servers/${server}/restore`, { name });
   const audit = async () =>
     webAudit((await (await app.request('/api/audit', { headers: { cookie } })).json()) as AuditLog).filter((e) => e.action === 'restore');
-  return { runs, fake, stopService, restoreOf, audit, dir, backupDir };
+  return { runs, fake, stopService, restoreOf, audit, dir, backupDir, cards: () => cardsOf(app, cookie) };
 }
 
 test('a restore with the linked service stopped runs the script with its settings, answers its output and is audited', async (t) => {

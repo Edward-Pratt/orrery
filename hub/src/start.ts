@@ -118,7 +118,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, checks, host, services, restores, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

@@ -1,54 +1,42 @@
-import { DecimalPipe, PercentPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink } from '@angular/router';
 import type { Lifecycle, LiveEvent, ServerCard } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
-import { LiveEvents } from '../events';
-import { Restart } from './restart';
+import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
+import { LiveEvents, ofTarget } from '../events';
+import { ServerRow } from './row';
 
 /** Events that change a card beyond its TPS: it is fetched again (and a server page's detail). */
 const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
 export const changesCard = (e: LiveEvent) =>
-  'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && e.kind.startsWith('restart')));
+  'serverId' in e && (CARD_EVENTS.includes(e.type) || (e.type === 'notice' && /^(restart|lag)/.test(e.kind)));
 
 @Component({
   selector: 'app-cards',
-  imports: [RouterLink, DecimalPipe, PercentPipe, Restart],
+  imports: [HlmSkeleton, ServerRow],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Servers</h1>
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      @for (c of cards(); track c.id) {
-        <div class="rounded-lg border p-4" [attr.data-server]="c.id">
-          <div class="flex items-center justify-between">
-            <a [routerLink]="c.id" class="font-medium hover:underline">{{ c.name }}</a>
-            <span class="text-sm" [class.text-destructive]="!c.online || c.hung">
-              {{ c.hung ? 'Not responding' : c.online ? 'Online' : 'Offline' }}
-            </span>
-          </div>
-          <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            @if (c.features.tps) {
-              <dt class="text-muted-foreground">TPS</dt>
-              <dd data-tps>{{ c.tps === null ? '–' : (c.tps | number: '1.1-1') }}</dd>
-            }
-            <dt class="text-muted-foreground">Players</dt>
-            <dd data-players>{{ c.players.length ? c.players.join(', ') : 'none' }}</dd>
-            <dt class="text-muted-foreground">Uptime 24 h</dt>
-            <dd>{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd>
-          </dl>
-          @if (c.features.chat) {
-            <app-restart class="mt-3 block border-t pt-3" [serverId]="c.id" [pending]="c.restart" (changed)="refetch.next()" />
+    <div class="flex flex-col gap-2">
+      @if (cards(); as list) {
+        @for (c of list; track c.id) {
+          <app-server-row [card]="c" (changed)="refetch.next()" />
+        } @empty {
+          <p class="text-muted-foreground">No servers yet: add one under "servers" in the hub's config.json.</p>
+        }
+      } @else {
+        <div class="flex flex-col gap-2" data-skeleton>
+          @for (i of [1, 2, 3]; track i) {
+            <hlm-skeleton class="h-14 w-full" />
           }
         </div>
-      } @empty {
-        <p class="text-muted-foreground">No servers.</p>
       }
     </div>
   `,
 })
 export default class Cards {
-  readonly cards = signal<ServerCard[]>([]);
+  /** Null until the first fetch, which shows the skeleton. */
+  readonly cards = signal<ServerCard[] | null>(null);
   /** Fetches the cards again. */
   protected readonly refetch = new Subject<void>();
 
@@ -66,12 +54,13 @@ export default class Cards {
       .subscribe((cards) => this.cards.set(cards));
     inject(LiveEvents)
       .all$.pipe(takeUntilDestroyed())
-      .subscribe(({ event }) => {
+      .subscribe((live) => {
+        const { event } = live;
         if (event.type === 'tps') {
           this.cards.update((cards) =>
-            cards.map((c) => (c.id === event.serverId && c.features.tps ? { ...c, tps: event.tps } : c)),
+            cards?.map((c) => (c.id === event.serverId && c.features.tps ? { ...c, tps: event.tps } : c)) ?? null,
           );
-        } else if (changesCard(event)) refetch.next();
+        } else if (changesCard(event) || (ofTarget('service')(live) && event.type === 'state')) refetch.next();
       });
   }
 }

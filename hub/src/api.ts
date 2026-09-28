@@ -78,7 +78,13 @@ export type Features = { chat: boolean; tps: boolean; quests: boolean };
 /** A countdown restart (or, with `stop`, a countdown stop of its service) in progress: when it fires and who scheduled it. */
 export type PendingRestart = { at: number; by: string; stop: boolean };
 
-/** `GET /api/servers`: one card per server. `tps` is null without the TPS feature. */
+/**
+ * `GET /api/servers`: one card per server. `tps` is null without the TPS feature. `lagging` is true while the server
+ * is in a lag alert (the rule and `lagTps`/`lagMinutes` thresholds of Discord's lag notice; refetch on the `lag` and
+ * `lagRecovered` notices). `service` is the systemd service it runs as: its id and active state (null until the hub
+ * has read it); the whole field is null with no linked service or with systemd off (refetch on that service's
+ * `state` events).
+ */
 export type ServerCard = {
   id: string;
   name: string;
@@ -89,6 +95,8 @@ export type ServerCard = {
   /** Share of the last 24 h the server was up (0–1), null if unknown. */
   uptimeDay: number | null;
   restart: PendingRestart | null;
+  lagging: boolean;
+  service: { id: string; state: string | null } | null;
   features: Features;
 };
 

@@ -24,6 +24,7 @@ import type { Checks } from './checks.ts';
 import type { HostMonitor } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
+import type { LagMonitor } from './lag.ts';
 import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
@@ -74,6 +75,7 @@ export type WebDeps = {
   hub: ServerHub;
   stats: Stats;
   restarts: RestartScheduler;
+  lag: LagMonitor;
   /** Only with the checks integration. */
   checks?: Checks;
   /** Only with the host integration. */
@@ -86,20 +88,25 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, checks, host, services, restores, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
-  const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => ({
-    id: s.id,
-    name: s.name,
-    online: s.online,
-    hung: s.hung,
-    tps: hasMod(s.id) ? s.tps : null,
-    players: s.players,
-    uptimeDay: status.uptimeDay,
-    restart: restarts.pending(s.id) ?? null,
-    features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
-  });
+  const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
+    const linked = services?.ofServer(s.id);
+    return {
+      id: s.id,
+      name: s.name,
+      online: s.online,
+      hung: s.hung,
+      tps: hasMod(s.id) ? s.tps : null,
+      players: s.players,
+      uptimeDay: status.uptimeDay,
+      restart: restarts.pending(s.id) ?? null,
+      lagging: lag.isLagging(s.id),
+      service: linked ? { id: linked.id, state: linked.state } : null,
+      features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
+    };
+  };
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
   const origin = new URL(web.publicUrl).origin;
   const app = new Hono<Env>().basePath('/api');

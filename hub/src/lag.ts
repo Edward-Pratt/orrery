@@ -38,6 +38,11 @@ export class LagMonitor {
     clearInterval(this.#timer);
   }
 
+  /** Whether the server is in a lag alert now: the state Discord's lag notice and its recovery follow. */
+  isLagging(serverId: string): boolean {
+    return this.#lagging.has(serverId);
+  }
+
   sample(now: number): void {
     for (const s of this.#hub.list()) {
       if (!s.online || s.hung || s.tps === null) {

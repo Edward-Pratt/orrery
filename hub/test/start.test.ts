@@ -116,7 +116,7 @@ test('a command run through the hub lands in its audit log', async (t) => {
   const db = new Db(cfg.dbPath);
   t.after(() => db.close());
   assert.deepEqual(
-    db.auditLog(10).map(({ ts: _, ...e }) => e),
+    db.auditLog(10).map(({ ts: _, id: __, ...e }) => e),
     [{ actor: 'discord:alice (123)', action: 'command', target: 'gtnh', details: 'list' }],
   );
 });
@@ -594,14 +594,37 @@ test('the audit log reads newest first, for all servers or one', async (t) => {
   restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
   restarts.cancel('gtnh', 'discord:bob (2)', 'bob');
   // Not the hub's own in-game warnings, whose timing varies.
-  const byPeople = (log: AuditLog) => log.filter((e) => e.actor.startsWith('discord:'));
+  const byPeople = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('discord:'));
   const log = byPeople(await get<AuditLog>('/api/audit'));
-  assert.deepEqual(log.map(({ ts: _, ...e }) => e), [
+  assert.deepEqual(log.map(({ ts: _, id: __, ...e }) => e), [
     { actor: 'discord:bob (2)', action: 'restart cancel', target: 'gtnh', details: '' },
     { actor: 'discord:alice (1)', action: 'restart', target: 'gtnh', details: 'in 10 min' },
   ]);
   assert.deepEqual(byPeople(await get<AuditLog>('/api/audit?server=gtnh')), log);
-  assert.deepEqual(await get<AuditLog>('/api/audit?server=web'), []);
+  assert.deepEqual(await get<AuditLog>('/api/audit?server=web'), { entries: [], older: false });
+});
+
+test('the audit log pages back with before, filters by actor and server, and says when nothing is older', async (t) => {
+  const { get, hub, app, cookie } = await apiHub(t);
+  // More than a batch, in one millisecond or so: the cursor identifies an entry, not a time.
+  for (let i = 0; i < 205; i++) hub.audit(i % 2 ? 'discord:bob (2)' : 'discord:alice (1)', 'command', 'gtnh', `n${i}`);
+  const first = await get<AuditLog>('/api/audit');
+  assert.equal(first.entries.length, 200);
+  assert.equal(first.older, true);
+  const rest = await get<AuditLog>(`/api/audit?before=${first.entries.at(-1)!.id}`);
+  assert.equal(rest.older, false);
+  const seen = [...first.entries, ...rest.entries].map((e) => e.id);
+  assert.equal(new Set(seen).size, seen.length);
+  assert.deepEqual(
+    [...first.entries, ...rest.entries].filter((e) => e.action === 'command' && e.details.startsWith('n')).map((e) => e.details),
+    Array.from({ length: 205 }, (_, i) => `n${204 - i}`),
+  );
+  const bob = await get<AuditLog>('/api/audit?actor=discord:bob%20(2)&server=gtnh');
+  assert.equal(bob.entries.length, 102);
+  assert.ok(bob.entries.every((e) => e.actor === 'discord:bob (2)' && e.target === 'gtnh'));
+  assert.equal(bob.older, false);
+  assert.deepEqual((await get<AuditLog>('/api/audit?actor=discord:bob%20(2)&server=web')).entries, []);
+  for (const before of ['0', '-1', 'abc', '1.5']) assert.equal((await app.request(`/api/audit?before=${before}`, { headers: { cookie } })).status, 400);
 });
 
 test("a server's history: TPS samples, player counts from sessions, and up/down periods", async (t) => {
@@ -673,7 +696,7 @@ function post(app: WebApi, cookie: string, path: string, body?: object, headers:
   });
 }
 
-const webAudit = (log: AuditLog) => log.filter((e) => e.actor.startsWith('web:')).map(({ ts: _, ...e }) => e);
+const webAudit = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('web:')).map(({ ts: _, id: __, ...e }) => e);
 
 test('chat from the dashboard reaches the mod, appears on the stream and is audited', async (t) => {
   const { app, cookie, get, port } = await apiHub(t);

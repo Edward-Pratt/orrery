@@ -169,6 +169,8 @@ export type LiveEvent = HubEvent | TargetEvent;
 
 /** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
 export type AuditEntry = { actor: string; action: string; target: string; details: string };
+/** An audit entry as stored: `id` is its cursor for paging back. */
+export type AuditRow = AuditEntry & { id: number; ts: number };
 
 export type TpsStats = { avg: number; min: number } | null;
 

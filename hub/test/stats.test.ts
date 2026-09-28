@@ -166,8 +166,11 @@ test('audit reads the log newest first, all servers or one', () => {
   const { db, stats } = setup();
   db.audit({ actor: 'discord:a (1)', action: 'command', target: 'gtnh', details: 'list' }, 1);
   db.audit({ actor: 'hub:daily', action: 'restart', target: 'other', details: '' }, 2);
-  assert.deepEqual(stats.audit(10).map((e) => e.target), ['other', 'gtnh']);
-  assert.deepEqual(stats.audit(10, 'gtnh').map((e) => e.ts), [1]);
+  assert.deepEqual(stats.audit(10).entries.map((e) => e.target), ['other', 'gtnh']);
+  assert.deepEqual(stats.audit(10, { target: 'gtnh' }).entries.map((e) => e.ts), [1]);
+  // Older entries remain only while the batch was full.
+  assert.deepEqual(stats.audit(1).older, true);
+  assert.deepEqual(stats.audit(2).older, false);
 });
 
 test('backups in a folder that has gone away: none listed, free space unknown', async () => {

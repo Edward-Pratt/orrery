@@ -238,7 +238,10 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   app.get('/audit', (c) => {
     const server = c.req.query('server');
     if (server !== undefined && !hub.get(server)) return c.notFound();
-    return c.json(stats.audit(AUDIT_LIMIT, server) satisfies AuditLog);
+    const before = c.req.query('before');
+    if (before !== undefined && !/^[1-9]\d{0,15}$/.test(before)) return c.text('before must be an entry id', 400);
+    const filter = { target: server, actor: c.req.query('actor'), before: before === undefined ? undefined : Number(before) };
+    return c.json(stats.audit(AUDIT_LIMIT, filter) satisfies AuditLog);
   });
   // Restore needs the server down, so it comes before the online check below, with checks of its own.
   if (restores) {

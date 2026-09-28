@@ -1,11 +1,11 @@
 import { backupStats, freeBytes, growthPerDay, listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
-import type { Db } from './db.ts';
-import type { AuditEntry, ServerHub } from './servers.ts';
+import type { AuditFilter, Db } from './db.ts';
+import type { ServerHub } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
 import { bucketMs, HISTORY_POINTS } from './host.ts';
-import type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+import type { AuditRow, BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
 export type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, TpsStats } from './types.ts';
 
 const HOUR = 60 * 60_000;
@@ -139,9 +139,10 @@ export class Stats {
     return { tps, players, uptime };
   }
 
-  /** The newest audit log entries, for every server or one. */
-  audit(limit: number, serverId?: string): (AuditEntry & { ts: number })[] {
-    return this.#db.auditLog(limit, serverId);
+  /** A batch of audit log entries, newest first (see `Db.auditLog`), and whether older ones remain. */
+  audit(limit: number, filter: AuditFilter = {}): { entries: AuditRow[]; older: boolean } {
+    const rows = this.#db.auditLog(limit + 1, filter);
+    return { entries: rows.slice(0, limit), older: rows.length > limit };
   }
 
   /** The Minecraft name linked to a Discord user, if any. */

@@ -2,6 +2,9 @@ import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
+import type { AuditRow } from './types.ts';
+
+export type AuditFilter = { target?: string; actor?: string; before?: number };
 import { localDay } from './units.ts';
 
 /** How long TPS and host samples are kept. */
@@ -333,12 +336,20 @@ export class Db {
     this.#write('audit', 'INSERT INTO audit (ts, actor, action, target, details) VALUES (?, ?, ?, ?, ?)', ts, e.actor, e.action, e.target, e.details);
   }
 
-  /** The newest `limit` audit entries, newest first, for every server or just `target`. */
-  auditLog(limit: number, target?: string): (AuditEntry & { ts: number })[] {
+  /**
+   * The newest `limit` audit entries, newest first, optionally of one `target` and/or `actor`, and only those strictly
+   * older than the entry `before` (its `id`): the order is (ts, rowid), so two entries in one millisecond aren't skipped.
+   */
+  auditLog(limit: number, { target, actor, before }: AuditFilter = {}): AuditRow[] {
     return this.#db
-      .prepare('SELECT ts, actor, action, target, details FROM audit WHERE ?1 IS NULL OR target = ?1 ORDER BY ts DESC, rowid DESC LIMIT ?2')
-      .all(target ?? null, limit)
-      .map((r) => ({ ...r }) as AuditEntry & { ts: number });
+      .prepare(
+        `SELECT rowid AS id, ts, actor, action, target, details FROM audit
+         WHERE (?1 IS NULL OR target = ?1) AND (?2 IS NULL OR actor = ?2)
+           AND (?3 IS NULL OR (ts, rowid) < (SELECT ts, rowid FROM audit WHERE rowid = ?3))
+         ORDER BY ts DESC, rowid DESC LIMIT ?4`,
+      )
+      .all(target ?? null, actor ?? null, before ?? null, limit)
+      .map((r) => ({ ...r }) as AuditRow);
   }
 
   close(): void {

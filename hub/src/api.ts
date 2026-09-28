@@ -3,7 +3,7 @@
  * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
  */
 import type {
-  AuditEntry,
+  AuditRow,
   BackupsAnswer,
   HistoryAnswer,
   HostSample,
@@ -114,8 +114,12 @@ export type PlayerAnswer = PlaytimeAnswer;
  */
 export type ServerHistory = HistoryAnswer & { asOf: number };
 
-/** `GET /api/audit[?server=id]`: newest first. */
-export type AuditLog = (AuditEntry & { ts: number })[];
+/**
+ * `GET /api/audit[?server=id][&actor=who][&before=id]`: a batch (200) of entries, newest first, and whether `older`
+ * ones remain. `before` is an entry's `id`: only entries strictly older than it come back. 404 unknown server, 400 bad
+ * `before`.
+ */
+export type AuditLog = { entries: AuditRow[]; older: boolean };
 
 /**
  * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. A server's events

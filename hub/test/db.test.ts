@@ -233,16 +233,26 @@ test('recordLifecycle keeps the event type as the reason: start, crash, start', 
   assert.equal(db.countEvents('s', 'crashed', 0, 100), 1);
 });
 
-test('the audit log reads newest first, limited, for all servers or one; writes never throw', () => {
+test('the audit log reads newest first, limited, filtered, and pages back across equal timestamps; writes never throw', () => {
   const db = new Db(':memory:');
   db.audit({ actor: 'discord:alice (1)', action: 'command', target: 'a', details: 'list' }, 1000);
   db.audit({ actor: 'hub:daily', action: 'restart', target: 'b', details: 'in 10 min' }, 2000);
   db.audit({ actor: 'hub:daily', action: 'command', target: 'b', details: 'stop' }, 2000);
-  assert.deepEqual(db.auditLog(2), [
-    { ts: 2000, actor: 'hub:daily', action: 'command', target: 'b', details: 'stop' },
-    { ts: 2000, actor: 'hub:daily', action: 'restart', target: 'b', details: 'in 10 min' },
-  ]);
-  assert.deepEqual(db.auditLog(10, 'a'), [{ ts: 1000, actor: 'discord:alice (1)', action: 'command', target: 'a', details: 'list' }]);
+  db.audit({ actor: 'hub:daily', action: 'command', target: 'a', details: 'save' }, 2000);
+  const details = (rows: { details: string }[]) => rows.map((r) => r.details);
+  assert.deepEqual(details(db.auditLog(3)), ['save', 'stop', 'in 10 min']);
+  assert.deepEqual(details(db.auditLog(10, { target: 'a' })), ['save', 'list']);
+  assert.deepEqual(details(db.auditLog(10, { actor: 'hub:daily', target: 'a' })), ['save']);
+  assert.deepEqual(details(db.auditLog(10, { actor: 'nobody' })), []);
+  // One entry at a time from the cursor back: none skipped or repeated, though three share a timestamp.
+  const seen: string[] = [];
+  for (let before: number | undefined; ; ) {
+    const [row] = db.auditLog(1, { before });
+    if (!row) break;
+    seen.push(row.details);
+    before = row.id;
+  }
+  assert.deepEqual(seen, ['save', 'stop', 'in 10 min', 'list']);
   db.close();
   assert.doesNotThrow(() => db.audit({ actor: 'x', action: 'command', target: 'a', details: '' }));
 });

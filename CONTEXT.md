@@ -62,11 +62,23 @@ The versioned base content a server runs: a modpack release (GTNH 2.7.4) or plai
 _Avoid_: modpack (for the general term), instance
 
 **Extra**:
-A third-party mod jar or config file added on top of a server's pack and tracked by the hub. Orrery's own mod is the Mod, never an extra: it reaches a server by a deploy, and a pack update puts back the Mod release the server already ran.
+A third-party mod jar or config file the hub keeps for one server and puts in after every pack update, either at a new path or overwriting the pack's file there. Orrery's own mod is the Mod, never an extra: it reaches a server by a deploy, and a pack update puts back the Mod release the server already ran, the same way it puts back extras.
 _Avoid_: addon, overlay, custom mod, mod (the Mod is orrery's own)
 
+**Config edit**:
+A find-and-replace the hub makes in one of the pack's own files after every pack update (heap size in the start script, pollution off). An edit that no longer matches anything stops the update.
+_Avoid_: patch, tweak, override (a whole replaced file is an extra)
+
+**Kept path**:
+A file or folder in a server's folder that belongs to the server, not the pack: a pack update never deletes or overwrites it (the world, `server.properties`, `config/JourneyMapServer`).
+_Avoid_: preserved, excluded, ignored
+
+**Adopt**:
+Telling the hub which pack version a server already runs, so it can take over pack updates for that server without changing anything on disk.
+_Avoid_: import, register
+
 **Pack update**:
-Moving a server to another version of its pack, with its extras applied again.
+Moving a server to another version of its pack, with its extras and config edits applied again. Going back to an older pack version is a pack update too, and so is applying changed extras or config edits onto the version already installed.
 _Avoid_: upgrade, reinstall
 
 ### Releases

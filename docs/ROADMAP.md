@@ -107,9 +107,21 @@ Stats) and History tabs (#79); the Backups tab (#80); Services with the checks m
 | Backups page: list, sizes, trend; **restore button** (wraps the v1.3 script, with confirmation) | hub + web | M |
 | Base stats (LSC power, AE2 storage, crafting CPUs) from the existing `oc-influxdb-exporter` (later: not in step 5) | hub | M |
 
+## v2 continued — chat, deploys, staging, packs
+
+Map: #57 (its CI piece shipped with #69). One spec per row, built in this order: each needs the rows above it, except
+that staging's hub and web changes (the `environment` field, `/api/environment` and the badge) can land early.
+
+| # | Spec | Where | Size | Needs |
+|---|---|---|---|---|
+| 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |
+| 2 | Releases and deploys: `.github/release.sh`, hub self-deploy with Rollback, dashboard and Mod deploys, `integrations.github`: #89 | repo + hub + web + deploy | L | — |
+| 3 | Staging: a second Environment at `staging.orrery.run`, its own OS user, OAuth app and `demo` server: #91 | hub + web + deploy | S | #89's release layout and deploy units |
+| 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
+
 ## Later / if needed
 
-- GitHub integration: a repo's CI runs, releases and open issues (introduces a Project term).
+- More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).
 
 - Whitelist gating (auto-whitelist linked members, remove on leaving the Discord server). Needs the
   privileged Server Members intent.

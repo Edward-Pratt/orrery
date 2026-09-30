@@ -14,13 +14,13 @@ export type Live = { id: number; event: LiveEvent };
 /** A server's own events: never the host's, a service's or a check's, even one with the same id. */
 export const ofServer =
   (serverId: string) =>
-  (live: Live): live is { id: number; event: HubEvent } =>
+  (live: Live): live is { id: number; event: HubEvent & { at: number } } =>
     'serverId' in live.event && live.event.serverId === serverId;
 
 /** Events about the host, services or checks (`target`), never a server's. */
 export const ofTarget =
   (target: Target) =>
-  (live: Live): live is { id: number; event: TargetEvent } =>
+  (live: Live): live is { id: number; event: TargetEvent & { at: number } } =>
     'target' in live.event && live.event.target === target;
 
 /**

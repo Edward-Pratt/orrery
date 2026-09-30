@@ -139,7 +139,7 @@ export async function startDiscord(
   const channels = new Map(Object.entries(cfg.channels)); // serverId -> channelId; a Map, so no inherited keys
   const serverByChannel = new Map([...channels].map(([serverId, channelId]) => [channelId, serverId]));
   const webhooks = new Map<string, Webhook>(); // serverId -> relay webhook
-  const refusedNames = new Set<string>(); // player names Discord won't accept as a webhook username
+  const refusedNames = new Set<string>(); // names Discord won't accept as a webhook username
   const topics = new Map<string, TopicEdit>(); // channelId -> last edit
   let presence = '';
   const client = new Client({
@@ -161,14 +161,19 @@ export async function startDiscord(
     post(serverId, message).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
   };
 
-  // Game chat goes through the channel's webhook, with the player's name and skin; falls back to the bot.
-  async function relayChat(e: Extract<HubEvent, { type: 'chat' }>): Promise<void> {
+  // Game chat (the player's name and skin) and dashboard lines (the admin's name and avatar, marked) go through the
+  // channel's webhook; falls back to the bot.
+  async function relayChat(e: Extract<HubEvent, { type: 'chat' | 'say' }>): Promise<void> {
+    const [username, avatarURL] =
+      e.type === 'chat'
+        ? [e.player, `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64`]
+        : [`${e.author} (dashboard)`, e.avatar];
     const hook = webhooks.get(e.serverId);
-    if (hook && !refusedNames.has(e.player)) {
+    if (hook && !refusedNames.has(username)) {
       try {
         await hook.send({
-          username: e.player,
-          avatarURL: `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64`,
+          username,
+          avatarURL,
           content: md(e.message),
           allowedMentions: { parse: [] },
         });
@@ -176,7 +181,7 @@ export async function startDiscord(
       } catch (err) {
         // A deleted webhook is forgotten; a refused name is remembered, so neither is retried per message.
         if (errorCode(err) === UNKNOWN_WEBHOOK) webhooks.delete(e.serverId);
-        if (errorCode(err) === INVALID_FORM_BODY) refusedNames.add(e.player);
+        if (errorCode(err) === INVALID_FORM_BODY) refusedNames.add(username);
         console.warn(`[discord] webhook send failed, posting as the bot: ${(err as Error).message}`);
       }
     }
@@ -199,7 +204,7 @@ export async function startDiscord(
   }
 
   hub.on('event', (e) => {
-    if (e.type === 'chat') {
+    if (e.type === 'chat' || (e.type === 'say' && e.source === 'dashboard')) {
       relayChat(e).catch((err) => console.error('[discord] chat relay failed:', err));
       return;
     }
@@ -216,7 +221,7 @@ export async function startDiscord(
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
     // Linked people appear in game under their Minecraft name.
-    hub.say(serverId, stats.linkedPlayer(m.author.id) ?? m.member?.displayName ?? m.author.username, text);
+    hub.say(serverId, stats.linkedPlayer(m.author.id) ?? m.member?.displayName ?? m.author.username, text, 'discord');
   });
 
   client.on(Events.InteractionCreate, (i) => {

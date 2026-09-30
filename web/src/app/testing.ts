@@ -1,4 +1,4 @@
-import type { LiveEvent } from '@hub/api';
+import type { HubEvent, LiveEvent, TargetEvent } from '@hub/api';
 
 /**
  * A fake `/api/events` for the FETCH token: each call opens a stream the test writes frames to (`push`, to every open
@@ -20,7 +20,9 @@ export function fakeEvents() {
   return {
     fetch: fetch as typeof globalThis.fetch,
     requests,
-    push: (id: number, e: LiveEvent) => open.forEach((c) => c.enqueue(text.encode(`id: ${id}\ndata: ${JSON.stringify(e)}\n\n`))),
+    /** Sends `e` as the hub would, stamped with `at` (default: now) unless it has its own. */
+    push: (id: number, e: HubEvent | TargetEvent, at = Date.now()) =>
+      open.forEach((c) => c.enqueue(text.encode(`id: ${id}\ndata: ${JSON.stringify({ at, ...e } satisfies LiveEvent)}\n\n`))),
     comment: () => open.forEach((c) => c.enqueue(text.encode(': keep-alive\n\n'))),
     drop: () => (open.forEach((c) => c.close()), open.clear()),
   };

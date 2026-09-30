@@ -9,9 +9,6 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.network.rcon.RConConsoleSource;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.stats.StatisticsFile;
-import net.minecraft.util.ChatComponentText;
-import net.minecraft.util.ChatStyle;
-import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.IChatComponent;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.WorldServer;
@@ -132,13 +129,9 @@ public class GameEvents {
     private void handle(MinecraftServer server, JsonObject in) {
         String type = HubClient.str(in, "type");
         if (type.equals("say")) {
-            IChatComponent line = new ChatComponentText("");
-            line.appendSibling(
-                new ChatComponentText("[Discord] ").setChatStyle(new ChatStyle().setColor(EnumChatFormatting.BLUE)));
-            line.appendSibling(
-                new ChatComponentText("<" + HubClient.str(in, "author") + "> " + HubClient.str(in, "message")));
             server.getConfigurationManager()
-                .sendChatMsg(line);
+                .sendChatMsg(
+                    SayLine.of(HubClient.str(in, "author"), HubClient.str(in, "message"), HubClient.str(in, "source")));
         } else if (type.equals("cmd")) {
             final CommandOutput output = new CommandOutput(HubClient.str(in, "id"), System.currentTimeMillis());
             // Vanilla's RCON sender: op-level, real world and coordinates. We only capture its replies per line,

@@ -62,7 +62,7 @@ The versioned base content a server runs: a modpack release (GTNH 2.7.4) or plai
 _Avoid_: modpack (for the general term), instance
 
 **Extra**:
-A third-party mod jar or config file added on top of a server's pack and tracked by the hub. Orrery's own mod is the Mod, not an extra unless decided otherwise.
+A third-party mod jar or config file added on top of a server's pack and tracked by the hub. Orrery's own mod is the Mod, never an extra: it reaches a server by a deploy, and a pack update puts back the Mod release the server already ran.
 _Avoid_: addon, overlay, custom mod, mod (the Mod is orrery's own)
 
 **Pack update**:
@@ -76,8 +76,12 @@ A tagged version of one part (hub, mod or dashboard), e.g. `hub-v2.4.0`.
 _Avoid_: build, version (a version is the number)
 
 **Deploy**:
-Putting a release onto a host.
-_Avoid_: install, rollout, push
+Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server. Each hub deploys only its own environment. Going back to an older release is a deploy too.
+_Avoid_: install, rollout, push, redeploy (deploying the running release is refused)
+
+**Rollback**:
+The hub returning by itself to the release it ran before, when a deploy's new release fails to stay up.
+_Avoid_: revert, downgrade (choosing an older release is a deploy)
 
 **Production**:
 The hub and dashboard people really use, with the real servers.

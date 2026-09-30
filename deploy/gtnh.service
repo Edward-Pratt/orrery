@@ -22,7 +22,9 @@ StandardInput=socket
 StandardOutput=journal
 StandardError=journal
 # `stop` saves and runs every mod's shutdown handler; then wait for the JVM to exit.
-ExecStop=/bin/sh -c 'echo stop > /run/gtnh.stdin; while kill -0 $MAINPID 2>/dev/null; do sleep 2; done'
+# systemd also runs ExecStop after the server exits by itself (in-game stop, crash). With no server reading, the
+# `stop` would wait in the FIFO, start the service again (socket activation) and stop the next server: a loop (#86).
+ExecStop=/bin/sh -c '[ -n "$MAINPID" ] && kill -0 "$MAINPID" 2>/dev/null || exit 0; echo stop > /run/gtnh.stdin; while kill -0 $MAINPID 2>/dev/null; do sleep 2; done'
 # GTNH world saves can take minutes; the 90 s default would SIGKILL mid-save and risk corruption.
 TimeoutStopSec=600
 Restart=always

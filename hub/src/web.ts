@@ -29,7 +29,7 @@ import type { LiveFeed } from './live.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
-import { mcText, type LiveEvent, type ServerHub, type ServerState } from './servers.ts';
+import { mcText, type FeedEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
@@ -276,8 +276,10 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const id = c.req.param('id');
     const user = c.get('user');
     const message = c.get('body').message;
-    // Linked people appear in game under their Minecraft name, as from Discord.
-    if (typeof message !== 'string' || !hub.say(id, stats.linkedPlayer(user.id) ?? user.username, message)) {
+    // Linked people appear in game under their Minecraft name, as from Discord; Discord shows the admin's avatar.
+    const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : undefined;
+    const author = stats.linkedPlayer(user.id) ?? user.username;
+    if (typeof message !== 'string' || !hub.say(id, author, message, 'dashboard', avatar)) {
       return c.text('Give a message', 400);
     }
     hub.audit(actor(user), 'chat', id, mcText(message, 256));
@@ -315,8 +317,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
   app.get('/events', (c) =>
     streamSSE(c, async (stream) => {
-      const send = (id: number, e: LiveEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
-      const onEvent = (id: number, e: LiveEvent) => void send(id, e);
+      const send = (id: number, e: FeedEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
+      const onEvent = (id: number, e: FeedEvent) => void send(id, e);
       // ponytail: a client that stops reading queues events in memory until its connection drops.
       for (const [id, e] of live.since(Number(c.req.header('last-event-id')) || 0)) void send(id, e);
       live.on('event', onEvent);

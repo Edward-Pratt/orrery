@@ -50,7 +50,13 @@ async function setup(url: string, card = CARD, service: ServiceStatus | null = n
   const render = async () => (await settle(), harness.fixture.detectChanges(), await harness.fixture.whenStable());
   await render();
   const text = (e: Element | null | undefined) => e?.textContent?.replace(/\s+/g, ' ').trim();
-  const chat = () => [...el.querySelectorAll('[data-chat] li')].map(text);
+  /** Each chat line's text, without its time. */
+  const chat = () =>
+    [...el.querySelectorAll('[data-chat] li')].map((li) => {
+      const line = li.cloneNode(true) as Element;
+      line.querySelector('time')?.remove();
+      return text(line);
+    });
   const tabs = () => [...el.querySelectorAll('[data-sections] a')].map(text);
   /** What the chart titled `title` draws: each series' name and points. */
   const chart = (title: string) =>
@@ -173,10 +179,39 @@ describe('server chat section', () => {
     events.push(4, { serverId: 'gtnh', type: 'tps', tps: 19 });
     await render();
     expect(chat()).toEqual(['Steve joined', 'Steve: hi']);
-    events.push(5, { serverId: 'gtnh', type: 'say', author: 'alex', message: 'hello from Discord' });
+    events.push(5, { serverId: 'gtnh', type: 'say', author: 'alex', message: 'hello from Discord', source: 'discord' });
     events.push(6, { serverId: 'gtnh', type: 'death', player: 'Steve', message: 'Steve fell' });
     await render();
-    expect(chat()).toEqual(['Steve joined', 'Steve: hi', 'alex (Discord or dashboard): hello from Discord', 'Steve fell']);
+    expect(chat()).toEqual(['Steve joined', 'Steve: hi', 'alex Discord: hello from Discord', 'Steve fell']);
+  });
+
+  it('tags each sent line with where it came from, and leaves game chat untagged', async () => {
+    const { el, events, render } = await setup('/gtnh/chat');
+    events.push(1, { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' });
+    events.push(2, { serverId: 'gtnh', type: 'say', author: 'bob', message: 'from Discord', source: 'discord' });
+    events.push(3, { serverId: 'gtnh', type: 'say', author: 'alex', message: 'from here', source: 'dashboard', avatar: 'https://x/a.png' });
+    await render();
+    const tags = [...el.querySelectorAll('[data-chat] li')].map((li) => li.querySelector('[data-source]')?.textContent?.trim() ?? null);
+    expect(tags).toEqual([null, 'Discord', 'Dashboard']);
+  });
+
+  it("starts each line with its local time, the day too before today, and the full date on hover", async () => {
+    // Local-time dates, so the expected times hold in any zone.
+    vi.useFakeTimers({ now: new Date(2026, 8, 30, 15, 0), toFake: ['Date'] });
+    try {
+      const { el, events, render } = await setup('/gtnh/chat');
+      const earlier = new Date(2026, 8, 29, 23, 30).getTime();
+      const today = new Date(2026, 8, 30, 9, 5).getTime();
+      events.push(1, { serverId: 'gtnh', type: 'join', player: 'Steve' }, earlier);
+      events.push(2, { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' }, today);
+      await render();
+      const times = [...el.querySelectorAll('[data-chat] li time')];
+      expect(times.map((t) => t.textContent?.trim())).toEqual(['29 Sep 23:30', '09:05']);
+      expect(times.map((t) => t.getAttribute('datetime'))).toEqual([new Date(earlier).toISOString(), new Date(today).toISOString()]);
+      expect(times[1]!.getAttribute('title')).toBe('Wednesday 30 September 2026, 09:05:00');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends a message as JSON, and explains a 409 as the server being offline', async () => {

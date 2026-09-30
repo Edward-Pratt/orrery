@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -12,20 +13,27 @@ import ServerPage from './server';
 type ChatLine = Extract<LiveEvent, { type: 'chat' | 'join' | 'leave' | 'death' | 'say' }>;
 const CHAT_TYPES: LiveEvent['type'][] = ['chat', 'join', 'leave', 'death', 'say'] satisfies ChatLine['type'][];
 const MAX_LINES = 500;
+const SOURCES = { discord: 'Discord', dashboard: 'Dashboard' } as const;
+
+/** Today's lines show the time only; older ones the day too. */
+const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDateString();
 
 /** A server's Chat section: recent and live chat, and sending into the game. */
 @Component({
   selector: 'app-server-chat',
-  imports: [HlmButton, PlayerName, StickBottom],
+  imports: [DatePipe, HlmButton, PlayerName, StickBottom],
   template: `
     @if (server.card()!.features.chat) {
       <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
         <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-chat>
           @for (line of lines(); track $index) {
             <li>
+              <time class="me-2 text-muted-foreground" [attr.datetime]="iso(line.at)" [title]="line.at | date: 'EEEE d MMMM y, HH:mm:ss'">{{
+                line.at | date: (sameDay(line.at) ? 'HH:mm' : 'd MMM HH:mm')
+              }}</time>
               @switch (line.type) {
                 @case ('chat') { <b><button [appPlayer]="line.player">{{ line.player }}</button></b>: {{ line.message }} }
-                @case ('say') { <b>{{ line.author }}</b><span class="text-muted-foreground"> (Discord or dashboard)</span>: {{ line.message }} }
+                @case ('say') { <b>{{ line.author }}</b><span class="text-xs text-muted-foreground" data-source> {{ sources[line.source] }}</span>: {{ line.message }} }
                 @case ('join') { <span class="text-muted-foreground"><button [appPlayer]="line.player">{{ line.player }}</button> joined</span> }
                 @case ('leave') { <span class="text-muted-foreground"><button [appPlayer]="line.player">{{ line.player }}</button> left</span> }
                 @case ('death') { <span class="text-muted-foreground">{{ line.message }}</span> }
@@ -53,6 +61,9 @@ export default class Chat {
   readonly #http = inject(HttpClient);
   readonly lines = signal<ChatLine[]>([]);
   readonly error = signal<string | null>(null);
+  protected readonly sources = SOURCES;
+  protected readonly sameDay = sameDay;
+  protected readonly iso = (at: number) => new Date(at).toISOString();
 
   constructor() {
     // The replay brings recent chat first, then new lines arrive live.

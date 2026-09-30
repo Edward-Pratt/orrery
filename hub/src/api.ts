@@ -7,7 +7,7 @@ import type {
   BackupsAnswer,
   HistoryAnswer,
   HostSample,
-  LiveEvent as AnyLiveEvent,
+  FeedEvent,
   Period,
   PlaytimeAnswer,
   ServiceStatus,
@@ -132,9 +132,10 @@ export type AuditLog = { entries: AuditRow[]; older: boolean };
 /**
  * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. A server's events
  * have `serverId`; the host's, a service's and a check's have `target` and `id` instead. `tps` events come from
- * heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest.
+ * heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest. `at` is when the hub saw
+ * the event (epoch ms), the same in a replay. A `say` (chat sent into the game) has its `source`: `discord` or `dashboard`.
  */
-export type LiveEvent = AnyLiveEvent;
+export type LiveEvent = FeedEvent;
 
 /**
  * Every request but GET/HEAD — the actions below, logout too — must send `Origin` (the dashboard's) and

@@ -3,7 +3,7 @@ import type { LiveEvent } from '@hub/api';
 import { FETCH, Live, LiveEvents, ofServer, RETRY_MS } from './events';
 import { fakeEvents, settle } from './testing';
 
-const chat = (message: string): LiveEvent => ({ serverId: 'gtnh', type: 'chat', player: 'Steve', message });
+const chat = (message: string): LiveEvent => ({ serverId: 'gtnh', type: 'chat', player: 'Steve', message, at: 1 });
 
 describe('LiveEvents', () => {
   it('gives the replay, then live events, then resumes after the last id when the stream drops', async () => {
@@ -61,11 +61,11 @@ describe('LiveEvents streams', () => {
 
 describe('ofServer', () => {
   it("keeps a server's own events, not a check's with the same id", () => {
-    const check: LiveEvent = { target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: 'https://x', error: 'HTTP 503' };
+    const check: LiveEvent = { target: 'check', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'checkDown', url: 'https://x', error: 'HTTP 503', at: 1 };
     const events: Live[] = [
       { id: 1, event: chat('mine') },
       { id: 2, event: check },
-      { id: 3, event: { serverId: 'other', type: 'started' } },
+      { id: 3, event: { serverId: 'other', type: 'started', at: 1 } },
     ];
     expect(events.filter(ofServer('gtnh')).map((l) => l.id)).toEqual([1]);
   });

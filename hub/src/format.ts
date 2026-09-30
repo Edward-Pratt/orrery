@@ -69,6 +69,8 @@ export function formatEvent(e: HubEvent): Post | null {
   switch (e.type) {
     case 'chat':
       return { content: `**${md(e.player)}**: ${md(e.message)}` };
+    case 'say': // chat sent into the game: Discord's own came from its channel
+      return e.source === 'dashboard' ? { content: `**${md(e.author)}** (dashboard): ${md(e.message)}` } : null;
     case 'join':
       return { content: `➡️ **${md(e.player)}** joined` };
     case 'leave':
@@ -101,7 +103,6 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'link': // answered by Links, which announces a new link
     case 'unlink':
     case 'backup': // the BackupWatcher publishes it as a notice
-    case 'say': // chat sent into the game: Discord's own came from its channel
     case 'console': // the /cmd reply shows it to whoever ran it
     case 'tps': // for the dashboard; /tps and lag notices cover Discord
       return null;

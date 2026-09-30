@@ -348,7 +348,9 @@ async function liveHub(t: TestContext) {
   return { app, cookie: await loginCookie(app), hub: hub!, live: handle.live, port: handle.port! };
 }
 
-type Sse = { id: number; data: LiveEvent };
+type Sse = { id: number; at: number; data: HubEvent | TargetEvent };
+/** A live event without the feed's time, to compare with what was sent. */
+const unstamped = ({ at: _, ...e }: LiveEvent) => e as HubEvent | TargetEvent;
 
 /** Opens /api/events and reads its frames (comments skipped) as they arrive. */
 async function openStream(app: WebApi, cookie: string, lastEventId?: number) {
@@ -371,7 +373,10 @@ async function openStream(app: WebApi, cookie: string, lastEventId?: number) {
         buf = buf.slice(end + 2);
         const field = (name: string) => frame.find((l) => l.startsWith(`${name}: `))?.slice(name.length + 2);
         const data = field('data');
-        if (data) events.push({ id: Number(field('id')), data: JSON.parse(data) });
+        if (data) {
+          const event = JSON.parse(data) as LiveEvent;
+          events.push({ id: Number(field('id')), at: event.at, data: unstamped(event) });
+        }
       }
     }
   })();
@@ -385,9 +390,9 @@ test('chat, commands and lifecycle changes reach an open event stream', async (t
   const mod = await online(port);
   mod.send({ type: 'chat', player: 'Steve', message: 'hi' });
   await until(() => stream.events.length === 2);
-  hub.say('gtnh', 'alex', 'hello back');
+  hub.say('gtnh', 'alex', 'hello back', 'discord');
   const result = hub.runCommand('gtnh', 'list', 'web:alex (5)');
-  assert.equal(((await mod.next()) as { type: string }).type, 'say');
+  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hello back', source: 'discord' });
   const run = (await mod.next()) as { id: string };
   mod.send({ type: 'cmdResult', id: run.id, output: ['There are 0 players'] });
   await result;
@@ -398,7 +403,7 @@ test('chat, commands and lifecycle changes reach an open event stream', async (t
     [
       { serverId: 'gtnh', type: 'connected' },
       { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' },
-      { serverId: 'gtnh', type: 'say', author: 'alex', message: 'hello back' },
+      { serverId: 'gtnh', type: 'say', author: 'alex', message: 'hello back', source: 'discord' },
       { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:alex (5)', output: ['There are 0 players'] },
       { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:alex (5)', output: ['later'], late: true },
     ],
@@ -406,6 +411,18 @@ test('chat, commands and lifecycle changes reach an open event stream', async (t
   const ids = stream.events.map((e) => e.id);
   assert.deepEqual(ids, [...ids].sort((a, b) => a - b));
   assert.equal(new Set(ids).size, ids.length);
+  for (const e of stream.events) assert.ok(Number.isInteger(e.at) && Math.abs(e.at - Date.now()) < 60_000, JSON.stringify(e));
+
+  // A replay and a resume carry the time each event had live.
+  const times = (events: Sse[]) => events.map((e) => [e.id, e.at]);
+  const replay = await openStream(app, cookie);
+  await until(() => replay.events.length === 5);
+  await replay.close();
+  assert.deepEqual(times(replay.events), times(stream.events));
+  const resumed = await openStream(app, cookie, ids[1]);
+  await until(() => resumed.events.length === 3);
+  await resumed.close();
+  assert.deepEqual(times(resumed.events), times(stream.events.slice(2)));
 });
 
 test('a new stream replays recent events first, and Last-Event-ID resumes after that id', async (t) => {
@@ -743,8 +760,16 @@ test('chat from the dashboard reaches the mod, appears on the stream and is audi
   t.after(() => stream.close());
   const res = await post(app, cookie, '/api/servers/gtnh/chat', { message: 'hi §cthere' });
   assert.equal(res.status, 204);
-  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi there' });
+  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi there', source: 'dashboard' });
   await until(() => stream.events.some((e) => e.data.type === 'say'));
+  assert.deepEqual(stream.events.find((e) => e.data.type === 'say')!.data, {
+    serverId: 'gtnh',
+    type: 'say',
+    author: 'alex',
+    message: 'hi there',
+    source: 'dashboard',
+    avatar: `https://cdn.discordapp.com/avatars/${ADMIN.id}/a1b2c3.png?size=64`,
+  });
   assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
     { actor: ACTOR, action: 'chat', target: 'gtnh', details: 'hi there' },
   ]);
@@ -841,7 +866,7 @@ test('a state-changing request needs a session, the dashboard origin and JSON', 
   assert.equal((await chat({ origin: '' })).status, 403);
   assert.equal((await chat({ 'content-type': 'text/plain' })).status, 415);
   assert.equal((await chat({ 'content-type': 'application/json; charset=utf-8' })).status, 204);
-  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi' });
+  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi', source: 'dashboard' });
   assert.equal((await app.request('/api/logout', { method: 'POST', headers: { cookie } })).status, 403);
 });
 
@@ -888,7 +913,10 @@ async function checksHub(t: TestContext, answers: Answer[]) {
   });
   t.after(() => handle.close());
   const notices: TargetNotice[] = [];
-  const add = (e: LiveEvent) => void ('target' in e && e.type === 'notice' && notices.push(e));
+  const add = (fed: LiveEvent) => {
+    const e = unstamped(fed);
+    if ('target' in e && e.type === 'notice') notices.push(e);
+  };
   handle.live.since().forEach(([, e]) => add(e)); // from the startup request
   handle.live.on('event', (_, e) => add(e));
   const app = handle.web!.app;
@@ -992,7 +1020,10 @@ async function hostHub(t: TestContext) {
   });
   t.after(() => handle.close());
   const events: TargetEvent[] = [];
-  handle.live.on('event', (_, e) => void ('target' in e && events.push(e)));
+  handle.live.on('event', (_, fed) => {
+    const e = unstamped(fed);
+    if ('target' in e) events.push(e);
+  });
   const samples = () => events.filter((e) => e.type === 'sample').length;
   const next = async () => {
     const n = samples() + 1;
@@ -1173,7 +1204,10 @@ async function servicesHub(t: TestContext) {
   });
   t.after(() => handle.close());
   const events: TargetEvent[] = [];
-  handle.live.on('event', (_, e) => void ('target' in e && e.target === 'service' && events.push(e)));
+  handle.live.on('event', (_, fed) => {
+    const e = unstamped(fed);
+    if ('target' in e && e.target === 'service') events.push(e);
+  });
   const shows = () => systemd.calls.filter((c) => c[0] === 'systemctl').length;
   await until(() => shows() === 2);
   const next = async () => {

@@ -29,9 +29,12 @@ export type QuestDone = { name: string; main: boolean };
 export type HubMsg =
   | { type: 'welcome' }
   | { type: 'reject'; reason: string }
-  | { type: 'say'; author: string; message: string }
+  | { type: 'say'; author: string; message: string; source: ChatSource }
   | { type: 'cmd'; id: string; command: string }
   | { type: 'linkResult'; player: string; ok: boolean; message: string };
+
+/** Where a chat line sent into the game came from. */
+export type ChatSource = 'discord' | 'dashboard';
 
 export type Backup = { name: string; size: number; mtimeMs: number };
 export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };
@@ -91,9 +94,12 @@ export type Announcement =
   | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
   | { type: 'linked'; player: string; discordId: string }
   | { type: 'summary'; name: string; summary: Summary };
-/** Chat sent into the game (`say`), and a command's output (`late`: output that came after the result). */
+/**
+ * Chat sent into the game (`say`; `avatar` is the admin's Discord avatar URL, on dashboard lines only, and never sent
+ * to the mod), and a command's output (`late`: output that came after the result).
+ */
 export type HubOutput =
-  | Extract<HubMsg, { type: 'say' }>
+  | (Extract<HubMsg, { type: 'say' }> & { avatar?: string })
   | { type: 'console'; command: string; by: string; output: string[]; late?: true };
 export type HubEvent = { serverId: string } & (
   | GameMsg
@@ -166,6 +172,8 @@ export type TargetEvent = { target: Target; id: string } & (
 );
 /** Everything on the live stream: server events and the rest. */
 export type LiveEvent = HubEvent | TargetEvent;
+/** A live event as the feed keeps it: `at` is when it entered the feed (epoch ms, the hub's clock). */
+export type FeedEvent = LiveEvent & { at: number };
 
 /** An action taken on a server, for the audit log. `actor` is e.g. "discord:alice (123)", or "hub:daily" for the hub itself. */
 export type AuditEntry = { actor: string; action: string; target: string; details: string };

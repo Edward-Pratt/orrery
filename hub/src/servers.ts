@@ -3,10 +3,12 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
-import type { Announcement, AuditEntry, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
+import type { Announcement, AuditEntry, ChatSource, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
 export type {
   Announcement,
   AuditEntry,
+  ChatSource,
+  FeedEvent,
   GameMsg,
   HubEvent,
   CheckStatus,
@@ -151,14 +153,17 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     return s && { ...s, players: [...s.players], dims: [...s.dims] };
   }
 
-  /** Broadcasts a chat line in-game. False if the server is offline or the text is empty after cleaning. */
-  say(id: string, author: string, message: string): boolean {
+  /**
+   * Broadcasts a chat line in-game, marked with where it came from. `avatar` (the admin's, for a dashboard line) goes
+   * only on the event, not to the mod. False if the server is offline or the text is empty after cleaning.
+   */
+  say(id: string, author: string, message: string, source: ChatSource, avatar?: string): boolean {
     const conn = this.#conns.get(id);
     const text = mcText(message, 256);
     if (!conn || !text) return false;
-    const msg = { type: 'say', author: mcText(author, 32) || '?', message: text } as const;
+    const msg = { type: 'say', author: mcText(author, 32) || '?', message: text, source } as const;
     this.#send(conn.socket, msg);
-    this.emit('event', { ...msg, serverId: id });
+    this.emit('event', { ...msg, ...(avatar && { avatar }), serverId: id });
     return true;
   }
 

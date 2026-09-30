@@ -167,15 +167,31 @@ test('a reconnect replaces the old connection without a crash alert', async (t) 
 
 test('say cleans text and skips empty messages', async (t) => {
   const { hub, port } = await setup(t);
-  assert.equal(hub.say('gtnh', 'Bob', 'hi'), false); // offline
+  assert.equal(hub.say('gtnh', 'Bob', 'hi', 'discord'), false); // offline
   const mod = await online(port);
-  assert.equal(hub.say('gtnh', 'Bob', '§c§l'), false);
-  assert.equal(hub.say('gtnh', 'B§4ob\n', 'line1\nline2 §kx' + 'y'.repeat(300)), true);
-  const say = (await mod.next()) as { type: string; author: string; message: string };
+  assert.equal(hub.say('gtnh', 'Bob', '§c§l', 'discord'), false);
+  assert.equal(hub.say('gtnh', 'B§4ob\n', 'line1\nline2 §kx' + 'y'.repeat(300), 'discord'), true);
+  const say = (await mod.next()) as { type: string; author: string; message: string; source: string };
   assert.equal(say.type, 'say');
   assert.equal(say.author, 'Bob');
+  assert.equal(say.source, 'discord');
   assert.equal(say.message.length, 256);
   assert.ok(say.message.startsWith('line1 line2 xyyy'));
+});
+
+test('say sends its source to the mod and keeps the avatar on the event', async (t) => {
+  const { hub, port, events } = await setup(t);
+  const mod = await online(port);
+  assert.equal(hub.say('gtnh', 'alex', 'hi', 'dashboard', 'https://cdn.example/a.png'), true);
+  assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi', source: 'dashboard' });
+  assert.deepEqual(events.at(-1), {
+    serverId: 'gtnh',
+    type: 'say',
+    author: 'alex',
+    message: 'hi',
+    source: 'dashboard',
+    avatar: 'https://cdn.example/a.png',
+  });
 });
 
 test('a mod cannot claim another serverId in its messages', async (t) => {

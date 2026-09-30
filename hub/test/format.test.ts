@@ -39,6 +39,14 @@ test('formatEvent keeps chat-like events as escaped plain text', () => {
   });
 });
 
+test('formatEvent posts a dashboard line as escaped text, and no Discord line', () => {
+  const say = { serverId: 's', type: 'say', author: 'a_b', message: '**hi** @everyone' } as const;
+  assert.deepEqual(formatEvent({ ...say, source: 'dashboard', avatar: 'https://x/a.png' }), {
+    content: '**a\\_b** (dashboard): \\*\\*hi\\*\\* @everyone',
+  });
+  assert.equal(formatEvent({ ...say, source: 'discord' }), null);
+});
+
 test('formatEvent announces lifecycle as coloured embeds, but not reconnects', () => {
   assert.equal(formatEvent({ serverId: 's', type: 'connected' }), null);
   assert.equal(formatEvent({ serverId: 's', type: 'offline' }), null);

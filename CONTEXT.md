@@ -95,6 +95,9 @@ _Avoid_: install, rollout, push, redeploy (deploying the running release is refu
 The hub returning by itself to the release it ran before, when a deploy's new release fails to stay up.
 _Avoid_: revert, downgrade (choosing an older release is a deploy)
 
+**Environment**:
+One hub and its dashboard, with their own config, data and login: Production or Staging. A hub acts only on its own environment.
+
 **Production**:
 The hub and dashboard people really use, with the real servers.
 

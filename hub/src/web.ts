@@ -193,6 +193,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       return c.json(deploys.answer(before === undefined ? undefined : Number(before)) satisfies DeploysAnswer);
     });
     app.post('/deploys/check', async (c) => {
+      hub.audit(actor(c.get('user')), 'deploy check', 'github', integrations.github!.repo);
       await deploys.check();
       return c.json(deploys.answer() satisfies DeploysAnswer);
     });

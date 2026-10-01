@@ -37,9 +37,11 @@ export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
   ];
 }
 
-/** A newer release that has waited longer than `newerAfterDays`: it needs attention. */
-export const overdue = (r: ReleaseRow, a: DeploysAnswer, now = Date.now()) =>
-  r.newer && r.releases[0]!.publishedAt < now - a.newerAfterDays * DAY;
+/** The oldest release newer than the running one has waited longer than `newerAfterDays`: it needs attention. */
+export function overdue(r: ReleaseRow, a: DeploysAnswer, now = Date.now()): boolean {
+  const at = r.releases.findIndex((rel) => rel.tag === r.running);
+  return at > 0 && r.releases[at - 1]!.publishedAt < now - a.newerAfterDays * DAY;
+}
 
 /** `hub-v2.6.0` → `v2.6.0`. */
 export const short = (tag: string | null) => tag?.replace(/^(hub|web|mod)-/, '') ?? 'unknown';

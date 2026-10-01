@@ -112,6 +112,15 @@ Stats) and History tabs (#79); the Backups tab (#80); Services with the checks m
 Map: #57 (its CI piece shipped with #69). One spec per row, built in this order: each needs the rows above it, except
 that staging's hub and web changes (the `environment` field, `/api/environment` and the badge) can land early.
 
+**Chat mirroring — done (`hub-v2.6.0` + `web-v0.5.0` + `mod-v1.4.0`, deployed 2026-10-01):** #88 (#92, #93, #94).
+
+**Releases and deploys — deployed 2026-10-01 (`hub-v2.6.0`, `hub-v2.6.1`, `web-v0.5.0`, `mod-v1.4.0`):** #89. The
+release script (#96); `integrations.github` and read-only Releases on the Host page (#97); the hub deploy script, units
+and polkit (#98); hub deploys with the history (#99); restore exclusion, the floor and Discord notices (#100); dashboard
+deploys (#101); Mod deploys (#102); the one-time move to `/home/opc/orrery` and smoke test (#103), which found that
+SELinux won't let systemd follow the `current` symlink into `WorkingDirectory` (the hub unit now has none). Still to
+smoke test: a Rollback of a broken hub release, and a dashboard deploy (it waits for `web-v0.5.1`).
+
 | # | Spec | Where | Size | Needs |
 |---|---|---|---|---|
 | 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |

@@ -64,7 +64,6 @@ const newestFirst = (a: Release, b: Release) => {
   return y[0]! - x[0]! || y[1]! - x[1]! || y[2]! - x[2]!;
 };
 /** The first hub and dashboard releases that can deploy: an older one would take the deploy flow away. */
-// ponytail: placeholders until #103 tags the real first releases.
 export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0' } as const;
 // ponytail: one environment per hub until the staging spec adds config's `environment`.
 const ENVIRONMENT = 'production';

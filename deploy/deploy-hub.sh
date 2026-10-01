@@ -17,8 +17,8 @@ gate=${DEPLOY_GATE_SECONDS:-30} poll=${DEPLOY_GATE_POLL:-2}
 [[ $(id -u) -ne 0 ]] || { echo "refusing to run as root: run as the hub's user" >&2; exit 2; }
 exec 9> "$root/deploy.lock"
 flock -n 9 || { echo "another deploy holds $root/deploy.lock" >&2; exit 1; }
-from=$(readlink "$root/current") || { echo "no $root/current to deploy over" >&2; exit 1; }
-from=$(basename "$from")
+prev=$(readlink "$root/current") || { echo "no $root/current to deploy over" >&2; exit 1; }
+from=$(basename "$prev") # the link itself is what a Rollback restores, wherever it pointed
 [[ $from != "$tag" ]] || { echo "$tag is already running" >&2; exit 1; }
 rm -f "$root/deploy-status.json" # the restarted hub must not mistake an earlier deploy's outcome for this one's
 
@@ -61,9 +61,9 @@ up() { # true if the unit stays active/running with one MainPID for the whole ga
   done
 }
 
-flip() { # <release>: points current at releases/<release> in one rename
-  ln -sfn "releases/$1" "$root/current.new" && mv -T "$root/current.new" "$root/current"
-  echo "current -> releases/$1; restarting $unit"
+flip() { # <target>: points current at it in one rename
+  ln -sfn "$1" "$root/current.new" && mv -T "$root/current.new" "$root/current"
+  echo "current -> $1; restarting $unit"
   systemctl restart "$unit" || echo "systemctl restart $unit failed"
 }
 
@@ -85,10 +85,10 @@ if ! clone || ! (cd "$dir/hub" && npm ci --omit=dev); then
   finish failed
 fi
 
-flip "$tag"
+flip "releases/$tag"
 if up; then finish ok; fi
 echo "rolling back to $from"
-flip "$from"
+flip "$prev"
 if up; then finish 'rolled back'; fi
 echo "$from didn't come up either: leaving it in place"
 finish failed

@@ -142,7 +142,7 @@ export type ServiceVerb = 'start' | 'stop' | 'restart';
  * environment or, for a Mod, the server id).
  */
 export type Target = 'host' | 'service' | 'check' | 'deploy';
-/** Something a hub-core module wants people to know about the host, a service or a check. */
+/** Something a hub-core module wants people to know about the host, a service, a check or a deploy. */
 export type TargetNotice = { severity: Severity } & (
   | { kind: 'checkDown'; url: string; error: string }
   | { kind: 'checkUp'; url: string; ms: number }

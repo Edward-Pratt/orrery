@@ -6,7 +6,7 @@
 // Install: sudo install -m 644 -o root -g root deploy/orrery-hub.rules /etc/polkit-1/rules.d/50-orrery-hub.rules
 // (polkit picks it up without a restart). Check as the hub's user: `systemctl stop --no-block <unit>` works for a
 // listed unit and is refused ("Interactive authentication required") for any other.
-// Edit USER if the hub runs as someone else (User= in orrery-hub.service).
+// Edit USER here and in the deploy block below if the hub runs as someone else (User= in orrery-hub.service).
 polkit.addRule(function (action, subject) {
   // Inside the rule: every rules file shares one JavaScript scope.
   var USER = 'opc';
@@ -28,7 +28,8 @@ polkit.addRule(function (action, subject) {
 // `systemctl start --no-block orrery-deploy@hub-v0.0.0.service` is allowed (and fails at the clone), while
 // `systemctl stop orrery-deploy@hub-v0.0.0.service` or `systemctl start orrery-deploy@x.service` is refused.
 polkit.addRule(function (action, subject) {
-  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== 'opc') return;
+  var USER = 'opc'; // the same as the first rule's
+  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== USER) return;
   var unit = action.lookup('unit');
   var verb = action.lookup('verb');
   if (

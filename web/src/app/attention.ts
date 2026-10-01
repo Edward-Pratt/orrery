@@ -123,7 +123,7 @@ export class Attention {
       .subscribe((on) => on && this.#start(on));
   }
 
-  #start(on: { minecraft: boolean; systemd: boolean; checks: boolean; github: boolean }): void {
+  #start(on: { minecraft: boolean; systemd: boolean; checks: boolean; github: boolean; host: boolean }): void {
     // Debounced: the stream's replay can hold many changes at once.
     const fetching = <T>(refetch: Subject<void>, url: string, into: (v: T) => void) =>
       refetch
@@ -131,7 +131,8 @@ export class Attention {
         .subscribe(into);
     if (on.minecraft) fetching<ServerCard[]>(this.#refetchCards, '/api/servers', (v) => this.#cards.set(v));
     if (on.systemd) fetching<ServiceStatus[]>(this.#refetchServices, '/api/services', (v) => this.#services.set(v));
-    if (on.github) fetching<DeploysAnswer>(this.#refetchDeploys, '/api/deploys', (v) => this.#deploys.set(v));
+    // Releases live on the Host page: without it an item would link nowhere.
+    if (on.github && on.host) fetching<DeploysAnswer>(this.#refetchDeploys, '/api/deploys', (v) => this.#deploys.set(v));
     if (on.checks) this.#http.get<CheckStatus[]>('/api/checks').pipe(catchError(() => EMPTY)).subscribe((v) => this.#checks.set(v));
     this.#events.all$.pipe(takeUntilDestroyed(this.#destroyRef))
       .subscribe((live) => {

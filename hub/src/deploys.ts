@@ -213,7 +213,8 @@ export class Deploys {
         this.#finish(row, 'failed', `systemctl failed: ${(err as Error).message}`);
         throw err;
       }
-      this.#watch(row);
+      // Not at once: systemd may answer `show` before it has dispatched the queued start (still inactive).
+      this.#watch(row, this.#watchMs);
       return row.id;
     } finally {
       this.#starting = false;
@@ -234,14 +235,12 @@ export class Deploys {
       return 'dev';
     }
     if (part === 'web') {
-      const deployed = this.#d.db.deploys(1, { part: 'web', outcome: 'ok' })[0];
-      if (deployed) return deployed.to;
+      // The stamp first: install-web.sh writes it on every install, a deploy's or one by hand.
       try {
         const stamp = readFileSync(`${webDir}.release`, 'utf8').trim();
-        return stamp.startsWith('web-v') && TAG.test(stamp) ? stamp : null;
-      } catch {
-        return null;
-      }
+        if (stamp.startsWith('web-v') && TAG.test(stamp)) return stamp;
+      } catch {}
+      return this.#d.db.deploys(1, { part: 'web', outcome: 'ok' })[0]?.to ?? null;
     }
     const v = this.#d.hub.modVersion(serverId!);
     if (v === undefined) return null;
@@ -278,7 +277,7 @@ export class Deploys {
   }
 
   /** Waits for a hub or dashboard deploy unit to end, then closes its row from the status file it wrote. */
-  #watch(row: DeployRow): void {
+  #watch(row: DeployRow, delayMs = 0): void {
     const poll = async () => {
       try {
         const out = await this.#d.run('systemctl', ['show', '--property=ActiveState', '--', this.#unit(row)]);
@@ -293,7 +292,8 @@ export class Deploys {
         this.#finish(row, status.outcome, status.log);
       } else this.#finish(row, 'failed', 'interrupted: the deploy unit ended without reporting');
     };
-    void poll();
+    if (delayMs) this.#later(poll, delayMs);
+    else void poll();
   }
 
   #status(): { tag: string; outcome: Exclude<DeployOutcome, 'running'>; finished: string; log: string } | undefined {
@@ -356,6 +356,7 @@ export class Deploys {
       this.#d.hub.off('event', listen);
       this.#listeners.delete(listen);
       clearTimeout(timeout);
+      if (timeout) this.#timers.delete(timeout);
       this.#finish(row, outcome, log);
     };
     const listen = (e: HubEvent) => {
@@ -369,19 +370,26 @@ export class Deploys {
     };
     this.#d.hub.on('event', listen);
     this.#listeners.add(listen);
-    this.#d.restarts.schedule(serverId, this.#countdownMinutes, by, byName, {
-      fire: async () => {
-        try {
-          await swap();
-        } catch (err) {
-          done('failed', `swap failed: ${(err as Error).message}`);
-          throw err;
-        }
-        swapped = true;
-        timeout = this.#later(() => done('failed', `${serverName} didn't come back with ${release.tag} in time`), this.#modTimeoutMs);
-        await this.#d.hub.runCommand(serverId, 'stop', by); // the linked service, or the countdown restart, brings it back
-      },
-    });
+    // The server may have gone down, or a countdown started, during the download: close the row, don't leave it running.
+    try {
+      this.#d.restarts.schedule(serverId, this.#countdownMinutes, by, byName, {
+        fire: async () => {
+          try {
+            await swap();
+          } catch (err) {
+            done('failed', `swap failed: ${(err as Error).message}`);
+            throw err;
+          }
+          swapped = true;
+          timeout = this.#later(() => done('failed', `${serverName} didn't come back with ${release.tag} in time`), this.#modTimeoutMs);
+          await this.#d.hub.runCommand(serverId, 'stop', by); // the linked service, or the countdown restart, brings it back
+        },
+      });
+    } catch (err) {
+      await rm(part, { force: true });
+      done('failed', `no countdown: ${(err as Error).message}`);
+      throw new DeployRefused(409, `${serverName} changed during the download: ${(err as Error).message}`);
+    }
     return row.id;
   }
 }

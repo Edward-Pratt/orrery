@@ -49,7 +49,7 @@ const RELEASES = [
 
 /** A fake GitHub: `fails` makes listing fail, `downloadFails` the download; counts the listings. */
 function fakeGitHub() {
-  const fake = { list: RELEASES, fails: false, downloadFails: false, calls: 0, downloads: [] as string[] };
+  const fake = { list: RELEASES, fails: false, downloadFails: false, calls: 0, downloads: [] as string[], gate: Promise.resolve() };
   return Object.assign(fake, {
     releases: async () => {
       fake.calls++;
@@ -58,6 +58,7 @@ function fakeGitHub() {
     },
     download: async (tag: string, asset: string) => {
       fake.downloads.push(`${tag} ${asset}`);
+      await fake.gate;
       if (fake.downloadFails) throw new Error('GitHub: HTTP 404');
       return new TextEncoder().encode(`jar ${tag}`);
     },
@@ -444,4 +445,22 @@ test('a Mod deploy left running by a hub that stopped is closed as interrupted',
   await first.close();
   const s = await start(t, w);
   assert.deepEqual((await rows(s)).map((r) => [r.outcome, r.log]), [['failed', 'interrupted: the hub restarted']]);
+});
+
+test('a countdown started during the download refuses the Mod deploy and closes its row', async (t) => {
+  const w = world(t);
+  const s = await start(t, w, { countdownMinutes: 1 });
+  await modRunning(s.port, '1.3.0');
+  let release!: () => void;
+  w.github.gate = new Promise((r) => (release = r));
+  const deploying = s.deploy({ part: 'mod', tag: 'mod-v1.4.0', server: 'gtnh' });
+  await until(() => w.github.downloads.length === 1);
+  assert.equal((await s.post('/api/servers/gtnh/restart', { minutes: 5 })).status, 204);
+  release();
+  const res = await deploying;
+  assert.equal(res.status, 409);
+  assert.deepEqual(jars(w), ['gtnhdiscord-1.3.0.jar']);
+  assert.equal((await rows(s))[0]!.outcome, 'failed');
+  assert.equal((await s.post('/api/servers/gtnh/restart/cancel')).status, 204);
+  assert.equal((await s.deploy({ part: 'web', tag: 'web-v0.5.0' })).status, 202); // nothing left running
 });

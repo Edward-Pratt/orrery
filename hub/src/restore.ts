@@ -43,13 +43,27 @@ export class Restores {
   #services: Pick<Services, 'ofServer'>;
   #servers: Map<string, Pick<ServerSettings, 'dir' | 'backupDir'>>;
   #run: RunRestore;
+  #deploying: () => boolean;
   #running = new Set<string>();
 
-  constructor(hub: Pick<ServerHub, 'get' | 'audit'>, services: Pick<Services, 'ofServer'>, servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir'>[], run: RunRestore) {
+  /** `deploying`: whether a hub deploy runs, whose restart would kill a restore halfway. */
+  constructor(
+    hub: Pick<ServerHub, 'get' | 'audit'>,
+    services: Pick<Services, 'ofServer'>,
+    servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir'>[],
+    run: RunRestore,
+    deploying: () => boolean = () => false,
+  ) {
     this.#hub = hub;
+    this.#deploying = deploying;
     this.#services = services;
     this.#servers = new Map(servers.map((s) => [s.id, s]));
     this.#run = run;
+  }
+
+  /** Whether any restore runs. */
+  busy(): boolean {
+    return this.#running.size > 0;
   }
 
   /** Resolves with the script's output; rejects with `RestoreRefused`, or the script's error. */
@@ -88,6 +102,7 @@ export class Restores {
     }
     // Checked after the last await, and marked running in the same turn, so two requests can't both pass.
     if (this.#running.has(serverId)) throw new RestoreRefused(409, `A restore is already running on ${serverName}.`);
+    if (this.#deploying()) throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
     return { GTNH_DIR: dir, BACKUP_DIR: backupDir, GTNH_SERVICE: service.unit };
   }
 }

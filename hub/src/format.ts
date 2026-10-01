@@ -125,8 +125,17 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
     case 'serviceFailed':
       return `❌ Service ${e.id} failed (${e.unit})`;
+    case 'deployStarted':
+      return `🚀 Deploying ${deployed(e)}: ${e.from ?? 'unknown'} → ${e.to} (by ${e.by})`;
+    case 'deployFinished':
+      if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
+      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from ?? 'the previous release'}`;
+      return `❌ Deploying ${deployed(e)} ${e.to} failed`;
   }
 }
+
+/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh". */
+const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod' }[e.part]} on ${e.id}`;
 
 /**
  * The alerts channel's post for an event about the host, a service or a check, naming what it is about (the channel

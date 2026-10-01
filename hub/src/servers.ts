@@ -90,6 +90,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #configs = new Map<string, ServerConfig>();
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
+  #modVersions = new Map<string, string>(); // kept after a disconnect: what the server last ran
   #sockets = new Set<Socket>(); // every accepted socket, including ones still before the handshake
   #server: Server | null = null;
   #timer: NodeJS.Timeout | undefined;
@@ -151,6 +152,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   get(id: string): ServerState | undefined {
     const s = this.#states.get(id);
     return s && { ...s, players: [...s.players], dims: [...s.dims] };
+  }
+
+  /** The version the server's Mod reported in its latest hello; undefined if it never connected. */
+  modVersion(id: string): string | undefined {
+    return this.#modVersions.get(id);
   }
 
   /**
@@ -252,6 +258,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       this.#conns.set(id, conn);
       old?.socket.destroy();
       Object.assign(this.#states.get(id)!, { online: true, hung: false });
+      this.#modVersions.set(id, msg.modVersion); // before `connected`, which a Mod deploy waits on
       this.#send(socket, { type: 'welcome' });
       this.#emit(id, 'connected');
     });

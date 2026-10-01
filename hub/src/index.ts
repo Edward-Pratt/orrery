@@ -1,4 +1,5 @@
 import { loadConfig } from './config.ts';
+import { githubReader } from './deploys.ts';
 import { startDiscord } from './discord.ts';
 import { httpGet } from './health.ts';
 import { localHost } from './host.ts';
@@ -20,6 +21,13 @@ if (web && !clientSecret) {
   process.exit(1);
 }
 
+const { github } = config.integrations;
+const githubToken = process.env.GITHUB_TOKEN;
+if (github && !githubToken) {
+  console.error('integrations.github is configured but GITHUB_TOKEN is not set');
+  process.exit(1);
+}
+
 const handle = await startHub(config, {
   startFrontend: async (hub, stats, restarts, links, cfg) => {
     const discord = await startDiscord(hub, stats, restarts, links, cfg, token ?? '');
@@ -29,6 +37,7 @@ const handle = await startHub(config, {
   host: localHost,
   run: execRun,
   restore: execRestore,
+  github: github && githubToken ? githubReader(github.repo, githubToken) : undefined,
   oauth: web && clientSecret ? discordOAuth(web.clientId, clientSecret) : undefined,
 });
 

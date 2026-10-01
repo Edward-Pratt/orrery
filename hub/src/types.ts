@@ -137,8 +137,11 @@ export type ServiceStatus = { id: string; unit: string; state: string | null; su
 /** What `POST /api/services/:id/<verb>` does to a service. */
 export type ServiceVerb = 'start' | 'stop' | 'restart';
 
-/** What an event that isn't about a server is about; its `id` is that thing's config id. */
-export type Target = 'host' | 'service' | 'check';
+/**
+ * What an event that isn't about a server is about; its `id` is that thing's config id (a deploy's: its target, the
+ * environment or, for a Mod, the server id).
+ */
+export type Target = 'host' | 'service' | 'check' | 'deploy';
 /** Something a hub-core module wants people to know about the host, a service or a check. */
 export type TargetNotice = { severity: Severity } & (
   | { kind: 'checkDown'; url: string; error: string }
@@ -148,7 +151,30 @@ export type TargetNotice = { severity: Severity } & (
   | { kind: 'diskLow'; mount: string; free: number; minFreeGB: number }
   | { kind: 'diskOk'; mount: string; free: number }
   | { kind: 'serviceFailed'; unit: string }
+  | { kind: 'deployStarted'; part: DeployPart; from: string | null; to: string; by: string }
+  | { kind: 'deployFinished'; part: DeployPart; from: string | null; to: string; outcome: DeployOutcome }
 );
+/** What a deploy puts in place: the hub, the dashboard (`web`) or a server's Mod. */
+export type DeployPart = 'hub' | 'web' | 'mod';
+export type DeployOutcome = 'running' | 'ok' | 'failed' | 'rolled back';
+/**
+ * A deploy in the history: `target` is the environment, or the server id for a Mod; `from` the release it replaced
+ * (null: unknown); `log` the last lines of what it did (or why it failed).
+ */
+export type DeployRow = {
+  id: number;
+  part: DeployPart;
+  target: string;
+  from: string | null;
+  to: string;
+  by: string;
+  started: number;
+  finished: number | null;
+  outcome: DeployOutcome;
+  log: string;
+};
+/** A published GitHub release of one part: its tag (`hub-v1.2.3`), when it was published, its assets' names. */
+export type Release = { tag: string; publishedAt: number; assets: string[] };
 /**
  * One minute of a host: the share of CPU time busy since the previous sample (0–1), the 1/5/15-minute load averages,
  * and memory and each watched mount's disk in bytes.

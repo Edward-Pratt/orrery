@@ -1,3 +1,4 @@
+process.exit(1); // deliberately broken: rollback smoke test (#103)
 import { loadConfig } from './config.ts';
 import { githubReader } from './deploys.ts';
 import { startDiscord } from './discord.ts';

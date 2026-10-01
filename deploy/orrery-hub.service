@@ -10,12 +10,13 @@ Wants=network-online.target
 
 [Service]
 User=opc
-WorkingDirectory=/home/opc/orrery/current/hub
+# No WorkingDirectory=: systemd (init_t) may not read the `current` symlink (user_home_t) under SELinux, so it fails
+# with 200/CHDIR. node follows it itself, and the hub needs no working directory (every path it uses is absolute).
 # DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web, GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
 # Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.
-ExecStart=/usr/bin/node src/index.ts /home/opc/orrery/config.json
+ExecStart=/usr/bin/node /home/opc/orrery/current/hub/src/index.ts /home/opc/orrery/config.json
 Restart=on-failure
 RestartSec=5
 

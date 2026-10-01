@@ -8,8 +8,14 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
-  there; tested by `test-install-web.sh`) and `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
-  tested by `test-restore-backup.sh`).
+  there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
+  tested by `test-restore-backup.sh`) and the deploys, which the hub starts per tag through polkit:
+  `orrery-deploy@.service` runs `deploy-hub.sh` as the hub's user (builds `<root>/releases/<tag>`, flips the
+  `current` symlink, rolls back if the hub won't stay up 30 s), `orrery-deploy-web@.service` runs `deploy-web.sh` as
+  root from a root-owned copy in `/usr/local/lib/orrery` (around `install-web.sh`); both write
+  `<root>/deploy-status.json` and are tested by `test-deploy.sh`. `orrery-deploy-staging@` and
+  `orrery-deploy-web-staging@` are staging's copies. Their polkit blocks are separate from `UNITS`: they allow only
+  `start` on those templates for well-formed tags and `restart` on that environment's hub.
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
 - `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
@@ -51,6 +57,7 @@ cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && npm test && npm run build       # the build also type-checks against the hub's API types
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
+bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
 bash .github/test-release.sh              # the release script against a throwaway repo
 ```

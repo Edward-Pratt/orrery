@@ -1,0 +1,18 @@
+# Deploys one hub release to production: `systemctl start --no-block orrery-deploy@hub-vX.Y.Z.service`, started by the
+# hub through polkit (orrery-hub.rules). Runs deploy-hub.sh from the running release, so a broken new one can't break
+# its own Rollback. Install: sudo cp deploy/orrery-deploy@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# %i, never %I: the instance is the tag exactly as escaped, and deploy-hub.sh validates it again.
+# No PartOf=/BindsTo=: restarting the hub must not stop its own deploy. No OnFailure=: the status file is the record.
+# orrery-deploy-staging@.service differs only in User, the root, the hub unit and EnvironmentFile.
+[Unit]
+Description=Deploy orrery hub %i (production)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+User=opc
+# GITHUB_TOKEN=... (read access to the repo's contents), next to the hub's own secrets. Root-only, outside /home (SELinux).
+EnvironmentFile=/etc/orrery.env
+# Absolute paths for git, npm and the node npm runs; edit if node comes from nvm (`which node`).
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /home/opc/orrery/current/deploy/deploy-hub.sh /home/opc/orrery orrery-hub.service %i

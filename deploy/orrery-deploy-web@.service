@@ -1,0 +1,17 @@
+# Deploys one dashboard release to production: `systemctl start --no-block orrery-deploy-web@web-vX.Y.Z.service`,
+# started by the hub through polkit (orrery-hub.rules). Runs as root, so its scripts are a root-owned copy, never the
+# hub's writable release directory (a compromised hub could otherwise edit what root runs). Install:
+#   sudo install -D -m 755 -o root -g root -t /usr/local/lib/orrery deploy/deploy-web.sh deploy/install-web.sh
+#   sudo cp deploy/orrery-deploy-web@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# Re-run the first line when either script changes in a release. %i, never %I: deploy-web.sh validates the tag again.
+# orrery-deploy-web-staging@.service differs only in the root, the web dir and EnvironmentFile.
+[Unit]
+Description=Deploy orrery dashboard %i (production)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+# GITHUB_TOKEN=..., handed to gh as GH_TOKEN.
+EnvironmentFile=/etc/orrery.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /usr/local/lib/orrery/deploy-web.sh /home/opc/orrery /var/www/orrery %i

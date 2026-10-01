@@ -109,3 +109,5 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash deploy/test-restore-backup.sh
       - run: bash deploy/test-install-web.sh
+      - run: bash deploy/test-deploy.sh
+      - run: bash .github/test-release.sh

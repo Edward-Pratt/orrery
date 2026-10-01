@@ -545,7 +545,7 @@ const NO_MOD = { chat: false, tps: false, quests: false };
 
 test('the API says which integrations are on, and nothing else about them', async (t) => {
   const { get } = await apiHub(t);
-  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false, host: false, systemd: false });
+  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false, host: false, systemd: false, github: false });
 });
 
 test('server cards while offline: features only for the server with the mod', async (t) => {

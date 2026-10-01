@@ -8,6 +8,8 @@ import type {
   AuditLog,
   CheckStatus,
   CommandOutput,
+  DeployAnswer,
+  DeploysAnswer,
   HostHistory,
   HostNow,
   Integrations,
@@ -21,6 +23,7 @@ import type {
   ServiceStatus,
 } from './api.ts';
 import type { Checks } from './checks.ts';
+import { DeployRefused, type Deploys } from './deploys.ts';
 import type { HostMonitor } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
@@ -84,11 +87,13 @@ export type WebDeps = {
   services?: Services;
   /** Only with the systemd integration and a restore runner. */
   restores?: Restores;
+  /** Only with the GitHub integration. */
+  deploys?: Deploys;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -178,8 +183,34 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       checks: !!integrations.checks,
       host: !!integrations.host,
       systemd: !!integrations.systemd,
+      github: !!integrations.github,
     } satisfies Integrations),
   );
+  if (deploys) {
+    app.get('/deploys', (c) => {
+      const before = c.req.query('before');
+      if (before !== undefined && !/^[1-9]\d{0,15}$/.test(before)) return c.text('before must be a deploy id', 400);
+      return c.json(deploys.answer(before === undefined ? undefined : Number(before)) satisfies DeploysAnswer);
+    });
+    app.post('/deploys/check', async (c) => {
+      hub.audit(actor(c.get('user')), 'deploy check', 'github', integrations.github!.repo);
+      await deploys.check();
+      return c.json(deploys.answer() satisfies DeploysAnswer);
+    });
+    app.post('/deploys', async (c) => {
+      const { part, tag, server } = await jsonBody(c.req);
+      if ((part !== 'hub' && part !== 'web' && part !== 'mod') || typeof tag !== 'string' || (part === 'mod') !== (typeof server === 'string')) {
+        return c.text('Give a part (hub, web or mod), a tag and, for a Mod, its server', 400);
+      }
+      const user = c.get('user');
+      try {
+        return c.json({ id: await deploys.deploy(part, tag, actor(user), server as string | undefined, user.username) } satisfies DeployAnswer, 202);
+      } catch (err) {
+        if (err instanceof DeployRefused) return c.text(err.message, err.status);
+        return c.text(`The deploy failed: ${(err as Error).message}`, 502);
+      }
+    });
+  }
   if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
   if (services) {
     app.get('/services', (c) => c.json(services.list() satisfies ServiceStatus[]));

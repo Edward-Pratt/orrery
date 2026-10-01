@@ -1,0 +1,13 @@
+# Deploys one dashboard release to staging: `systemctl start --no-block orrery-deploy-web-staging@web-vX.Y.Z.service`,
+# started by staging's hub through polkit (orrery-hub.rules). Same as orrery-deploy-web@.service (root, scripts in
+# /usr/local/lib/orrery) but for staging's root, web dir and env file.
+# Install: sudo cp deploy/orrery-deploy-web-staging@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+[Unit]
+Description=Deploy orrery dashboard %i (staging)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+EnvironmentFile=/etc/orrery-staging.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /usr/local/lib/orrery/deploy-web.sh /srv/orrery-staging /var/www/orrery-staging %i

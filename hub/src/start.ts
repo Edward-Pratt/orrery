@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
+import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
 import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
@@ -41,6 +42,10 @@ export type HubDeps = {
   run?: Run;
   /** Runs the restore script; without it (or systemd) the dashboard can't restore backups. */
   restore?: RunRestore;
+  /** GitHub's releases; needed only with the GitHub integration (which also needs `run`). */
+  github?: GitHub;
+  /** Shorter deploy timings, for tests. */
+  deploys?: DeploysOptions;
 };
 
 export type HubHandle = {
@@ -56,10 +61,11 @@ export type HubHandle = {
 
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
-  const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd } = config.integrations;
+  const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd, github } = config.integrations;
   if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
   if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
+  if (github && !(deps.github && deps.run)) throw new Error('integrations.github needs a GitHub reader and a systemctl runner');
   const backupDirs: Record<string, string> = Object.fromEntries(
     config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
   );
@@ -107,18 +113,37 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   host?.start();
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
-  const restores = services && deps.restore && new Restores(hub, services, config.servers, deps.restore);
+  let deploys: Deploys | undefined;
+  const restores = services && deps.restore && new Restores(hub, services, config.servers, deps.restore, () => deploys?.busy() ?? false);
+  const dbCopies = join(dirname(config.dbPath), 'db-backups');
+  deploys =
+    github &&
+    new Deploys(
+      {
+        hub,
+        db,
+        restarts,
+        github: deps.github!, // checked above
+        run: deps.run!,
+        config: github,
+        servers: config.servers,
+        hasMod: (id) => Boolean(minecraft?.tokens[id]),
+        restoring: () => restores?.busy() ?? false,
+        dbCopies,
+      },
+      deps.deploys,
+    );
+  deploys?.start();
 
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
-  const dbCopies = join(dirname(config.dbPath), 'db-backups');
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -137,6 +162,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       checks?.stop();
       host?.stop();
       services?.stop();
+      deploys?.stop();
       stopSummaries();
       upkeep();
       stopPing();

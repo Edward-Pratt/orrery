@@ -1,5 +1,8 @@
 # orrery hub. Install: sudo cp deploy/orrery-hub.service /etc/systemd/system/
 # Edit User and the paths below to match your server.
+# Release layout: /home/opc/orrery holds releases/hub-vX.Y.Z/, current -> releases/hub-vX.Y.Z (flipped by
+# deploy-hub.sh through orrery-deploy@.service), config.json and hub.db (its dbPath absolute), so every release
+# shares the same data.
 [Unit]
 Description=orrery hub
 After=network-online.target
@@ -7,12 +10,12 @@ Wants=network-online.target
 
 [Service]
 User=opc
-WorkingDirectory=/home/opc/ClaudeCode/orrery/hub
-# DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
+WorkingDirectory=/home/opc/orrery/current/hub
+# DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web, GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
 # Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.
-ExecStart=/usr/bin/node src/index.ts
+ExecStart=/usr/bin/node src/index.ts /home/opc/orrery/config.json
 Restart=on-failure
 RestartSec=5
 

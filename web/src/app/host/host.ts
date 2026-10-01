@@ -1,12 +1,14 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
-import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import type { HostHistory, HostNow, HostSample } from '@hub/api';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { catchError, filter, of, switchMap } from 'rxjs';
 import { PeriodPicker, type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofTarget } from '../events';
+import { Integrations } from '../integrations';
+import { Releases } from './releases';
 import type { Health } from '../status';
 
 const GB = 1024 ** 3;
@@ -26,7 +28,7 @@ const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 
 
 @Component({
   selector: 'app-host',
-  imports: [DatePipe, HlmSkeleton, PeriodPicker, TimeSeries],
+  imports: [DatePipe, HlmSkeleton, PeriodPicker, Releases, TimeSeries],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Host {{ id() }}</h1>
     @if (tiles(); as list) {
@@ -63,10 +65,15 @@ const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 
         </section>
       }
     </div>
+    @if (on()?.github) {
+      <app-releases />
+    }
   `,
 })
 export default class Host {
   protected readonly bars = { ok: 'bg-status-ok', warn: 'bg-status-warn', down: 'bg-status-down' };
+  // ponytail: Releases live on the Host page, so they need the host integration on too.
+  protected readonly on = toSignal(inject(Integrations).on$);
   readonly id = signal('');
   readonly sample = signal<HostSample | null>(null);
   /** The first answer is in (a skeleton shows until then). */

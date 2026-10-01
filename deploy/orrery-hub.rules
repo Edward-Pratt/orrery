@@ -6,7 +6,7 @@
 // Install: sudo install -m 644 -o root -g root deploy/orrery-hub.rules /etc/polkit-1/rules.d/50-orrery-hub.rules
 // (polkit picks it up without a restart). Check as the hub's user: `systemctl stop --no-block <unit>` works for a
 // listed unit and is refused ("Interactive authentication required") for any other.
-// Edit USER if the hub runs as someone else (User= in orrery-hub.service).
+// Edit USER here and in the deploy block below if the hub runs as someone else (User= in orrery-hub.service).
 polkit.addRule(function (action, subject) {
   // Inside the rule: every rules file shares one JavaScript scope.
   var USER = 'opc';
@@ -17,6 +17,40 @@ polkit.addRule(function (action, subject) {
     subject.user === USER &&
     UNITS.indexOf(action.lookup('unit')) >= 0 &&
     VERBS.indexOf(action.lookup('verb')) >= 0
+  ) {
+    return polkit.Result.YES;
+  }
+});
+
+// Deploys: separate from UNITS above, and not synced with integrations.systemd. Production's hub user may start its
+// own deploy templates for a well-formed tag (deploy-hub.sh and deploy-web.sh check it again) and restart the hub,
+// nothing else, so a compromised hub can install a published release at worst. Check as that user on the host:
+// `systemctl start --no-block orrery-deploy@hub-v0.0.0.service` is allowed (and fails at the clone), while
+// `systemctl stop orrery-deploy@hub-v0.0.0.service` or `systemctl start orrery-deploy@x.service` is refused.
+polkit.addRule(function (action, subject) {
+  var USER = 'opc'; // the same as the first rule's
+  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== USER) return;
+  var unit = action.lookup('unit');
+  var verb = action.lookup('verb');
+  if (
+    (verb === 'start' && /^orrery-deploy@hub-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
+    (verb === 'start' && /^orrery-deploy-web@web-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
+    (verb === 'restart' && unit === 'orrery-hub.service')
+  ) {
+    return polkit.Result.YES;
+  }
+});
+
+// Staging's deploys: the same for staging's hub user over staging's templates and hub, never production's. Grants
+// nothing until the staging spec creates the orrery-staging user.
+polkit.addRule(function (action, subject) {
+  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== 'orrery-staging') return;
+  var unit = action.lookup('unit');
+  var verb = action.lookup('verb');
+  if (
+    (verb === 'start' && /^orrery-deploy-staging@hub-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
+    (verb === 'start' && /^orrery-deploy-web-staging@web-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
+    (verb === 'restart' && unit === 'orrery-hub-staging.service')
   ) {
     return polkit.Result.YES;
   }

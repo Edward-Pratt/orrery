@@ -1,0 +1,15 @@
+# Deploys one hub release to staging: `systemctl start --no-block orrery-deploy-staging@hub-vX.Y.Z.service`, started by
+# staging's hub through polkit (orrery-hub.rules). Same as orrery-deploy@.service but for staging's user, root, hub unit
+# and env file. Install: sudo cp deploy/orrery-deploy-staging@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# %i, never %I. No PartOf=/BindsTo=/OnFailure=.
+[Unit]
+Description=Deploy orrery hub %i (staging)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+User=orrery-staging
+# GITHUB_TOKEN=... for staging. Root-only, outside /home (SELinux).
+EnvironmentFile=/etc/orrery-staging.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /srv/orrery-staging/current/deploy/deploy-hub.sh /srv/orrery-staging orrery-hub-staging.service %i

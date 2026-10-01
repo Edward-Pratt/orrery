@@ -333,3 +333,40 @@ test('loadConfig applies each per-server default once, and keeps set values', as
   assert.equal(s.backupMinFreeGB, 3);
   assert.equal(s.backupMaxAgeHours, 26);
 });
+
+test('GitHub needs a repo; its deploy targets are absolute paths and unit names, defaulted for production', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...c } = valid(dir);
+  const github = (g: unknown) => validateConfig({ ...c, integrations: { github: g } });
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }), []);
+  const staging = {
+    root: '/srv/orrery-staging',
+    hubUnit: 'orrery-hub-staging.service',
+    hubTemplate: 'orrery-deploy-staging',
+    webTemplate: 'orrery-deploy-web-staging',
+    webDir: '/var/www/orrery-staging',
+  };
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', newerAfterDays: 7, deploys: staging }), []);
+  assert.deepEqual(github('orrery'), ['integrations: "github" must be an object']);
+  assert.deepEqual(github({ repo: 'orrery', newerAfterDays: 0, deploys: [] }), [
+    'integrations.github: "repo" must be owner/name',
+    'integrations.github: "newerAfterDays" must be a positive number',
+    'integrations.github: "deploys" must be an object',
+  ]);
+  assert.deepEqual(github({ repo: 'a/b', deploys: { root: 'orrery', webDir: '../www', hubUnit: '--now', hubTemplate: 'x@y', webTemplate: '-rf' } }), [
+    'integrations.github.deploys: "root" must be an absolute path',
+    'integrations.github.deploys: "webDir" must be an absolute path',
+    'integrations.github.deploys: "hubUnit" must be a systemd unit name, like orrery-hub.service',
+    'integrations.github.deploys: "hubTemplate" must be a unit template\'s name, like orrery-deploy',
+    'integrations.github.deploys: "webTemplate" must be a unit template\'s name, like orrery-deploy',
+  ]);
+
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify({ ...c, integrations: { github: { repo: 'a/b', deploys: { root: '/srv/x' } } } }));
+  assert.deepEqual(loadConfig(path).integrations.github, {
+    repo: 'a/b',
+    newerAfterDays: 14,
+    deploys: { root: '/srv/x', hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: '/var/www/orrery' },
+  });
+});

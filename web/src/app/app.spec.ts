@@ -10,7 +10,7 @@ import { fakeEvents, settle } from './testing';
 import { Theme } from './theme';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false };
 
 async function open(me: Me | null, on: Integrations = ALL, url = '/') {
   history.replaceState(null, '', url);
@@ -42,7 +42,7 @@ describe('the shell', () => {
     const some = await open(ALEX, { ...ALL, minecraft: false, checks: false, host: false });
     expect(labels(some.el)).toEqual(['Services', 'Audit log']);
     TestBed.resetTestingModule();
-    const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, host: false });
+    const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, github: false, host: false });
     expect(labels(checksOnly.el)).toEqual(['Checks', 'Audit log']); // the services page, without systemd
   });
 

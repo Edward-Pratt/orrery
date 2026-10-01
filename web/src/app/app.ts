@@ -150,9 +150,9 @@ export class App {
   readonly #attention = inject(Attention);
   protected readonly visible = computed(() => PAGES.filter((p) => this.#on()?.[p.on] && !(p.unless && this.#on()?.[p.unless])));
 
-  /** The count on a sidebar entry: only Servers and Services (or Checks) have one. */
+  /** The count on a sidebar entry: only Servers, Services (or Checks) and Host have one. */
   protected badge(path: string): number {
-    return path === 'servers' || path === 'services' ? this.#attention.count(path) : 0;
+    return path === 'servers' || path === 'services' || path === 'host' ? this.#attention.count(path) : 0;
   }
 
   constructor() {

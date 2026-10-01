@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { parseDaily } from './daily.ts';
 import type { LagConfig } from './lag.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
@@ -77,12 +77,42 @@ export type ServiceConfig = { id: string; unit: string };
  */
 export type HostIntegration = { id: string; mounts: string[]; memoryMaxPercent: number; memoryMinutes: number; diskMinFreeGB: number };
 
+/**
+ * Where an environment's deploys go: its root (`releases/`, `current`, `config.json`, `hub.db`, `deploy.lock`,
+ * `deploy-status.json`), its hub's unit, the templates of its hub and dashboard deploy units (`<template>@<tag>.service`)
+ * and where its dashboard is served from.
+ */
+export type DeployTargets = { root: string; hubUnit: string; hubTemplate: string; webTemplate: string; webDir: string };
+
+/**
+ * GitHub: the repo (`owner/name`) whose published releases the hub offers, how many days a newer one waits before
+ * it needs attention, and this environment's deploy targets. The token comes from `GITHUB_TOKEN`, never config.
+ */
+export type GithubIntegration = { repo: string; newerAfterDays: number; deploys: DeployTargets };
+
+/** Production's deploy targets; staging sets its own. */
+export const PRODUCTION_DEPLOYS: DeployTargets = {
+  root: '/home/opc/orrery',
+  hubUnit: 'orrery-hub.service',
+  hubTemplate: 'orrery-deploy',
+  webTemplate: 'orrery-deploy-web',
+  webDir: '/var/www/orrery',
+};
+
 export type Config = {
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
   /** Each integration is on when its section is present; none is required. */
-  integrations: { minecraft?: MinecraftIntegration; discord?: DiscordConfig; web?: WebIntegration; checks?: CheckConfig[]; host?: HostIntegration; systemd?: ServiceConfig[] };
+  integrations: {
+    minecraft?: MinecraftIntegration;
+    discord?: DiscordConfig;
+    web?: WebIntegration;
+    checks?: CheckConfig[];
+    host?: HostIntegration;
+    systemd?: ServiceConfig[];
+    github?: GithubIntegration;
+  };
 };
 
 function resolve(s: ServerEntry): ServerSettings {
@@ -326,6 +356,32 @@ export function validateConfig(raw: unknown): string[] {
       }
     }
   }
+  const github = integrations.github;
+  if (github !== undefined && !isObj(github)) err('integrations', '"github" must be an object');
+  else if (github) {
+    const where = 'integrations.github';
+    const repo = str(github, 'repo', where);
+    if (repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(repo)) err(where, '"repo" must be owner/name');
+    num(github, 'newerAfterDays', where, (n) => n > 0, 'a positive number');
+    const deploys = github.deploys;
+    if (deploys !== undefined && !isObj(deploys)) err(where, '"deploys" must be an object');
+    else if (deploys) {
+      const at = `${where}.deploys`;
+      // Not checked to exist: the root is made by the one-time move, after the config is written.
+      for (const key of ['root', 'webDir']) {
+        const path = str(deploys, key, at, false);
+        if (path !== undefined && !isAbsolute(path)) err(at, `"${key}" must be an absolute path`);
+      }
+      const unit = str(deploys, 'hubUnit', at, false);
+      if (unit !== undefined && !UNIT.test(unit)) err(at, '"hubUnit" must be a systemd unit name, like orrery-hub.service');
+      for (const key of ['hubTemplate', 'webTemplate']) {
+        const t = str(deploys, key, at, false);
+        if (t !== undefined && (t.includes('@') || !UNIT.test(`${t}@hub-v0.0.0.service`))) {
+          err(at, `"${key}" must be a unit template's name, like orrery-deploy`);
+        }
+      }
+    }
+  }
   return errors;
 }
 
@@ -364,7 +420,14 @@ export function loadConfig(path: string): Config {
   }
   const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
   const integrations = { ...c.integrations };
-  const { web, discord, host } = integrations;
+  const { web, discord, host, github } = integrations;
+  if (github) {
+    integrations.github = {
+      ...github,
+      newerAfterDays: github.newerAfterDays ?? 14,
+      deploys: { ...PRODUCTION_DEPLOYS, ...github.deploys },
+    };
+  }
   if (host) {
     const defaults = { mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
     integrations.host = { ...defaults, ...(host as Partial<HostIntegration> & { id: string }) };

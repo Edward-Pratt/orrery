@@ -5,6 +5,9 @@
 import type {
   AuditRow,
   BackupsAnswer,
+  DeployPart,
+  DeployRow,
+  Release,
   HistoryAnswer,
   HostSample,
   FeedEvent,
@@ -19,6 +22,9 @@ export type {
   Backup,
   BackupsAnswer,
   CheckStatus,
+  DeployOutcome,
+  DeployPart,
+  DeployRow,
   HistoryAnswer,
   HostSample,
   HubEvent,
@@ -26,6 +32,7 @@ export type {
   Notice,
   Period,
   PlaytimeAnswer,
+  Release,
   ServerState,
   ServiceStatus,
   ServiceVerb,
@@ -43,7 +50,7 @@ export type {
 export type Me = { id: string; username: string; avatar: string | null };
 
 /** `GET /api/integrations`: which integrations are switched on. */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean };
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean; github: boolean };
 
 /**
  * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
@@ -59,6 +66,40 @@ export type HostNow = { id: string; sample: HostSample | null };
 export type HostHistory = HostSample[];
 
 
+
+/**
+ * A part's releases: the one `running` (the hub: `dev` from a plain checkout; the dashboard: null if unknown; a Mod:
+ * `mod-v` + the version its hello reported, as is when that isn't a release, null if it never connected), the
+ * `latest` published one (null: none), and every published one, newest first.
+ */
+export type PartReleases = { running: string | null; latest: string | null; releases: Release[] };
+
+/**
+ * `GET /api/deploys[?before=id]` (only with the GitHub integration): what each part runs against what GitHub has
+ * published (drafts and prereleases left out), each server's Mod, when GitHub was last asked (`checkedAt`, null: not
+ * yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the deploy history, newest first, with
+ * whether `older` ones remain (`before` is a row's `id`). Changes come as `deployStarted`/`deployFinished` notices.
+ */
+export type DeploysAnswer = {
+  hub: PartReleases;
+  web: PartReleases;
+  mod: { latest: string | null; releases: Release[]; servers: { id: string; name: string; running: string | null }[] };
+  checkedAt: number | null;
+  error: string | null;
+  newerAfterDays: number;
+  history: DeployRow[];
+  older: boolean;
+};
+
+/**
+ * `POST /api/deploys`: deploys a published release (`server`: the Mod's server). Answers 202 with the history row's
+ * `id`; the outcome follows as a `deployFinished` notice. 404 for a tag GitHub didn't list or an unknown server, 409
+ * when refused (another deploy runs, the tag is the one running, a restore runs, below the first release that can
+ * deploy, a server with no folder, no Mod or a countdown running), 502 if systemctl or the download fails. Audited.
+ * `POST /api/deploys/check` asks GitHub again and answers like `GET /api/deploys`.
+ */
+export type DeployRequest = { part: DeployPart; tag: string; server?: string };
+export type DeployAnswer = { id: number };
 
 /** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
 export type ServiceLogs = { lines: string[] };

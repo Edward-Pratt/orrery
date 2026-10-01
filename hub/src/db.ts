@@ -1,8 +1,8 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
-import type { AuditRow } from './types.ts';
+import type { AuditRow, DeployOutcome, DeployRow } from './types.ts';
 
 export type AuditFilter = { target?: string; actor?: string; before?: number };
 import { localDay } from './units.ts';
@@ -60,7 +60,10 @@ export class Db {
       CREATE INDEX IF NOT EXISTS audit_target_ts ON audit (target, ts);
       CREATE TABLE IF NOT EXISTS host_samples (host_id TEXT NOT NULL, ts INTEGER NOT NULL, sample TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS host_samples_host_ts ON host_samples (host_id, ts);
+      CREATE TABLE IF NOT EXISTS deploys (id INTEGER PRIMARY KEY, part TEXT NOT NULL, target TEXT NOT NULL, from_tag TEXT,
+        to_tag TEXT NOT NULL, by TEXT NOT NULL, started INTEGER NOT NULL, finished INTEGER, outcome TEXT NOT NULL, log TEXT NOT NULL);
     `);
+    // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
     if (!(this.#db.prepare('PRAGMA table_info(web_sessions)').all() as { name: string }[]).some((c) => c.name === 'avatar')) {
       this.#db.exec('ALTER TABLE web_sessions ADD COLUMN avatar TEXT');
@@ -350,6 +353,36 @@ export class Db {
       )
       .all(target ?? null, actor ?? null, before ?? null, limit)
       .map((r) => ({ ...r }) as AuditRow);
+  }
+
+  /** A copy of the whole database, now (`VACUUM INTO`). Throws: a deploy must not go ahead without it. */
+  copyTo(file: string): void {
+    mkdirSync(dirname(file), { recursive: true });
+    this.#db.prepare('VACUUM INTO ?').run(file);
+  }
+
+  /** Starts a deploy's history row as `running`; returns its id. Throws, so a deploy isn't started unrecorded. */
+  startDeploy(d: Pick<DeployRow, 'part' | 'target' | 'from' | 'to' | 'by'>, started = Date.now()): number {
+    const r = this.#db
+      .prepare("INSERT INTO deploys (part, target, from_tag, to_tag, by, started, outcome, log) VALUES (?, ?, ?, ?, ?, ?, 'running', '')")
+      .run(d.part, d.target, d.from, d.to, d.by, started);
+    return Number(r.lastInsertRowid);
+  }
+
+  /** Closes a running deploy's row with its outcome; a row already closed stays as it is. */
+  finishDeploy(id: number, outcome: Exclude<DeployOutcome, 'running'>, log: string, finished = Date.now()): void {
+    this.#write('finish deploy', "UPDATE deploys SET outcome = ?, log = ?, finished = ? WHERE id = ? AND outcome = 'running'", outcome, log, finished, id);
+  }
+
+  /** The newest `limit` deploys, newest first: only those older than the row `before`, of `part`, with `outcome` (`running`: still running). */
+  deploys(limit: number, { before, part, outcome, running }: { before?: number; part?: DeployRow['part']; outcome?: DeployOutcome; running?: true } = {}): DeployRow[] {
+    return this.#db
+      .prepare(
+        `SELECT id, part, target, from_tag AS "from", to_tag AS "to", by, started, finished, outcome, log FROM deploys
+         WHERE (?1 IS NULL OR id < ?1) AND (?2 IS NULL OR part = ?2) AND (?3 IS NULL OR outcome = ?3) ORDER BY id DESC LIMIT ?4`,
+      )
+      .all(before ?? null, part ?? null, running ? 'running' : (outcome ?? null), limit)
+      .map((r) => ({ ...r }) as DeployRow);
   }
 
   close(): void {

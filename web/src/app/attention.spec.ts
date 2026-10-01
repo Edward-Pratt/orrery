@@ -2,14 +2,14 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import type { CheckStatus, Integrations, Me, ServerCard, ServiceStatus } from '@hub/api';
+import type { CheckStatus, DeploysAnswer, Integrations, Me, ServerCard, ServiceStatus } from '@hub/api';
 import { App } from './app';
 import { BackupProgress } from './servers/backup-progress';
 import { FETCH } from './events';
 import { dialogButton, fakeEvents, settle } from './testing';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false };
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
   name: id.toUpperCase(),
@@ -28,7 +28,7 @@ const service = (id: string, state: string, sub = 'x'): ServiceStatus => ({ id, 
 const check = (id: string, up: boolean | null): CheckStatus => ({ id, url: 'http://x', up, ms: 1, error: up === false ? 'HTTP 500' : null, checkedAt: 1, service: null });
 
 /** Opens the shell logged in, answering what the attention strip fetches. */
-async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = []) {
+async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
@@ -38,8 +38,9 @@ async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks:
   await settle();
   backend.expectOne('/api/me').flush(ALEX);
   await settle();
-  backend.match('/api/integrations').forEach((r) => r.flush(ALL));
+  backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys }));
   await settle();
+  if (deploys) backend.expectOne('/api/deploys').flush(deploys);
   backend.expectOne('/api/servers').flush(cards);
   backend.expectOne('/api/services').flush(services);
   backend.expectOne('/api/checks').flush(checks);
@@ -58,7 +59,32 @@ async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks:
   return { fixture, backend, events, el, render, lines, badges, refetch };
 }
 
+const DAY = 24 * 60 * 60_000;
+/** The hub runs hub-v2.5.0; hub-v2.6.0 was published `daysAgo`. */
+const deploys = (daysAgo: number): DeploysAnswer => ({
+  hub: {
+    running: 'hub-v2.5.0',
+    latest: 'hub-v2.6.0',
+    releases: [{ tag: 'hub-v2.6.0', publishedAt: Date.now() - daysAgo * DAY, assets: [] }, { tag: 'hub-v2.5.0', publishedAt: 0, assets: [] }],
+  },
+  web: { running: null, latest: null, releases: [] },
+  mod: { latest: null, releases: [], servers: [] },
+  checkedAt: Date.now(),
+  error: null,
+  newerAfterDays: 14,
+  history: [],
+  older: false,
+});
+
 describe('the attention strip', () => {
+  it('shows a newer release only once it has waited past newerAfterDays, linking to Releases', async () => {
+    expect((await open([], [], [], deploys(3))).lines()).toEqual([]);
+    TestBed.resetTestingModule();
+    const { lines, badges } = await open([], [], [], deploys(20));
+    expect(lines()).toEqual(['Hub can update to hub-v2.6.0 Releases']);
+    expect(badges()).toEqual(['Host 1']);
+  });
+
   it('shows an unexpected offline, but not a server an admin stopped', async () => {
     const { el, lines } = await open([
       card('crashed', { online: false, service: { id: 'crashed', state: 'failed' } }),

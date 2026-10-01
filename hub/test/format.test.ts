@@ -375,3 +375,22 @@ test('formatTargetEvent names the check, since the alerts channel is shared', ()
     embeds: [{ title: '✅ Check site is back up (120 ms)', description: 'https://site.example', color: COLORS.green }],
   });
 });
+
+test('deploy notices reach Discord worded and coloured by outcome', () => {
+  const notice = (n: object) => formatTargetEvent({ target: 'deploy', id: 'production', type: 'notice', ...n } as TargetEvent);
+  const embed = (n: object) => {
+    const post = notice(n) as { embeds: { title: string; color: number }[] };
+    return [post.embeds[0]!.title, post.embeds[0]!.color];
+  };
+  const base = { part: 'hub', from: 'hub-v2.5.0', to: 'hub-v2.6.0' };
+  assert.deepEqual(embed({ ...base, severity: 'info', kind: 'deployStarted', by: 'web:alex (1)' }), [
+    `🚀 Deploying the hub on production: hub-v2.5.0 → hub-v2.6.0 (by web:alex (1))`,
+    0x3498db,
+  ]);
+  assert.deepEqual(embed({ ...base, severity: 'good', kind: 'deployFinished', outcome: 'ok' }), ['✅ Deployed the hub on production: hub-v2.6.0', 0x2ecc71]);
+  assert.deepEqual(embed({ ...base, severity: 'problem', kind: 'deployFinished', outcome: 'failed' }), ['❌ Deploying the hub on production hub-v2.6.0 failed', 0xe74c3c]);
+  assert.deepEqual(embed({ ...base, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), [
+    '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
+    0xe74c3c,
+  ]);
+});

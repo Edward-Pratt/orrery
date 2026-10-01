@@ -2,10 +2,12 @@ import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import type { CheckStatus, ServerCard, ServiceStatus } from '@hub/api';
+import { Router } from '@angular/router';
+import type { CheckStatus, DeploysAnswer, ServerCard, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { catchError, debounceTime, EMPTY, filter, of, startWith, Subject, switchMap, take } from 'rxjs';
 import { Feedback } from './feedback';
+import { overdue, releaseRows } from './host/release-rows';
 import { LiveEvents, ofTarget } from './events';
 import { Integrations } from './integrations';
 import { Session } from './session';
@@ -17,7 +19,7 @@ import { restartLeft } from './units';
 /** One thing that needs a human now: what it is about (`page` is the sidebar entry it counts on), and the fix, if any. */
 export type AttentionItem = {
   key: string;
-  page: 'servers' | 'services';
+  page: 'servers' | 'services' | 'host';
   target: string;
   message: string;
   /** For a pending restart: when it fires, shown as a countdown. */
@@ -40,8 +42,11 @@ export class Attention {
   readonly #cards = signal<ServerCard[]>([]);
   readonly #services = signal<ServiceStatus[]>([]);
   readonly #checks = signal<CheckStatus[]>([]);
+  readonly #deploys = signal<DeploysAnswer | null>(null);
+  readonly #router = inject(Router);
   readonly #refetchCards = new Subject<void>();
   readonly #refetchServices = new Subject<void>();
+  readonly #refetchDeploys = new Subject<void>();
 
   readonly items = computed<AttentionItem[]>(() => {
     const cards = this.#cards();
@@ -88,6 +93,17 @@ export class Attention {
     for (const c of this.#checks()) {
       if (c.up === false) items.push({ key: `check:${c.id}`, page: 'services', target: c.id, message: `is down: ${c.error}` });
     }
+    const deploys = this.#deploys();
+    for (const r of deploys ? releaseRows(deploys) : []) {
+      if (!overdue(r, deploys!)) continue;
+      items.push({
+        key: `release:${r.key}`,
+        page: 'host',
+        target: r.label,
+        message: `can update to ${r.latest}`,
+        action: { label: 'Releases', run: () => void this.#router.navigate(['/host'], { fragment: 'releases' }) },
+      });
+    }
     return items;
   });
   /** How many items each sidebar entry shows. */
@@ -107,7 +123,7 @@ export class Attention {
       .subscribe((on) => on && this.#start(on));
   }
 
-  #start(on: { minecraft: boolean; systemd: boolean; checks: boolean }): void {
+  #start(on: { minecraft: boolean; systemd: boolean; checks: boolean; github: boolean; host: boolean }): void {
     // Debounced: the stream's replay can hold many changes at once.
     const fetching = <T>(refetch: Subject<void>, url: string, into: (v: T) => void) =>
       refetch
@@ -115,6 +131,8 @@ export class Attention {
         .subscribe(into);
     if (on.minecraft) fetching<ServerCard[]>(this.#refetchCards, '/api/servers', (v) => this.#cards.set(v));
     if (on.systemd) fetching<ServiceStatus[]>(this.#refetchServices, '/api/services', (v) => this.#services.set(v));
+    // Releases live on the Host page: without it an item would link nowhere.
+    if (on.github && on.host) fetching<DeploysAnswer>(this.#refetchDeploys, '/api/deploys', (v) => this.#deploys.set(v));
     if (on.checks) this.#http.get<CheckStatus[]>('/api/checks').pipe(catchError(() => EMPTY)).subscribe((v) => this.#checks.set(v));
     this.#events.all$.pipe(takeUntilDestroyed(this.#destroyRef))
       .subscribe((live) => {
@@ -125,7 +143,8 @@ export class Attention {
           this.#refetchCards.next(); // a card carries its service's state
         } else if (ofTarget('check')(live) && event.type === 'checked') {
           this.#checks.update((checks) => checks.map((c) => (c.id === event.id ? event.status : c)));
-        } else if (changesCard(event)) this.#refetchCards.next();
+        } else if (ofTarget('deploy')(live)) this.#refetchDeploys.next();
+        else if (changesCard(event)) this.#refetchCards.next();
       });
   }
 

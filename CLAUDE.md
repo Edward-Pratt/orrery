@@ -25,13 +25,13 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 ## Architecture rules
 
 - The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
-  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host` and `systemd`.
+  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host`, `systemd` and `github`.
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
   (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
-  (`HostMonitor`, `Checks`, `Services`, `Restores`); they
+  (`HostMonitor`, `Checks`, `Services`, `Restores`, `Deploys`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same
@@ -79,6 +79,8 @@ that part's commits (`.github/notes.sh`); for the mod it attaches the jar, for t
 ## Secrets
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`, `DISCORD_CLIENT_SECRET`) are git-ignored. Never commit them.
+`GITHUB_TOKEN` (only with `integrations.github`: a fine-grained token with read access to the repo's contents) lives in
+the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
 
 ## Agent skills
 

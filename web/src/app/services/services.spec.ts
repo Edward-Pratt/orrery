@@ -10,7 +10,7 @@ import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
 import Services from './services';
 
-const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true };
+const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false };
 const svc = (id: string, state: string | null, checks: string[] = []): ServiceStatus => ({ id, unit: `${id}.service`, state, sub: state, checks });
 const GRAFANA = svc('grafana', 'active', ['grafana']);
 const CADDY = svc('caddy', 'inactive');
@@ -186,7 +186,7 @@ describe('services page', () => {
   });
 
   it('is titled Checks, holding only checks, when systemd is off', async () => {
-    const { el, text } = await setup({ ...ALL, systemd: false, minecraft: false });
+    const { el, text } = await setup({ ...ALL, systemd: false, github: false, minecraft: false });
     expect(text(el.querySelector('h1'))).toBe('Checks');
     expect(el.querySelector('[data-service]')).toBeNull();
     expect(el.querySelector('h2')).toBeNull();

@@ -330,7 +330,7 @@ export type ExtraRequest = { upload: string; target: string; label?: string; not
 export type ExtraUpdate = { upload?: string; label?: string; note?: string };
 /** `POST /api/servers/:id/pack/edits` and `PUT …/edits/:id` (answers `PackState`). An invalid regex is 400. */
 export type EditRequest = { path: string; find: string; replace: string; note?: string };
-/** `POST /api/servers/:id/pack/edits/preview`: how many times `find` matches the file on the server now (404: no such file). */
+/** `POST /api/servers/:id/pack/edits/preview`: how many lines of the file on the server now `find` matches in (404: no such file). */
 export type EditPreviewRequest = { path: string; find: string };
 export type EditPreview = { matches: number };
 /**

@@ -567,6 +567,7 @@ test('the preview counts the matches in the file on the server', async (t) => {
   write(w.dir, { 'config/gregtech.cfg': 'pollution=true\nheap=6G\nother_pollution=true\n' });
   const preview = (body: object) => s.req('POST', '/api/servers/gtnh/pack/edits/preview', body);
   assert.deepEqual(await s.json(preview({ path: 'config/gregtech.cfg', find: 'pollution=true$' })), { matches: 2 });
+  assert.deepEqual(await s.json(preview({ path: 'config/gregtech.cfg', find: 'o' })), { matches: 2 }); // lines, not hits
   assert.deepEqual(await s.json(preview({ path: 'config/gregtech.cfg', find: '^pollution=true$' })), { matches: 1 });
   assert.deepEqual(await s.json(preview({ path: 'config/gregtech.cfg', find: 'nothing' })), { matches: 0 });
   assert.equal((await preview({ path: 'config/missing.cfg', find: 'x' })).status, 404);
@@ -907,7 +908,8 @@ test('a pack update and a restore refuse each other (GitHub off: no deploys to a
   // A pack update holds a restore off.
   let gate!: () => void;
   const restore: RunRestore = () => new Promise((r) => (gate = () => r('Restored.')));
-  const { s } = await updatable(t, { restore });
+  const { w: first, s } = await updatable(t, { restore });
+  write(first.backupDir, { '2026-10-02-12-00-00.zip': 'backup' });
   s.fake.downloadGate = new Promise(() => {});
   await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
   const refused = await s.req('POST', '/api/servers/gtnh/restore', { name: '2026-10-02-12-00-00.zip' });

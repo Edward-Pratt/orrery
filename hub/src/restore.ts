@@ -101,9 +101,9 @@ export class Restores {
     if (!service) throw new RestoreRefused(409, `${serverName} has no linked service: restore it on the host with deploy/restore-backup.sh.`);
     const { dir, backupDir } = this.#servers.get(serverId) ?? {};
     if (!dir || !backupDir) throw new RestoreRefused(409, `${serverName} has no server folder.`);
-    if (this.#o.packing(serverId)) throw new RestoreRefused(409, `A pack update is running on ${serverName}: restore once it is done.`);
     // Only a name the hub listed itself reaches the script, never one from the request as such.
     if (!(await listBackups(backupDir)).some((b) => b.name === name)) throw new RestoreRefused(404, `No backup ${name}.`);
+    if (this.#o.packing(serverId)) throw new RestoreRefused(409, `A pack update is running on ${serverName}: restore once it is done.`);
     if (service.state !== 'inactive' && service.state !== 'failed') {
       throw new RestoreRefused(409, `${service.unit} is ${service.state ?? 'not read yet'}: stop it first.`);
     }

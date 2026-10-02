@@ -515,14 +515,16 @@ export class Packs {
     return this.state(serverId);
   }
 
-  /** How many times `find` matches the file on the server now. */
+  /** How many lines of the file on the server now `find` matches in. */
   async previewEdit(serverId: string, path: unknown, find: unknown): Promise<EditPreview> {
     const s = this.#server(serverId);
     const p = relPath(path, 'a file');
     const re = regex(find);
     const file = join(s.dir!, p);
     if (!(await isFile(file)) || !(await inside(s.dir!, p))) throw new PackRefused(404, `No file ${p} on the server.`);
-    return { matches: (await readFile(file, 'utf8')).match(re)?.length ?? 0 };
+    const content = await readFile(file, 'utf8');
+    const lines = new Set([...content.matchAll(re)].map((m) => content.slice(0, m.index).split('\n').length));
+    return { matches: lines.size };
   }
 
   /**

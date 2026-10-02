@@ -21,8 +21,9 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 |---|---|
 | `src/app/session.ts` | `Session` (who is logged in, logout) and the `loggedOutOn401` interceptor. |
 | `src/app/integrations.ts` | `Integrations` (`GET /api/integrations`, asked once) and `enabled(...names)`, the `canMatch` guard (any of them on). |
-| `src/app/app.routes.ts` | One lazy route per integration with pages, matched only when it is on (Minecraft: `servers`; `host`; systemd or checks: `services`, which holds the checks too; there is no `checks` route). |
-| `src/app/app.ts` | The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages (`PAGES`), `UserMenu` (avatar → Theme, Log out); the attention strip above `<router-outlet>` and amber count badges on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off the Services entry reads "Checks". |
+| `src/app/environment.ts` | `Environment.staging` (`GET /api/environment`, asked once, before login; false on an error) and `StagingBadge`, the amber "Staging" next to "orrery" in the sidebar, phone header and login card (nothing on Production). |
+| `src/app/app.routes.ts` | `servers` (always: every hub has servers; a server without a Mod token just has no Mod features) and `audit`, and one lazy route per other integration with pages, matched only when it is on (`host`; systemd or checks: `services`, which holds the checks too; there is no `checks` route). |
+| `src/app/app.ts` | The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages (`PAGES`), `UserMenu` (avatar → Theme, Log out); the attention strip above `<router-outlet>` and amber count badges on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging. |
 | `src/app/login.ts` | The logged-out card; shows the reason the hub gave in `?login=`. |
 | `src/app/theme.ts` | `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as `dark` on `<html>`. |
 | `src/app/status.ts` | `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`; teal `--brand`; Figtree). |

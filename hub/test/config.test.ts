@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -389,4 +390,23 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
     newerAfterDays: 14,
     deploys: { root: '/srv/x', hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: '/var/www/orrery' },
   });
+});
+
+test('environment defaults to production, may be staging, and nothing else', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'config.json');
+  const load = async (extra: object) => {
+    await writeFile(path, JSON.stringify({ ...valid(dir), ...extra }));
+    return loadConfig(path).environment;
+  };
+  assert.equal(await load({}), 'production');
+  assert.equal(await load({ environment: 'staging' }), 'staging');
+  assert.deepEqual(validateConfig({ ...valid(dir), environment: 'Staging' }), ['"environment" must be production or staging']);
+});
+
+test("staging's example config is valid", () => {
+  const example = JSON.parse(readFileSync(new URL('../config.staging.example.json', import.meta.url), 'utf8'));
+  assert.deepEqual(validateConfig(example), []);
+  assert.equal(example.environment, 'staging');
 });

@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { GithubIntegration, ServerSettings } from './config.ts';
+import type { Environment, GithubIntegration, ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { ServerHub } from './servers.ts';
@@ -65,8 +65,6 @@ const newestFirst = (a: Release, b: Release) => {
 };
 /** The first hub and dashboard releases that can deploy: an older one would take the deploy flow away. */
 export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0' } as const;
-// ponytail: one environment per hub until the staging spec adds config's `environment`.
-const ENVIRONMENT = 'production';
 const LOG_LINES = 40;
 const HISTORY = 50;
 /** A oneshot deploy unit is `activating` while its script runs; inactive or failed once it is over. */
@@ -81,6 +79,8 @@ export type DeploysDeps = {
   github: GitHub;
   run: Run;
   config: GithubIntegration;
+  /** The target of this hub's own and its dashboard's deploys. */
+  environment: Environment;
   servers: Pick<ServerSettings, 'id' | 'dir'>[];
   /** Whether a server has a Mod token. */
   hasMod: (serverId: string) => boolean;
@@ -215,7 +215,7 @@ export class Deploys {
     this.#starting = true;
     try {
       if (part === 'hub') this.#d.db.copyTo(join(this.#d.dbCopies, `hub-before-${tag}-${Date.now()}.db`));
-      const row = this.#begin(part, ENVIRONMENT, from, tag, by);
+      const row = this.#begin(part, this.#d.environment, from, tag, by);
       try {
         await this.#d.run('systemctl', ['start', '--no-block', '--', this.#unit(row)]);
       } catch (err) {

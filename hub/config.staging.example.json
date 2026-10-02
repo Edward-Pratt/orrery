@@ -1,0 +1,25 @@
+{
+  "environment": "staging",
+  "dbPath": "/srv/orrery-staging/hub.db",
+  "servers": [{ "id": "demo", "name": "Demo" }],
+  "integrations": {
+    "web": {
+      "listenPort": 25582,
+      "publicUrl": "https://staging.orrery.run",
+      "clientId": "000000000000000000",
+      "guildId": "000000000000000000",
+      "adminRoleId": "000000000000000000"
+    },
+    "host": { "id": "oracle" },
+    "github": {
+      "repo": "Edward-Pratt/orrery",
+      "deploys": {
+        "root": "/srv/orrery-staging",
+        "hubUnit": "orrery-hub-staging.service",
+        "hubTemplate": "orrery-deploy-staging",
+        "webTemplate": "orrery-deploy-web-staging",
+        "webDir": "/var/www/orrery-staging"
+      }
+    }
+  }
+}

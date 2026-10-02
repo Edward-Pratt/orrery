@@ -102,7 +102,13 @@ export const PRODUCTION_DEPLOYS: DeployTargets = {
   webDir: '/var/www/orrery',
 };
 
+/** Which Environment a hub is: a label only, shown by the dashboard; what a hub can do comes from its integrations. */
+export const ENVIRONMENTS = ['production', 'staging'] as const;
+export type Environment = (typeof ENVIRONMENTS)[number];
+
 export type Config = {
+  /** Default production. */
+  environment: Environment;
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];
@@ -216,6 +222,9 @@ export function validateConfig(raw: unknown): string[] {
     return seen;
   };
 
+  if (raw.environment !== undefined && !ENVIRONMENTS.includes(raw.environment as Environment)) {
+    err('', `"environment" must be ${ENVIRONMENTS.join(' or ')}`);
+  }
   str(raw, 'dbPath', '');
   httpUrl(raw, 'healthcheckUrl', '');
 
@@ -431,7 +440,7 @@ export function loadConfig(path: string): Config {
   if (errors.length) {
     throw new Error(`${path} has ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n- ${errors.join('\n- ')}`);
   }
-  const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
+  const c = raw as Omit<Config, 'servers' | 'environment'> & { environment?: Environment; servers: ServerEntry[] };
   const integrations = { ...c.integrations };
   const { web, discord, host, github } = integrations;
   if (github) {
@@ -453,5 +462,5 @@ export function loadConfig(path: string): Config {
       sessionDays: web.sessionDays ?? 7,
     };
   }
-  return { ...c, servers: c.servers.map(resolve), integrations };
+  return { ...c, environment: c.environment ?? 'production', servers: c.servers.map(resolve), integrations };
 }

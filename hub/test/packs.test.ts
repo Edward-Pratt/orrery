@@ -127,6 +127,7 @@ function world(t: TestContext) {
     keep: ['config/JourneyMapServer', 'journeymap/'],
   };
   const config: Config = {
+    environment: 'production',
     dbPath: join(root, 'data', 'hub.db'),
     servers: [gtnh],
     integrations: {

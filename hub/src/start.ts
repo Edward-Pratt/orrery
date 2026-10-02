@@ -3,6 +3,7 @@ import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
+import { fetchDownload, Packs, type Download, type PacksOptions } from './packs.ts';
 import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
 import type { Config, DiscordConfig } from './config.ts';
@@ -46,6 +47,10 @@ export type HubDeps = {
   github?: GitHub;
   /** Shorter deploy timings, for tests. */
   deploys?: DeploysOptions;
+  /** Downloads a pack zip from a URL (default: `fetch`). */
+  download?: Download;
+  /** Shorter pack update timings, for tests. */
+  packs?: PacksOptions;
 };
 
 export type HubHandle = {
@@ -114,7 +119,15 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
   let deploys: Deploys | undefined;
-  const restores = services && deps.restore && new Restores(hub, services, config.servers, deps.restore, () => deploys?.busy() ?? false);
+  let packs: Packs | undefined;
+  const restores =
+    services &&
+    deps.restore &&
+    new Restores(hub, services, config.servers, deps.restore, {
+      deploying: () => deploys?.busy() ?? false,
+      packing: (id) => packs?.busy(id) ?? false,
+      restored: (id) => packs?.restored(id),
+    });
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   deploys =
     github &&
@@ -129,11 +142,31 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
         restoring: () => restores?.busy() ?? false,
+        packing: (id) => packs?.busy(id) ?? false,
         dbCopies,
       },
       deps.deploys,
     );
   deploys?.start();
+  // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
+  packs =
+    services &&
+    minecraft &&
+    new Packs(
+      {
+        hub,
+        db,
+        services,
+        restarts,
+        servers: config.servers,
+        hasMod: (id) => Boolean(minecraft.tokens[id]),
+        dataDir: dirname(config.dbPath),
+        download: deps.download ?? fetchDownload,
+        restoring: (id) => restores?.busy(id) ?? false,
+        deploying: (id) => (deploys?.busy() ? 'hub' : deploys?.modBusy(id) ? 'mod' : null),
+      },
+      deps.packs,
+    );
 
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
@@ -141,9 +174,10 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
+  await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations: config.integrations })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -163,6 +197,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       host?.stop();
       services?.stop();
       deploys?.stop();
+      packs?.stop();
       stopSummaries();
       upkeep();
       stopPing();

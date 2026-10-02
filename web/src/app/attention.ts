@@ -5,7 +5,7 @@ import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import type { CheckStatus, DeploysAnswer, ServerCard, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
-import { catchError, debounceTime, EMPTY, filter, of, startWith, Subject, switchMap, take } from 'rxjs';
+import { catchError, debounceTime, EMPTY, filter, of, skip, startWith, Subject, switchMap, take } from 'rxjs';
 import { Feedback } from './feedback';
 import { overdue, releaseRows } from './host/release-rows';
 import { LiveEvents, ofTarget } from './events';
@@ -47,6 +47,7 @@ export class Attention {
   readonly #refetchCards = new Subject<void>();
   readonly #refetchServices = new Subject<void>();
   readonly #refetchDeploys = new Subject<void>();
+  readonly #running$ = toObservable(this.#progress.running);
 
   readonly items = computed<AttentionItem[]>(() => {
     const cards = this.#cards();
@@ -67,6 +68,16 @@ export class Attention {
       const doing = this.#progress.running()[c.id];
       if (doing) items.push({ key: `${doing}:${c.id}`, page: 'servers', target: c.name, message: doing === 'backup' ? 'is backing up' : 'is being restored' });
       if (c.online && c.lagging) items.push({ key: `lagging:${c.id}`, page: 'servers', target: c.name, message: 'is lagging' });
+      const rolledBack = c.packUpdate?.rolledBack;
+      if (rolledBack) {
+        items.push({
+          key: `pack:${c.id}`,
+          page: 'servers',
+          target: c.name,
+          message: `rolled back its pack update to ${rolledBack.to}: the world may have changed on load`,
+          action: { label: 'Restore…', run: () => void this.#router.navigate(['/servers', c.id, 'pack']) },
+        });
+      }
       if (c.restart) {
         items.push({
           key: `restart:${c.id}`,
@@ -130,6 +141,8 @@ export class Attention {
         .pipe(debounceTime(50), startWith(undefined), switchMap(() => this.#http.get<T>(url).pipe(catchError(() => EMPTY))), takeUntilDestroyed(this.#destroyRef))
         .subscribe(into);
     if (on.minecraft) fetching<ServerCard[]>(this.#refetchCards, '/api/servers', (v) => this.#cards.set(v));
+    // A restore sends no event, but ends a pack rollback's offer: the cards are fetched again when one starts or ends.
+    this.#running$.pipe(skip(1), takeUntilDestroyed(this.#destroyRef)).subscribe(() => this.#refetchCards.next());
     if (on.systemd) fetching<ServiceStatus[]>(this.#refetchServices, '/api/services', (v) => this.#services.set(v));
     // Releases live on the Host page: without it an item would link nowhere.
     if (on.github && on.host) fetching<DeploysAnswer>(this.#refetchDeploys, '/api/deploys', (v) => this.#deploys.set(v));

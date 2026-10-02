@@ -13,13 +13,17 @@ export type ReleaseRow = {
   newer: boolean;
   /** Its deploy in progress, if any. */
   deploying: DeployRow | undefined;
+  /** Why it can't deploy now: a pack update runs (on its server, for a Mod; anywhere, for the hub). */
+  why: string | null;
 };
 
 const DAY = 24 * 60 * 60_000;
 
 export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
   const running = (part: DeployPart, server?: string) => a.history.find((h) => h.outcome === 'running' && h.part === part && (!server || h.target === server));
-  const row = (key: string, label: string, part: DeployPart, run: string | null, latest: string | null, releases: Release[], server?: string): ReleaseRow => ({
+  const why = (part: DeployPart, server?: string, name?: string) =>
+    part === 'hub' && a.packing.length ? 'A pack update is running.' : server && a.packing.includes(server) ? `A pack update is running on ${name}.` : null;
+  const row = (key: string, label: string, part: DeployPart, run: string | null, latest: string | null, releases: Release[], server?: string, name?: string): ReleaseRow => ({
     key,
     label,
     part,
@@ -29,11 +33,12 @@ export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
     releases,
     newer: releases.findIndex((r) => r.tag === run) > 0,
     deploying: running(part, server),
+    why: why(part, server, name),
   });
   return [
     row('hub', 'Hub', 'hub', a.hub.running, a.hub.latest, a.hub.releases),
     row('web', 'Dashboard', 'web', a.web.running, a.web.latest, a.web.releases),
-    ...a.mod.servers.map((s) => row(`mod:${s.id}`, `Mod on ${s.name}`, 'mod', s.running, a.mod.latest, a.mod.releases, s.id)),
+    ...a.mod.servers.map((s) => row(`mod:${s.id}`, `Mod on ${s.name}`, 'mod', s.running, a.mod.latest, a.mod.releases, s.id, s.name)),
   ];
 }
 

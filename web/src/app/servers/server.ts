@@ -19,6 +19,7 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
   { path: 'players', label: 'Players', has: () => true },
   { path: 'history', label: 'History', has: () => true },
   { path: 'backups', label: 'Backups', has: (d) => d.backups.configured },
+  { path: 'pack', label: 'Pack', has: (d) => d.pack },
 ];
 
 /** A server's page: header (name, state, linked service, actions), tabs, and the sections, which read the detail from here. */
@@ -42,10 +43,11 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
         </div>
         <app-server-actions [card]="c" [full]="true" (changed)="refresh()" />
       </header>
-      <nav class="mb-4 flex gap-4 border-b text-sm" data-sections>
+      <!-- Seven tabs don't fit a phone: the row scrolls sideways. -->
+      <nav class="-mx-4 mb-4 flex gap-4 overflow-x-auto border-b px-4 text-sm whitespace-nowrap md:mx-0 md:px-0" data-sections>
         @for (s of sections; track s.path) {
           @if (s.has(detail()!)) {
-            <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px pb-2 hover:underline">{{ s.label }}</a>
+            <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px shrink-0 pb-2 hover:underline">{{ s.label }}</a>
           }
         }
       </nav>

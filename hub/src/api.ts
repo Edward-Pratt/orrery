@@ -11,6 +11,8 @@ import type {
   HistoryAnswer,
   HostSample,
   FeedEvent,
+  PackOutcome,
+  PackStepState,
   Period,
   PlaytimeAnswer,
   ServiceStatus,
@@ -30,6 +32,10 @@ export type {
   HubEvent,
   Lifecycle,
   Notice,
+  PackFinished,
+  PackOutcome,
+  PackStep,
+  PackStepState,
   Period,
   PlaytimeAnswer,
   Release,
@@ -89,6 +95,8 @@ export type DeploysAnswer = {
   newerAfterDays: number;
   history: DeployRow[];
   older: boolean;
+  /** The servers a pack update runs on: no Mod deploy onto them, and no hub deploy, meanwhile. */
+  packing: string[];
 };
 
 /**
@@ -139,6 +147,11 @@ export type ServerCard = {
   lagging: boolean;
   service: { id: string; state: string | null } | null;
   features: Features;
+  /**
+   * Without packs null; else whether a pack update runs on it (refetch on `packUpdateStarted`/`packUpdateFinished`),
+   * and the restore offer after one rolled back (see `PackState.rolledBack`).
+   */
+  packUpdate: { running: boolean; rolledBack: PackRollback | null } | null;
 };
 
 /**
@@ -152,6 +165,8 @@ export type ServerDetail = {
   tps: TpsAnswer | null;
   top: Record<Period, { player: string; ms: number }[]>;
   backups: BackupsAnswer;
+  /** Whether the server can have a pack: a folder, a linked service and a Mod token. Only then are there pack routes. */
+  pack: boolean;
 };
 
 /** `GET /api/servers/:id/players/:name`: playtime and last seen; 404 for a name never seen on the server. */
@@ -203,3 +218,126 @@ export type RestoreRequest = { name: string };
 
 /** The answer to a command, to `POST /api/servers/:id/backup` and to a restore. */
 export type CommandOutput = { output: string[] };
+
+/**
+ * Packs (only for a server with a folder, a linked service and a Mod token; others 404). Every path is relative to the
+ * server's folder. Actions are audited as the admin; `PackRefused` answers 400 (bad input), 404 or 409 (not now).
+ */
+/** The installed pack: `source` is its URL, or the uploaded file's name; `how` it arrived. */
+export type InstalledPack = {
+  name: string;
+  version: string;
+  source: string;
+  sha256: string;
+  by: string;
+  at: number;
+  how: 'adopted' | 'updated';
+};
+/** How a file differs from what the last apply put on the server. */
+export type PackChange = 'added' | 'replaced' | 'removed';
+/**
+ * A file the hub keeps for the server and lays over the pack on every update: at a new path, or replacing the pack's
+ * file there (`replaces`). `removed` ones stay, struck through, until an apply. `change`: against the last apply.
+ */
+export type Extra = {
+  id: number;
+  target: string;
+  sha256: string;
+  label: string;
+  note: string;
+  by: string;
+  at: number;
+  removed: boolean;
+  replaces: boolean;
+  change: PackChange | null;
+};
+/**
+ * A find-and-replace in one file, applied after the pack, the Extras and the Mod: `find` is a JavaScript regex (`gm`
+ * flags), `replace` may use `$1`. `failedOn`: the version an update failed on because it matched nothing.
+ */
+export type ConfigEdit = { id: number; path: string; find: string; replace: string; note: string; by: string; at: number; failedOn: string | null };
+/** A file the next apply changes: an Extra, or a file whose Config edits changed. */
+export type PendingChange = { path: string; kind: 'extra' | 'edit'; change: PackChange };
+/**
+ * A pack update in the history: `changes` lists what an apply onto the same version changed (null: a version
+ * update); `step` the one it was at; `backup` the pre-update backup's name; `log` its last lines (or why it failed).
+ */
+export type PackUpdateRow = {
+  id: number;
+  from: string;
+  to: string;
+  changes: string[] | null;
+  by: string;
+  started: number;
+  finished: number | null;
+  outcome: PackOutcome;
+  step: PackStepState['step'];
+  backup: string | null;
+  log: string;
+};
+/** The update running now: where to (`name`, `version`), who started it, and every step in order. `cancellable`: in Prepare or the Stop countdown. */
+export type RunningPackUpdate = {
+  id: number;
+  name: string;
+  version: string;
+  by: string;
+  started: number;
+  steps: PackStepState[];
+  cancellable: boolean;
+};
+/** After an update rolled back: the version it tried, and the pre-update backup to restore (null: none recorded). */
+export type PackRollback = { to: string; backup: string | null };
+/**
+ * `GET /api/servers/:id/pack`: the installed pack (null until adopted), the Kept paths (`server`: its `keep` list;
+ * `builtIn`), the Extras, Config edits and pending changes, the history (newest first), the running update, the Mod's
+ * jar in `mods/` (null: none), why an update can't start now (`blocked`, null: it can), and the rollback offer.
+ */
+export type PackState = {
+  installed: InstalledPack | null;
+  kept: { server: string[]; builtIn: string[] };
+  extras: Extra[];
+  edits: ConfigEdit[];
+  pending: PendingChange[];
+  history: PackUpdateRow[];
+  running: RunningPackUpdate | null;
+  mod: string | null;
+  blocked: string | null;
+  rolledBack: PackRollback | null;
+  /** The files the installed pack itself ships (Kept paths left out), sorted: an Extra at one of them replaces it. */
+  packFiles: string[];
+};
+/**
+ * `POST /api/servers/:id/pack/uploads`: the raw file as the body (`application/zip`, `application/java-archive` or
+ * `application/octet-stream`, the one exception to the JSON rule; Origin still checked), its name in `x-file-name`;
+ * at most 4 GiB. `upload` names it in a source or an Extra, once; unused ones are cleared when the hub restarts.
+ */
+export type UploadAnswer = { upload: string; fileName: string; size: number };
+/** A pack zip: an `https:` URL the hub downloads, or an upload. */
+export type PackSource = { url: string; name: string; version: string } | { upload: string; name: string; version: string };
+/** A file in the Adopt report, with its size on the server. */
+export type ReportFile = { path: string; size: number };
+/**
+ * `POST /api/servers/:id/pack/compare` (a `PackSource`; 409 once adopted, 502 if the download fails): how the server
+ * folder compares with the pack. `matching` files are the same; `mod` is the Mod's jar; `notInPack` files under
+ * `mods/` and `config/` the pack lacks; `different` pack files changed on the server. Kept paths are left out. Held
+ * for an hour for `POST …/pack/adopt`.
+ */
+export type CompareReport = { name: string; version: string; matching: number; mod: string[]; notInPack: ReportFile[]; different: ReportFile[] };
+/** `POST /api/servers/:id/pack/adopt`: the report's paths to keep as Extras. Answers `PackState`; changes nothing on disk. */
+export type AdoptRequest = { keep: string[] };
+/** `POST /api/servers/:id/pack/extras` (answers `PackState`): an upload put at `target`. `PUT …/extras/:id` takes any of upload, label and note. */
+export type ExtraRequest = { upload: string; target: string; label?: string; note?: string };
+export type ExtraUpdate = { upload?: string; label?: string; note?: string };
+/** `POST /api/servers/:id/pack/edits` and `PUT …/edits/:id` (answers `PackState`). An invalid regex is 400. */
+export type EditRequest = { path: string; find: string; replace: string; note?: string };
+/** `POST /api/servers/:id/pack/edits/preview`: how many lines of the file on the server now `find` matches in (404: no such file). */
+export type EditPreviewRequest = { path: string; find: string };
+export type EditPreview = { matches: number };
+/**
+ * `POST /api/servers/:id/pack/update`: a new pack, or `{ pending: true }` to apply the changes pending onto the
+ * installed one. Answers 202 with the history row's `id`; steps follow as `packUpdateStep` notices, the end as
+ * `packUpdateFinished`. 409 while offline, without a pack, with nothing to change, or while an update, a restore or
+ * a Mod deploy runs on the server. `POST …/pack/update/cancel`: only in Prepare or the Stop countdown (else 409).
+ */
+export type PackUpdateRequest = PackSource | { pending: true };
+export type PackUpdateAnswer = { id: number };

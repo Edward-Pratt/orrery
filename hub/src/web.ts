@@ -13,8 +13,13 @@ import type {
   HostHistory,
   HostNow,
   Integrations,
+  CompareReport,
+  EditPreview,
   Me,
+  PackState,
+  PackUpdateAnswer,
   PlayerAnswer,
+  UploadAnswer,
   ServerCard,
   ServerDetail,
   ServerHistory,
@@ -29,6 +34,7 @@ import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
 import type { LiveFeed } from './live.ts';
+import { DownloadFailed, PackRefused, type Packs } from './packs.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
@@ -54,6 +60,8 @@ const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } a
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
 
 const AUDIT_LIMIT = 200;
+const UPLOAD = /^\/api\/servers\/[^/]+\/pack\/uploads$/;
+const UPLOAD_TYPES = ['application/zip', 'application/java-archive', 'application/octet-stream'];
 const MAX_HOURS = 90 * 24;
 
 /** A history period's `hours` query (default 24); undefined unless a whole number from 1 to 2160. */
@@ -89,11 +97,13 @@ export type WebDeps = {
   restores?: Restores;
   /** Only with the GitHub integration. */
   deploys?: Deploys;
+  /** Only with the systemd and Minecraft integrations. */
+  packs?: Packs;
   integrations: Config['integrations'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -110,6 +120,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
       features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
+      packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
@@ -164,8 +175,10 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   app.use(async (c, next) => {
     if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
     if (c.req.header('origin') !== origin) return c.text('Wrong origin', 403);
-    if (c.req.header('content-type')?.split(';')[0]!.trim().toLowerCase() !== 'application/json') {
-      return c.text('Send JSON', 415);
+    const type = c.req.header('content-type')?.split(';')[0]!.trim().toLowerCase();
+    // The one exception: a pack or Extra upload is the raw file.
+    if (UPLOAD.test(c.req.path) ? !UPLOAD_TYPES.includes(type ?? '') : type !== 'application/json') {
+      return c.text(UPLOAD.test(c.req.path) ? 'Send the file as application/zip, application/java-archive or application/octet-stream' : 'Send JSON', 415);
     }
     await next();
   });
@@ -257,6 +270,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       tps: hasMod(id) ? stats.tps(id)! : null,
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
+      pack: packs?.has(id) ?? false,
     } satisfies ServerDetail);
   });
   app.get('/servers/:id/history', (c) => {
@@ -294,6 +308,74 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         return c.text(`The restore failed: ${(err as Error).message}`, 502);
       }
     });
+  }
+  // Packs work on a stopped server too (an update checks for itself), so they come before the online check below.
+  if (packs) {
+    /** Runs a pack action for a server that has packs, mapping its refusals to their status. */
+    const pack = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<unknown>, status: 200 | 202 = 200) => {
+      const id = c.req.param('id')!;
+      if (!packs.has(id)) return c.notFound();
+      try {
+        const answer = await fn(id, c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer as object, status);
+      } catch (err) {
+        if (err instanceof PackRefused) return c.text(err.message, err.status);
+        if (err instanceof DownloadFailed) return c.text(err.message, 502);
+        throw err;
+      }
+    };
+    const id = (c: Context<Env>, key: string) => Number(/^[1-9]\d{0,15}$/.test(c.req.param(key) ?? '') ? c.req.param(key) : NaN);
+    app.get('/servers/:id/pack', (c) => pack(c, async (sid) => (await packs.state(sid)) satisfies PackState));
+    app.post('/servers/:id/pack/uploads', (c) =>
+      pack(c, async () => {
+        let name = 'upload';
+        try {
+          name = decodeURIComponent(c.req.header('x-file-name') ?? 'upload');
+        } catch {}
+        return (await packs.upload(c.req.raw.body, name)) satisfies UploadAnswer;
+      }),
+    );
+    app.post('/servers/:id/pack/compare', (c) =>
+      pack(c, async (sid, user) => (await packs.compare(sid, await jsonBody(c.req), actor(user))) satisfies CompareReport),
+    );
+    app.post('/servers/:id/pack/adopt', (c) =>
+      pack(c, async (sid, user) => (await packs.adopt(sid, (await jsonBody(c.req)).keep, actor(user), user.username)) satisfies PackState),
+    );
+    app.post('/servers/:id/pack/update', (c) =>
+      pack(
+        c,
+        async (sid, user) => {
+          const body = await jsonBody(c.req);
+          return { id: packs.update(sid, body.pending === true ? 'pending' : body, actor(user), user.username) } satisfies PackUpdateAnswer;
+        },
+        202,
+      ),
+    );
+    app.post('/servers/:id/pack/update/cancel', (c) => pack(c, async (sid, user) => packs.cancel(sid, actor(user), user.username)));
+    app.post('/servers/:id/pack/extras', (c) =>
+      pack(c, async (sid, user) => (await packs.addExtra(sid, await jsonBody(c.req), actor(user), user.username)) satisfies PackState),
+    );
+    app.put('/servers/:id/pack/extras/:extra', (c) =>
+      pack(c, async (sid, user) => (await packs.updateExtra(sid, id(c, 'extra'), await jsonBody(c.req), actor(user))) satisfies PackState),
+    );
+    app.delete('/servers/:id/pack/extras/:extra', (c) =>
+      pack(c, async (sid, user) => (await packs.removeExtra(sid, id(c, 'extra'), actor(user))) satisfies PackState),
+    );
+    app.post('/servers/:id/pack/edits/preview', (c) =>
+      pack(c, async (sid) => {
+        const { path, find } = await jsonBody(c.req);
+        return (await packs.previewEdit(sid, path, find)) satisfies EditPreview;
+      }),
+    );
+    app.post('/servers/:id/pack/edits', (c) =>
+      pack(c, async (sid, user) => (await packs.addEdit(sid, await jsonBody(c.req), actor(user), user.username)) satisfies PackState),
+    );
+    app.put('/servers/:id/pack/edits/:edit', (c) =>
+      pack(c, async (sid, user) => (await packs.updateEdit(sid, id(c, 'edit'), await jsonBody(c.req), actor(user))) satisfies PackState),
+    );
+    app.delete('/servers/:id/pack/edits/:edit', (c) =>
+      pack(c, async (sid, user) => (await packs.removeEdit(sid, id(c, 'edit'), actor(user))) satisfies PackState),
+    );
   }
   // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
   app.post('/servers/:id/*', async (c, next) => {

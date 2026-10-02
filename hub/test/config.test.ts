@@ -217,6 +217,26 @@ test("a server's linked service must be a listed service, linked to no other ser
   assert.equal(loadConfig(path).servers[0]!.service, 'gtnh');
 });
 
+test("a server's keep list is relative paths in its folder, without ..", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = valid(dir);
+  c.servers[0]!.keep = ['config/JourneyMapServer', 'serverutilities/', 'journeymap'];
+  assert.deepEqual(validateConfig(c), []);
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify(c));
+  assert.deepEqual(loadConfig(path).servers[0]!.keep, ['config/JourneyMapServer', 'serverutilities/', 'journeymap']);
+  c.servers[0]!.keep = ['/etc', 'config/../..', '', 7, 'ok'];
+  assert.deepEqual(validateConfig(c), [
+    'server "gtnh": "keep" entries must be relative paths without "..", got "/etc"',
+    'server "gtnh": "keep" entries must be relative paths without "..", got "config/../.."',
+    'server "gtnh": "keep" entries must be relative paths without "..", got ""',
+    'server "gtnh": "keep" entries must be relative paths without "..", got 7',
+  ]);
+  c.servers[0]!.keep = 'world';
+  assert.deepEqual(validateConfig(c), ['server "gtnh": "keep" must be a list of paths in the server folder']);
+});
+
 const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
 
 test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {

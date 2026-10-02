@@ -14,6 +14,7 @@ export default [
       { path: 'players', loadComponent: () => import('./players') },
       { path: 'stats', redirectTo: 'players' },
       { path: 'backups', loadComponent: () => import('./backups') },
+      { path: 'pack', loadComponent: () => import('./pack') },
     ],
   },
 ] satisfies Routes;

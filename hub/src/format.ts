@@ -33,7 +33,8 @@ const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning
 /** A countdown's words: a restart's, or a stop's (of a server's service). */
 const COUNTDOWN = { restart: { in: '🔄 Restart in', now: '🔄 Restarting now' }, stop: { in: '🛑 Stop in', now: '🛑 Stopping now' } };
 
-function noticeText(n: Notice): string {
+/** A notice's title; null for one that isn't posted. */
+function noticeText(n: Notice): string | null {
   switch (n.kind) {
     case 'restartScheduled':
       return `${COUNTDOWN[n.stop ? 'stop' : 'restart'].in} ${countdownText(n.ms)} (by ${n.by})`;
@@ -61,6 +62,23 @@ function noticeText(n: Notice): string {
       return `✅ Backup finished (${n.detail})`;
     case 'backupFailed':
       return `❌ Backup failed: ${n.detail}`;
+    case 'packUpdateStarted':
+      return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
+    case 'packUpdateStep': // progress for the dashboard
+      return null;
+    case 'packUpdateFinished':
+      switch (n.outcome) {
+        case 'ok':
+          return n.from === n.to ? `✅ Pack changes applied to ${n.to} (${formatDuration(n.ms)})` : `✅ Pack updated to ${n.to} (${formatDuration(n.ms)})`;
+        case 'rolled back':
+          return `❌ Pack update to ${n.to} rolled back: ${n.from} is running again.${n.backup ? ` Pre-update backup: ${n.backup}` : ''}`;
+        case 'failed':
+          return `❌ Pack update to ${n.to} failed: the server didn't come back, even after a rollback`;
+        case 'failed in staging':
+          return `⚠️ Pack update to ${n.to} failed while preparing: the server wasn't touched`;
+        case 'cancelled':
+          return `❎ Pack update to ${n.to} cancelled: the server wasn't touched`;
+      }
   }
 }
 
@@ -89,8 +107,10 @@ export function formatEvent(e: HubEvent): Post | null {
       return embed({ title: '⚠️ Server not responding', color: COLORS.orange });
     case 'recovered':
       return embed({ title: '✅ Server responding again', color: COLORS.green });
-    case 'notice':
-      return embed({ title: title(noticeText(e)), color: SEVERITY_COLORS[e.severity] });
+    case 'notice': {
+      const text = noticeText(e);
+      return text === null ? null : embed({ title: title(text), color: SEVERITY_COLORS[e.severity] });
+    }
     case 'questBatch':
       return formatQuests(e);
     case 'linked':

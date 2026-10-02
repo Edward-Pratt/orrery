@@ -18,6 +18,20 @@ dash.orrery.run {
 	}
 }
 
+# Staging (deploy/orrery-hub-staging.service): the same, with its own hub port and dashboard folder.
+staging.orrery.run {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:25582 {
+			flush_interval -1
+		}
+	}
+	handle {
+		root * /var/www/orrery-staging
+		try_files {path} /index.html
+		file_server
+	}
+}
+
 # Grafana with http_addr = 127.0.0.1 and root_url = https://grafana.orrery.run/ in grafana.ini.
 grafana.orrery.run {
 	reverse_proxy 127.0.0.1:3000

@@ -12,6 +12,7 @@ import type {
   DeploysAnswer,
   HostHistory,
   HostNow,
+  EnvironmentInfo,
   Integrations,
   CompareReport,
   EditPreview,
@@ -100,10 +101,11 @@ export type WebDeps = {
   /** Only with the systemd and Minecraft integrations. */
   packs?: Packs;
   integrations: Config['integrations'];
+  environment: Config['environment'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -128,6 +130,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   const app = new Hono<Env>().basePath('/api');
   const actor = (user: Me) => `web:${user.username} (${user.id})`;
 
+  app.get('/environment', (c) => c.json({ environment } satisfies EnvironmentInfo));
   app.get('/login', (c) => {
     const state = randomBytes(16).toString('base64url');
     setCookie(c, 'state', state, { ...COOKIE, maxAge: 600 });

@@ -130,6 +130,11 @@ Cloudflare, which refuses bodies over 100 MB: the adopted zip went up over an SS
 updates). Still to smoke test on the real server: Apply changes, a version update with players online, a rollback and
 restoring its pre-update backup.
 
+**Staging — built, to set up on the host:** #91. Config's `environment` and `GET /api/environment`, the dashboard's
+Staging badge and tab title, the Servers page without the Minecraft integration (for Staging's offline `demo`),
+`deploy/orrery-hub-staging.service` (its header: the one-time setup), the Caddyfile's `staging.orrery.run` site and
+`hub/config.staging.example.json`. Still to do on the host: the setup and the spec's manual smoke test.
+
 | # | Spec | Where | Size | Needs |
 |---|---|---|---|---|
 | 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |

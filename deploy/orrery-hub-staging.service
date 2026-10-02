@@ -1,0 +1,41 @@
+# orrery hub, Staging: a second Environment on the production host at https://staging.orrery.run (#91), with its own
+# OS user, root, env file, OAuth app and database. Same as orrery-hub.service but for those. polkit
+# (orrery-hub.rules) lets orrery-staging start its own deploy templates and restart this unit, nothing else.
+#
+# One-time setup, in order (as root):
+#  1. The user, which can't read production's files (/home/opc is 0700, /etc/orrery.env root-only):
+#       useradd --system --home-dir /srv/orrery-staging --shell /usr/sbin/nologin orrery-staging
+#  2. Its root:  install -d -m 750 -o orrery-staging -g orrery-staging /srv/orrery-staging /srv/orrery-staging/releases
+#  3. A Discord OAuth app "orrery (staging)", redirect https://staging.orrery.run/api/callback. Its client id goes in
+#     the config; the env file, root-only, holds DISCORD_CLIENT_SECRET=... (its secret) and GITHUB_TOKEN=... (no
+#     DISCORD_TOKEN: no bot):  install -m 600 -o root -g root staging.env /etc/orrery-staging.env
+#  4. The config: hub/config.staging.example.json, with the app's client id and production's guild and admin role:
+#       install -m 640 -o orrery-staging -g orrery-staging config.json /srv/orrery-staging/config.json
+#  5. DNS: staging.orrery.run → this host. Then deploy/Caddyfile to /etc/caddy/Caddyfile and `systemctl reload caddy`.
+#  6. polkit: install deploy/orrery-hub.rules as its header says (its staging block names orrery-staging).
+#  7. Units: copy this, orrery-deploy-staging@.service and orrery-deploy-web-staging@.service to /etc/systemd/system/,
+#     then `systemctl daemon-reload`.
+#  8. The first hub release by hand (deploy-hub.sh deploys over a running `current`, so it needs one), as the user:
+#       cd /srv/orrery-staging/releases && runuser -u orrery-staging -- git clone --depth 1 --branch hub-vX.Y.Z \
+#         https://github.com/Edward-Pratt/orrery.git hub-vX.Y.Z
+#       runuser -u orrery-staging -- sh -c 'cd hub-vX.Y.Z/hub && npm ci --omit=dev'
+#       runuser -u orrery-staging -- ln -sfn releases/hub-vX.Y.Z /srv/orrery-staging/current
+#  9. SELinux: `restorecon -R /srv/orrery-staging`; if the hub or a deploy is denied, `ausearch -m avc -ts recent`.
+# 10. `systemctl enable --now orrery-hub-staging.service`, then the dashboard from Staging's Host page (Releases), or
+#     `systemctl start orrery-deploy-web-staging@web-vX.Y.Z`. Later releases of both deploy from there too.
+# Stop it any time with `systemctl stop orrery-hub-staging`: production doesn't depend on it.
+[Unit]
+Description=orrery hub (staging)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=orrery-staging
+# No WorkingDirectory=, as in orrery-hub.service: SELinux may refuse systemd following the `current` symlink.
+EnvironmentFile=/etc/orrery-staging.env
+ExecStart=/usr/bin/node /srv/orrery-staging/current/hub/src/index.ts /srv/orrery-staging/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

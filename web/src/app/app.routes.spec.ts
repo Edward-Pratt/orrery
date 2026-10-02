@@ -20,7 +20,7 @@ async function open(url: string, on: Integrations) {
   const harness = await RouterTestingHarness.create();
   const navigated = harness.navigateByUrl(url);
   await settle();
-  TestBed.inject(HttpTestingController).expectOne('/api/integrations').flush(on);
+  TestBed.inject(HttpTestingController).match('/api/integrations').forEach((r) => r.flush(on)); // servers and audit don't ask
   await navigated;
   return harness;
 }
@@ -58,8 +58,8 @@ describe('routing by enabled integrations', () => {
     expect(off.routeNativeElement?.textContent).toContain('Nothing here');
   });
 
-  it('has no servers page when Minecraft is off', async () => {
-    const harness = await open('/servers', { minecraft: false, discord: true, web: true, checks: false, host: false, systemd: false, github: false });
-    expect(harness.routeNativeElement?.textContent).toContain('Nothing here');
+  it('opens the servers page with Minecraft off too (Staging\'s demo server has no Mod)', async () => {
+    const harness = await open('/', { minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false });
+    expect(harness.routeNativeElement?.textContent).toContain('Servers');
   });
 });

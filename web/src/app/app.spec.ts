@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import type { Integrations, Me } from '@hub/api';
+import type { EnvironmentInfo, Integrations, Me } from '@hub/api';
 import { By } from '@angular/platform-browser';
 import { App, UserMenu } from './app';
 import { FETCH } from './events';
@@ -12,7 +12,8 @@ import { Theme } from './theme';
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
 const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false };
 
-async function open(me: Me | null, on: Integrations = ALL, url = '/') {
+/** `env`: what /api/environment answers, or `error` when it fails. */
+async function open(me: Me | null, on: Integrations = ALL, url = '/', env: EnvironmentInfo['environment'] | 'error' = 'production') {
   history.replaceState(null, '', url);
   TestBed.configureTestingModule({
     providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: fakeEvents().fetch }],
@@ -20,6 +21,9 @@ async function open(me: Me | null, on: Integrations = ALL, url = '/') {
   const fixture = TestBed.createComponent(App);
   const backend = TestBed.inject(HttpTestingController);
   await settle();
+  const environment = backend.expectOne('/api/environment');
+  if (env === 'error') environment.flush('Bad gateway', { status: 502, statusText: 'Bad Gateway' });
+  else environment.flush({ environment: env });
   const req = backend.expectOne('/api/me');
   if (me) req.flush(me);
   else req.flush('Not logged in', { status: 401, statusText: 'Unauthorized' });
@@ -33,17 +37,41 @@ async function open(me: Me | null, on: Integrations = ALL, url = '/') {
 const labels = (el: HTMLElement) => [...el.querySelectorAll('aside nav a')].map((a) => a.textContent!.trim());
 
 describe('the shell', () => {
-  afterEach(() => (document.documentElement.classList.remove('dark'), localStorage.clear()));
+  afterEach(() => (document.documentElement.classList.remove('dark'), localStorage.clear(), (document.title = '')));
+
+  const badges = (el: HTMLElement) => [...el.querySelectorAll('[data-staging]')].map((b) => b.closest('aside, header, .rounded-xl')!.tagName);
+
+  it('marks Staging with a badge in the sidebar, the phone header and the login card, and in the tab title', async () => {
+    const staging = await open(ALEX, ALL, '/', 'staging');
+    expect(badges(staging.el)).toEqual(['ASIDE', 'HEADER']);
+    expect(staging.el.querySelector('[data-staging]')!.textContent!.trim()).toBe('Staging');
+    expect(document.title).toBe('orrery (staging)');
+    TestBed.resetTestingModule();
+    const login = await open(null, ALL, '/', 'staging');
+    expect(badges(login.el)).toEqual(['DIV']);
+    expect(document.title).toBe('orrery (staging)');
+  });
+
+  it('shows no badge on Production, or when the hub cannot say', async () => {
+    for (const env of ['production', 'error'] as const) {
+      for (const me of [ALEX, null]) {
+        const r = await open(me, ALL, '/', env);
+        expect(r.el.querySelector('[data-staging]')).toBeNull();
+        expect(document.title).toBe('orrery');
+        TestBed.resetTestingModule();
+      }
+    }
+  });
 
   it('lists the pages of the integrations that are on, in order', async () => {
     const all = await open(ALEX);
     expect(labels(all.el)).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
     TestBed.resetTestingModule();
     const some = await open(ALEX, { ...ALL, minecraft: false, checks: false, host: false });
-    expect(labels(some.el)).toEqual(['Services', 'Audit log']);
+    expect(labels(some.el)).toEqual(['Servers', 'Services', 'Audit log']);
     TestBed.resetTestingModule();
     const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, github: false, host: false });
-    expect(labels(checksOnly.el)).toEqual(['Checks', 'Audit log']); // the services page, without systemd
+    expect(labels(checksOnly.el)).toEqual(['Servers', 'Checks', 'Audit log']); // the services page, without systemd
   });
 
   const openMenu = async (r: Awaited<ReturnType<typeof open>>) => {

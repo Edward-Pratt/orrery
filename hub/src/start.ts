@@ -139,6 +139,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         github: deps.github!, // checked above
         run: deps.run!,
         config: github,
+        environment: config.environment,
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
         restoring: () => restores?.busy() ?? false,
@@ -177,7 +178,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations: config.integrations })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

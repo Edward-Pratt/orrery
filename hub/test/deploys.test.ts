@@ -106,6 +106,7 @@ function world(t: TestContext, { servers, restore }: Setup = {}) {
     ...(restore && { service: 'gtnh' }),
   };
   const config: Config = {
+    environment: 'production',
     dbPath: join(root, 'hub.db'),
     servers: servers?.(dir) ?? [gtnh],
     integrations: {
@@ -313,8 +314,9 @@ test('refusals: an unknown tag, the running tag, a release below the floor, a ba
   assert.deepEqual(await rows(s), []);
 });
 
-test('a dashboard deploy starts its unit and closes its row when the unit is done', async (t) => {
+test("a dashboard deploy starts its unit and closes its row, targeting the hub's Environment, when the unit is done", async (t) => {
   const w = world(t);
+  w.config.environment = 'staging';
   const s = await start(t, w);
   assert.equal((await s.deploy({ part: 'web', tag: 'web-v0.5.0' })).status, 202);
   assert.deepEqual(w.systemd.starts(), ['orrery-deploy-web@web-v0.5.0.service']);
@@ -324,7 +326,7 @@ test('a dashboard deploy starts its unit and closes its row when the unit is don
   await until(() => s.notices.length === 2);
   const a = await s.get();
   assert.equal(a.web.running, 'web-v0.5.0');
-  assert.deepEqual((await rows(s))[0], { part: 'web', target: 'production', from: null, to: 'web-v0.5.0', by: ACTOR, outcome: 'ok', log: 'installed' });
+  assert.deepEqual((await rows(s))[0], { part: 'web', target: 'staging', from: null, to: 'web-v0.5.0', by: ACTOR, outcome: 'ok', log: 'installed' });
 });
 
 test('a deploy whose systemctl fails answers 502 and closes its row failed', async (t) => {

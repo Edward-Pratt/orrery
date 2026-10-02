@@ -11,6 +11,7 @@ import type {
   AuditLog,
   CheckStatus,
   CommandOutput,
+  EnvironmentInfo,
   HostNow,
   HostSample,
   Integrations,
@@ -44,6 +45,7 @@ function config(t: TestContext, integrations: Config['integrations']): Config {
   const dir = mkdtempSync(join(tmpdir(), 'hub-start-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return {
+    environment: 'production',
     dbPath: join(dir, 'hub.db'),
     healthcheckUrl: 'https://example.invalid/ping',
     servers: [
@@ -307,6 +309,55 @@ test('logging out ends the session on the hub', async (t) => {
   });
   assert.equal(out.status, 204);
   assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
+});
+
+test('/api/environment answers without a session: production by default, else the configured one', async (t) => {
+  const app = await webHub(t, fakeOAuth().oauth);
+  const res = await app.request('/api/environment');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { environment: 'production' } satisfies EnvironmentInfo);
+  const handle = await startHub(
+    { ...config(t, { web: WEB }), environment: 'staging' },
+    { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth },
+  );
+  t.after(() => handle.close());
+  assert.deepEqual(await (await handle.web!.app.request('/api/environment')).json(), { environment: 'staging' });
+});
+
+test("staging's hub, web and host only with an offline demo server, starts without a bot and shows demo with nothing to act on", async (t) => {
+  const { healthcheckUrl: _, ...base } = config(t, { web: WEB, host: { id: 'oracle', mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 } });
+  const cfg: Config = {
+    ...base,
+    environment: 'staging',
+    servers: [{ id: 'demo', name: 'Demo', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' }],
+  };
+  const handle = await startHub(cfg, {
+    startFrontend: () => assert.fail('Discord is off'),
+    get: () => assert.fail('no health ping or checks'),
+    oauth: fakeOAuth().oauth,
+    host: {
+      cpu: () => ({ idle: 1, total: 2 }),
+      load: () => [0, 0, 0],
+      memory: async () => ({ total: 16 * GB, available: 8 * GB }),
+      disk: async () => ({ free: 50 * GB, total: 100 * GB }),
+    },
+  });
+  t.after(() => handle.close());
+  assert.equal(handle.port, undefined);
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async (path: string) => (await app.request(path, { headers: { cookie } })).json();
+  const [demo] = (await get('/api/servers')) as ServerCard[];
+  assert.equal(demo!.id, 'demo');
+  assert.equal(demo!.online, false);
+  assert.equal(demo!.tps, null);
+  assert.equal(demo!.service, null);
+  assert.equal(demo!.packUpdate, null);
+  assert.deepEqual(demo!.features, { chat: false, tps: false, quests: false });
+  assert.deepEqual(((await get('/api/servers/demo')) as ServerDetail).backups, { configured: false });
+  assert.deepEqual(await get('/api/integrations'), {
+    minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false,
+  } satisfies Integrations);
 });
 
 test('with web off the hub has no HTTP API and needs no OAuth', async (t) => {

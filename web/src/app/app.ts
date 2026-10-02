@@ -1,4 +1,5 @@
-import { Component, computed, inject, input } from '@angular/core';
+import { Component, computed, effect, inject, input } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { Integrations as IntegrationsOn, Me } from '@hub/api';
@@ -9,6 +10,7 @@ import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { catchError, of } from 'rxjs';
 import { Attention, AttentionStrip } from './attention';
+import { Environment, StagingBadge } from './environment';
 import { Integrations } from './integrations';
 import { Login } from './login';
 import { Session } from './session';
@@ -16,7 +18,7 @@ import { MODES, Theme } from './theme';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
 const PAGES: { path: string; label: string; icon: string; on: keyof IntegrationsOn; unless?: keyof IntegrationsOn }[] = [
-  { path: 'servers', label: 'Servers', icon: 'lucideServer', on: 'minecraft' },
+  { path: 'servers', label: 'Servers', icon: 'lucideServer', on: 'web' }, // every hub has servers
   { path: 'services', label: 'Services', icon: 'lucideLayers', on: 'systemd' },
   // The services page holds the checks; without systemd it is "Checks" and holds only those.
   { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
@@ -78,7 +80,7 @@ export class UserMenu {
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge],
   viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideScrollText })],
   template: `
     <hlm-toaster />
@@ -91,7 +93,7 @@ export class UserMenu {
         <div class="min-h-dvh md:flex">
           <aside class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r bg-sidebar px-3 py-5 md:flex">
             <span class="flex items-center gap-2 px-3 text-lg font-bold tracking-tight">
-              <span class="size-3 rounded-full bg-brand ring-4 ring-brand/20"></span> orrery
+              <span class="size-3 rounded-full bg-brand ring-4 ring-brand/20"></span> orrery <app-staging-badge />
             </span>
             <nav class="mt-8 flex flex-col gap-0.5" aria-label="Pages">
               @for (p of visible(); track p.path) {
@@ -110,7 +112,7 @@ export class UserMenu {
             <div class="mt-auto px-1"><app-user-menu [user]="session.user()!" [showName]="true" /></div>
           </aside>
           <header class="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-2 backdrop-blur md:hidden">
-            <span class="flex items-center gap-2 font-bold"><span class="size-2.5 rounded-full bg-brand"></span> orrery</span>
+            <span class="flex items-center gap-2 font-bold"><span class="size-2.5 rounded-full bg-brand"></span> orrery <app-staging-badge /></span>
             <app-user-menu [user]="session.user()!" [showName]="false" />
           </header>
           <div class="min-w-0 flex-1">
@@ -157,6 +159,9 @@ export class App {
 
   constructor() {
     inject(Theme); // applies the remembered mode before the first page shows
+    const env = inject(Environment);
+    const title = inject(Title);
+    effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));
     this.session.load();
   }
 }

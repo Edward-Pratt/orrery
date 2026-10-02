@@ -121,12 +121,14 @@ deploys (#101); Mod deploys (#102); the one-time move to `/home/opc/orrery` and 
 SELinux won't let systemd follow the `current` symlink into `WorkingDirectory` (the hub unit now has none). Still to
 smoke test: a Rollback of a broken hub release, and a dashboard deploy (it waits for `web-v0.5.1`).
 
-**Packs — released (`hub-v2.7.0` + `web-v0.6.0`), not yet deployed:** #90. The Pack tab, Kept paths and `keep` (#104);
+**Packs — done (`hub-v2.7.0` + `web-v0.6.0`, deployed 2026-10-02):** #90. The Pack tab, Kept paths and `keep` (#104);
 uploads, Compare and Adopt (#105); Extras and Config edits with changes pending (#106); pack updates: Prepare, Backup,
 Stop, Swap and the health gate (#107); live steps and Cancel (#108); rollback, interruption and the restore offer
 (#109); exclusive with restores and deploys (#110). The installed pack's zip is kept in `<data>/packs/` so changes can
-be applied onto it. Still to do by hand: adopting production and the smoke test (#111), then deleting
-`deploy/legacy/update-server.sh`.
+be applied onto it. Production adopted (#111) and `deploy/legacy/update-server.sh` deleted. Uploads go through
+Cloudflare, which refuses bodies over 100 MB: the adopted zip went up over an SSH tunnel to Caddy (use a pack URL for
+updates). Still to smoke test on the real server: Apply changes, a version update with players online, a rollback and
+restoring its pre-update backup.
 
 | # | Spec | Where | Size | Needs |
 |---|---|---|---|---|

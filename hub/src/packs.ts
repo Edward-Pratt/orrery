@@ -346,6 +346,7 @@ export class Packs {
       mod: (await modJars(s.dir!))[0] ?? null,
       blocked: this.#blocked(serverId, s.name),
       rolledBack: this.rollback(serverId),
+      packFiles: [...own],
     };
   }
 

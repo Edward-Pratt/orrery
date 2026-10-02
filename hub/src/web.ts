@@ -120,7 +120,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
       features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
-      packRollback: packs?.rollback(s.id) ?? null,
+      packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
   const redirectUri = new URL('/api/callback', web.publicUrl).href;

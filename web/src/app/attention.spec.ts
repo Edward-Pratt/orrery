@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import type { CheckStatus, DeploysAnswer, Integrations, Me, ServerCard, ServiceStatus } from '@hub/api';
 import { App } from './app';
 import { BackupProgress } from './servers/backup-progress';
@@ -22,6 +22,7 @@ const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   lagging: false,
   service: null,
   features: { chat: true, tps: true, quests: false },
+  packUpdate: null,
   ...more,
 });
 const service = (id: string, state: string, sub = 'x'): ServiceStatus => ({ id, unit: `${id}.service`, state, sub, checks: [] });
@@ -74,6 +75,7 @@ const deploys = (daysAgo: number): DeploysAnswer => ({
   newerAfterDays: 14,
   history: [],
   older: false,
+  packing: [],
 });
 
 describe('the attention strip', () => {
@@ -99,6 +101,19 @@ describe('the attention strip', () => {
   it('shows a server with no linked service whenever it is offline', async () => {
     const { lines } = await open([card('site', { online: false })]);
     expect(lines()).toEqual(['SITE is offline']);
+  });
+
+  it('offers the pre-update backup after a pack update rolled back, linking to the Pack tab, until a later update', async () => {
+    const rolledBack = { running: false, rolledBack: { to: '2.7.5', backup: '2026-10-02-12-00-00.zip' } };
+    const { el, lines, events, refetch, render } = await open([card('gtnh', { packUpdate: rolledBack })]);
+    expect(lines()).toEqual(['GTNH rolled back its pack update to 2.7.5: the world may have changed on load Restore…']);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    el.querySelector<HTMLButtonElement>('[data-fix]')!.click();
+    await render();
+    expect(navigate).toHaveBeenCalledWith(['/servers', 'gtnh', 'pack']);
+    events.push(1, { type: 'notice', serverId: 'gtnh', severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.5', by: 'alex' });
+    await refetch([card('gtnh', { packUpdate: { running: true, rolledBack: null } })]);
+    expect(lines()).toEqual([]);
   });
 
   it('shows a lagging server', async () => {

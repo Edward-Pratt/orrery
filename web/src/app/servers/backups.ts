@@ -1,6 +1,8 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import type { Backup, CommandOutput, RestoreRequest } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideEllipsis } from '@ng-icons/lucide';
@@ -51,6 +53,15 @@ import ServerPage from './server';
             <span class="text-sm text-muted-foreground">{{ offline() }}</span>
           }
         </div>
+        @if (preselected(); as name) {
+          <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-preselected>
+            <span class="flex-1">Restore <span class="font-mono">{{ name }}</span>, the backup from before the pack update?</span>
+            <button hlmBtn size="sm" variant="outline" [disabled]="!!restoreWhy() || !!progress()" (click)="restore(name)" data-restore-preselected>Restore…</button>
+            @if (restoreWhy(); as why) {
+              <span class="w-full text-xs text-muted-foreground">{{ why }}</span>
+            }
+          </div>
+        }
         @if (b.backups.length) {
           <table class="w-full text-left text-sm">
             <thead class="text-muted-foreground">
@@ -58,7 +69,7 @@ import ServerPage from './server';
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
-                <tr class="border-t" data-backup>
+                <tr class="border-t" [class.bg-amber-500/10]="backup.name === preselected()" data-backup>
                   <td class="py-1 pr-4 font-mono">{{ backup.name }}</td>
                   <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
                   <td class="pr-4">{{ bytes(backup.size) }}</td>
@@ -120,12 +131,19 @@ export default class Backups {
   protected readonly progress = computed(() => this.#progress.running()[this.#server.id]);
   /** Why a backup can't be restored now: only with the linked service stopped (it follows live state). */
   protected readonly restoreWhy = computed(() => {
+    if (this.#server.card()!.packUpdate?.running) return `A pack update is running on ${this.serverName()}: restore once it is done.`;
     const service = this.#server.service();
     if (!service) return `${this.serverName()} has no linked service: restore it on the host with deploy/restore-backup.sh.`;
     return service.state === 'inactive' || service.state === 'failed' ? null : `To restore a backup, stop ${service.unit} first.`;
   });
   /** The backup being restored. */
   readonly restoring = signal<string | null>(null);
+  /** The backup the Pack tab's restore offer links to (`?restore=`), when it is listed. */
+  protected readonly preselected = computed(() => {
+    const name = this.#query()?.get('restore');
+    return name && this.backups()?.backups.some((b) => b.name === name) ? name : null;
+  });
+  readonly #query = toSignal(inject(ActivatedRoute).queryParamMap);
 
   async restore(name: string): Promise<void> {
     const ok = await this.#feedback.confirm({

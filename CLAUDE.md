@@ -25,13 +25,15 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 ## Architecture rules
 
 - The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
-  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host`, `systemd` and `github`.
+  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host`, `systemd` and `github`. Packs need no section of their own: a
+  server with a `dir`, a linked service (`systemd`) and a Mod token (`minecraft`) has one. The hub's host needs `unzip`
+  for them (and for `restore-backup.sh`).
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
   (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
-  (`HostMonitor`, `Checks`, `Services`, `Restores`, `Deploys`); they
+  (`HostMonitor`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same

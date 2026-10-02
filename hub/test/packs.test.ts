@@ -296,6 +296,7 @@ test('a server with a folder, a service and a Mod has a Pack: Kept paths from ke
   });
   assert.deepEqual([p.history, p.extras, p.edits, p.pending, p.running, p.rolledBack], [[], [], [], [], null, null]);
   assert.equal(p.mod, 'mods/gtnhdiscord-1.4.0.jar');
+  assert.deepEqual(p.packFiles, []);
   assert.equal((await s.json<ServerDetail>(s.req('GET', '/api/servers/gtnh'))).pack, true);
 });
 
@@ -380,6 +381,7 @@ test('Adopt keeps the ticked files as Extras and records the pack, changing noth
     ],
   );
   assert.deepEqual(p.pending, []);
+  assert.deepEqual(p.packFiles, ['config/forge.cfg', 'config/gregtech.cfg', 'mods/bq.jar', 'mods/gregtech.jar', 'mods/old-only.jar', 'startserver.sh']);
   // Each Extra is stored under its row id, outside the server folder.
   const stored = join(w.root, 'data', 'extras', 'gtnh');
   assert.deepEqual(readdirSync(stored).sort(), p.extras.map((e) => String(e.id)).sort());
@@ -764,6 +766,7 @@ test('each step goes on the stream, the replay keeps only the latest, none is po
     ],
   });
   assert.deepEqual((await s.pack()).blocked, 'A pack update is running on GTNH.');
+  assert.deepEqual((await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!.packUpdate, { running: true, rolledBack: null });
   release();
   await s.finished();
   const steps = s.events.filter((e) => e.kind === 'packUpdateStep');
@@ -858,7 +861,7 @@ test('no hello within the gate rolls back to exactly the old files, offering the
   assert.deepEqual([p.installed!.version, p.installed!.source], ['2.7.4', URL_OLD]);
   assert.deepEqual(p.pending.map((x) => x.path), ['mods/bq.jar', 'config/custom.cfg', 'startserver.sh']); // still pending
   assert.deepEqual(p.rolledBack, { to: '2.7.5', backup: '2026-10-02-12-00-00.zip' });
-  assert.deepEqual((await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!.packRollback, p.rolledBack);
+  assert.deepEqual((await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!.packUpdate, { running: false, rolledBack: p.rolledBack });
   const finished = s.events.find((e) => e.kind === 'packUpdateFinished')!;
   assert.deepEqual({ ...finished, ms: 0 }, { severity: 'problem', kind: 'packUpdateFinished', outcome: 'rolled back', from: '2.7.4', to: '2.7.5', ms: 0, backup: '2026-10-02-12-00-00.zip' });
   // A restore ends the offer. (The rollback's last read of the unit saw it stopped.)
@@ -866,7 +869,7 @@ test('no hello within the gate rolls back to exactly the old files, offering the
   assert.equal((await s.req('POST', '/api/servers/gtnh/restore', { name: '2026-10-02-12-00-00.zip' })).status, 200);
   assert.equal(restored, 1);
   assert.equal((await s.pack()).rolledBack, null);
-  assert.equal((await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!.packRollback, null);
+  assert.deepEqual((await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!.packUpdate, { running: false, rolledBack: null });
 });
 
 test('no hello after the rollback either ends as failed, leaving the .pre-update folder and naming it', async (t) => {
@@ -956,6 +959,7 @@ test('a pack update and a Mod deploy onto the same server refuse each other', as
   const { s } = await withGithub(t);
   s.fake.downloadGate = new Promise(() => {});
   await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  assert.deepEqual((await s.json<{ packing: string[] }>(s.req('GET', '/api/deploys'))).packing, ['gtnh']);
   const deploy = await s.req('POST', '/api/deploys', { part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' });
   assert.equal(deploy.status, 409);
   assert.equal(await deploy.text(), 'A pack update is running on GTNH: deploy the Mod once it is done.');

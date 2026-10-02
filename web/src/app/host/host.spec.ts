@@ -133,6 +133,7 @@ const ANSWER: DeploysAnswer = {
   newerAfterDays: 14,
   history: [{ id: 1, part: 'web', target: 'production', from: 'web-v0.4.1', to: 'web-v0.5.0', by: 'web:alex (5)', started: 1, finished: 2, outcome: 'ok', log: 'installed' }],
   older: false,
+  packing: [],
 };
 
 describe('host page releases', () => {
@@ -239,6 +240,15 @@ describe('host page releases', () => {
     req.flush({ ...ANSWER, web: { ...ANSWER.web, latest: 'web-v0.6.0', releases: [rel('web-v0.6.0', 0), ...ANSWER.web.releases] } });
     await render();
     expect(rowText('web')).toContain('newer available');
+  });
+
+  it('no Mod deploy onto a server while a pack update runs on it, and no hub deploy meanwhile', async () => {
+    const { row } = await releases({ ...ANSWER, packing: ['gtnh'] });
+    expect(row('mod:gtnh').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
+    expect(row('mod:gtnh').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running on GTNH.');
+    expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
+    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running.');
+    expect(row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
   });
 
   it('has no section with the GitHub integration off', async () => {

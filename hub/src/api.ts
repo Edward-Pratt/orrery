@@ -95,6 +95,8 @@ export type DeploysAnswer = {
   newerAfterDays: number;
   history: DeployRow[];
   older: boolean;
+  /** The servers a pack update runs on: no Mod deploy onto them, and no hub deploy, meanwhile. */
+  packing: string[];
 };
 
 /**
@@ -145,8 +147,11 @@ export type ServerCard = {
   lagging: boolean;
   service: { id: string; state: string | null } | null;
   features: Features;
-  /** The offer after a pack update rolled back (see `PackState.rolledBack`); null otherwise or without packs. */
-  packRollback: PackRollback | null;
+  /**
+   * Without packs null; else whether a pack update runs on it (refetch on `packUpdateStarted`/`packUpdateFinished`),
+   * and the restore offer after one rolled back (see `PackState.rolledBack`).
+   */
+  packUpdate: { running: boolean; rolledBack: PackRollback | null } | null;
 };
 
 /**
@@ -298,6 +303,8 @@ export type PackState = {
   mod: string | null;
   blocked: string | null;
   rolledBack: PackRollback | null;
+  /** The files the installed pack itself ships (Kept paths left out), sorted: an Extra at one of them replaces it. */
+  packFiles: string[];
 };
 /**
  * `POST /api/servers/:id/pack/uploads`: the raw file as the body (`application/zip`, `application/java-archive` or

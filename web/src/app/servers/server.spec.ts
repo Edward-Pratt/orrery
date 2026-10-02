@@ -23,12 +23,13 @@ const CARD: ServerCard = {
   uptimeDay: 1,
   restart: null,
   features: { chat: true, tps: true, quests: true },
+  packUpdate: null,
 };
 const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false } };
 
 /** A server's detail, as the hub answers it, with nothing in it but the card. */
 const detail = (card: ServerCard, more: Partial<ServerDetail> = {}) =>
-  ({ card, service: null, top: { day: [], week: [], all: [] }, backups: { configured: false }, ...more }) as ServerDetail;
+  ({ card, service: null, top: { day: [], week: [], all: [] }, backups: { configured: false }, pack: false, ...more }) as ServerDetail;
 
 /** Opens `url` (e.g. `/gtnh/chat`) straight away, as a reload would, and answers the server's detail. */
 async function setup(url: string, card = CARD, service: ServiceStatus | null = null, more: Partial<ServerDetail> = {}) {

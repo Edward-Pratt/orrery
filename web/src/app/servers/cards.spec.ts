@@ -21,6 +21,7 @@ const GTNH: ServerCard = {
   lagging: false,
   service: { id: 'gtnh-svc', state: 'active' },
   features: { chat: true, tps: true, quests: true },
+  packUpdate: null,
 };
 const SITE: ServerCard = {
   ...GTNH,

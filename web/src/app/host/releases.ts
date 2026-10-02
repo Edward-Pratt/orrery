@@ -2,13 +2,16 @@ import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { DeployAnswer, DeployOutcome, DeployRequest, DeploysAnswer } from '@hub/api';
+import type { DeployAnswer, DeployOutcome, DeployRequest, DeploysAnswer, LiveEvent } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { debounceTime, filter } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { releaseRows, short, type ReleaseRow } from './release-rows';
+
+/** A pack update started or ended: Deploy may be refused or allowed again. */
+const packNotice = (e: LiveEvent) => 'serverId' in e && e.type === 'notice' && (e.kind === 'packUpdateStarted' || e.kind === 'packUpdateFinished');
 
 const OUTCOME: Record<DeployOutcome, string> = {
   running: 'bg-muted text-muted-foreground',
@@ -70,7 +73,10 @@ const OUTCOME: Record<DeployOutcome, string> = {
                 <button hlmBtn variant="ghost" size="sm" (click)="picking.set(null)">Cancel</button>
               </span>
             } @else if (r.releases.length) {
-              <button hlmBtn variant="outline" size="sm" [disabled]="busy()" (click)="pick(r)" data-deploy>Deploy</button>
+              @if (r.why) {
+                <span class="text-xs text-muted-foreground" data-why>{{ r.why }}</span>
+              }
+              <button hlmBtn variant="outline" size="sm" [disabled]="busy() || !!r.why" (click)="pick(r)" data-deploy>Deploy</button>
             }
           </li>
         }
@@ -118,7 +124,7 @@ export class Releases {
   constructor() {
     this.#load();
     inject(LiveEvents)
-      .all$.pipe(filter(ofTarget('deploy')), debounceTime(50), takeUntilDestroyed())
+      .all$.pipe(filter((l) => ofTarget('deploy')(l) || packNotice(l.event)), debounceTime(50), takeUntilDestroyed())
       .subscribe(() => this.#load());
   }
 

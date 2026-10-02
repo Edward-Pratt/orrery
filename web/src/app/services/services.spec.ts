@@ -27,6 +27,7 @@ const CARD: ServerCard = {
   lagging: false,
   service: { id: 'mc', state: 'active' },
   features: { chat: true, tps: true, quests: false },
+  packUpdate: null,
 };
 
 @Component({ imports: [HlmToaster, Services], template: `<hlm-toaster /><app-services />` })

@@ -186,6 +186,7 @@ export class Deploys {
       newerAfterDays: this.#d.config.newerAfterDays,
       history: history.slice(0, HISTORY),
       older: history.length > HISTORY,
+      packing: this.#d.hub.list().flatMap((s) => (this.#d.packing(s.id) ? [s.id] : [])),
     };
   }
 

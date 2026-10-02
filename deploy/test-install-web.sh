@@ -37,5 +37,13 @@ check 'a release tag writes its stamp next to WEB_DIR' \
   'install web-v1.2.3 && [[ $(cat "$WEB_DIR/index.html") == v1 && $(cat "$WEB_DIR.release") == web-v1.2.3 ]]'
 check 'a failed install keeps the stamp' '! install "$T/junk.tar.gz" && [[ $(cat "$WEB_DIR.release") == web-v1.2.3 ]]'
 check 'an archive install removes the stamp: its release is unknown' 'install "$T/v2.tar.gz" && [[ ! -e $WEB_DIR.release ]]'
+# restorecon: records the folder it labelled, or fails with FAIL_LABEL set.
+printf '#!/usr/bin/env bash
+[[ -z ${FAIL_LABEL:-} ]] || exit 1
+echo "$2" > "%s/labelled"
+' "$T" > "$T/bin/restorecon"
+chmod +x "$T/bin/restorecon"
+check 'labels the new build before it goes live' 'install "$T/v1.tar.gz" && [[ $(cat "$T/labelled") == "$T"/www/.orrery-web-*/new ]]'
+check 'a failed labelling keeps the installed build' '! FAIL_LABEL=1 install "$T/v2.tar.gz" && [[ $(cat "$WEB_DIR/index.html") == v1 ]]'
 check 'leaves no staging folders behind' '! compgen -G "$T/www/.orrery-web-*" > /dev/null'
 exit $fail

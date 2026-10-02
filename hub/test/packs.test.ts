@@ -198,9 +198,9 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     }
     return `ActiveState=${state[unit] ?? 'inactive'}\nSubState=running\n`;
   };
-  const download: Download = async (url, dest, onProgress) => {
+  const download: Download = async (url, dest, onProgress, signal) => {
     fake.downloads.push(url);
-    await fake.downloadGate;
+    await Promise.race([fake.downloadGate, new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted'))))]);
     const from = w.urls[url];
     if (!from) throw new Error('HTTP 404');
     onProgress(1, 2);
@@ -662,7 +662,10 @@ test('applying pending changes onto the installed version, and refusing with not
   const again = await s.req('POST', '/api/servers/gtnh/pack/update', { pending: true });
   assert.equal(again.status, 409);
   assert.equal(await again.text(), 'Nothing is pending: 2.7.4 is installed as it is.');
-  // The same zip and version by upload, with nothing pending, is refused as well.
+  // The same zip and version, by upload or from the same URL, with nothing pending, is refused as well.
+  const same = await s.req('POST', '/api/servers/gtnh/pack/update', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' });
+  assert.equal(same.status, 409);
+  assert.equal(await same.text(), 'GT New Horizons 2.7.4 is installed already, with nothing pending.');
   const up = await s.json<UploadAnswer>(s.upload(w.urls[URL_OLD]!));
   assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update', { upload: up.upload, name: 'GT New Horizons', version: '2.7.4' })).status, 409);
   assert.match(await s.audit('pack update').then((a) => a[0]!.details), /^changes applied to 2\.7\.4: mods\/bq\.jar added/);
@@ -790,15 +793,14 @@ test("a running update's latest step is replayed, and only that", async (t) => {
   assert.equal(replay.length, 1);
 });
 
-test('Cancel while preparing ends the update as cancelled with nothing touched', async (t) => {
+test('Cancel while preparing stops the download and ends the update as cancelled with nothing touched', async (t) => {
   const { w, s } = await updatable(t);
-  let release!: () => void;
-  s.fake.downloadGate = new Promise((r) => (release = r));
+  s.fake.downloadGate = new Promise(() => {}); // a download that would never end
   const before = snapshot(w.dir);
   await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
   await until(() => s.fake.downloads.length === 1);
+  assert.equal((await s.pack()).running!.cancellable, true);
   assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update/cancel')).status, 204);
-  release();
   const row = await s.finished();
   assert.equal(row.outcome, 'cancelled');
   assert.deepEqual(snapshot(w.dir), before);
@@ -815,7 +817,7 @@ test('with players online the stop counts down; cancelling it, here or anywhere,
     await sleep(20);
     const before = snapshot(w.dir);
     await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
-    await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'stop' && e.detail.startsWith('1 player online: stopping in')), 5000);
+    await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'stop' && e.cancellable && e.detail.startsWith('1 player online: stopping in')), 5000);
     const card = (await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!;
     assert.equal(card.restart?.stop, true);
     assert.equal((await s.pack()).running!.cancellable, true);

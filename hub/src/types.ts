@@ -86,7 +86,7 @@ export type Notice = { severity: Severity } & (
   | { kind: 'backupFinished'; detail: string }
   | { kind: 'backupFailed'; detail: string }
   | { kind: 'packUpdateStarted'; from: string; to: string; by: string }
-  | ({ kind: 'packUpdateStep' } & PackStepState)
+  | ({ kind: 'packUpdateStep'; cancellable: boolean } & PackStepState)
   | { kind: 'packUpdateFinished'; outcome: PackFinished; from: string; to: string; ms: number; backup?: string }
 );
 /** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */

@@ -27,7 +27,7 @@ import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
 import { catchError, debounceTime, EMPTY, filter, firstValueFrom, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
-import { LiveEvents, ofServer } from '../events';
+import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { formatBytes, formatDuration } from '../units';
 import ServerPage from './server';
@@ -252,11 +252,9 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                   <div class="min-w-0 flex-1">
                     <p class="truncate font-mono text-xs" [class.line-through]="e.removed">{{ e.target }}</p>
                     <p class="text-xs text-muted-foreground">
+                      <span class="mr-1 rounded-full border px-1.5" data-where>{{ e.replaces ? "replaces the pack's file" : 'new path' }}</span>
                       @if (e.label) {
                         {{ e.label }} ·
-                      }
-                      @if (e.replaces) {
-                        replaces the pack's file ·
                       }
                       {{ e.by }}, {{ e.at | date: 'd MMM y' }}
                       @if (e.note) {
@@ -541,16 +539,18 @@ export default class Pack {
         takeUntilDestroyed(),
       )
       .subscribe((p) => this.#show(p));
-    inject(LiveEvents)
-      .all$.pipe(filter(ofServer(this.#server.id)), takeUntilDestroyed())
+    const events = inject(LiveEvents).all$;
+    // A Mod deploy starting or ending changes why an update can't start.
+    events.pipe(filter(ofTarget('deploy')), takeUntilDestroyed()).subscribe(() => this.#reload.next());
+    events
+      .pipe(filter(ofServer(this.#server.id)), takeUntilDestroyed())
       .subscribe(({ event: e }) => {
         if (e.type !== 'notice') return;
         if (e.kind === 'packUpdateStep') {
           const r = this.running();
           if (!r) return this.#reload.next(); // started elsewhere: fetch it with its steps
           const steps = r.steps.some((s) => s.step === e.step) ? r.steps.map((s) => (s.step === e.step ? { step: e.step, state: e.state, detail: e.detail } : s)) : [...r.steps, { step: e.step, state: e.state, detail: e.detail }];
-          // Cancel is taken while preparing and during the stop's countdown (the step that says who is online).
-          this.running.set({ ...r, steps, cancellable: e.state === 'running' && (e.step === 'prepare' || (e.step === 'stop' && e.detail.includes('online'))) });
+          this.running.set({ ...r, steps, cancellable: e.cancellable });
         } else if (e.kind === 'packUpdateStarted') {
           this.done.set(null);
           this.#reload.next();

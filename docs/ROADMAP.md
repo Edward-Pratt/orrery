@@ -121,6 +121,13 @@ deploys (#101); Mod deploys (#102); the one-time move to `/home/opc/orrery` and 
 SELinux won't let systemd follow the `current` symlink into `WorkingDirectory` (the hub unit now has none). Still to
 smoke test: a Rollback of a broken hub release, and a dashboard deploy (it waits for `web-v0.5.1`).
 
+**Packs — released (`hub-v2.7.0` + `web-v0.6.0`), not yet deployed:** #90. The Pack tab, Kept paths and `keep` (#104);
+uploads, Compare and Adopt (#105); Extras and Config edits with changes pending (#106); pack updates: Prepare, Backup,
+Stop, Swap and the health gate (#107); live steps and Cancel (#108); rollback, interruption and the restore offer
+(#109); exclusive with restores and deploys (#110). The installed pack's zip is kept in `<data>/packs/` so changes can
+be applied onto it. Still to do by hand: adopting production and the smoke test (#111), then deleting
+`deploy/legacy/update-server.sh`.
+
 | # | Spec | Where | Size | Needs |
 |---|---|---|---|---|
 | 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |

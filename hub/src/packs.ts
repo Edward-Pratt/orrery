@@ -27,12 +27,12 @@ import type { Services } from './services.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from './types.ts';
 import { formatDuration } from './units.ts';
 
-/** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown). Rejects on failure. */
-export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void) => Promise<void>;
+/** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
+export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
 
 /** The real download: `fetch` (following redirects, as GitHub release assets need) streamed to the file. */
-export const fetchDownload: Download = async (url, dest, onProgress) => {
-  const res = await fetch(url, { redirect: 'follow' });
+export const fetchDownload: Download = async (url, dest, onProgress, signal) => {
+  const res = await fetch(url, { redirect: 'follow', signal });
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length')) || null;
   let bytes = 0;
@@ -43,7 +43,7 @@ export const fetchDownload: Download = async (url, dest, onProgress) => {
       done(null, chunk);
     },
   });
-  await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest));
+  await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest), { signal });
 };
 
 /** Why a pack action wasn't done: 400 (bad input), 404 (no such thing) or 409 (not now). */
@@ -116,8 +116,9 @@ type Job = {
   byName: string;
   started: number;
   steps: PackStepState[];
-  /** Set by `cancel`; Prepare checks it between its parts. */
+  /** Set by `cancel`; Prepare checks it between its parts, and it aborts the download. */
   cancelled: boolean;
+  abort: AbortController;
   /** Where Cancel is accepted now. */
   window: 'prepare' | 'countdown' | null;
   stopped: boolean;
@@ -546,7 +547,9 @@ export class Packs {
     } else {
       src = this.#source(source);
       const up = 'upload' in src ? this.#uploads.get(src.upload) : undefined;
-      if (up && up.sha256 === pack.sha256 && src.version === pack.version && !pending.length) {
+      // An upload's sha256 is known now; a URL's only after the download, so the same URL stands in for it here.
+      const same = up ? up.sha256 === pack.sha256 : 'url' in src && src.url === pack.source;
+      if (same && src.version === pack.version && !pending.length) {
         throw new PackRefused(409, `${pack.name} ${pack.version} is installed already, with nothing pending.`);
       }
     }
@@ -563,6 +566,7 @@ export class Packs {
       started: Date.now(),
       steps: STEPS.map((step) => ({ step, state: 'waiting', detail: '' })),
       cancelled: false,
+      abort: new AbortController(),
       window: 'prepare',
       stopped: false,
       touched: false,
@@ -586,7 +590,10 @@ export class Packs {
     if (!job.window) throw new PackRefused(409, 'Too late to cancel: only while preparing or during the countdown.');
     this.#d.hub.audit(by, 'pack update cancel', serverId, `${job.from} → ${job.version}`);
     if (job.window === 'countdown') this.#d.restarts.cancel(serverId, by, byName); // the update sees the cancelled countdown
-    else job.cancelled = true;
+    else {
+      job.cancelled = true;
+      job.abort.abort();
+    }
   }
 
   // The update itself.
@@ -608,7 +615,7 @@ export class Packs {
       if (!src) got = { zip: this.#zipOf(s.id), sha256: pack.sha256, source: pack.source };
       else if ('url' in src) {
         let last = 0;
-        got = await this.#fetch(src, (bytes, total) => {
+        got = await this.#fetch(src, job.abort.signal, (bytes, total) => {
           if (Date.now() - last < TICK_MS) return;
           last = Date.now();
           this.#step(job, 'prepare', 'running', `Downloading ${mb(bytes)}${total ? ` of ${mb(total)}` : ''}`);
@@ -848,7 +855,7 @@ export class Packs {
     else job.steps[i] = { step, state, detail };
     if (state === 'running' && was?.state !== 'running') this.#d.db.setPackUpdate(job.id, { step });
     if (state !== 'running') this.#log(job, `${step}: ${state}${detail ? `: ${detail}` : ''}`);
-    this.#d.hub.publish(job.serverId, { severity: 'info', kind: 'packUpdateStep', step, state, detail });
+    this.#d.hub.publish(job.serverId, { severity: 'info', kind: 'packUpdateStep', step, state, detail, cancellable: job.window !== null });
   }
 
   #log(job: Job, line: string): void {
@@ -996,7 +1003,11 @@ export class Packs {
   }
 
   /** A source's zip in `<data>/uploads`, with its sha256 and what to record as its source. */
-  async #fetch(src: PackSource, onProgress: (bytes: number, total: number | null) => void = () => {}): Promise<{ zip: string; sha256: string; source: string }> {
+  async #fetch(
+    src: PackSource,
+    signal?: AbortSignal,
+    onProgress: (bytes: number, total: number | null) => void = () => {},
+  ): Promise<{ zip: string; sha256: string; source: string }> {
     if ('upload' in src) {
       const up = this.#take(src.upload);
       return { zip: up.path, sha256: up.sha256, source: up.fileName };
@@ -1004,7 +1015,7 @@ export class Packs {
     await mkdir(this.#uploadsDir, { recursive: true });
     const zip = join(this.#uploadsDir, randomBytes(16).toString('hex'));
     try {
-      await this.#d.download(src.url, zip, onProgress);
+      await this.#d.download(src.url, zip, onProgress, signal);
     } catch (err) {
       await rm(zip, { force: true });
       throw new DownloadFailed(`Downloading the pack failed: ${(err as Error).message}`);

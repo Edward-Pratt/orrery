@@ -365,7 +365,7 @@ test('formatEvent posts a pack update when it starts and ends, coloured by outco
     title: "❎ Pack update to 2.7.5 cancelled: the server wasn't touched",
     color: COLORS.blue,
   });
-  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading' }), null);
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
 });
 
 test('a notice is coloured by its severity, not its text', () => {

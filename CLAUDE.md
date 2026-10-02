@@ -14,10 +14,10 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `current` symlink, rolls back if the hub won't stay up 30 s), `orrery-deploy-web@.service` runs `deploy-web.sh` as
   root from a root-owned copy in `/usr/local/lib/orrery` (around `install-web.sh`); both write
   `<root>/deploy-status.json` and are tested by `test-deploy.sh`. `orrery-deploy-staging@` and
-  `orrery-deploy-web-staging@` are staging's copies. Staging (`docs/ROADMAP.md`, #91) runs `orrery-hub-staging.service` as
+  `orrery-deploy-web-staging@` are staging's copies. Their polkit blocks are separate from `UNITS`: they allow only
+  `start` on those templates for well-formed tags and `restart` on that environment's hub. Staging (`docs/ROADMAP.md`, #91) runs `orrery-hub-staging.service` as
   `orrery-staging` from `/srv/orrery-staging` (its header holds the one-time setup; config from
-  `hub/config.staging.example.json`), behind the Caddyfile's `staging.orrery.run` site (port 25582, `/var/www/orrery-staging`). Their polkit blocks are separate from `UNITS`: they allow only
-  `start` on those templates for well-formed tags and `restart` on that environment's hub.
+  `hub/config.staging.example.json`), behind the Caddyfile's `staging.orrery.run` site (port 25582, `/var/www/orrery-staging`).
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
 - `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.

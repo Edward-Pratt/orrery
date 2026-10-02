@@ -17,8 +17,8 @@ import { Session } from './session';
 import { MODES, Theme } from './theme';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
-const PAGES: { path: string; label: string; icon: string; on: keyof IntegrationsOn; unless?: keyof IntegrationsOn }[] = [
-  { path: 'servers', label: 'Servers', icon: 'lucideServer', on: 'web' }, // every hub has servers
+const PAGES: { path: string; label: string; icon: string; on?: keyof IntegrationsOn; unless?: keyof IntegrationsOn }[] = [
+  { path: 'servers', label: 'Servers', icon: 'lucideServer', }, // every hub has servers
   { path: 'services', label: 'Services', icon: 'lucideLayers', on: 'systemd' },
   // The services page holds the checks; without systemd it is "Checks" and holds only those.
   { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
@@ -150,7 +150,7 @@ export class App {
   protected readonly session = inject(Session);
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
-  protected readonly visible = computed(() => PAGES.filter((p) => this.#on()?.[p.on] && !(p.unless && this.#on()?.[p.unless])));
+  protected readonly visible = computed(() => PAGES.filter((p) => (!p.on || this.#on()?.[p.on]) && !(p.unless && this.#on()?.[p.unless])));
 
   /** The count on a sidebar entry: only Servers, Services (or Checks) and Host have one. */
   protected badge(path: string): number {

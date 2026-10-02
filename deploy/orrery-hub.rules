@@ -41,8 +41,8 @@ polkit.addRule(function (action, subject) {
   }
 });
 
-// Staging's deploys: the same for staging's hub user over staging's templates and hub, never production's. Grants
-// nothing until the staging spec creates the orrery-staging user.
+// Staging's deploys: the same for staging's hub user over staging's templates and hub, never production's. The
+// orrery-staging user is created by deploy/orrery-hub-staging.service's one-time setup.
 polkit.addRule(function (action, subject) {
   if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== 'orrery-staging') return;
   var unit = action.lookup('unit');

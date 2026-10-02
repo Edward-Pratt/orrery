@@ -552,8 +552,8 @@ test('server cards while offline: features only for the server with the mod', as
   const { get } = await apiHub(t);
   const offline = { online: false, hung: false, tps: null, players: [], uptimeDay: null, restart: null, lagging: false, service: null };
   assert.deepEqual(await get<ServerCard[]>('/api/servers'), [
-    { id: 'gtnh', name: 'GTNH', ...offline, features: MOD },
-    { id: 'web', name: 'Website', ...offline, features: NO_MOD },
+    { id: 'gtnh', name: 'GTNH', ...offline, features: MOD, packRollback: null },
+    { id: 'web', name: 'Website', ...offline, features: NO_MOD, packRollback: null },
   ]);
 });
 
@@ -565,7 +565,7 @@ test('a connected server card shows TPS, players, uptime and a pending restart',
   restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
   const [card] = await get<ServerCard[]>('/api/servers');
   const { uptimeDay, restart, ...rest } = card!;
-  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], lagging: false, service: null, features: MOD });
+  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], lagging: false, service: null, features: MOD, packRollback: null });
   assert.equal(uptimeDay, 1);
   assert.equal(restart?.by, 'alice');
   assert.ok(restart!.at > Date.now());

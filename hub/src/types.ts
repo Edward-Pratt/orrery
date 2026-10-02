@@ -85,7 +85,16 @@ export type Notice = { severity: Severity } & (
   | { kind: 'lowDisk'; free: number; minFreeGB: number }
   | { kind: 'backupFinished'; detail: string }
   | { kind: 'backupFailed'; detail: string }
+  | { kind: 'packUpdateStarted'; from: string; to: string; by: string }
+  | ({ kind: 'packUpdateStep' } & PackStepState)
+  | { kind: 'packUpdateFinished'; outcome: PackFinished; from: string; to: string; ms: number; backup?: string }
 );
+/** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */
+export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';
+/** Where a pack update's step is, with its live detail or result ("Staged: 2,318 files"). */
+export type PackStepState = { step: PackStep; state: 'waiting' | 'running' | 'done' | 'failed'; detail: string };
+export type PackOutcome = 'running' | 'ok' | 'rolled back' | 'failed in staging' | 'failed' | 'cancelled';
+export type PackFinished = Exclude<PackOutcome, 'running'>;
 /**
  * What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up; a summary
  * carries the server's name for its heading.

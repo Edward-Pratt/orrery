@@ -116,6 +116,14 @@ export class Services {
     }));
   }
 
+  /** Reads a listed service's state from systemd now (rather than at the next round); undefined if unlisted or unread. */
+  async read(id: string): Promise<ServiceStatus | undefined> {
+    const s = this.#services.get(id);
+    if (!s) return undefined;
+    await this.#read(s);
+    return this.list().find((x) => x.id === id);
+  }
+
   /** A listed service's recent log lines, oldest first; undefined for an id that isn't listed. Rejects if journalctl fails. */
   async logs(id: string): Promise<string[] | undefined> {
     const s = this.#services.get(id);

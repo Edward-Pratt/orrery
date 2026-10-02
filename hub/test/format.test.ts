@@ -335,6 +335,39 @@ test("formatEvent posts lag and backup notices with today's wording and severity
   });
 });
 
+test('formatEvent posts a pack update when it starts and ends, coloured by outcome; its steps never', () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  const title = (n: Notice) => (post(n) as { embeds: APIEmbed[] }).embeds[0];
+  assert.deepEqual(title({ severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.5', by: 'alex' }), {
+    title: '📦 Updating the pack: 2.7.4 → 2.7.5 (by alex)',
+    color: COLORS.blue,
+  });
+  assert.deepEqual(title({ severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.4', by: 'alex' }), {
+    title: '📦 Applying pack changes to 2.7.4 (by alex)',
+    color: COLORS.blue,
+  });
+  const done = { kind: 'packUpdateFinished', from: '2.7.4', to: '2.7.5', ms: 400_000 } as const;
+  assert.deepEqual(title({ ...done, severity: 'good', outcome: 'ok' }), { title: '✅ Pack updated to 2.7.5 (6 m 40 s)', color: COLORS.green });
+  assert.deepEqual(title({ ...done, to: '2.7.4', severity: 'good', outcome: 'ok' }), { title: '✅ Pack changes applied to 2.7.4 (6 m 40 s)', color: COLORS.green });
+  assert.deepEqual(title({ ...done, severity: 'problem', outcome: 'rolled back', backup: '2026-09-30-14-12-00.zip' }), {
+    title: '❌ Pack update to 2.7.5 rolled back: 2.7.4 is running again. Pre-update backup: 2026-09-30-14-12-00.zip',
+    color: COLORS.red,
+  });
+  assert.deepEqual(title({ ...done, severity: 'problem', outcome: 'failed' }), {
+    title: "❌ Pack update to 2.7.5 failed: the server didn't come back, even after a rollback",
+    color: COLORS.red,
+  });
+  assert.deepEqual(title({ ...done, severity: 'info', outcome: 'failed in staging' }), {
+    title: "⚠️ Pack update to 2.7.5 failed while preparing: the server wasn't touched",
+    color: COLORS.blue,
+  });
+  assert.deepEqual(title({ ...done, severity: 'info', outcome: 'cancelled' }), {
+    title: "❎ Pack update to 2.7.5 cancelled: the server wasn't touched",
+    color: COLORS.blue,
+  });
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading' }), null);
+});
+
 test('a notice is coloured by its severity, not its text', () => {
   const color = (severity: Severity) =>
     (formatEvent({ severity, kind: 'restartNow', type: 'notice', serverId: 's' }) as { embeds: APIEmbed[] }).embeds[0].color;

@@ -5,7 +5,7 @@ import type { FeedEvent, LiveEvent, ServerHub } from './servers.ts';
  * Numbers every hub event, stamps it with the time it arrived (`at`), and keeps the last `perTarget` of each server's (and each host's, service's and check's)
  * in memory, so a live stream can replay them and resume after a given id. TPS events, host samples and check results stay
  * out of that buffer (they would push chat and notices out): only the latest of each is kept, a server's TPS until it goes
- * down. Ids start at the clock, so a client's id from before a hub restart stays older than new ones. Nothing
+ * down, and a server's latest `packUpdateStep` until its update finishes. Ids start at the clock, so a client's id from before a hub restart stays older than new ones. Nothing
  * survives a restart.
  */
 export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
@@ -24,7 +24,9 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
     hub.on('event', (e) => {
       const entry = stamp(e);
       if (e.type === 'tps') this.#latest.set(`server:${e.serverId}`, entry);
+      else if (e.type === 'notice' && e.kind === 'packUpdateStep') this.#latest.set(`pack:${e.serverId}`, entry);
       else {
+        if (e.type === 'notice' && e.kind === 'packUpdateFinished') this.#latest.delete(`pack:${e.serverId}`);
         if (e.type === 'stopped' || e.type === 'crashed') this.#latest.delete(`server:${e.serverId}`);
         buffer(`server:${e.serverId}`, entry);
       }

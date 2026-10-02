@@ -25,6 +25,12 @@ export const execRestore: RunRestore = (name, env) =>
     child.stdin?.end('y\n');
   });
 
+/**
+ * What else a restore must not race: a hub deploy (`deploying`: its restart would kill a restore halfway) and a pack
+ * update on the server (`packing`); `restored` hears of each one done.
+ */
+export type RestoreChecks = { deploying?: () => boolean; packing?: (serverId: string) => boolean; restored?: (serverId: string) => void };
+
 /** Why a restore wasn't run: 404 (no such server or backup) or 409 (not now). */
 export class RestoreRefused extends Error {
   readonly status: 404 | 409;
@@ -43,27 +49,26 @@ export class Restores {
   #services: Pick<Services, 'ofServer'>;
   #servers: Map<string, Pick<ServerSettings, 'dir' | 'backupDir'>>;
   #run: RunRestore;
-  #deploying: () => boolean;
+  #o: Required<RestoreChecks>;
   #running = new Set<string>();
 
-  /** `deploying`: whether a hub deploy runs, whose restart would kill a restore halfway. */
   constructor(
     hub: Pick<ServerHub, 'get' | 'audit'>,
     services: Pick<Services, 'ofServer'>,
     servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir'>[],
     run: RunRestore,
-    deploying: () => boolean = () => false,
+    o: RestoreChecks = {},
   ) {
     this.#hub = hub;
-    this.#deploying = deploying;
+    this.#o = { deploying: () => false, packing: () => false, restored: () => {}, ...o };
     this.#services = services;
     this.#servers = new Map(servers.map((s) => [s.id, s]));
     this.#run = run;
   }
 
-  /** Whether any restore runs. */
-  busy(): boolean {
-    return this.#running.size > 0;
+  /** Whether a restore runs on a server (`serverId` undefined: on any). */
+  busy(serverId?: string): boolean {
+    return serverId === undefined ? this.#running.size > 0 : this.#running.has(serverId);
   }
 
   /** Resolves with the script's output; rejects with `RestoreRefused`, or the script's error. */
@@ -81,6 +86,7 @@ export class Restores {
     try {
       const output = await this.#run(name, env);
       this.#hub.audit(by, 'restore', serverId, `${name}: done`);
+      this.#o.restored(serverId);
       return output;
     } catch (err) {
       this.#hub.audit(by, 'restore', serverId, `${name}: failed: ${(err as Error).message}`);
@@ -95,6 +101,7 @@ export class Restores {
     if (!service) throw new RestoreRefused(409, `${serverName} has no linked service: restore it on the host with deploy/restore-backup.sh.`);
     const { dir, backupDir } = this.#servers.get(serverId) ?? {};
     if (!dir || !backupDir) throw new RestoreRefused(409, `${serverName} has no server folder.`);
+    if (this.#o.packing(serverId)) throw new RestoreRefused(409, `A pack update is running on ${serverName}: restore once it is done.`);
     // Only a name the hub listed itself reaches the script, never one from the request as such.
     if (!(await listBackups(backupDir)).some((b) => b.name === name)) throw new RestoreRefused(404, `No backup ${name}.`);
     if (service.state !== 'inactive' && service.state !== 'failed') {
@@ -102,7 +109,7 @@ export class Restores {
     }
     // Checked after the last await, and marked running in the same turn, so two requests can't both pass.
     if (this.#running.has(serverId)) throw new RestoreRefused(409, `A restore is already running on ${serverName}.`);
-    if (this.#deploying()) throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
+    if (this.#o.deploying()) throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
     return { GTNH_DIR: dir, BACKUP_DIR: backupDir, GTNH_SERVICE: service.unit };
   }
 }

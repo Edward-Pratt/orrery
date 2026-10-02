@@ -19,6 +19,7 @@ type ServerEntry = {
   lagAlerts?: boolean;
   quests?: QuestMode;
   service?: string;
+  keep?: string[];
 };
 
 /** What a server is configured to do, with every default applied. */
@@ -37,6 +38,8 @@ export type ServerSettings = {
   quests: QuestMode;
   /** The id of the service (in `integrations.systemd`) this server runs as. */
   service?: string;
+  /** Paths in `dir` a pack update never deletes or overwrites, besides the built-in ones. */
+  keep?: string[];
 };
 
 /** The bot's guild, the role allowed to run admin commands, and a channel per server id. */
@@ -244,6 +247,16 @@ export function validateConfig(raw: unknown): string[] {
       for (const key of ['dir', 'backupDir']) {
         const path = str(s, key, where, false);
         if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
+      }
+      if (s.keep !== undefined) {
+        if (!Array.isArray(s.keep)) err(where, '"keep" must be a list of paths in the server folder');
+        else {
+          for (const k of s.keep) {
+            if (typeof k !== 'string' || k === '' || isAbsolute(k) || k.split(/[/\\]/).includes('..')) {
+              err(where, `"keep" entries must be relative paths without "..", got ${JSON.stringify(k)}`);
+            }
+          }
+        }
       }
       // Last, so a duplicate's own problems read first.
       if (sid !== undefined) {

@@ -86,6 +86,8 @@ export type DeploysDeps = {
   hasMod: (serverId: string) => boolean;
   /** Whether any restore runs (a hub deploy's restart would kill it). */
   restoring: () => boolean;
+  /** Whether a pack update runs on a server (undefined: on any). */
+  packing: (serverId?: string) => boolean;
   /** Where the database copy before a hub deploy goes. */
   dbCopies: string;
 };
@@ -158,6 +160,11 @@ export class Deploys {
     return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'hub');
   }
 
+  /** Whether a Mod deploy onto a server runs (a pack update must wait for it). */
+  modBusy(serverId: string): boolean {
+    return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'mod' && r.target === serverId);
+  }
+
   /** What runs against what is published, and the history newest first, 50 rows older than `before`. */
   answer(before?: number): DeploysAnswer {
     const part = (p: 'hub' | 'web'): PartReleases => {
@@ -197,6 +204,8 @@ export class Deploys {
     const from = this.#running(part, serverId);
     if (from === tag) throw new DeployRefused(409, `${tag} is already running.`);
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
+    if (part === 'hub' && this.#d.packing()) throw new DeployRefused(409, 'A pack update is running: deploy the hub once it is done.');
+    if (server && this.#d.packing(server.id)) throw new DeployRefused(409, `A pack update is running on ${server.name}: deploy the Mod once it is done.`);
     if (part !== 'mod' && newestFirst(release, { tag: FLOOR[part], publishedAt: 0, assets: [] }) > 0) {
       throw new DeployRefused(409, `${tag} is older than ${FLOOR[part]}, the first release that can deploy.`);
     }

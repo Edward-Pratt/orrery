@@ -5,6 +5,8 @@
 # GITHUB_TOKEN (from the unit's EnvironmentFile) is handed to gh as GH_TOKEN. Writes <root>/deploy-status.json:
 # {"tag","from","outcome":"ok"|"failed","finished","log"}, written as <root>'s owner (the hub's user).
 set -euo pipefail
+# runuser (and install-web.sh's restorecon) live in /usr/sbin, which the unit's PATH leaves out.
+PATH=$PATH:/usr/sbin:/sbin
 [[ $# -eq 3 ]] || { echo "usage: $0 <root> <webDir> <web-vX.Y.Z>" >&2; exit 2; }
 root=$1 web=$2 tag=$3
 [[ $tag =~ ^web-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a web-vX.Y.Z tag: $tag" >&2; exit 2; }

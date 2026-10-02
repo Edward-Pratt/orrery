@@ -10,6 +10,8 @@
 # Writes the tag to <WEB_DIR>.release (e.g. /var/www/orrery.release) after the swap, for the hub to show which release
 # runs; installing an archive removes the stamp, as its release is unknown.
 set -euo pipefail
+# restorecon lives in /usr/sbin, which a systemd unit's PATH may leave out: without it Caddy can't read the new files.
+PATH=$PATH:/usr/sbin:/sbin
 WEB_DIR=${WEB_DIR:-/var/www/orrery}
 REPO=${REPO:-Edward-Pratt/orrery}
 [[ $# -eq 1 ]] || { echo "usage: $0 <web-vX.Y.Z | archive.tar.gz>" >&2; exit 2; }
@@ -31,9 +33,11 @@ mkdir "$stage/new"
 tar -xzf "$archive" -C "$stage/new" --no-same-owner
 [[ -f $stage/new/index.html ]] || { echo "no index.html in $1: not a dashboard build" >&2; exit 1; }
 chmod -R u=rwX,go=rX "$stage/new"
+# The policy's default labels, before the swap: a failure here leaves the installed build serving. The staged path
+# is under WEB_DIR's parent, so it gets the same labels (a rename keeps them).
+if command -v restorecon > /dev/null; then restorecon -R "$stage/new"; fi
 
 if [[ -d $WEB_DIR ]]; then mv "$WEB_DIR" "$stage/old"; fi
 mv "$stage/new" "$WEB_DIR"
-if command -v restorecon > /dev/null; then restorecon -R "$WEB_DIR"; fi # the policy's default labels
 if [[ $archive == "$1" ]]; then rm -f "$WEB_DIR.release"; else printf '%s\n' "$1" > "$WEB_DIR.release"; fi
 echo "Installed $1 into $WEB_DIR."

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
@@ -10,6 +10,8 @@ import { localDay } from './units.ts';
 /** How long TPS and host samples are kept. */
 const SAMPLES_KEEP_MS = 90 * 24 * 60 * 60_000;
 const COPIES_KEPT = 7;
+/** Copies taken before a hub deploy (`hub-before-<tag>-<ms>.db`) kept: one per Rollback anyone would still want. */
+const DEPLOY_COPIES_KEPT = 3;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
@@ -56,6 +58,7 @@ export class Db {
       CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL, avatar TEXT);
+      CREATE TABLE IF NOT EXISTS web_session_checks (id TEXT PRIMARY KEY, token TEXT NOT NULL, checked INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS audit (ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, details TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS audit_target_ts ON audit (target, ts);
       CREATE TABLE IF NOT EXISTS host_samples (host_id TEXT NOT NULL, ts INTEGER NOT NULL, sample TEXT NOT NULL);
@@ -297,12 +300,14 @@ export class Db {
 
   /**
    * Nightly upkeep: drops TPS and host samples older than 90 days (every other table is small and kept for all-time
-   * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies. Never throws.
+   * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies, and the 3 newest of the
+   * copies taken before hub deploys. Never throws.
    */
   maintain(copyDir: string, now = Date.now()): void {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
+    this.#write('prune web session checks', 'DELETE FROM web_session_checks WHERE id NOT IN (SELECT id FROM web_sessions)');
     try {
       mkdirSync(copyDir, { recursive: true });
       const file = join(copyDir, `hub-${localDay(now)}.db`);
@@ -314,6 +319,13 @@ export class Db {
         .reverse()
         .slice(COPIES_KEPT);
       for (const name of old) rmSync(join(copyDir, name), { force: true });
+      // By time, not name: tags don't sort as text (hub-v2.10.0 < hub-v2.9.0).
+      const deployCopies = readdirSync(copyDir)
+        .filter((n) => /^hub-before-.*\.db$/.test(n))
+        .map((n) => ({ n, mtime: statSync(join(copyDir, n)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(DEPLOY_COPIES_KEPT);
+      for (const { n } of deployCopies) rmSync(join(copyDir, n), { force: true });
     } catch (err) {
       console.error('[db] nightly copy failed:', (err as Error).message);
     }
@@ -342,6 +354,24 @@ export class Db {
 
   deleteWebSession(id: string): void {
     this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
+    this.#write('delete web session check', 'DELETE FROM web_session_checks WHERE id = ?', id);
+  }
+
+  /**
+   * A session's Discord access token (sealed: only the session's cookie opens it) and when its admin role was last
+   * checked; undefined for a session from before checks.
+   */
+  webSessionCheck(id: string): { token: string; checked: number } | undefined {
+    const row = this.#db.prepare('SELECT token, checked FROM web_session_checks WHERE id = ?').get(id) as { token: string; checked: number } | undefined;
+    return row && { ...row };
+  }
+
+  setWebSessionCheck(id: string, token: string, checked: number): void {
+    this.#write('web session check', 'INSERT OR REPLACE INTO web_session_checks (id, token, checked) VALUES (?, ?, ?)', id, token, checked);
+  }
+
+  markWebSessionChecked(id: string, checked: number): void {
+    this.#write('web session checked', 'UPDATE web_session_checks SET checked = ? WHERE id = ?', checked, id);
   }
 
   /** Records who did what to which server. Never pruned: the table is small. */

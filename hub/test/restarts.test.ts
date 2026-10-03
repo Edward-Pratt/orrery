@@ -21,7 +21,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const audit: string[] = []; // "command|by"
   const log: string[] = []; // "actor|action|target|details", from hub.audit
   const notices: Notice[] = []; // published on the hub's event stream
-  const state = { online: true, stopError: null as Error | null };
+  const state = { online: true, stopError: null as Error | null, paused: null as string | null };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     get: (id: string) => (state.online ? ({ id, online: true } as ServerState) : undefined),
@@ -38,7 +38,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
       events.emit('event', { ...notice, type: 'notice', serverId });
     },
   } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
-  const restarts = new RestartScheduler(hub);
+  const restarts = new RestartScheduler(hub, { paused: () => state.paused });
   t.after(() => restarts.stop());
   return { restarts, events, commands, audit, log, notices, state };
 }
@@ -160,6 +160,20 @@ test('a skipped daily restart (server offline) still arms the next day', (t) => 
   t.mock.timers.tick(50 * MIN); // 05:50: skipped, logged
   assert.deepEqual(notices, []);
   state.online = true;
+  t.mock.timers.tick(24 * 60 * MIN); // next day 05:50
+  assert.deepEqual(notices, [scheduled(10, 'daily')]);
+});
+
+test('a daily restart is skipped while paused (a pack update runs), and arms the next day', (t) => {
+  const { restarts, notices, state } = setup(t, Date.UTC(2026, 8, 24, 4, 0));
+  const errors = t.mock.method(console, 'error', () => {});
+  restarts.daily('gtnh', '06:00');
+  state.paused = 'a pack update is running';
+  t.mock.timers.tick(50 * MIN); // 05:50: skipped, logged
+  assert.deepEqual(notices, []);
+  assert.equal(restarts.pending('gtnh'), undefined);
+  assert.match(String(errors.mock.calls[0]?.arguments[0]), /daily restart of gtnh skipped: a pack update is running/);
+  state.paused = null;
   t.mock.timers.tick(24 * 60 * MIN); // next day 05:50
   assert.deepEqual(notices, [scheduled(10, 'daily')]);
 });

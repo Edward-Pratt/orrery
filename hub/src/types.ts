@@ -93,7 +93,8 @@ export type Notice = { severity: Severity } & (
 export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';
 /** Where a pack update's step is, with its live detail or result ("Staged: 2,318 files"). */
 export type PackStepState = { step: PackStep; state: 'waiting' | 'running' | 'done' | 'failed'; detail: string };
-export type PackOutcome = 'running' | 'ok' | 'rolled back' | 'failed in staging' | 'failed' | 'cancelled';
+/** `failed before swap`: stopped, then failed before any file moved (the old pack starts again); `failed`: not back even after a rollback. */
+export type PackOutcome = 'running' | 'ok' | 'rolled back' | 'failed in staging' | 'failed before swap' | 'failed' | 'cancelled';
 export type PackFinished = Exclude<PackOutcome, 'running'>;
 /**
  * What a hub-core module posts for people to see. `count` exceeds `quests.length` for a batched roll-up; a summary

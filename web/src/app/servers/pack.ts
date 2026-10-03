@@ -38,6 +38,7 @@ const RESULT: Record<PackFinished | 'running', string> = {
   ok: 'text-status-ok',
   'rolled back': 'text-status-down',
   failed: 'text-status-down',
+  'failed before swap': 'text-status-down',
   'failed in staging': 'text-muted-foreground',
   cancelled: 'text-muted-foreground',
 };

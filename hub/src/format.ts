@@ -74,6 +74,8 @@ function noticeText(n: Notice): string | null {
           return `❌ Pack update to ${n.to} rolled back: ${n.from} is running again.${n.backup ? ` Pre-update backup: ${n.backup}` : ''}`;
         case 'failed':
           return `❌ Pack update to ${n.to} failed: the server didn't come back, even after a rollback`;
+        case 'failed before swap':
+          return `❌ Pack update to ${n.to} failed after the stop, before any file changed: ${n.from} is starting again`;
         case 'failed in staging':
           return `⚠️ Pack update to ${n.to} failed while preparing: the server wasn't touched`;
         case 'cancelled':

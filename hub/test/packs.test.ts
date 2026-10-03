@@ -89,6 +89,8 @@ type Setup = {
   restore?: RunRestore;
   github?: HubDeps['github'];
   gateMs?: number;
+  /** How long a stop may take (default 15 min). */
+  stopMs?: number;
   /** The unit's state when the hub starts (default active). */
   unit?: string;
 };
@@ -154,6 +156,8 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     starts: 0,
     backupFails: false,
     players: [] as string[],
+    /** A stop that never ends: the unit stays active. */
+    stopHangs: false,
     downloadGate: Promise.resolve(),
     downloads: [] as string[],
   };
@@ -187,7 +191,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     calls.push([command, ...args]);
     const unit = args.at(-1)!;
     if (args[0] === 'stop') {
-      state[unit] = 'inactive';
+      if (!fake.stopHangs) state[unit] = 'inactive';
       mod?.send({ type: 'stopping' });
       mod?.socket.end();
     }
@@ -215,7 +219,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     download,
     restore: setup.restore,
     github: setup.github,
-    packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000 },
+    packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000, ...(setup.stopMs && { stopMs: setup.stopMs }) },
     deploys: { watchMs: 10, countdownMinutes: 60 },
   });
   let closed = false;
@@ -731,6 +735,15 @@ test('an update is refused while one runs, without a pack, offline, and for bad 
   const twice = await update();
   assert.equal(twice.status, 409);
   assert.equal(await twice.text(), 'A pack update is already running on GTNH.');
+  // Extras and edits wait too: Prepare is reading them.
+  for (const res of [
+    await s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'config/custom.cfg', find: '^our', replace: 'my' }),
+    await s.req('POST', '/api/servers/gtnh/pack/extras', { upload: 'f'.repeat(32), target: 'mods/x.jar' }),
+    await s.req('DELETE', '/api/servers/gtnh/pack/extras/1'),
+  ]) {
+    assert.equal(res.status, 409);
+    assert.equal(await res.text(), 'A pack update is running on GTNH: change Extras and edits once it is done.');
+  }
   assert.equal((await s.req('POST', '/api/servers/nope/pack/update', toNew)).status, 404);
 });
 
@@ -831,6 +844,32 @@ test('with players online the stop counts down; cancelling it, here or anywhere,
     assert.equal(row.backup, '2026-10-02-12-00-00.zip');
     await s.close();
   }
+});
+
+test('an update is refused while a countdown runs on the server, as its blocked reason says', async (t) => {
+  const { s } = await updatable(t);
+  assert.equal((await s.req('POST', '/api/servers/gtnh/restart', { minutes: 5 })).status, 204);
+  const res = await s.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  assert.equal(res.status, 409);
+  assert.equal(await res.text(), 'A countdown is running on GTNH: cancel it first.');
+  assert.equal((await s.pack()).blocked, 'A countdown is running on GTNH: cancel it first.');
+  assert.equal((await s.req('POST', '/api/servers/gtnh/restart/cancel')).status, 204);
+  assert.equal((await s.pack()).blocked, null);
+});
+
+test('a stop that never ends fails the update before the swap: the folder is unchanged and the service started again', async (t) => {
+  const { w, s } = await updatable(t, { stopMs: 200 });
+  s.fake.stopHangs = true;
+  const before = snapshot(w.dir);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  const row = await s.finished();
+  assert.equal(row.outcome, 'failed before swap');
+  assert.ok(row.log.includes("The service didn't stop within"), row.log);
+  assert.deepEqual(snapshot(w.dir), before);
+  assert.deepEqual(s.systemctl(), ['stop gtnh.service', 'start gtnh.service']);
+  const finished = s.events.find((e) => e.kind === 'packUpdateFinished')!;
+  assert.equal(finished.severity, 'problem');
+  assert.match(JSON.stringify(formatEvent({ type: 'notice', serverId: 'gtnh', ...finished })), /failed after the stop, before any file changed: 2\.7\.4 is starting again/);
 });
 
 test('Cancel after the server was stopped is 409', async (t) => {

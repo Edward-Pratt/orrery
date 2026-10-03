@@ -86,7 +86,10 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
   const live = new LiveFeed(hub);
 
-  const restarts = new RestartScheduler(hub);
+  let deploys: Deploys | undefined;
+  let packs: Packs | undefined;
+  // A daily countdown during a pack update would clash with its Stop; the update restarts the server anyway.
+  const restarts = new RestartScheduler(hub, { paused: (id) => (packs?.busy(id) ? 'a pack update is running' : null) });
   for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
   const backups = new BackupWatcher(
     hub,
@@ -118,8 +121,6 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   host?.start();
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
-  let deploys: Deploys | undefined;
-  let packs: Packs | undefined;
   const restores =
     services &&
     deps.restore &&

@@ -300,6 +300,47 @@ test('an expired session gets 401', async (t) => {
   assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
 });
 
+test("a session ends once Discord says its user lost the admin role, re-checked every 10 minutes", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { oauth, calls } = fakeOAuth();
+  let discord: 'admin' | 'down' | 'demoted' = 'admin';
+  const app = await webHub(t, {
+    ...oauth,
+    member: async (token, guildId) => {
+      if (discord === 'down') throw new Error('guild member: HTTP 503');
+      return discord === 'demoted' ? { ...ADMIN, roles: [] } : oauth.member(token, guildId);
+    },
+  });
+  const cookie = await loginCookie(app);
+  const me = async () => {
+    const res = await app.request('/api/me', { headers: { cookie } });
+    await new Promise((r) => setImmediate(r)); // lets a background re-check finish
+    return res.status;
+  };
+  const asked = () => calls.filter((c) => c.startsWith('member')).length;
+  assert.equal(asked(), 1); // at login
+  t.mock.timers.tick(10 * 60_000 - 1);
+  assert.equal(await me(), 200);
+  assert.equal(asked(), 1);
+  t.mock.timers.tick(1);
+  assert.equal(await me(), 200);
+  assert.equal(asked(), 2); // still an admin
+  assert.equal(await me(), 200);
+  assert.equal(asked(), 2); // not again for 10 minutes
+
+  const errors = t.mock.method(console, 'error', () => {});
+  discord = 'down';
+  t.mock.timers.tick(10 * 60_000);
+  assert.equal(await me(), 200);
+  assert.equal(await me(), 200); // Discord unreachable: the session stays
+  assert.match(String(errors.mock.calls[0]?.arguments[0]), /re-checking alex/);
+
+  discord = 'demoted';
+  t.mock.timers.tick(10 * 60_000);
+  assert.equal(await me(), 200); // the request that asks still goes through
+  assert.equal(await me(), 401);
+});
+
 test('logging out ends the session on the hub', async (t) => {
   const app = await webHub(t, fakeOAuth().oauth);
   const cookie = await loginCookie(app);

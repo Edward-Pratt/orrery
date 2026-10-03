@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { Hono, type Context } from 'hono';
@@ -59,6 +59,23 @@ const KEEP_ALIVE_MS = 25_000;
 const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } as const;
 /** Sessions are stored hashed, so a copy of the database logs nobody in. */
 const hash = (id: string) => createHash('sha256').update(id).digest('hex');
+/** How often a session's admin role is asked of Discord again, so one taken away ends the session. */
+const RECHECK_MS = 10 * 60_000;
+
+/** A session's Discord access token, sealed with a key from its cookie: like the session, unreadable from a database copy. */
+const sealKey = (session: string) => createHash('sha256').update(`token:${session}`).digest();
+function seal(token: string, session: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', sealKey(session), iv);
+  const sealed = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), sealed]).toString('base64');
+}
+function unseal(sealed: string, session: string): string {
+  const b = Buffer.from(sealed, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', sealKey(session), b.subarray(0, 12));
+  decipher.setAuthTag(b.subarray(12, 28));
+  return Buffer.concat([decipher.update(b.subarray(28)), decipher.final()]).toString('utf8');
+}
 
 const AUDIT_LIMIT = 200;
 const UPLOAD = /^\/api\/servers\/[^/]+\/pack\/uploads$/;
@@ -152,8 +169,10 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const failed = (why: 'state' | 'discord' | 'admin') => c.redirect(new URL(`/?login=${why}`, web.publicUrl).href);
     if (!state || c.req.query('state') !== state || !code) return failed('state');
     let member: Member | undefined;
+    let token: string;
     try {
-      member = await oauth.member(await oauth.token(code, redirectUri), web.guildId);
+      token = await oauth.token(code, redirectUri);
+      member = await oauth.member(token, web.guildId);
     } catch (err) {
       console.error('[web] Discord login failed:', (err as Error).message);
       return failed('discord');
@@ -161,15 +180,39 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     if (!member?.roles.includes(web.adminRoleId)) return failed('admin');
     const id = randomBytes(32).toString('base64url');
     db.addWebSession(hash(id), member.id, member.username, member.avatar, Date.now() + web.sessionDays * DAY_S * 1000);
+    db.setWebSessionCheck(hash(id), seal(token, id), Date.now());
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
     console.log(`[web] ${member.username} (${member.id}) logged in`);
     return c.redirect(new URL('/', web.publicUrl).href);
   });
 
+  /**
+   * Asks Discord again whether a session's user still has the admin role; ends the session if not (or if Discord no
+   * longer takes the token). Discord being unreachable keeps it: the next check asks again.
+   */
+  const recheck = async (id: string, session: string, sealed: string, user: Me) => {
+    let member: Member | undefined;
+    try {
+      member = await oauth.member(unseal(sealed, session), web.guildId);
+    } catch (err) {
+      console.error(`[web] re-checking ${user.username} (${user.id}) failed:`, (err as Error).message);
+      return;
+    }
+    if (member?.roles.includes(web.adminRoleId)) return;
+    db.deleteWebSession(id);
+    console.log(`[web] ${user.username} (${user.id}) is no longer an admin: logged out`);
+  };
   app.use(async (c, next) => {
     const session = getCookie(c, 'session');
-    const user = session ? db.webSession(hash(session)) : undefined;
-    if (!user) return c.text('Not logged in', 401);
+    const id = session && hash(session);
+    const user = id ? db.webSession(id) : undefined;
+    if (!id || !user) return c.text('Not logged in', 401);
+    // ponytail: sessions from before re-checks have no row and run to their expiry unchecked.
+    const check = db.webSessionCheck(id);
+    if (check && Date.now() - check.checked >= RECHECK_MS) {
+      db.markWebSessionChecked(id, Date.now()); // first, so concurrent requests ask Discord once
+      void recheck(id, session!, check.token, user); // in the background: this request goes on, the next one sees the outcome
+    }
     c.set('user', user);
     await next();
   });
@@ -491,6 +534,7 @@ export function discordOAuth(clientId: string, clientSecret: string): OAuth {
         headers: { authorization: `Bearer ${accessToken}` },
       });
       if (res.status === 404) return undefined; // not in the guild
+      if (res.status === 401) return undefined; // the token was revoked or expired: no longer known as a member
       const m = await json('guild member', res);
       return { id: m.user.id, username: m.user.username, avatar: m.user.avatar ?? null, roles: m.roles };
     },

@@ -224,7 +224,8 @@ export type CommandOutput = { output: string[] };
 
 /**
  * Packs (only for a server with a folder, a linked service and a Mod token; others 404). Every path is relative to the
- * server's folder. Actions are audited as the admin; `PackRefused` answers 400 (bad input), 404 or 409 (not now).
+ * server's folder. Actions are audited as the admin; `PackRefused` answers 400 (bad input), 404 or 409 (not now; Extras and Config edits change
+ * only while no update runs).
  */
 /** The installed pack: `source` is its URL, or the uploaded file's name; `how` it arrived. */
 export type InstalledPack = {
@@ -339,8 +340,8 @@ export type EditPreview = { matches: number };
 /**
  * `POST /api/servers/:id/pack/update`: a new pack, or `{ pending: true }` to apply the changes pending onto the
  * installed one. Answers 202 with the history row's `id`; steps follow as `packUpdateStep` notices, the end as
- * `packUpdateFinished`. 409 while offline, without a pack, with nothing to change, or while an update, a restore or
- * a Mod deploy runs on the server. `POST …/pack/update/cancel`: only in Prepare or the Stop countdown (else 409).
+ * `packUpdateFinished`. 409 while offline, without a pack, with nothing to change, or while an update, a restore,
+ * a Mod deploy or a countdown runs on the server. `POST …/pack/update/cancel`: only in Prepare or the Stop countdown (else 409).
  */
 export type PackUpdateRequest = PackSource | { pending: true };
 export type PackUpdateAnswer = { id: number };

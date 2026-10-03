@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -188,6 +188,13 @@ test('maintain prunes old TPS samples and host samples, copies the database and 
   await mkdir(copies);
   for (let d = 1; d <= 8; d++) await writeFile(join(copies, `hub-2026-09-${String(d).padStart(2, '0')}.db`), '');
   await writeFile(join(copies, 'notes.txt'), '');
+  // Before-deploy copies go by age, not name: hub-v2.10.0 is newer than hub-v2.9.0.
+  const tags = ['hub-v2.7.0', 'hub-v2.8.0', 'hub-v2.9.0', 'hub-v2.10.0', 'hub-v2.11.0'];
+  for (const [i, tag] of tags.entries()) {
+    const file = join(copies, `hub-before-${tag}-${i}.db`);
+    await writeFile(file, '');
+    await utimes(file, new Date(now - (10 - i) * DAY), new Date(now - (10 - i) * DAY));
+  }
 
   db.maintain(copies, now);
 
@@ -201,6 +208,9 @@ test('maintain prunes old TPS samples and host samples, copies the database and 
     'hub-2026-09-07.db',
     'hub-2026-09-08.db',
     'hub-2026-09-25.db',
+    'hub-before-hub-v2.10.0-3.db',
+    'hub-before-hub-v2.11.0-4.db',
+    'hub-before-hub-v2.9.0-2.db',
     'notes.txt',
   ]);
   const copy = new DatabaseSync(join(copies, 'hub-2026-09-25.db'));

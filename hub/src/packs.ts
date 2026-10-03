@@ -731,7 +731,7 @@ export class Packs {
       if (job.touched) return await this.#rollback(job, s, service.id, pack, { oldFiles, oldOwn, manifest }, zip);
       if (job.stopped) {
         await this.#d.services.act(service.id, 'start', job.actor, job.byName).catch(() => {});
-        return await this.#end(job, 'failed', staging, zip);
+        return await this.#end(job, 'failed before swap', staging, zip);
       }
       return await this.#end(job, job.cancelled ? 'cancelled' : 'failed in staging', staging, zip);
     }
@@ -834,7 +834,7 @@ export class Packs {
     this.#d.db.setPackUpdate(job.id, { outcome, finished, log: job.log.slice(-LOG_LINES).join('\n') });
     this.#jobs.delete(job.serverId);
     this.#d.hub.audit(job.actor, 'pack update', job.serverId, `${job.from} → ${job.version}: ${outcome}`);
-    const severity: Severity = outcome === 'ok' ? 'good' : outcome === 'rolled back' || outcome === 'failed' ? 'problem' : 'info';
+    const severity: Severity = outcome === 'ok' ? 'good' : ['rolled back', 'failed', 'failed before swap'].includes(outcome) ? 'problem' : 'info';
     this.#d.hub.publish(job.serverId, {
       severity,
       kind: 'packUpdateFinished',
@@ -915,9 +915,11 @@ export class Packs {
     return this.#settings(serverId)!;
   }
 
+  /** A server with an adopted pack and no update running, else 404 or 409: Extras and edits change only between updates. */
   #adopted(serverId: string): ServerSettings {
     const s = this.#server(serverId);
     if (!this.#d.db.pack(serverId)) throw new PackRefused(409, `orrery doesn't know ${s.name}'s pack yet: adopt it first.`);
+    if (this.#jobs.has(serverId)) throw new PackRefused(409, `A pack update is running on ${s.name}: change Extras and edits once it is done.`);
     return s;
   }
 
@@ -927,6 +929,8 @@ export class Packs {
     const deploy = this.#d.deploying(serverId);
     if (deploy === 'mod') return `A Mod deploy onto ${name} is running.`;
     if (deploy === 'hub') return 'A hub deploy is running.';
+    // Its Stop would clash with the countdown (`CountdownRunning`), after the backup.
+    if (this.#d.restarts.pending(serverId)) return `A countdown is running on ${name}: cancel it first.`;
     return null;
   }
 

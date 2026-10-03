@@ -36,9 +36,12 @@ export class RestartScheduler {
   #hub: Hub;
   #pending = new Map<string, Pending>();
   #daily = new Map<string, () => void>(); // serverId -> cancel
+  #paused: (serverId: string) => string | null;
 
-  constructor(hub: Hub) {
+  /** `paused` says why a server's daily restart must be skipped today (a pack update restarts it anyway); null: it runs. */
+  constructor(hub: Hub, { paused = () => null }: { paused?: (serverId: string) => string | null } = {}) {
     this.#hub = hub;
+    this.#paused = paused;
     hub.on('event', (e) => {
       if ((e.type === 'stopped' || e.type === 'crashed') && this.#clear(e.serverId)) {
         hub.publish(e.serverId, { severity: 'info', kind: 'restartCancelledDown' });
@@ -83,6 +86,8 @@ export class RestartScheduler {
   daily(serverId: string, time: string): void {
     // Arm first: everyDay throws on a bad time, and the earlier daily restart must survive that.
     const cancel = everyDay(time, DAILY_LEAD_MS, () => {
+      const why = this.#paused(serverId);
+      if (why) return console.error(`[restart] daily restart of ${serverId} skipped: ${why}`);
       try {
         this.schedule(serverId, DAILY_LEAD_MS / 60_000, 'hub:daily', 'daily');
       } catch (err) {

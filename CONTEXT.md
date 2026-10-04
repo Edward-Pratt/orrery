@@ -86,11 +86,11 @@ The pack versions an Environment's hub keeps, by pack name and version, for any 
 _Avoid_: cache, store, repository
 
 **Install**:
-Putting a pack version from the library into a new server's empty folder: the first pack a server gets, as opposed to a pack update. Creating the server's systemd unit and config entry is not part of it: the hub hands those over as a script for the host's owner to run.
+Putting a pack version from the library into a new server's empty folder: the first pack a server gets, as opposed to a pack update. Creating the server's systemd unit and config entry is not part of it: the host's owner does that by running the setup script, with the command the hub shows.
 _Avoid_: provision, deploy (a deploy is a release of hub, dashboard or Mod)
 
 **Pending server**:
-A server the hub has installed but that isn't in config yet, because the host's owner hasn't run its setup script. It can't start. It becomes a server when the hub finds it in config, or disappears when it is discarded, folder and all.
+A server the hub has installed but that isn't in config yet, because the host's owner hasn't run the setup script for it yet. It can't start. It becomes a server when the hub finds it in config, or disappears when it is discarded, folder and all.
 _Avoid_: draft, new server, unconfigured server
 
 **Java runtime**:

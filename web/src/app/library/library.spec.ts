@@ -3,8 +3,9 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { LibraryAdd, LibraryPack, LibraryState } from '@hub/api';
+import type { LibraryAdd, LibraryPack, LibraryRuntime, LibraryState } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
+import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents } from '../testing';
 import routes from './routes';
 import { fromFileName } from './library';
@@ -22,9 +23,19 @@ const PACK: LibraryPack = {
   at: Date.UTC(2026, 8, 20),
   usedBy: [],
 };
+const JDK: LibraryRuntime = {
+  name: 'temurin-21.0.8+9',
+  label: 'Temurin 21.0.8+9',
+  feature: 21,
+  size: 200 * 1024 ** 2,
+  sha256: 'ce79869e',
+  by: 'alex',
+  at: Date.UTC(2026, 8, 21),
+  usedBy: ['gtnh'],
+};
 const ADD = { type: 'libraryAdd', add: 3, name: 'GT New Horizons', version: '2.7.5', by: 'alex' } as const;
-const EMPTY: LibraryState = { packs: [], running: null };
-const RUNNING: LibraryState = { packs: [PACK], running: { add: 3, name: 'GT New Horizons', version: '2.7.5', by: 'alex', started: 0, detail: 'Downloading' } };
+const EMPTY: LibraryState = { packs: [], runtimes: [], running: null };
+const RUNNING: LibraryState = { packs: [PACK], runtimes: [], running: { add: 3, kind: 'pack', name: 'GT New Horizons', version: '2.7.5', by: 'alex', started: 0, detail: 'Downloading' } };
 
 async function setup(state: LibraryState) {
   const events = fakeEvents();
@@ -77,7 +88,7 @@ describe('library page', () => {
   });
 
   it('lists each pack with its Minecraft version, loader, size, source, sha256, who added it and its servers', async () => {
-    const { el, text } = await setup({ packs: [PACK, { ...PACK, id: 1, version: '2.7.3', usedBy: ['gtnh'] }], running: null });
+    const { el, text } = await setup({ packs: [PACK, { ...PACK, id: 1, version: '2.7.3', usedBy: ['gtnh'] }], runtimes: [], running: null });
     expect([...el.querySelectorAll('[data-pack] [data-name]')].map(text)).toEqual(['GT New Horizons 2.7.4', 'GT New Horizons 2.7.3']);
     const row = el.querySelector('[data-pack="2"]')!;
     expect(text(row.querySelector('[data-meta]'))).toContain('Minecraft 1.7.10 · forge · 1.0 GB · added by alex');
@@ -134,7 +145,7 @@ describe('library page', () => {
     expect(cancel.request.headers.get('content-type')).toBe('application/json');
     cancel.flush(null, { status: 204, statusText: 'No Content' });
     await push({ ...ADD, phase: 'finished', outcome: 'cancelled', reason: '' });
-    await reload({ packs: [PACK], running: null });
+    await reload({ packs: [PACK], runtimes: [], running: null });
     expect(el.querySelector('[data-running]')).toBeNull();
     expect(el.querySelector('[data-ended]')).toBeNull(); // nothing to say about a cancel
   });
@@ -142,13 +153,13 @@ describe('library page', () => {
   it('says why a failed add failed', async () => {
     const { el, text, push, reload } = await setup(RUNNING);
     await push({ ...ADD, phase: 'finished', outcome: 'failed', reason: 'The zip has no mods/ or config/ folder: is it a server pack?' });
-    await reload({ packs: [PACK], running: null });
+    await reload({ packs: [PACK], runtimes: [], running: null });
     expect(el.querySelector('[data-running]')).toBeNull();
     expect(text(el.querySelector('[data-ended=failed]'))).toBe('Adding GT New Horizons 2.7.5 failed: The zip has no mods/ or config/ folder: is it a server pack?');
   });
 
   it('deletes a pack once its name and version are typed', async () => {
-    const { q, render, backend, reload } = await setup({ packs: [PACK], running: null });
+    const { q, render, backend, reload } = await setup({ packs: [PACK], runtimes: [], running: null });
     q('[data-pack="2"] [data-delete]').click();
     await render();
     expect(dialog()?.textContent).toContain('Delete GT New Horizons 2.7.4?');
@@ -163,5 +174,54 @@ describe('library page', () => {
     expect(del.request.headers.get('content-type')).toBe('application/json');
     del.flush(null, { status: 204, statusText: 'No Content' });
     await reload(EMPTY);
+  });
+
+  it('lists Java runtimes with their size and servers, and says when there are none', async () => {
+    const { el, text } = await setup({ packs: [], runtimes: [JDK], running: null });
+    const row = el.querySelector('[data-runtime="temurin-21.0.8+9"]')!;
+    expect(text(row.querySelector('[data-name]'))).toBe('Temurin 21.0.8+9');
+    expect(text(row.querySelector('[data-meta]'))).toContain('Java 21 · 200.0 MB · added by alex');
+    expect(text(row.querySelector('[data-used]'))).toBe('set on gtnh');
+    TestBed.resetTestingModule();
+    const empty = await setup(EMPTY);
+    expect(empty.el.querySelector('[data-runtimes-empty]')).not.toBeNull();
+  });
+
+  it('adds a runtime of the picked Java version, shown as the running add, with no Add meanwhile', async () => {
+    const { el, q, text, render, backend, reload } = await setup(EMPTY);
+    q('[data-add-runtime]').click();
+    await render();
+    expect([...document.querySelectorAll('[data-feature]')].map((b) => b.textContent?.trim())).toEqual(['8', '17', '21', '25']);
+    expect(text(q('[data-go]'))).toBe('Add Temurin 21');
+    q('[data-feature="17"]').click();
+    await render();
+    q('[data-go]').click();
+    await render();
+    const req = backend.expectOne('/api/library/runtimes');
+    expect(req.request.body).toEqual({ feature: 17 });
+    req.flush({ add: 4 }, { status: 202, statusText: 'Accepted' });
+    await reload({ packs: [], runtimes: [], running: { add: 4, kind: 'runtime', name: 'Temurin', version: '17', by: 'alex', started: 0, detail: 'Asking Adoptium' } });
+    expect(text(el.querySelector('[data-running]'))).toContain('Adding Temurin 17 (by alex)');
+    expect(q<HTMLButtonElement>('[data-add-runtime]').disabled).toBe(true);
+    expect(q<HTMLButtonElement>('[data-add]').disabled).toBe(true);
+  });
+
+  it('deletes a runtime once its name is typed; a refusal is a toast with the reason', async () => {
+    const { q, render, backend } = await setup({ packs: [], runtimes: [JDK], running: null });
+    const failed = vi.spyOn(TestBed.inject(Feedback), 'failed');
+    q('[data-runtime="temurin-21.0.8+9"] [data-delete]').click();
+    await render();
+    expect(dialog()?.textContent).toContain('Delete Temurin 21.0.8+9?');
+    const typed = document.querySelector<HTMLInputElement>('[data-confirm-typed]')!;
+    typed.value = 'temurin-21.0.8+9';
+    typed.dispatchEvent(new Event('input'));
+    await render();
+    dialogButton('ok').click();
+    await render();
+    const del = backend.expectOne((r) => r.method === 'DELETE' && r.url === '/api/library/runtimes/temurin-21.0.8%2B9');
+    expect(del.request.headers.get('content-type')).toBe('application/json');
+    del.flush('temurin-21.0.8+9 is what gtnh runs on.', { status: 409, statusText: 'Conflict' });
+    await render();
+    expect(failed).toHaveBeenCalledWith('Deleting Temurin 21.0.8+9', expect.objectContaining({ status: 409, error: 'temurin-21.0.8+9 is what gtnh runs on.' }));
   });
 });

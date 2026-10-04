@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type {
@@ -11,6 +11,7 @@ import type {
   InstalledPack,
   PackChange,
   PackRollback,
+  PackRuntime,
   PackState,
   PendingChange,
   ReportFile,
@@ -18,7 +19,7 @@ import type {
 import { listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import type { Db, EditRow, LibraryRow, PackRow } from './db.ts';
-import type { Library } from './library.ts';
+import { RUNTIME, type Library } from './library.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
@@ -52,7 +53,7 @@ export type PacksOptions = {
 export type PacksDeps = {
   hub: Pick<ServerHub, 'get' | 'on' | 'off' | 'publish' | 'audit' | 'runCommand'>;
   db: Db;
-  services: Pick<Services, 'ofServer' | 'act' | 'read'>;
+  services: Pick<Services, 'ofServer' | 'act' | 'read' | 'environment'>;
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
   servers: ServerSettings[];
   hasMod: (serverId: string) => boolean;
@@ -61,7 +62,7 @@ export type PacksDeps = {
   /** Finished uploads, taken as an Extra. */
   uploads: Pick<Uploads, 'get' | 'take'>;
   /** Where every pack comes from: Compare, Adopt and updates install a library entry's zip. */
-  library: Pick<Library, 'entry' | 'zip'>;
+  library: Pick<Library, 'entry' | 'zip' | 'runtime'>;
   /** Whether a restore runs on a server. */
   restoring: (serverId: string) => boolean;
   /** What deploy runs that a pack update on a server must wait for: a hub deploy, or a Mod deploy onto it. */
@@ -253,6 +254,11 @@ export class Packs {
   /** Stops each wait and ticker without resolving it: a closing hub leaves a running update as a crash would. */
   #halts = new Set<() => void>();
   #closed = false;
+  /** Servers whose Java runtime changed since their last start. ponytail: in memory, so a hub restart forgets it; a table if that matters. */
+  #runtimeChanged = new Set<string>();
+  #started = (e: HubEvent) => {
+    if (e.type === 'connected') this.#runtimeChanged.delete(e.serverId);
+  };
 
   constructor(deps: PacksDeps, o: PacksOptions = {}) {
     this.#d = deps;
@@ -261,6 +267,7 @@ export class Packs {
 
   /** Clears Compare's leftover scratch, and closes updates the last hub left running as interrupted. */
   async start(): Promise<void> {
+    this.#d.hub.on('event', this.#started);
     // `downloads/` and `staging/` are from before the library (#139).
     for (const old of ['downloads', 'staging']) await rm(join(this.#d.dataDir, old), { recursive: true, force: true });
     for (const s of this.#d.servers) await rm(this.#work(s.id), { recursive: true, force: true });
@@ -276,6 +283,7 @@ export class Packs {
 
   stop(): void {
     this.#closed = true;
+    this.#d.hub.off('event', this.#started);
     for (const halt of this.#halts) halt();
   }
 
@@ -330,7 +338,33 @@ export class Packs {
       blocked: this.#blocked(serverId, s.name),
       rolledBack: this.rollback(serverId),
       packFiles: [...own],
+      runtime: await this.#runtime(s),
     };
+  }
+
+  /**
+   * Sets the Java a server runs on from its next start: its link `<root>/java/<server>` swapped atomically to a runtime
+   * (a new link renamed over it), or removed for the host's own `java` (`name` null).
+   */
+  async setRuntime(serverId: string, name: unknown, by: string): Promise<PackState> {
+    const s = this.#server(serverId);
+    if (name !== null && (typeof name !== 'string' || !RUNTIME.test(name) || !this.#d.library.runtime(name))) {
+      throw new PackRefused(404, 'No such runtime in the library.');
+    }
+    const link = this.#javaLink(serverId);
+    if (name === null) await rm(link, { force: true });
+    else {
+      await mkdir(dirname(link), { recursive: true });
+      const next = `${link}.new-${process.pid}-${Date.now()}`;
+      await symlink(join(this.#d.dataDir, 'runtimes', name), next);
+      await rename(next, link).catch(async (err) => {
+        await rm(next, { force: true });
+        throw err;
+      });
+    }
+    this.#runtimeChanged.add(serverId);
+    this.#d.hub.audit(by, 'pack runtime', serverId, name ?? 'system java');
+    return this.state(s.id);
   }
 
   /** Compares a pack with the server folder; held for `adopt`. Refused once the server has a pack. */
@@ -869,6 +903,26 @@ export class Packs {
 
   #extrasDir(serverId: string): string {
     return join(this.#d.dataDir, 'extras', serverId);
+  }
+
+  /** A server's Java link, which its unit names in `PATH` and `JAVA_HOME`. */
+  #javaLink(serverId: string): string {
+    return join(this.#d.dataDir, 'java', serverId);
+  }
+
+  /** What the server's Java link points at, whether that waits for a restart, and the unit lines it lacks. */
+  async #runtime(s: ServerSettings): Promise<PackRuntime> {
+    const link = this.#javaLink(s.id);
+    const target = await readlink(link).catch(() => null);
+    const runtimes = join(this.#d.dataDir, 'runtimes');
+    const name = target && dirname(target) === runtimes ? target.slice(runtimes.length + 1) : null;
+    const env = await this.#d.services.environment(this.#d.services.ofServer(s.id)!.id);
+    const names = env !== undefined && (env.split(/\s+/).includes(`JAVA_HOME=${link}`) || env.includes(`${link}/bin`));
+    return {
+      name,
+      pending: this.#runtimeChanged.has(s.id),
+      unitLines: names ? null : [`Environment=PATH=${link}/bin:/usr/local/bin:/usr/bin:/bin`, `Environment=JAVA_HOME=${link}`],
+    };
   }
 
   /** Compare's scratch folder for a server. */

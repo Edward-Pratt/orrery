@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -175,6 +175,8 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     dropAt: 100,
     /** Answer a Range with the whole file (200). */
     ignoreRange: false,
+    /** The unit's `Environment=` as systemctl shows it. */
+    environment: '',
     /** Holds the Mod's answer to `backup start`: an update waits in Backup. */
     backupGate: Promise.resolve(),
     downloads: [] as string[],
@@ -209,6 +211,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
   const run: Run = async (command, args) => {
     calls.push([command, ...args]);
     const unit = args.at(-1)!;
+    if (args.includes('--property=Environment')) return `Environment=${fake.environment}\n`;
     if (args[0] === 'stop') {
       if (!fake.stopHangs) state[unit] = 'inactive';
       mod?.send({ type: 'stopping' });
@@ -1147,7 +1150,7 @@ async function libraryHub(t: TestContext, setup: Setup = {}, w = world(t)) {
 
 test('a pack version added from a URL and one from a chunked upload are listed with their sha256 and size, newest first', async (t) => {
   const { w, s, lib, add, finished, files } = await libraryHub(t);
-  assert.deepEqual(await lib(), { packs: [], running: null });
+  assert.deepEqual(await lib(), { packs: [], runtimes: [], running: null });
   await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' }); // the Minecraft version and loader from its Forge jar
   assert.deepEqual(await finished(), ['ok', '']);
   await add({ upload: await s.upload(w.urls[URL_NEW]!), ...NEW });
@@ -1172,7 +1175,7 @@ test('an add streams its progress then its end; the replay holds only the latest
   s.fake.downloadGate = new Promise((r) => (release = r));
   const { add: n } = await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' });
   await until(() => adds.length >= 1);
-  assert.deepEqual({ ...(await lib()).running!, started: 0 }, { add: n, name: 'GT New Horizons', version: '2.7.6', by: 'alex', started: 0, detail: 'Downloading' });
+  assert.deepEqual({ ...(await lib()).running!, started: 0 }, { add: n, kind: 'pack', name: 'GT New Horizons', version: '2.7.6', by: 'alex', started: 0, detail: 'Downloading' });
   const replay = () => s.handle.live.since().map(([, e]) => e).filter((e) => 'target' in e && e.type === 'libraryAdd');
   assert.equal(replay().length, 1);
   release();
@@ -1203,7 +1206,7 @@ test('Cancel stops an add and leaves nothing behind; a second add while one runs
   assert.equal(await deploy.text(), 'A library add is running: deploy the hub once it is done.');
   assert.equal((await s.req('POST', '/api/library/cancel')).status, 204);
   assert.deepEqual(await finished(), ['cancelled', '']);
-  assert.deepEqual(await lib(), { packs: [], running: null });
+  assert.deepEqual(await lib(), { packs: [], runtimes: [], running: null });
   assert.deepEqual(files(), []);
   assert.equal((await s.req('POST', '/api/library/cancel')).status, 409); // nothing running
   assert.deepEqual((await s.audit('library')).map((e) => `${e.action}: ${e.details}`), [
@@ -1384,6 +1387,12 @@ test('an Actions artifact is fetched through the API with the token, which never
   );
   const [entry] = (await lib()).packs;
   assert.deepEqual([entry!.source, entry!.sha256], [ARTIFACT, sha(w.urls[URL_FORGE]!)]);
+  // A pasted api.github.com link is no artifact: the hub's token is never lent to it.
+  s.fake.requests.length = 0;
+  w.urls['https://api.github.com/repos/someone/private/zipball'] = w.urls[URL_NEW]!;
+  await add({ url: 'https://api.github.com/repos/someone/private/zipball', ...NEW });
+  await finished(2);
+  assert.deepEqual(s.fake.requests.map((r) => r.headers.authorization), [undefined]);
 });
 
 test('an Actions artifact without a token is refused, saying why', async (t) => {
@@ -1458,4 +1467,94 @@ test('more than 5 redirects, a redirect off https, and an HTTP error fail the ad
   s.fake.redirects['https://hop.example/1'] = 'https://hop.example/2';
   await add({ url: 'https://hop.example/1', ...NEW }); // five redirects are fine
   assert.deepEqual(await finished(4), ['ok', '']);
+});
+
+// Java runtimes (#141).
+
+const ARCH = process.arch === 'arm64' ? 'aarch64' : 'x64';
+const ADOPTIUM = (feature: number) => `https://api.adoptium.net/v3/assets/latest/${feature}/hotspot?architecture=${ARCH}&image_type=jdk&os=linux&vendor=eclipse`;
+const JDK = 'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jdk_hotspot_21.0.8_9.tar.gz';
+
+/** A library hub whose fake Adoptium offers Temurin 21.0.8+9: a tiny tarball whose bin/java prints a version (or fails). */
+async function runtimeHub(t: TestContext, { javaFails = false, checksum }: { javaFails?: boolean; checksum?: string } = {}) {
+  const h = await libraryHub(t);
+  const src = join(h.w.root, 'jdk-src');
+  write(join(src, 'jdk-21.0.8+9'), { 'bin/java': javaFails ? '#!/bin/sh\necho "Exec format error" >&2\nexit 126\n' : '#!/bin/sh\necho \'openjdk version "21.0.8"\' >&2\n', release: 'JAVA_VERSION="21.0.8"' });
+  execFileSync('chmod', ['+x', join(src, 'jdk-21.0.8+9', 'bin', 'java')]);
+  const tarball = join(h.w.zips, 'jdk.tar.gz');
+  execFileSync('tar', ['-czf', tarball, '-C', src, 'jdk-21.0.8+9']);
+  const answer = join(h.w.zips, 'adoptium-21.json');
+  writeFileSync(answer, JSON.stringify([{ release_name: 'jdk-21.0.8+9', binary: { package: { link: JDK, checksum: checksum ?? sha(tarball), size: statSync(tarball).size } } }]));
+  h.w.urls[ADOPTIUM(21)] = answer;
+  h.w.urls[JDK] = tarball;
+  const addRuntime = (feature = 21) => h.s.json<{ add: number }>(h.s.req('POST', '/api/library/runtimes', { feature }), 202);
+  const data = join(h.w.root, 'data');
+  return { ...h, tarball, data, addRuntime };
+}
+
+test('a runtime is added from Adoptium, checked with java -version, and listed; the same build again is already installed', async (t) => {
+  const { s, lib, adds, addRuntime, finished, tarball, data } = await runtimeHub(t);
+  await addRuntime();
+  assert.deepEqual(await finished(), ['ok', '']);
+  assert.ok(adds.every((e) => (e as LibraryAdd & { id: string }).id === 'runtimes'));
+  assert.deepEqual(
+    adds.filter((e) => e.phase === 'progress').map((e) => e.phase === 'progress' && e.detail.replace(/ [\d.]+ [KMG]?B of .*/, '')),
+    ['Asking Adoptium', 'Downloading', 'Downloading', 'Checking the download', 'Unpacking', 'Running java -version', 'Storing'],
+  );
+  const { runtimes } = await lib();
+  assert.deepEqual(runtimes.map(({ at: _, ...r }) => r), [
+    { name: 'temurin-21.0.8+9', label: 'Temurin 21.0.8+9', feature: 21, size: statSync(tarball).size, sha256: sha(tarball), by: 'alex', usedBy: [] },
+  ]);
+  assert.ok(existsSync(join(data, 'runtimes', 'temurin-21.0.8+9', 'bin', 'java')));
+  assert.deepEqual(readdirSync(join(data, 'work')), []);
+  await addRuntime();
+  assert.deepEqual(await finished(2), ['ok', 'Temurin 21.0.8+9 is already installed.']);
+  assert.equal(s.fake.requests.filter((r) => r.url === JDK).length, 1); // not downloaded again
+  for (const feature of [11, '21', undefined]) assert.equal((await s.req('POST', '/api/library/runtimes', { feature })).status, 400, String(feature));
+  assert.deepEqual((await s.audit('library runtime')).map((e) => e.details), ['Temurin 21', 'Temurin 21.0.8+9: ok', 'Temurin 21', 'Temurin 21.0.8+9: ok: Temurin 21.0.8+9 is already installed.']);
+});
+
+test('a java -version that fails, or a wrong sha256, leaves nothing installed', async (t) => {
+  for (const [setup, why] of [
+    [{ javaFails: true }, "java -version failed on this host, so it isn't installed: Exec format error"],
+    [{ checksum: 'f'.repeat(64) }, "The download's sha256 doesn't match Adoptium's: not installed."],
+  ] as const) {
+    const { lib, addRuntime, finished, data, s } = await runtimeHub(t, setup);
+    await addRuntime();
+    assert.deepEqual(await finished(), ['failed', why]);
+    assert.deepEqual((await lib()).runtimes, []);
+    assert.ok(!existsSync(join(data, 'runtimes')));
+    assert.deepEqual(readdirSync(join(data, 'work')), []);
+    await s.close();
+  }
+});
+
+test("a server's runtime: the link swapped, pending until its next start, removed for system java; the unit lines when it lacks them", async (t) => {
+  const { s, lib, addRuntime, finished, data } = await runtimeHub(t);
+  await addRuntime();
+  await finished();
+  const link = join(data, 'java', 'gtnh');
+  let p = await s.pack();
+  assert.deepEqual(p.runtime, { name: null, pending: false, unitLines: [`Environment=PATH=${link}/bin:/usr/local/bin:/usr/bin:/bin`, `Environment=JAVA_HOME=${link}`] });
+  s.fake.environment = `PATH=${link}/bin:/usr/local/bin:/usr/bin:/bin JAVA_HOME=${link}`;
+  p = await s.json<PackState>(s.req('PUT', '/api/servers/gtnh/pack/runtime', { runtime: 'temurin-21.0.8+9' }));
+  assert.deepEqual(p.runtime, { name: 'temurin-21.0.8+9', pending: true, unitLines: null });
+  assert.equal(readlinkSync(link), join(data, 'runtimes', 'temurin-21.0.8+9'));
+  assert.deepEqual((await lib()).runtimes[0]!.usedBy, ['gtnh']);
+  // Deleting it now is refused, naming the server.
+  const refused = await s.req('DELETE', '/api/library/runtimes/temurin-21.0.8+9');
+  assert.equal(refused.status, 409);
+  assert.equal(await refused.text(), 'temurin-21.0.8+9 is what gtnh runs on.');
+  await s.connect(); // the server's next start
+  assert.equal((await s.pack()).runtime.pending, false);
+  for (const runtime of ['temurin-17.0.1+1', '../etc', 7]) assert.equal((await s.req('PUT', '/api/servers/gtnh/pack/runtime', { runtime })).status, 404, String(runtime));
+  p = await s.json<PackState>(s.req('PUT', '/api/servers/gtnh/pack/runtime', { runtime: null }));
+  assert.deepEqual(p.runtime, { name: null, pending: true, unitLines: null });
+  assert.ok(!existsSync(link));
+  assert.equal((await s.req('DELETE', '/api/library/runtimes/temurin-21.0.8+9')).status, 204);
+  assert.deepEqual((await lib()).runtimes, []);
+  assert.ok(!existsSync(join(data, 'runtimes', 'temurin-21.0.8+9')));
+  assert.equal((await s.req('DELETE', '/api/library/runtimes/temurin-21.0.8+9')).status, 404);
+  assert.deepEqual((await s.audit('pack runtime')).map((e) => `${e.target}: ${e.details}`), ['gtnh: temurin-21.0.8+9', 'gtnh: system java']);
+  assert.deepEqual((await s.audit('library runtime delete')).map((e) => e.details), ['temurin-21.0.8+9']);
 });

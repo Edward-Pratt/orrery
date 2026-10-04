@@ -32,7 +32,7 @@ Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
 - The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
   `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host`, `systemd` and `github`. Packs need no section of their own: a
   server with a `dir`, a linked service (`systemd`) and a Mod token (`minecraft`) has one. The hub's host needs `unzip`
-  for them (and for `restore-backup.sh`).
+  for them (and for `restore-backup.sh`), and `tar` for the library's Java runtimes.
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public

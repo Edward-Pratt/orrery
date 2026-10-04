@@ -9,9 +9,9 @@ import type {
   EditPreview,
   EditRequest,
   Extra,
-  LibraryPack,
   LibraryState,
   PackFinished,
+  PackRuntimeRequest,
   PackState,
   PackStep,
   PackUpdateAnswer,
@@ -220,6 +220,33 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                   </ul>
                 </div>
               }
+              <div class="mt-4 border-t pt-3 text-sm" data-runtime-row>
+                <p class="text-xs font-medium text-muted-foreground">Java runtime</p>
+                @if (p.runtime.unitLines; as lines) {
+                  <p data-runtime-now>{{ runtimeLabel(p.runtime.name) }}</p>
+                  <p class="mt-1 text-xs text-muted-foreground">To pick a runtime here, add these two lines to the server's unit as root, then restart it:</p>
+                  <pre class="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs" data-unit-lines>{{ lines.join('\n') }}</pre>
+                } @else {
+                  <div class="flex flex-wrap items-center gap-2">
+                    <select
+                      class="h-8 rounded-md border bg-background px-2 text-sm"
+                      [disabled]="busy() || !library()"
+                      [value]="p.runtime.name ?? ''"
+                      (change)="setRuntime($any($event.target).value || null)"
+                      aria-label="Java runtime"
+                      data-runtime-select
+                    >
+                      <option value="">System java</option>
+                      @for (r of library()?.runtimes ?? []; track r.name) {
+                        <option [value]="r.name">{{ r.label }}</option>
+                      }
+                    </select>
+                    @if (p.runtime.pending) {
+                      <span class="rounded-full bg-amber-500/15 px-2 text-xs text-status-warn" data-runtime-pending>pending restart</span>
+                    }
+                  </div>
+                }
+              </div>
               @if (failedPrep(); as f) {
                 <div class="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm" data-failed-prep>
                   <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
@@ -385,7 +412,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
       }
     </ng-template>
     <ng-template #sourceFields>
-      @if (library(); as packs) {
+      @if (library()?.packs; as packs) {
         @if (packs.length) {
           <label
             >Pack version
@@ -486,9 +513,9 @@ export default class Pack {
   protected readonly keep = signal(new Set<string>());
 
   // The library version picked (Adopt and Update pack).
-  protected readonly library = signal<LibraryPack[] | null>(null);
+  protected readonly library = signal<LibraryState | null>(null);
   protected readonly pick = signal<number | null>(null);
-  protected readonly picked = computed(() => this.library()?.find((e) => e.id === this.pick()) ?? null);
+  protected readonly picked = computed(() => this.library()?.packs.find((e) => e.id === this.pick()) ?? null);
   // The Extra and Config edit sheets.
   protected readonly extraFile = signal<File | null>(null);
   protected readonly target = signal('');
@@ -536,7 +563,7 @@ export default class Pack {
       )
       .subscribe((p) => {
         this.#show(p);
-        if (!p.installed && !this.library()) this.#fetchLibrary();
+        if (!this.library()) this.#fetchLibrary();
       });
     const events = inject(LiveEvents).all$;
     // A Mod deploy starting or ending changes why an update can't start.
@@ -580,12 +607,13 @@ export default class Pack {
   }
 
   protected isUrl = (s: string) => /^https:\/\//.test(s);
+  protected runtimeLabel = (name: string | null) => (name ? (this.library()?.runtimes.find((r) => r.name === name)?.label ?? name) : 'System java');
   protected took = (ms: number) => formatDuration(ms);
 
-  /** The library's versions, to pick from. */
+  /** The library's versions and runtimes, to pick from. */
   #fetchLibrary(): void {
     this.#http.get<LibraryState>('/api/library').subscribe({
-      next: (l) => this.library.set(l.packs),
+      next: (l) => this.library.set(l),
       error: (err: HttpErrorResponse) => this.#feedback.failed('Reading the library', err),
     });
   }
@@ -693,6 +721,15 @@ export default class Pack {
   async #start(body: () => Promise<PackUpdateRequest>): Promise<void> {
     const answer = await this.#request('Starting the update', async () => firstValueFrom(this.#http.post<PackUpdateAnswer>(`${this.#base}/update`, await body())));
     if (answer) this.#reload.next();
+  }
+
+  /** Points the server's Java link at a runtime (null: the host's own java), from its next start. */
+  protected async setRuntime(name: string | null): Promise<void> {
+    const body: PackRuntimeRequest = { runtime: name };
+    const p = await this.#request('Setting the Java runtime', () => firstValueFrom(this.#http.put<PackState>(`${this.#base}/runtime`, body)));
+    if (!p) return;
+    this.#show(p);
+    this.#feedback.ok(`Set to ${this.runtimeLabel(name)}: it applies at the server's next restart.`);
   }
 
   protected async cancel(): Promise<void> {

@@ -37,6 +37,7 @@ const EMPTY: PackState = {
   blocked: null,
   rolledBack: null,
   packFiles: [],
+  runtime: { name: null, pending: false, unitLines: null },
 };
 const extra = (target: string, more: Partial<Extra> = {}): Extra => ({
   id: target.length,
@@ -98,7 +99,8 @@ const entry = (id: number, version: string, mc = '1.7.10'): LibraryPack => ({
   at: 0,
   usedBy: [],
 });
-const LIBRARY: LibraryState = { packs: [entry(2, '2.7.5'), entry(1, '2.7.4')], running: null };
+const RUNTIME = { name: 'temurin-21.0.8+9', label: 'Temurin 21.0.8+9', feature: 21, size: 1, sha256: 'a', by: 'alex', at: 0, usedBy: [] };
+const LIBRARY: LibraryState = { packs: [entry(2, '2.7.5'), entry(1, '2.7.4')], runtimes: [RUNTIME], running: null };
 
 /** Opens the server's Pack tab and answers its detail and pack state. */
 async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
@@ -134,7 +136,9 @@ async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
   };
   /** Answers the dashboard's read of the library. */
   const library = async (state = LIBRARY) => {
-    backend.expectOne('/api/library').flush(state);
+    const reqs = backend.match('/api/library');
+    expect(reqs.length).toBeGreaterThan(0);
+    for (const r of reqs) r.flush(state);
     await render();
   };
   /** Answers the reload a change or an event asks for (debounced). */
@@ -226,11 +230,38 @@ describe('server pack tab', () => {
 
   it('links to the Library page, and says so when the library is empty', async () => {
     const { el, library } = await setup(EMPTY);
-    await library({ packs: [], running: null });
+    await library({ packs: [], runtimes: [], running: null });
     expect(el.querySelector('[data-pick]')).toBeNull();
     expect(el.querySelector('[data-library-empty]')).not.toBeNull();
     expect(el.querySelector<HTMLAnchorElement>('[data-library-link]')!.getAttribute('href')).toBe('/library');
     expect(el.querySelector('[data-url]')).toBeNull(); // no URL or upload: the library is the only way in
+  });
+
+  it("shows the server's Java runtime and changes it, pending until the next restart", async () => {
+    const { el, q, text, render, backend, library } = await setup();
+    await library();
+    expect(q<HTMLSelectElement>('[data-runtime-select]').value).toBe('');
+    expect([...el.querySelectorAll('[data-runtime-select] option')].map(text)).toEqual(['System java', 'Temurin 21.0.8+9']);
+    const select = q<HTMLSelectElement>('[data-runtime-select]');
+    select.value = 'temurin-21.0.8+9';
+    select.dispatchEvent(new Event('change'));
+    await render();
+    const req = backend.expectOne('/api/servers/gtnh/pack/runtime');
+    expect(req.request.method).toBe('PUT');
+    expect(req.request.body).toEqual({ runtime: 'temurin-21.0.8+9' });
+    req.flush({ ...INSTALLED, runtime: { name: 'temurin-21.0.8+9', pending: true, unitLines: null } });
+    await render();
+    expect(text(el.querySelector('[data-runtime-pending]'))).toBe('pending restart');
+    expect(q<HTMLSelectElement>('[data-runtime-select]').value).toBe('temurin-21.0.8+9');
+  });
+
+  it("shows the two unit lines instead of the selector when the server's unit doesn't name the link", async () => {
+    const lines = ['Environment=PATH=/srv/o/java/gtnh/bin:/usr/local/bin:/usr/bin:/bin', 'Environment=JAVA_HOME=/srv/o/java/gtnh'];
+    const { el, text, library } = await setup({ ...INSTALLED, runtime: { name: null, pending: false, unitLines: lines } });
+    await library();
+    expect(el.querySelector('[data-runtime-select]')).toBeNull();
+    expect(text(el.querySelector('[data-runtime-now]'))).toBe('System java');
+    expect(el.querySelector('[data-unit-lines]')!.textContent).toBe(lines.join('\n'));
   });
 
   it('shows Extras with their pills, removed ones struck through, and the Mod as a locked last row', async () => {

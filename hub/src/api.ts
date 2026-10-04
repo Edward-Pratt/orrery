@@ -310,7 +310,16 @@ export type PackState = {
   rolledBack: PackRollback | null;
   /** The files the installed pack itself ships (Kept paths left out), sorted: an Extra at one of them replaces it. */
   packFiles: string[];
+  runtime: PackRuntime;
 };
+/**
+ * The Java the server runs on: `name`, the runtime its link (`<root>/java/<server>`) points at, null for the host's own
+ * `java`; `pending` until the server's next start after a change. `unitLines`: the two lines its unit needs before the
+ * link means anything (null when it names the link already), shown instead of the selector.
+ */
+export type PackRuntime = { name: string | null; pending: boolean; unitLines: string[] | null };
+/** `PUT /api/servers/:id/pack/runtime` (answers `PackState`): a runtime's name, or null for the host's own `java`. 404 unknown runtime. */
+export type PackRuntimeRequest = { runtime: string | null };
 /**
  * `POST /api/uploads` (`UploadRequest`, `size` at most 4 GiB) starts a chunked upload. `PUT /api/uploads/:upload?offset=<n>`
  * appends a raw `application/octet-stream` body of at most 64 MiB (the one exception to the JSON rule; Origin still
@@ -370,9 +379,23 @@ export type LibraryPack = {
   usedBy: string[];
 };
 /** The add running now (one at a time): `add` matches its `libraryAdd` events, `detail` is its latest progress. */
-export type RunningLibraryAdd = { add: number; name: string; version: string; by: string; started: number; detail: string };
+export type RunningLibraryAdd = { add: number; kind: 'pack' | 'runtime'; name: string; version: string; by: string; started: number; detail: string };
+/**
+ * A Java runtime (a Temurin JDK, in `<root>/runtimes/<name>/`): `name` is `temurin-<build>` ("temurin-21.0.8+9"),
+ * `label` "Temurin 21.0.8+9", `feature` its Java version, `size` its download's, and the servers whose Java link
+ * points at it.
+ */
+export type LibraryRuntime = { name: string; label: string; feature: number; size: number; sha256: string; by: string; at: number; usedBy: string[] };
 /** `GET /api/library`: the packs, newest first, and the running add. */
-export type LibraryState = { packs: LibraryPack[]; running: RunningLibraryAdd | null };
+export type LibraryState = { packs: LibraryPack[]; runtimes: LibraryRuntime[]; running: RunningLibraryAdd | null };
+/**
+ * `POST /api/library/runtimes`: adds the latest GA Temurin JDK of a Java version (8, 17, 21 or 25) for this host from
+ * Adoptium, in the background like a pack add (one add of either kind at a time; its `libraryAdd` events have `id`
+ * `runtimes`, name `Temurin`, version the Java version). It's checked against Adoptium's sha256 and counted as
+ * installed only once `bin/java -version` runs here; the same build again finishes ok as "already installed".
+ * `DELETE /api/library/runtimes/:name`: 404 unknown, 409 while a server's Java link points at it (naming them).
+ */
+export type RuntimeAddRequest = { feature: 8 | 17 | 21 | 25 };
 /**
  * `POST /api/library/packs`: adds a pack version from an `https:` URL or a finished upload, in the background. `mc`
  * and `loader` (only `forge`) left blank are read from the zip's Forge jar (`minecraft_server.<mc>.jar` gives only

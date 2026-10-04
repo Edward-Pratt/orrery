@@ -1,11 +1,12 @@
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, readdirSync, readlinkSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { LibraryPack, LibraryState, RunningLibraryAdd } from './api.ts';
-import type { Db, LibraryRow } from './db.ts';
+import type { LibraryPack, LibraryRuntime, LibraryState, RunningLibraryAdd } from './api.ts';
+import type { Db, LibraryRow, RuntimeRow } from './db.ts';
 import { contentRoot, sha256File, zipEntries } from './packs.ts';
 import type { ServerHub } from './servers.ts';
 import type { LibraryAdd, TargetEvent } from './types.ts';
@@ -16,10 +17,24 @@ import type { Uploads } from './uploads.ts';
 export type Fetch = (url: string, init: { headers: Record<string, string>; redirect: 'manual'; signal?: AbortSignal }) => Promise<Response>;
 
 const GITHUB_API = 'https://api.github.com';
+const ADOPTIUM = 'https://api.adoptium.net/v3/assets/latest';
+/** The Java versions Add runtime offers. */
+export const FEATURES = [8, 17, 21, 25];
+/** A runtime's name, from Adoptium's build name: safe as a folder name. */
+export const RUNTIME = /^temurin-[0-9][0-9A-Za-z.+_-]*$/;
+/** Adoptium's names for the architectures Node reports. */
+const ARCH: Record<string, string> = { x64: 'x64', arm64: 'aarch64' };
+const JAVA_CHECK_MS = 30_000;
 const REDIRECTS = 5;
 const RESUMES = 3;
 /** A GitHub Actions artifact's page, which the API serves as a zip. */
 const ARTIFACT = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/\d+\/artifacts\/(\d+)\/?$/;
+
+/** Runs a program (no shell); rejects with its error output. */
+const run = (file: string, args: string[], signal: AbortSignal, timeout = 0) =>
+  new Promise<void>((done, fail) =>
+    execFile(file, args, { signal, timeout }, (err, _out, stderr) => (err ? fail(new Error(stderr.trim().split('\n').at(-1) || err.message)) : done())),
+  );
 
 /** An answer that isn't a drop: an HTTP error or a refused redirect fails the download at once. */
 class Refused extends Error {}
@@ -107,6 +122,8 @@ export type LibraryDeps = {
   githubToken?: string;
   /** The servers whose running pack update installs an entry. */
   installing: (id: number) => string[];
+  /** Node's name for this host's architecture (default `process.arch`), for tests. */
+  arch?: string;
 };
 
 const TEXT_MAX = 100;
@@ -162,6 +179,8 @@ export class Library {
   /** Clears what adds left when the last hub stopped, and moves the zips of `packs/` (from before the library) in. */
   async start(): Promise<void> {
     for (const f of await readdir(this.#dir).catch(() => [])) if (f.startsWith(TEMP)) await rm(join(this.#dir, f), { force: true });
+    const work = join(this.#d.root, 'work');
+    for (const f of await readdir(work).catch(() => [])) if (f.startsWith('runtime-')) await rm(join(work, f), { recursive: true, force: true });
     await this.#moveOver();
   }
 
@@ -218,7 +237,8 @@ export class Library {
     const a = this.#add;
     return {
       packs: this.#d.db.library().map((r): LibraryPack => ({ ...r, usedBy: this.#usedBy(r.id) })),
-      running: a ? { add: a.add, name: a.name, version: a.version, by: a.by, started: a.started, detail: a.detail } : null,
+      runtimes: this.#d.db.runtimes().map((r): LibraryRuntime => ({ ...r, label: `Temurin ${r.name.slice('temurin-'.length)}`, usedBy: this.#linkedTo(r.name) })),
+      running: a ? { add: a.add, kind: a.kind, name: a.name, version: a.version, by: a.by, started: a.started, detail: a.detail } : null,
     };
   }
 
@@ -261,6 +281,7 @@ export class Library {
     const source = 'url' in from ? from.url : upload!.fileName;
     const add: Add = {
       add: this.#next++,
+      kind: 'pack',
       name: fields.name,
       version: fields.version,
       by: byName,
@@ -276,6 +297,134 @@ export class Library {
     this.#d.hub.audit(by, 'library add', 'library', `${add.name} ${add.version} from ${source}`);
     void this.#run(add, fields, 'url' in from ? from.url : upload!);
     return add.add;
+  }
+
+  /** A runtime, or undefined. */
+  runtime(name: string): RuntimeRow | undefined {
+    return this.#d.db.runtimes().find((r) => r.name === name);
+  }
+
+  /** Starts adding the latest GA Temurin JDK of a Java version for this host; returns its add number at once. */
+  addRuntime(body: unknown, by: string, byName: string): number {
+    const feature = (body && typeof body === 'object' ? (body as Record<string, unknown>) : {}).feature;
+    if (typeof feature !== 'number' || !FEATURES.includes(feature)) throw new LibraryRefused(400, `Pick a Java version: ${FEATURES.join(', ')}.`);
+    const arch = ARCH[this.#d.arch ?? process.arch];
+    if (!arch) throw new LibraryRefused(400, `Temurin has no build for this host's architecture (${this.#d.arch ?? process.arch}).`);
+    if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);
+    const add: Add = {
+      add: this.#next++,
+      kind: 'runtime',
+      name: 'Temurin',
+      version: String(feature),
+      by: byName,
+      started: Date.now(),
+      detail: '',
+      actor: by,
+      source: 'Adoptium',
+      abort: new AbortController(),
+      cancelled: false,
+      storing: false,
+    };
+    this.#add = add;
+    this.#d.hub.audit(by, 'library runtime add', 'library', `Temurin ${feature}`);
+    void this.#runRuntime(add, feature, arch);
+    return add.add;
+  }
+
+  /** Deletes a runtime; refused (409, naming them) while a server's Java link points at it. */
+  async deleteRuntime(name: string, by: string): Promise<void> {
+    if (!RUNTIME.test(name) || !this.runtime(name)) throw new LibraryRefused(404, 'No such runtime in the library.');
+    const users = this.#linkedTo(name);
+    if (users.length) throw new LibraryRefused(409, `${name} is what ${users.join(', ')} run${users.length === 1 ? 's' : ''} on.`);
+    this.#d.db.deleteRuntime(name);
+    await rm(join(this.#d.root, 'runtimes', name), { recursive: true, force: true });
+    this.#d.hub.audit(by, 'library runtime delete', 'library', name);
+  }
+
+  /** The servers whose Java link (`<root>/java/<server>`) points at a runtime. */
+  #linkedTo(name: string): string[] {
+    const links = join(this.#d.root, 'java');
+    const runtime = join(this.#d.root, 'runtimes', name);
+    let ids: string[];
+    try {
+      ids = readdirSync(links);
+    } catch {
+      return [];
+    }
+    return ids.filter((id) => {
+      try {
+        return resolve(links, readlinkSync(join(links, id))) === runtime;
+      } catch {
+        return false; // not a link (a swap's leftover)
+      }
+    }).sort();
+  }
+
+  /**
+   * Asks Adoptium for the build, downloads its tarball into `work/runtime-<random>/`, checks its sha256, unpacks it with
+   * the system `tar`, runs `bin/java -version` (30 s), and only then moves it to `runtimes/<name>/`.
+   */
+  async #runRuntime(add: Add, feature: number, arch: string): Promise<void> {
+    const work = join(this.#d.root, 'work', `runtime-${randomBytes(16).toString('hex')}`);
+    const signal = add.abort.signal;
+    try {
+      await mkdir(join(work, 'jdk'), { recursive: true });
+      this.#progress(add, 'Asking Adoptium');
+      // musl's Node reports no glibc.
+      const os = (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime ? 'linux' : 'alpine-linux';
+      const asked = await request(this.#d.download, `${ADOPTIUM}/${feature}/hotspot?architecture=${arch}&image_type=jdk&os=${os}&vendor=eclipse`, {}, undefined, signal);
+      if (!asked.ok) throw new Error(`Adoptium answered HTTP ${asked.status}.`);
+      const answer = (await asked.json().catch(() => [])) as { release_name?: unknown; binary?: { package?: { link?: unknown; checksum?: unknown } } }[];
+      const build = answer[0];
+      const pkg = build?.binary?.package;
+      if (typeof build?.release_name !== 'string' || typeof pkg?.link !== 'string' || typeof pkg.checksum !== 'string' || !/^[0-9a-f]{64}$/.test(pkg.checksum)) {
+        throw new Error(`Adoptium has no Temurin ${feature} JDK for ${os} ${arch}.`);
+      }
+      const name = `temurin-${build.release_name.replace(/^jdk-?/, '')}`;
+      if (!RUNTIME.test(name)) throw new Error(`Adoptium named the build "${build.release_name}": refused.`);
+      add.version = name.slice('temurin-'.length);
+      if (this.runtime(name)) return await this.#finish(add, 'ok', `Temurin ${add.version} is already installed.`, work);
+      this.#cancelled(add);
+      const tarball = join(work, 'jdk.tar.gz');
+      let last = 0;
+      this.#progress(add, 'Downloading');
+      try {
+        await download(
+          this.#d.download,
+          pkg.link,
+          tarball,
+          (bytes, total) => {
+            if (Date.now() - last < TICK_MS) return;
+            last = Date.now();
+            this.#progress(add, `Downloading ${formatBytes(bytes)}${total ? ` of ${formatBytes(total)}` : ''}`);
+          },
+          signal,
+        );
+      } catch (err) {
+        throw add.cancelled ? err : new Error(`Downloading the JDK failed: ${(err as Error).message}`);
+      }
+      this.#progress(add, 'Checking the download');
+      const sha256 = await sha256File(tarball);
+      if (sha256 !== pkg.checksum) throw new Error("The download's sha256 doesn't match Adoptium's: not installed.");
+      this.#progress(add, 'Unpacking');
+      await run('tar', ['-xzf', tarball, '-C', join(work, 'jdk'), '--no-same-owner'], signal);
+      const top = await readdir(join(work, 'jdk'));
+      const home = top.length === 1 ? join(work, 'jdk', top[0]!) : join(work, 'jdk');
+      this.#progress(add, 'Running java -version');
+      await run(join(home, 'bin', 'java'), ['-version'], signal, JAVA_CHECK_MS).catch((err: Error) => {
+        throw new Error(`java -version failed on this host, so it isn't installed: ${err.message}`);
+      });
+      this.#cancelled(add);
+      add.storing = true;
+      this.#progress(add, 'Storing');
+      await mkdir(join(this.#d.root, 'runtimes'), { recursive: true });
+      const size = (await stat(tarball)).size;
+      await rename(home, join(this.#d.root, 'runtimes', name));
+      this.#d.db.addRuntime({ name, feature, size, sha256, by: add.by, at: Date.now() });
+      await this.#finish(add, 'ok', '', work);
+    } catch (err) {
+      await this.#finish(add, add.cancelled ? 'cancelled' : 'failed', add.cancelled ? '' : (err as Error).message, work);
+    }
   }
 
   /** Stops the running add, leaving nothing behind; too late once it is being stored. */
@@ -319,7 +468,7 @@ export class Library {
               this.#progress(add, `Downloading ${formatBytes(bytes)}${total ? ` of ${formatBytes(total)}` : ''}`);
             },
             add.abort.signal,
-            this.#d.githubToken,
+            artifact ? this.#d.githubToken : undefined, // only the API link the hub built: a pasted api.github.com URL gets no token
           );
         } catch (err) {
           throw add.cancelled ? err : new Error(`Downloading the pack failed: ${(err as Error).message}`);
@@ -383,15 +532,15 @@ export class Library {
   }
 
   async #finish(add: Add, outcome: 'ok' | 'cancelled' | 'failed', reason: string, temp: string): Promise<void> {
-    await rm(temp, { force: true }).catch(() => {});
+    await rm(temp, { recursive: true, force: true }).catch(() => {});
     this.#add = undefined;
     if (this.#closed) return;
-    this.#d.hub.audit(add.actor, 'library add', 'library', `${add.name} ${add.version}: ${outcome}${reason ? `: ${reason}` : ''}`);
+    this.#d.hub.audit(add.actor, add.kind === 'pack' ? 'library add' : 'library runtime add', 'library', `${add.name} ${add.version}: ${outcome}${reason ? `: ${reason}` : ''}`);
     this.#publish(add, { phase: 'finished', outcome, reason });
   }
 
   #publish(add: Add, e: Pick<Extract<LibraryAdd, { phase: 'progress' }>, 'phase' | 'detail'> | Pick<Extract<LibraryAdd, { phase: 'finished' }>, 'phase' | 'outcome' | 'reason'>): void {
-    this.#d.hub.publishTarget({ target: 'library', id: 'packs', type: 'libraryAdd', add: add.add, name: add.name, version: add.version, by: add.by, ...e } as TargetEvent);
+    this.#d.hub.publishTarget({ target: 'library', id: add.kind === 'pack' ? 'packs' : 'runtimes', type: 'libraryAdd', add: add.add, name: add.name, version: add.version, by: add.by, ...e } as TargetEvent);
   }
 
   /** The servers using an entry: their pack is it, or their running update installs it. */

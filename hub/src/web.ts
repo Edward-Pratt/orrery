@@ -409,6 +409,10 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         await library.deletePack(Number(id), by);
       }),
     );
+    app.post('/library/runtimes', (c) =>
+      act(c, async (by, user) => ({ add: library.addRuntime(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),
+    );
+    app.delete('/library/runtimes/:name', (c) => act(c, (by) => library.deleteRuntime(c.req.param('name'), by)));
   }
   if (packs) {
     /** Runs a pack action for a server that has packs, mapping its refusals to their status. */
@@ -440,6 +444,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         },
         202,
       ),
+    );
+    app.put('/servers/:id/pack/runtime', (c) =>
+      pack(c, async (sid, user) => (await packs.setRuntime(sid, (await jsonBody(c.req)).runtime, actor(user))) satisfies PackState),
     );
     app.post('/servers/:id/pack/update/cancel', (c) => pack(c, async (sid, user) => packs.cancel(sid, actor(user), user.username)));
     app.post('/servers/:id/pack/extras', (c) =>

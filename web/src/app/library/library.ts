@@ -2,9 +2,9 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { LibraryAdd, LibraryAddAnswer, LibraryAddRequest, LibraryPack, LibraryState } from '@hub/api';
+import type { LibraryAdd, LibraryAddAnswer, LibraryAddRequest, LibraryPack, LibraryRuntime, LibraryState, RuntimeAddRequest } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCircleAlert, lucidePackage, lucidePlus } from '@ng-icons/lucide';
+import { lucideCircleAlert, lucideCoffee, lucidePackage, lucidePlus } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -30,22 +30,17 @@ export function fromFileName(file: string): { name: string; version: string } {
 }
 
 /**
- * The Library page: the Environment's pack versions, newest first, an add sheet (a link or an upload) and the running
- * add's card with its progress and Cancel, followed live from `libraryAdd` events. Delete asks for the typed name.
+ * The Library page: the Environment's pack versions, newest first, an add sheet (a link, an Actions artifact or an
+ * upload), its Java runtimes with an add sheet (a Java version), and the running add's card (either kind) with its
+ * progress and Cancel, followed live from `libraryAdd` events. Delete asks for the typed name.
  */
 @Component({
   selector: 'app-library',
   imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSkeleton, HlmSpinner, HlmToggleGroupImports],
-  viewProviders: [provideIcons({ lucideCircleAlert, lucidePackage, lucidePlus })],
+  viewProviders: [provideIcons({ lucideCircleAlert, lucideCoffee, lucidePackage, lucidePlus })],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Library</h1>
-    <section class="flex max-w-4xl flex-col gap-4" data-packs>
-      <div class="flex items-center gap-3">
-        <h2 class="text-base font-semibold">Packs</h2>
-        <button hlmBtn size="sm" class="ml-auto" [disabled]="!!running()" (click)="openSheet()" data-add>
-          <ng-icon name="lucidePlus" /> Add pack
-        </button>
-      </div>
+    <div class="mb-4 flex max-w-4xl flex-col gap-4 empty:hidden">
       @if (running(); as r) {
         <div class="flex flex-wrap items-center gap-3 rounded-xl border p-4 text-sm" data-running>
           <hlm-spinner />
@@ -70,6 +65,14 @@ export function fromFileName(file: string): { name: string; version: string } {
           }
         </div>
       }
+    </div>
+    <section class="flex max-w-4xl flex-col gap-4" data-packs>
+      <div class="flex items-center gap-3">
+        <h2 class="text-base font-semibold">Packs</h2>
+        <button hlmBtn size="sm" class="ml-auto" [disabled]="!!running()" (click)="openSheet()" data-add>
+          <ng-icon name="lucidePlus" /> Add pack
+        </button>
+      </div>
       @if (state(); as s) {
         @if (s.packs.length) {
           <ul class="divide-y rounded-lg border">
@@ -102,8 +105,70 @@ export function fromFileName(file: string): { name: string; version: string } {
       }
     </section>
 
-    @if (sheet()) {
-      <hlm-sheet side="right" state="open" (closed)="sheet.set(false)">
+    @if (state(); as s) {
+      <section class="mt-8 flex max-w-4xl flex-col gap-4" data-runtimes>
+        <div class="flex items-center gap-3">
+          <div>
+            <h2 class="text-base font-semibold">Java runtimes</h2>
+            <p class="text-sm text-muted-foreground">Temurin JDKs from Adoptium. Each server runs on the one set on its Pack tab, or on the host's own java.</p>
+          </div>
+          <button hlmBtn size="sm" class="ml-auto shrink-0" [disabled]="!!running()" (click)="openRuntimeSheet()" data-add-runtime>
+            <ng-icon name="lucidePlus" /> Add runtime
+          </button>
+        </div>
+        @if (s.runtimes.length) {
+          <ul class="divide-y rounded-lg border">
+            @for (r of s.runtimes; track r.name) {
+              <li class="flex flex-wrap items-start gap-x-4 gap-y-1 p-3 text-sm" [attr.data-runtime]="r.name">
+                <div class="min-w-0 flex-1">
+                  <p class="font-medium" data-name>{{ r.label }}</p>
+                  <p class="text-xs text-muted-foreground" data-meta>Java {{ r.feature }} · {{ bytes(r.size) }} · added by {{ r.by }} {{ r.at | date: 'd MMM y HH:mm' }}</p>
+                  <p class="truncate font-mono text-xs text-muted-foreground" [title]="r.sha256">sha256 {{ r.sha256 }}</p>
+                </div>
+                <span class="text-xs text-muted-foreground" data-used>{{ r.usedBy.length ? 'set on ' + r.usedBy.join(', ') : 'set on no server' }}</span>
+                <button hlmBtn variant="ghost" size="sm" [disabled]="busy()" (click)="removeRuntime(r)" data-delete>Delete</button>
+              </li>
+            }
+          </ul>
+        } @else {
+          <div class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground" data-runtimes-empty>
+            <ng-icon name="lucideCoffee" class="text-2xl" />
+            <p>No runtimes yet: every server runs on the host's own java.</p>
+          </div>
+        }
+      </section>
+    }
+
+    @if (sheet() === 'runtime') {
+      <hlm-sheet side="right" state="open" (closed)="sheet.set(null)">
+        <hlm-sheet-content *hlmSheetPortal="let ctx" class="data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
+          <hlm-sheet-header>
+            <h2 hlmSheetTitle>Add runtime</h2>
+          </hlm-sheet-header>
+          <div class="flex flex-col gap-3 px-4 pb-4 text-sm">
+            <p>Java version</p>
+            <hlm-toggle-group type="single" [value]="feature()" (valueChange)="feature.set($any($event) || feature())" class="w-full">
+              @for (f of features; track f) {
+                <button hlmToggleGroupItem [value]="f" class="flex-1" [attr.data-feature]="f">{{ f }}</button>
+              }
+            </hlm-toggle-group>
+            <p class="text-xs text-muted-foreground">
+              The latest GA Temurin JDK of that version for this host, checked against Adoptium's sha256 and installed only once java -version runs here.
+              A newer build becomes its own entry.
+            </p>
+            <button hlmBtn [disabled]="busy()" (click)="addRuntime()" data-go>
+              @if (busy()) {
+                <hlm-spinner />
+              }
+              Add Temurin {{ feature() }}
+            </button>
+          </div>
+        </hlm-sheet-content>
+      </hlm-sheet>
+    }
+
+    @if (sheet() === 'pack') {
+      <hlm-sheet side="right" state="open" (closed)="sheet.set(null)">
         <hlm-sheet-content *hlmSheetPortal="let ctx" class="data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
           <hlm-sheet-header>
             <h2 hlmSheetTitle>Add pack</h2>
@@ -170,7 +235,9 @@ export default class Library {
   protected readonly ended = signal<Extract<LibraryAdd, { phase: 'finished' }> | null>(null);
   protected readonly busy = signal(false);
   protected readonly uploaded = signal<number | null>(null);
-  protected readonly sheet = signal(false);
+  protected readonly sheet = signal<'pack' | 'runtime' | null>(null);
+  protected readonly features: RuntimeAddRequest['feature'][] = [8, 17, 21, 25];
+  protected readonly feature = signal<RuntimeAddRequest['feature']>(21);
   protected readonly from = signal<'url' | 'artifact' | 'upload'>('url');
   protected readonly url = signal('');
   protected readonly artifact = signal('');
@@ -220,7 +287,12 @@ export default class Library {
   protected openSheet(): void {
     for (const s of [this.url, this.name, this.version, this.mc, this.loader]) s.set('');
     this.file.set(null);
-    this.sheet.set(true);
+    this.sheet.set('pack');
+  }
+
+  protected openRuntimeSheet(): void {
+    this.feature.set(21);
+    this.sheet.set('runtime');
   }
 
   protected setUrl(url: string): void {
@@ -270,8 +342,35 @@ export default class Library {
       return firstValueFrom(this.#http.post<LibraryAddAnswer>('/api/library/packs', body));
     });
     if (!answer) return;
-    this.sheet.set(false);
+    this.sheet.set(null);
     this.ended.set(null);
+    this.#reload.next();
+  }
+
+  protected async addRuntime(): Promise<void> {
+    const body: RuntimeAddRequest = { feature: this.feature() };
+    const answer = await this.#request(`Adding Temurin ${body.feature}`, () => firstValueFrom(this.#http.post<LibraryAddAnswer>('/api/library/runtimes', body)));
+    if (!answer) return;
+    this.sheet.set(null);
+    this.ended.set(null);
+    this.#reload.next();
+  }
+
+  protected async removeRuntime(r: LibraryRuntime): Promise<void> {
+    const ok = await this.#feedback.confirm({
+      title: `Delete ${r.label}?`,
+      verb: `Delete ${r.label}`,
+      description: `Its JDK is deleted from the host. Add it again to get it back.`,
+      destructive: true,
+      typeName: r.name,
+    });
+    if (!ok) return;
+    const done = await this.#request(`Deleting ${r.label}`, async () => {
+      await firstValueFrom(this.#http.delete(`/api/library/runtimes/${encodeURIComponent(r.name)}`, { headers: JSON_HEADERS }));
+      return true;
+    });
+    if (!done) return;
+    this.#feedback.ok(`Deleted ${r.label}.`);
     this.#reload.next();
   }
 

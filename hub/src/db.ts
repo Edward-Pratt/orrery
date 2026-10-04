@@ -78,6 +78,8 @@ export class Db {
       CREATE TABLE IF NOT EXISTS library (id INTEGER PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, mc TEXT NOT NULL,
         loader TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, source TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL,
         UNIQUE (name, version));
+      CREATE TABLE IF NOT EXISTS runtimes (name TEXT PRIMARY KEY, feature INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+        by TEXT NOT NULL, at INTEGER NOT NULL);
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -567,11 +569,29 @@ export class Db {
     this.#db.prepare('DELETE FROM library WHERE id = ?').run(id);
   }
 
+  /** Every installed Java runtime, newest first. */
+  runtimes(): RuntimeRow[] {
+    return this.#db
+      .prepare('SELECT name, feature, size, sha256, by, at FROM runtimes ORDER BY at DESC, name DESC')
+      .all()
+      .map((r) => ({ ...r }) as RuntimeRow);
+  }
+
+  addRuntime(r: RuntimeRow): void {
+    this.#db.prepare('INSERT INTO runtimes (name, feature, size, sha256, by, at) VALUES (?, ?, ?, ?, ?, ?)').run(r.name, r.feature, r.size, r.sha256, r.by, r.at);
+  }
+
+  deleteRuntime(name: string): void {
+    this.#db.prepare('DELETE FROM runtimes WHERE name = ?').run(name);
+  }
+
   close(): void {
     this.#db.close();
   }
 }
 
+/** A Java runtime in the library; its JDK is `<root>/runtimes/<name>/`. `feature`: 8, 17, 21 or 25; `size`: the tarball's. */
+export type RuntimeRow = { name: string; feature: number; size: number; sha256: string; by: string; at: number };
 /** A pack version in the library; its zip is `<root>/library/<sha256>.zip`. */
 export type LibraryRow = { id: number; name: string; version: string; mc: string; loader: string; sha256: string; size: number; source: string; by: string; at: number };
 /** A server's installed pack as stored; `snapshot` is what the last apply laid over it, as JSON. */

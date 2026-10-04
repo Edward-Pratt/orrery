@@ -141,6 +141,7 @@ Staging badge and tab title, the Servers page without the Minecraft integration 
 | 2 | Releases and deploys: `.github/release.sh`, hub self-deploy with Rollback, dashboard and Mod deploys, `integrations.github`: #89 | repo + hub + web + deploy | L | — |
 | 3 | Staging: a second Environment at `staging.orrery.run`, its own OS user, OAuth app and `demo` server: #91 | hub + web + deploy | S | #89's release layout and deploy units |
 | 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
+| 5 | Packs v2: the pack library (chunked uploads, GitHub Actions artifacts), Java runtimes, New server with `add-server.sh`, the Mod renamed `orrery`: #134 · Map: #123 · Layout: `docs/adr/0003-host-directory-layout.md` | hub + web + mod + deploy (no protocol bump) | L | #90; staging set up for its smoke test |
 
 ## Later / if needed
 

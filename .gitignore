@@ -9,3 +9,5 @@ hub/db-backups/
 # Claude Code: per-user settings and scratch worktrees
 .claude/settings.local.json
 .claude/worktrees/
+# Angular CLI cache when ng runs from the root (web/ ignores its own)
+.angular/

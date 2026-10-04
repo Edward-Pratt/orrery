@@ -116,7 +116,6 @@ export class Services {
     }));
   }
 
-  /** Reads a listed service's state from systemd now (rather than at the next round); undefined if unlisted or unread. */
   /** A listed unit's `Environment=` settings as systemd shows them (`A=b C=d`); undefined if unknown or unreadable. */
   async environment(id: string): Promise<string | undefined> {
     const s = this.#services.get(id);
@@ -130,6 +129,7 @@ export class Services {
     }
   }
 
+  /** Reads a listed service's state from systemd now (rather than at the next round); undefined if unlisted or unread. */
   async read(id: string): Promise<ServiceStatus | undefined> {
     const s = this.#services.get(id);
     if (!s) return undefined;

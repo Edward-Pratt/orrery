@@ -39,11 +39,11 @@ const run = (file: string, args: string[], signal: AbortSignal, timeout = 0) =>
 /** An answer that isn't a drop: an HTTP error or a refused redirect fails the download at once. */
 class Refused extends Error {}
 
-/** `url` requested with up to 5 redirects followed here: every hop `https:`, the token sent only to api.github.com. */
+/** `url` requested with up to 5 redirects followed here: every hop `https:`, the token sent only on the first, and only to api.github.com. */
 async function request(fetcher: Fetch, url: string, headers: Record<string, string>, token: string | undefined, signal?: AbortSignal): Promise<Response> {
   for (let hop = 0; ; hop++) {
     if (URL.parse(url)?.protocol !== 'https:') throw new Refused(`a redirect to ${url} isn't https: refused`);
-    const auth: Record<string, string> = token && new URL(url).origin === GITHUB_API ? { authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } : {};
+    const auth: Record<string, string> = token && hop === 0 && new URL(url).origin === GITHUB_API ? { authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } : {};
     const res = await fetcher(url, { headers: { ...headers, ...auth }, redirect: 'manual', signal });
     if (![301, 302, 303, 307, 308].includes(res.status)) return res;
     await res.body?.cancel();
@@ -264,11 +264,12 @@ export class Library {
     if (fields.loader && !LOADERS.includes(fields.loader)) throw new LibraryRefused(400, `Only ${LOADERS.join(', ')} is a known loader.`);
     let from: { url: string } | { upload: string };
     if (typeof b.url === 'string') {
-      if (URL.parse(b.url)?.protocol !== 'https:') throw new LibraryRefused(400, 'The pack URL must be https.');
-      if (ARTIFACT.test(b.url) && !this.#d.githubToken) {
+      b.url = b.url.trim();
+      if (URL.parse(b.url as string)?.protocol !== 'https:') throw new LibraryRefused(400, 'The pack URL must be https.');
+      if (ARTIFACT.test(b.url as string) && !this.#d.githubToken) {
         throw new LibraryRefused(400, 'An Actions artifact needs a GitHub token: set GITHUB_TOKEN (Actions: read) for the hub, or paste a release link.');
       }
-      from = { url: b.url.trim() };
+      from = { url: b.url as string };
     } else if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) from = { upload: b.upload };
     else throw new LibraryRefused(400, 'Give a pack URL, or upload the zip again.');
     if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);

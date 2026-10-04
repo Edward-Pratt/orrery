@@ -94,6 +94,8 @@ export type DeploysDeps = {
   restoring: () => boolean;
   /** Whether a pack update runs on a server (undefined: on any). */
   packing: (serverId?: string) => boolean;
+  /** Whether a library add runs (a hub deploy's restart would lose it). */
+  libraryAdding: () => boolean;
   /** Where the database copy before a hub deploy goes. */
   dbCopies: string;
 };
@@ -212,6 +214,7 @@ export class Deploys {
     if (from === tag) throw new DeployRefused(409, `${tag} is already running.`);
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
     if (part === 'hub' && this.#d.packing()) throw new DeployRefused(409, 'A pack update is running: deploy the hub once it is done.');
+    if (part === 'hub' && this.#d.libraryAdding()) throw new DeployRefused(409, 'A library add is running: deploy the hub once it is done.');
     if (server && this.#d.packing(server.id)) throw new DeployRefused(409, `A pack update is running on ${server.name}: deploy the Mod once it is done.`);
     if (part !== 'mod' && newestFirst(release, { tag: FLOOR[part], publishedAt: 0, assets: [] }) > 0) {
       throw new DeployRefused(409, `${tag} is older than ${FLOOR[part]}, the first release that can deploy.`);

@@ -10,7 +10,7 @@ import { fakeEvents, settle } from './testing';
 import { Theme } from './theme';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, library: false };
 
 /** `env`: what /api/environment answers, or `error` when it fails. */
 async function open(me: Me | null, on: Integrations = ALL, url = '/', env: EnvironmentInfo['environment'] | 'error' = 'production') {

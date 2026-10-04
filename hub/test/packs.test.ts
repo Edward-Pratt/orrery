@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import type { AuditLog, CompareReport, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer, UploadProgress } from '../src/api.ts';
+import type { AuditLog, CompareReport, LibraryAdd, LibraryState, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer, UploadProgress } from '../src/api.ts';
 import type { Config, ServerSettings } from '../src/config.ts';
 import type { Download } from '../src/packs.ts';
 import type { RunRestore } from '../src/restore.ts';
@@ -1099,4 +1099,162 @@ test('a pack update and a hub deploy refuse each other', async (t) => {
   const update = await other.s.req('POST', '/api/servers/gtnh/pack/update', toNew);
   assert.equal(update.status, 409);
   assert.equal(await update.text(), 'A hub deploy is running.');
+});
+
+// The pack library.
+
+const URL_FORGE = 'https://packs.example/GTNH_2.7.6.zip';
+const NEW = { name: 'GT New Horizons', version: '2.7.5', mc: '1.7.10', loader: 'forge' };
+const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+
+/** A hub on a world with 2.7.6 (a Forge jar at its root) behind a URL too, recording the library's add events. */
+async function libraryHub(t: TestContext, setup: Setup = {}, w = world(t)) {
+  w.urls[URL_FORGE] = w.zip('GTNH_2.7.6.zip', { ...PACK_NEW, 'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar': 'forge' });
+  const s = await start(t, w, setup);
+  const adds: LibraryAdd[] = [];
+  s.handle.live.on('event', (_, e) => {
+    if ('target' in e && e.type === 'libraryAdd') adds.push(e);
+  });
+  const lib = () => s.json<LibraryState>(s.req('GET', '/api/library'));
+  const add = (body: object) => s.json<{ add: number }>(s.req('POST', '/api/library/packs', body), 202);
+  /** Waits for the nth add to finish; returns how. */
+  const finished = async (n = 1) => {
+    await until(() => adds.filter((e) => e.phase === 'finished').length >= n);
+    const e = adds.filter((e) => e.phase === 'finished')[n - 1]!;
+    return e.phase === 'finished' ? [e.outcome, e.reason] : [];
+  };
+  const files = () => readdirSync(join(w.root, 'data', 'library')).sort();
+  return { w, s, adds, lib, add, finished, files };
+}
+
+test('a pack version added from a URL and one from a chunked upload are listed with their sha256 and size, newest first', async (t) => {
+  const { w, s, lib, add, finished, files } = await libraryHub(t);
+  assert.deepEqual(await lib(), { packs: [], running: null });
+  await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' }); // the Minecraft version and loader from its Forge jar
+  assert.deepEqual(await finished(), ['ok', '']);
+  await add({ upload: await s.upload(w.urls[URL_NEW]!), ...NEW });
+  assert.deepEqual(await finished(2), ['ok', '']);
+  const { packs, running } = await lib();
+  assert.equal(running, null);
+  const entry = (file: string, version: string, source: string) =>
+    ({ name: 'GT New Horizons', version, mc: '1.7.10', loader: 'forge', sha256: sha(file), size: statSync(file).size, source, by: 'alex', usedBy: [] });
+  assert.deepEqual(packs.map(({ id: _, at: __, ...p }) => p), [entry(w.urls[URL_NEW]!, '2.7.5', 'GTNH_2.7.5.zip'), entry(w.urls[URL_FORGE]!, '2.7.6', URL_FORGE)]);
+  assert.deepEqual(files(), [`${sha(w.urls[URL_FORGE]!)}.zip`, `${sha(w.urls[URL_NEW]!)}.zip`].sort());
+  assert.deepEqual(await s.audit('library'), [
+    { actor: ACTOR, action: 'library add', target: 'library', details: `GT New Horizons 2.7.6 from ${URL_FORGE}` },
+    { actor: ACTOR, action: 'library add', target: 'library', details: 'GT New Horizons 2.7.6: ok' },
+    { actor: ACTOR, action: 'library add', target: 'library', details: 'GT New Horizons 2.7.5 from GTNH_2.7.5.zip' },
+    { actor: ACTOR, action: 'library add', target: 'library', details: 'GT New Horizons 2.7.5: ok' },
+  ]);
+});
+
+test('an add streams its progress then its end; the replay holds only the latest progress, and none once it ends', async (t) => {
+  const { s, adds, lib, add, finished } = await libraryHub(t);
+  let release!: () => void;
+  s.fake.downloadGate = new Promise((r) => (release = r));
+  const { add: n } = await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' });
+  await until(() => adds.length >= 1);
+  assert.deepEqual({ ...(await lib()).running!, started: 0 }, { add: n, name: 'GT New Horizons', version: '2.7.6', by: 'alex', started: 0, detail: 'Downloading' });
+  const replay = () => s.handle.live.since().map(([, e]) => e).filter((e) => 'target' in e && e.type === 'libraryAdd');
+  assert.equal(replay().length, 1);
+  release();
+  await finished();
+  const phases = adds.map((e) => (e.phase === 'progress' ? e.detail : `${e.phase} ${e.outcome}`));
+  assert.deepEqual(phases, ['Downloading', 'Downloading 1 B of 2 B', 'Checking the zip', 'Storing', 'finished ok']);
+  assert.ok(adds.every((e) => e.add === n));
+  assert.deepEqual(replay().map((e) => 'phase' in e && e.phase), ['finished']);
+});
+
+test('Cancel stops an add and leaves nothing behind; a second add while one runs, and a hub deploy, are refused', async (t) => {
+  const w = world(t);
+  mkdirSync(join(w.root, 'deploy-root'));
+  w.config.integrations.github = {
+    repo: 'Edward-Pratt/orrery',
+    newerAfterDays: 14,
+    deploys: { root: join(w.root, 'deploy-root'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
+  };
+  const { s, lib, add, finished, files } = await libraryHub(t, { github }, w);
+  while ((await s.json<{ checkedAt: number | null }>(s.req('GET', '/api/deploys'))).checkedAt === null) await sleep(5);
+  s.fake.downloadGate = new Promise(() => {}); // a download that would never end
+  await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' });
+  await until(() => s.fake.downloads.length === 1);
+  const second = await s.req('POST', '/api/library/packs', { url: URL_NEW, ...NEW });
+  assert.equal(second.status, 409);
+  assert.equal(await second.text(), 'GT New Horizons 2.7.6 is being added: one add at a time.');
+  const deploy = await s.req('POST', '/api/deploys', { part: 'hub', tag: 'hub-v2.7.0' });
+  assert.equal(deploy.status, 409);
+  assert.equal(await deploy.text(), 'A library add is running: deploy the hub once it is done.');
+  assert.equal((await s.req('POST', '/api/library/cancel')).status, 204);
+  assert.deepEqual(await finished(), ['cancelled', '']);
+  assert.deepEqual(await lib(), { packs: [], running: null });
+  assert.deepEqual(files(), []);
+  assert.equal((await s.req('POST', '/api/library/cancel')).status, 409); // nothing running
+  assert.deepEqual((await s.audit('library')).map((e) => `${e.action}: ${e.details}`), [
+    `library add: GT New Horizons 2.7.6 from ${URL_FORGE}`,
+    'library cancel: GT New Horizons 2.7.6',
+    'library add: GT New Horizons 2.7.6: cancelled',
+  ]);
+});
+
+test('the same file under the same name and version is already there; any other duplicate is refused, naming the entry', async (t) => {
+  const { w, s, lib, add, finished, files } = await libraryHub(t);
+  await add({ url: URL_NEW, ...NEW });
+  await finished();
+  await add({ url: URL_NEW, ...NEW });
+  assert.deepEqual(await finished(2), ['ok', 'GT New Horizons 2.7.5 is already in the library.']);
+  await add({ url: URL_OLD, ...NEW });
+  assert.deepEqual(await finished(3), ['failed', 'GT New Horizons 2.7.5 is in the library already, with a different file.']);
+  await add({ url: URL_NEW, ...NEW, version: '2.7.5-again' });
+  assert.deepEqual(await finished(4), ['failed', 'This file is in the library already, as GT New Horizons 2.7.5.']);
+  // An upload's sha256 is known at once: refused before it starts, and the upload is still there to use.
+  const upload = await s.upload(w.urls[URL_NEW]!);
+  for (const [body, why] of [
+    [{ upload, ...NEW }, 'GT New Horizons 2.7.5 is already in the library.'],
+    [{ upload, ...NEW, version: '2.7.5-again' }, 'This file is in the library already, as GT New Horizons 2.7.5.'],
+  ] as const) {
+    const res = await s.req('POST', '/api/library/packs', body);
+    assert.equal(res.status, 409);
+    assert.equal(await res.text(), why);
+  }
+  assert.equal((await lib()).packs.length, 1);
+  assert.deepEqual(files(), [`${sha(w.urls[URL_NEW]!)}.zip`]);
+});
+
+test('an unsafe or rootless zip, or one that says nothing of its Minecraft version, is refused and leaves nothing', async (t) => {
+  const { w, lib, add, finished, files } = await libraryHub(t);
+  w.urls['https://x/dots.zip'] = rawZip(w, 'dots.zip', { 'mods/a.jar': 'a', 'mods/../../../evil.txt': 'x' });
+  w.urls['https://x/client.zip'] = w.zip('client.zip', { 'readme.txt': 'not a server pack' });
+  const cases = [
+    [{ url: 'https://x/dots.zip', ...NEW }, 'The zip has a path outside its folder (mods/../../../evil.txt): refused.'],
+    [{ url: 'https://x/client.zip', ...NEW }, 'The zip has no mods/ or config/ folder: is it a server pack?'],
+    [{ url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' }, "The zip doesn't say its Minecraft version: type the Minecraft version and loader, then add it again."],
+    [{ url: 'https://x/missing.zip', ...NEW }, 'Downloading the pack failed: HTTP 404'],
+  ] as const;
+  for (const [i, [body, why]] of cases.entries()) {
+    await add(body);
+    assert.deepEqual(await finished(i + 1), ['failed', why]);
+  }
+  assert.deepEqual((await lib()).packs, []);
+  assert.deepEqual(files(), []);
+});
+
+test('bad adds are 400; Delete removes the entry and its zip, audited; an unknown one is 404', async (t) => {
+  const { s, lib, add, finished, files } = await libraryHub(t);
+  for (const body of [
+    { url: 'http://packs.example/a.zip', ...NEW },
+    { url: URL_NEW, ...NEW, name: ' ' },
+    { url: URL_NEW, ...NEW, version: 'v'.repeat(101) },
+    { url: URL_NEW, ...NEW, loader: 'fabric' },
+    { upload: 'nope', ...NEW },
+  ]) {
+    assert.equal((await s.req('POST', '/api/library/packs', body)).status, 400, JSON.stringify(body));
+  }
+  await add({ url: URL_NEW, ...NEW });
+  await finished();
+  const [entry] = (await lib()).packs;
+  assert.equal((await s.req('DELETE', `/api/library/packs/${entry!.id}`)).status, 204);
+  assert.deepEqual((await lib()).packs, []);
+  assert.deepEqual(files(), []);
+  for (const id of [entry!.id, 'x']) assert.equal((await s.req('DELETE', `/api/library/packs/${id}`)).status, 404);
+  assert.deepEqual((await s.audit('library delete')).map((e) => e.details), ['GT New Horizons 2.7.5']);
 });

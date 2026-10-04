@@ -75,6 +75,9 @@ export class Db {
       CREATE TABLE IF NOT EXISTS pack_updates (id INTEGER PRIMARY KEY, server_id TEXT NOT NULL, from_version TEXT NOT NULL,
         to_version TEXT NOT NULL, changes TEXT, by TEXT NOT NULL, started INTEGER NOT NULL, finished INTEGER, outcome TEXT NOT NULL,
         step TEXT NOT NULL, backup TEXT, log TEXT NOT NULL, restored INTEGER);
+      CREATE TABLE IF NOT EXISTS library (id INTEGER PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, mc TEXT NOT NULL,
+        loader TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, source TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL,
+        UNIQUE (name, version));
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -529,11 +532,34 @@ export class Db {
       .map((r) => ({ ...r, changes: r.changes === null ? null : JSON.parse(r.changes as string) }) as PackUpdateDbRow);
   }
 
+  // The pack library. Its writes throw, as the packs' do.
+
+  /** Every library entry, newest first. */
+  library(): LibraryRow[] {
+    return this.#db
+      .prepare('SELECT id, name, version, mc, loader, sha256, size, source, by, at FROM library ORDER BY at DESC, id DESC')
+      .all()
+      .map((r) => ({ ...r }) as LibraryRow);
+  }
+
+  addLibraryEntry(e: Omit<LibraryRow, 'id'>): number {
+    const r = this.#db
+      .prepare('INSERT INTO library (name, version, mc, loader, sha256, size, source, by, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(e.name, e.version, e.mc, e.loader, e.sha256, e.size, e.source, e.by, e.at);
+    return Number(r.lastInsertRowid);
+  }
+
+  deleteLibraryEntry(id: number): void {
+    this.#db.prepare('DELETE FROM library WHERE id = ?').run(id);
+  }
+
   close(): void {
     this.#db.close();
   }
 }
 
+/** A pack version in the library; its zip is `<root>/library/<sha256>.zip`. */
+export type LibraryRow = { id: number; name: string; version: string; mc: string; loader: string; sha256: string; size: number; source: string; by: string; at: number };
 /** A server's installed pack as stored; `snapshot` is what the last apply laid over it, as JSON. */
 export type PackRow = { name: string; version: string; source: string; sha256: string; by: string; at: number; how: 'adopted' | 'updated'; snapshot: string };
 export type ExtraRow = { id: number; target: string; sha256: string; label: string; note: string; by: string; at: number; removed: boolean };

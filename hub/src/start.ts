@@ -3,6 +3,7 @@ import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
+import { Library } from './library.ts';
 import { fetchDownload, Packs, type Download, type PacksOptions } from './packs.ts';
 import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
@@ -91,6 +92,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   let deploys: Deploys | undefined;
   let packs: Packs | undefined;
+  let library: Library | undefined;
   // A daily countdown during a pack update would clash with its Stop; the update restarts the server anyway.
   const restarts = new RestartScheduler(hub, { paused: (id) => (packs?.busy(id) ? 'a pack update is running' : null) });
   for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
@@ -148,6 +150,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
         restoring: () => restores?.busy() ?? false,
         packing: (id) => packs?.busy(id) ?? false,
+        libraryAdding: () => library?.busy() ?? false,
         dbCopies,
       },
       deps.deploys,
@@ -176,6 +179,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.packs,
     );
 
+  // The library takes uploads and is one per Environment: on whenever packs are.
+  library = uploads && new Library({ hub, db, uploads, root: dirname(config.dbPath), download: deps.download ?? fetchDownload });
+
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
@@ -183,10 +189,11 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
   await uploads?.start();
+  await library?.start();
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -207,6 +214,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       services?.stop();
       deploys?.stop();
       packs?.stop();
+      library?.stop();
       uploads?.stop();
       stopSummaries();
       upkeep();

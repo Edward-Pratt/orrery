@@ -18,7 +18,7 @@ const SAMPLE: HostSample = {
 };
 const EARLIER: HostSample = { ...SAMPLE, ts: 0, cpu: 0.5, disks: [...SAMPLE.disks, { mount: '/data', free: 1 * GB, total: 2 * GB }] };
 
-const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false };
+const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false };
 
 async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
   const events = fakeEvents();
@@ -138,7 +138,7 @@ const ANSWER: DeploysAnswer = {
 
 describe('host page releases', () => {
   async function releases(answer: DeploysAnswer = ANSWER) {
-    const h = await setup(SAMPLE, true, { ...ON, github: true });
+    const h = await setup(SAMPLE, true, { ...ON, github: true, library: false });
     h.backend.expectOne('/api/host/samples?hours=24').flush([]);
     await h.render();
     h.backend.expectOne('/api/deploys').flush(answer);

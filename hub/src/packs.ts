@@ -133,7 +133,7 @@ const unzip = (args: string[]) =>
     execFile('unzip', args, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error(`unzip: ${stderr.trim() || err.message}`)) : resolve(stdout))),
   );
 
-async function sha256File(path: string): Promise<string> {
+export async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await pipeline(createReadStream(path), hash);
   return hash.digest('hex');
@@ -211,7 +211,7 @@ function regex(find: unknown): RegExp {
  * The entries of a pack zip, checked before anything is extracted: refused (400) with a symlink, an absolute path or
  * a `..` segment. Read from `unzip -Z`, whose count must match the zip's own, so no entry can slip past.
  */
-async function zipEntries(zip: string): Promise<string[]> {
+export async function zipEntries(zip: string): Promise<string[]> {
   const out = await unzip(['-Z', zip]).catch((err: Error) => {
     throw new PackRefused(400, `Not a readable zip: ${err.message}`);
   });
@@ -232,7 +232,7 @@ async function zipEntries(zip: string): Promise<string[]> {
 }
 
 /** The content root: the shallowest folder holding `mods/` or `config/` ('' for the zip's top). */
-function contentRoot(entries: string[]): string {
+export function contentRoot(entries: string[]): string {
   let best: string[] | undefined;
   for (const e of entries) {
     const parts = e.split('/');

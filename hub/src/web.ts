@@ -15,6 +15,8 @@ import type {
   EnvironmentInfo,
   Integrations,
   CompareReport,
+  LibraryAddAnswer,
+  LibraryState,
   EditPreview,
   Me,
   PackState,
@@ -35,6 +37,7 @@ import type { HostMonitor } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
+import { LibraryRefused, type Library } from './library.ts';
 import type { LiveFeed } from './live.ts';
 import { DownloadFailed, PackRefused, type Packs } from './packs.ts';
 import { UploadRefused, type Uploads } from './uploads.ts';
@@ -121,12 +124,14 @@ export type WebDeps = {
   packs?: Packs;
   /** With packs. */
   uploads?: Uploads;
+  /** With packs. */
+  library?: Library;
   integrations: Config['integrations'];
   environment: Config['environment'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -246,6 +251,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       host: !!integrations.host,
       systemd: !!integrations.systemd,
       github: !!integrations.github,
+      library: !!library,
     } satisfies Integrations),
   );
   if (deploys) {
@@ -379,6 +385,30 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       if (!/^(0|[1-9]\d{0,15})$/.test(offset)) return c.text('Give the offset in bytes', 400);
       return upload(c, async (id) => ({ received: await uploads.append(id, Number(offset), c.req.raw.body) }) satisfies UploadProgress);
     });
+  }
+  if (library) {
+    /** Runs a library action as the admin, mapping its refusals to their status. */
+    const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
+      try {
+        const answer = await fn(actor(c.get('user')), c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer, status);
+      } catch (err) {
+        if (err instanceof LibraryRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/library', (c) => c.json(library.state() satisfies LibraryState));
+    app.post('/library/packs', (c) =>
+      act(c, async (by, user) => ({ add: library.addPack(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),
+    );
+    app.post('/library/cancel', (c) => act(c, async (by) => library.cancel(by)));
+    app.delete('/library/packs/:id', (c) =>
+      act(c, async (by) => {
+        const id = c.req.param('id');
+        if (!/^[1-9]\d{0,15}$/.test(id)) throw new LibraryRefused(404, 'No such pack in the library.');
+        await library.deletePack(Number(id), by);
+      }),
+    );
   }
   if (packs) {
     /** Runs a pack action for a server that has packs, mapping its refusals to their status. */

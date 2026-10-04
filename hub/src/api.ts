@@ -30,6 +30,7 @@ export type {
   HistoryAnswer,
   HostSample,
   HubEvent,
+  LibraryAdd,
   Lifecycle,
   Notice,
   PackFinished,
@@ -58,8 +59,8 @@ export type Me = { id: string; username: string; avatar: string | null };
 /** `GET /api/environment`, the one read without a session: which Environment this hub is, for the dashboard's badge. */
 export type EnvironmentInfo = { environment: 'production' | 'staging' };
 
-/** `GET /api/integrations`: which integrations are switched on. */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean; github: boolean };
+/** `GET /api/integrations`: which integrations are switched on, and whether the hub has the Pack `library` (systemd and Minecraft). */
+export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean; github: boolean; library: boolean };
 
 /**
  * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
@@ -349,3 +350,38 @@ export type EditPreview = { matches: number };
  */
 export type PackUpdateRequest = PackSource | { pending: true };
 export type PackUpdateAnswer = { id: number };
+
+/**
+ * The Pack library (only with systemd and Minecraft): one per Environment. A pack version, by name and version, with
+ * its Minecraft version and loader, its zip's size and sha256, where it came from (a URL, or the uploaded file's
+ * name), who added it and when, and the servers using it (`usedBy`: ids).
+ */
+export type LibraryPack = {
+  id: number;
+  name: string;
+  version: string;
+  mc: string;
+  loader: string;
+  sha256: string;
+  size: number;
+  source: string;
+  by: string;
+  at: number;
+  usedBy: string[];
+};
+/** The add running now (one at a time): `add` matches its `libraryAdd` events, `detail` is its latest progress. */
+export type RunningLibraryAdd = { add: number; name: string; version: string; by: string; started: number; detail: string };
+/** `GET /api/library`: the packs, newest first, and the running add. */
+export type LibraryState = { packs: LibraryPack[]; running: RunningLibraryAdd | null };
+/**
+ * `POST /api/library/packs`: adds a pack version from an `https:` URL or a finished upload, in the background. `mc`
+ * and `loader` (only `forge`) left blank are read from the zip's Forge jar (`minecraft_server.<mc>.jar` gives only
+ * `mc`); the add fails if they can't be. Name, version and `mc`: at most 100 characters. Answers 202 with the add's
+ * number; progress and the end follow as `libraryAdd` events (`target` `library`). 409 while an add runs, and for an
+ * upload whose file, or name and version, is in the library already (a URL's only once downloaded: an add of the same
+ * file under the same name and version finishes ok, saying so; the other duplicates fail). `POST /api/library/cancel`
+ * stops the running add (409 when none, or once it is being stored); it leaves nothing behind. `DELETE
+ * /api/library/packs/:id` deletes one (404 unknown). All audited.
+ */
+export type LibraryAddRequest = ({ url: string } | { upload: string }) & { name: string; version: string; mc?: string; loader?: string };
+export type LibraryAddAnswer = { add: number };

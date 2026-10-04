@@ -4,7 +4,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { Integrations as IntegrationsOn, Me } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideCpu, lucideLayers, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun } from '@ng-icons/lucide';
+import { lucideCheck, lucideCpu, lucideLayers, lucideLibrary, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun } from '@ng-icons/lucide';
 import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
@@ -23,6 +23,7 @@ const PAGES: { path: string; label: string; icon: string; on?: keyof Integration
   // The services page holds the checks; without systemd it is "Checks" and holds only those.
   { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
   { path: 'host', label: 'Host', icon: 'lucideCpu', on: 'host' },
+  { path: 'library', label: 'Library', icon: 'lucideLibrary', on: 'library' },
   { path: 'audit', label: 'Audit log', icon: 'lucideScrollText', on: 'web' },
 ];
 const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideMoon' };
@@ -81,7 +82,7 @@ export class UserMenu {
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge],
-  viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideScrollText })],
+  viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText })],
   template: `
     <hlm-toaster />
     @switch (session.user()) {

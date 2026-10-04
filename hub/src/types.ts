@@ -149,9 +149,9 @@ export type ServiceVerb = 'start' | 'stop' | 'restart';
 
 /**
  * What an event that isn't about a server is about; its `id` is that thing's config id (a deploy's: its target, the
- * environment or, for a Mod, the server id).
+ * environment or, for a Mod, the server id; the library's: `packs`).
  */
-export type Target = 'host' | 'service' | 'check' | 'deploy';
+export type Target = 'host' | 'service' | 'check' | 'deploy' | 'library';
 /** Something a hub-core module wants people to know about the host, a service, a check or a deploy. */
 export type TargetNotice = { severity: Severity } & (
   | { kind: 'checkDown'; url: string; error: string }
@@ -205,6 +205,15 @@ export type TargetEvent = { target: Target; id: string } & (
   | { type: 'sample'; sample: HostSample }
   | { type: 'state'; state: string; sub: string }
   | { type: 'checked'; status: CheckStatus }
+  | LibraryAdd
+);
+/**
+ * A library add (`target` `library`, `id` `packs`): its progress (`detail`: "Downloading 412 MB of 1,024 MB"; the live
+ * feed keeps only the latest), then once `finished`, with why it `failed` (`reason`). `add` numbers the adds of a hub run.
+ */
+export type LibraryAdd = { type: 'libraryAdd'; add: number; name: string; version: string; by: string } & (
+  | { phase: 'progress'; detail: string }
+  | { phase: 'finished'; outcome: 'ok' | 'cancelled' | 'failed'; reason: string }
 );
 /** Everything on the live stream: server events and the rest. */
 export type LiveEvent = HubEvent | TargetEvent;

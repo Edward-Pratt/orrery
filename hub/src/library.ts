@@ -1,0 +1,266 @@
+import { randomBytes } from 'node:crypto';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { LibraryPack, LibraryState, RunningLibraryAdd } from './api.ts';
+import type { Db, LibraryRow } from './db.ts';
+import { contentRoot, sha256File, zipEntries, type Download } from './packs.ts';
+import type { ServerHub } from './servers.ts';
+import type { LibraryAdd, TargetEvent } from './types.ts';
+import { formatBytes } from './units.ts';
+import type { Uploads } from './uploads.ts';
+
+/** Why a library action wasn't done: 400 (bad input), 404 (no such entry) or 409 (not now). */
+export class LibraryRefused extends Error {
+  readonly status: 400 | 404 | 409;
+  constructor(status: 400 | 404 | 409, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export type LibraryDeps = {
+  hub: Pick<ServerHub, 'publishTarget' | 'audit'>;
+  db: Db;
+  /** Finished uploads, taken as a source. */
+  uploads: Pick<Uploads, 'get' | 'take'>;
+  /** The Environment's root (the folder holding `hub.db`): zips live in `<root>/library/<sha256>.zip`. */
+  root: string;
+  download: Download;
+};
+
+const TEXT_MAX = 100;
+const LOADERS = ['forge'];
+/** How often a download's byte count goes on the stream. */
+const TICK_MS = 1_000;
+const TEMP = '.add-';
+
+type Add = RunningLibraryAdd & { actor: string; source: string; abort: AbortController; cancelled: boolean; storing: boolean };
+type Fields = { name: string; version: string; mc: string; loader: string };
+
+const text = (raw: unknown, what: string, required: boolean): string => {
+  if ((raw === undefined || (typeof raw === 'string' && !raw.trim())) && !required) return '';
+  if (typeof raw !== 'string' || !raw.trim() || raw.trim().length > TEXT_MAX) throw new LibraryRefused(400, `Give ${what} (at most ${TEXT_MAX} characters).`);
+  return raw.trim();
+};
+
+/**
+ * What a pack zip says about itself, from the files at its content root: a Forge universal jar
+ * (`forge-<mc>-<forge>…jar`) gives the Minecraft version and the loader, else `minecraft_server.<mc>.jar` the version.
+ */
+export function detect(entries: string[], root: string): { mc: string; loader: string } {
+  const prefix = root ? `${root}/` : '';
+  const top = entries.filter((e) => e.startsWith(prefix) && !e.slice(prefix.length).includes('/')).map((e) => e.slice(prefix.length));
+  for (const f of top) {
+    const m = /^forge-(\d+\.\d+(?:\.\d+)?)-.*\.jar$/.exec(f);
+    if (m) return { mc: m[1]!, loader: 'forge' };
+  }
+  for (const f of top) {
+    const m = /^minecraft_server\.(\d+\.\d+(?:\.\d+)?)\.jar$/.exec(f);
+    if (m) return { mc: m[1]!, loader: '' };
+  }
+  return { mc: '', loader: '' };
+}
+
+/**
+ * The Environment's Pack library: pack versions stored by sha256 under `<root>/library/`, named and versioned in the
+ * `library` table. One add at a time, in the background, announced as `libraryAdd` events; adds are lost on a hub
+ * restart. Hub core.
+ */
+export class Library {
+  #d: LibraryDeps;
+  #dir: string;
+  #add: Add | undefined;
+  #next = 1;
+  #closed = false;
+
+  constructor(deps: LibraryDeps) {
+    this.#d = deps;
+    this.#dir = join(deps.root, 'library');
+  }
+
+  /** Clears what adds left when the last hub stopped. */
+  async start(): Promise<void> {
+    for (const f of await readdir(this.#dir).catch(() => [])) if (f.startsWith(TEMP)) await rm(join(this.#dir, f), { force: true });
+  }
+
+  stop(): void {
+    this.#closed = true;
+    this.#add?.abort.abort();
+  }
+
+  /** Whether an add runs (a hub deploy waits for it). */
+  busy(): boolean {
+    return this.#add !== undefined;
+  }
+
+  state(): LibraryState {
+    const a = this.#add;
+    return {
+      packs: this.#d.db.library().map((r): LibraryPack => ({ ...r, usedBy: [] })),
+      running: a ? { add: a.add, name: a.name, version: a.version, by: a.by, started: a.started, detail: a.detail } : null,
+    };
+  }
+
+  /** An entry's zip; 404 for an unknown id. */
+  zip(id: number): string {
+    return join(this.#dir, `${this.#entry(id).sha256}.zip`);
+  }
+
+  /** Starts adding a pack version from a URL or a finished upload; returns its add number at once. */
+  addPack(body: unknown, by: string, byName: string): number {
+    const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const fields: Fields = {
+      name: text(b.name, 'the pack name', true),
+      version: text(b.version, 'the pack version', true),
+      mc: text(b.mc, 'the Minecraft version', false),
+      loader: text(b.loader, 'the loader', false),
+    };
+    if (fields.loader && !LOADERS.includes(fields.loader)) throw new LibraryRefused(400, `Only ${LOADERS.join(', ')} is a known loader.`);
+    let from: { url: string } | { upload: string };
+    if (typeof b.url === 'string') {
+      if (URL.parse(b.url)?.protocol !== 'https:') throw new LibraryRefused(400, 'The pack URL must be https.');
+      from = { url: b.url };
+    } else if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) from = { upload: b.upload };
+    else throw new LibraryRefused(400, 'Give a pack URL, or upload the zip again.');
+    if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);
+    if ('upload' in from) {
+      // An upload's sha256 is known now: a duplicate is refused before the upload is used up.
+      const known = this.#duplicate(fields, this.#d.uploads.get(from.upload)!.sha256);
+      if (known) throw new LibraryRefused(409, known.why);
+    }
+    const upload = 'upload' in from ? this.#d.uploads.take(from.upload)! : undefined;
+    const source = 'url' in from ? from.url : upload!.fileName;
+    const add: Add = {
+      add: this.#next++,
+      name: fields.name,
+      version: fields.version,
+      by: byName,
+      started: Date.now(),
+      detail: '',
+      actor: by,
+      source,
+      abort: new AbortController(),
+      cancelled: false,
+      storing: false,
+    };
+    this.#add = add;
+    this.#d.hub.audit(by, 'library add', 'library', `${add.name} ${add.version} from ${source}`);
+    void this.#run(add, fields, 'url' in from ? from.url : upload!);
+    return add.add;
+  }
+
+  /** Stops the running add, leaving nothing behind; too late once it is being stored. */
+  cancel(by: string): void {
+    const a = this.#add;
+    if (!a) throw new LibraryRefused(409, 'No add is running.');
+    if (a.storing) throw new LibraryRefused(409, 'Too late to cancel: it is being stored.');
+    this.#d.hub.audit(by, 'library cancel', 'library', `${a.name} ${a.version}`);
+    a.cancelled = true;
+    a.abort.abort();
+  }
+
+  async deletePack(id: number, by: string): Promise<void> {
+    const e = this.#entry(id);
+    this.#d.db.deleteLibraryEntry(id);
+    await rm(join(this.#dir, `${e.sha256}.zip`), { force: true });
+    this.#d.hub.audit(by, 'library delete', 'library', `${e.name} ${e.version}`);
+  }
+
+  async #run(add: Add, fields: Fields, src: string | { path: string; sha256: string }): Promise<void> {
+    const temp = join(this.#dir, `${TEMP}${randomBytes(16).toString('hex')}`);
+    try {
+      await mkdir(this.#dir, { recursive: true });
+      let sha256: string;
+      if (typeof src === 'string') {
+        this.#progress(add, 'Downloading');
+        let last = 0;
+        try {
+          await this.#d.download(
+            src,
+            temp,
+            (bytes, total) => {
+              if (Date.now() - last < TICK_MS) return;
+              last = Date.now();
+              this.#progress(add, `Downloading ${formatBytes(bytes)}${total ? ` of ${formatBytes(total)}` : ''}`);
+            },
+            add.abort.signal,
+          );
+        } catch (err) {
+          throw add.cancelled ? err : new Error(`Downloading the pack failed: ${(err as Error).message}`);
+        }
+        this.#cancelled(add);
+        this.#progress(add, 'Checking the zip');
+        sha256 = await sha256File(temp);
+      } else {
+        await rename(src.path, temp).catch(async (err) => {
+          await rm(src.path, { force: true }); // taken from Uploads: nothing else would remove it
+          throw err;
+        });
+        this.#progress(add, 'Checking the zip');
+        sha256 = src.sha256;
+      }
+      const entries = await zipEntries(temp);
+      const found = detect(entries, contentRoot(entries));
+      const mc = fields.mc || found.mc;
+      const loader = fields.loader || found.loader;
+      if (!mc || !loader) throw new Error(`The zip doesn't say its ${!mc ? 'Minecraft version' : 'loader'}: type the Minecraft version and loader, then add it again.`);
+      this.#cancelled(add);
+      const known = this.#duplicate(fields, sha256);
+      if (known?.same) return await this.#finish(add, 'ok', known.why, temp);
+      if (known) throw new Error(known.why);
+      add.storing = true;
+      this.#progress(add, 'Storing');
+      const size = (await stat(temp)).size;
+      const zip = join(this.#dir, `${sha256}.zip`);
+      await rename(temp, zip);
+      try {
+        this.#d.db.addLibraryEntry({ name: fields.name, version: fields.version, mc, loader, sha256, size, source: add.source, by: add.by, at: Date.now() });
+      } catch (err) {
+        await rm(zip, { force: true });
+        throw err;
+      }
+      await this.#finish(add, 'ok', '', temp);
+    } catch (err) {
+      await this.#finish(add, add.cancelled ? 'cancelled' : 'failed', add.cancelled ? '' : (err as Error).message, temp);
+    }
+  }
+
+  /** Why `fields` with a file of `sha256` can't be added; `same` when it is in the library already, as is. */
+  #duplicate(f: Fields, sha256: string): { why: string; same: boolean } | undefined {
+    const rows = this.#d.db.library();
+    const named = rows.find((r) => r.name === f.name && r.version === f.version);
+    if (named?.sha256 === sha256) return { why: `${f.name} ${f.version} is already in the library.`, same: true };
+    if (named) return { why: `${f.name} ${f.version} is in the library already, with a different file.`, same: false };
+    const file = rows.find((r) => r.sha256 === sha256);
+    if (file) return { why: `This file is in the library already, as ${file.name} ${file.version}.`, same: false };
+    return undefined;
+  }
+
+  #cancelled(add: Add): void {
+    if (add.cancelled) throw new Error('Cancelled.');
+  }
+
+  #progress(add: Add, detail: string): void {
+    if (this.#closed) throw new Error('The hub is closing.');
+    add.detail = detail;
+    this.#publish(add, { phase: 'progress', detail });
+  }
+
+  async #finish(add: Add, outcome: 'ok' | 'cancelled' | 'failed', reason: string, temp: string): Promise<void> {
+    await rm(temp, { force: true }).catch(() => {});
+    this.#add = undefined;
+    if (this.#closed) return;
+    this.#d.hub.audit(add.actor, 'library add', 'library', `${add.name} ${add.version}: ${outcome}${reason ? `: ${reason}` : ''}`);
+    this.#publish(add, { phase: 'finished', outcome, reason });
+  }
+
+  #publish(add: Add, e: Pick<Extract<LibraryAdd, { phase: 'progress' }>, 'phase' | 'detail'> | Pick<Extract<LibraryAdd, { phase: 'finished' }>, 'phase' | 'outcome' | 'reason'>): void {
+    this.#d.hub.publishTarget({ target: 'library', id: 'packs', type: 'libraryAdd', add: add.add, name: add.name, version: add.version, by: add.by, ...e } as TargetEvent);
+  }
+
+  #entry(id: number): LibraryRow {
+    const e = this.#d.db.library().find((r) => r.id === id);
+    if (!e) throw new LibraryRefused(404, 'No such pack in the library.');
+    return e;
+  }
+}

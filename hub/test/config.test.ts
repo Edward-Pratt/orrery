@@ -360,7 +360,7 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { integrations: _, ...c } = valid(dir);
   const github = (g: unknown, dbPath = '/srv/orrery-staging/hub.db') => validateConfig({ ...c, dbPath, integrations: { github: g } });
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, 'hub.db'), []); // no root set: nothing to compare
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, '/home/opc/orrery/hub.db'), []); // production's root by default
   const staging = {
     root: '/srv/orrery-staging',
     hubUnit: 'orrery-hub-staging.service',
@@ -370,11 +370,15 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   };
   assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', newerAfterDays: 7, deploys: staging }), []);
   assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: { root: '/srv/orrery-staging/' } }, '/srv/orrery-staging/./hub.db'), []);
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: staging }, '/srv/orrery/hub.db'), [
-    'integrations.github.deploys: "root" must be the folder holding dbPath (/srv/orrery)',
-  ]);
-  assert.deepEqual(github('orrery'), ['integrations: "github" must be an object']);
-  assert.deepEqual(github({ repo: 'orrery', newerAfterDays: 0, deploys: [] }), [
+  const under = (dbPath: string, root: string) =>
+    `integrations.github: "dbPath" must be a file directly in the deploys root ${root} (like ${root}/hub.db), not ${dbPath}: a hub deploy replaces current/`;
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: staging }, '/srv/orrery/hub.db'), [under('/srv/orrery/hub.db', '/srv/orrery-staging')]);
+  // Production's config as it was: hub.db inside the release `current` points at, lost on every hub deploy.
+  for (const dbPath of ['/home/opc/orrery/current/hub.db', 'hub.db']) {
+    assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, dbPath), [under(dbPath, '/home/opc/orrery')], dbPath);
+  }
+  assert.deepEqual(github('orrery', '/home/opc/orrery/hub.db'), ['integrations: "github" must be an object']);
+  assert.deepEqual(github({ repo: 'orrery', newerAfterDays: 0, deploys: [] }, '/home/opc/orrery/hub.db'), [
     'integrations.github: "repo" must be owner/name',
     'integrations.github: "newerAfterDays" must be a positive number',
     'integrations.github: "deploys" must be an object',

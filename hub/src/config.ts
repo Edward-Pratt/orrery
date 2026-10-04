@@ -394,11 +394,6 @@ export function validateConfig(raw: unknown): string[] {
         const path = str(deploys, key, at, false);
         if (path !== undefined && !isAbsolute(path)) err(at, `"${key}" must be an absolute path`);
       }
-      // One root per Environment (docs/adr/0003): the deploys' root is the folder holding hub.db.
-      const root = deploys.root;
-      if (typeof root === 'string' && isAbsolute(root) && typeof raw.dbPath === 'string' && resolvePath(root) !== resolvePath(dirname(raw.dbPath))) {
-        err(at, `"root" must be the folder holding dbPath (${resolvePath(dirname(raw.dbPath))})`);
-      }
       const unit = str(deploys, 'hubUnit', at, false);
       if (unit !== undefined && !UNIT.test(unit)) err(at, '"hubUnit" must be a systemd unit name, like orrery-hub.service');
       for (const key of ['hubTemplate', 'webTemplate']) {
@@ -407,6 +402,12 @@ export function validateConfig(raw: unknown): string[] {
           err(at, `"${key}" must be a unit template's name, like orrery-deploy`);
         }
       }
+    }
+    // One root per Environment (docs/adr/0003): hub.db sits directly in the deploys' root (production's when unset),
+    // never under `current/` or `releases/`, which every hub deploy replaces with a fresh clone.
+    const root = isObj(deploys) && typeof deploys.root === 'string' ? deploys.root : PRODUCTION_DEPLOYS.root;
+    if (isAbsolute(root) && typeof raw.dbPath === 'string' && resolvePath(root) !== resolvePath(dirname(raw.dbPath))) {
+      err(where, `"dbPath" must be a file directly in the deploys root ${resolvePath(root)} (like ${join(resolvePath(root), 'hub.db')}), not ${raw.dbPath}: a hub deploy replaces current/`);
     }
   }
   return errors;

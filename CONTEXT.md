@@ -81,6 +81,14 @@ _Avoid_: import, register
 Moving a server to another version of its pack, with its extras and config edits applied again. Going back to an older pack version is a pack update too, and so is applying changed extras or config edits onto the version already installed.
 _Avoid_: upgrade, reinstall
 
+**Pack library**:
+The pack versions an Environment's hub keeps, by pack name and version, for any of its servers to install or update to. A version is removed only by hand, and only while no server runs it.
+_Avoid_: cache, store, repository
+
+**Install**:
+Putting a pack version from the library into a new server's empty folder: the first pack a server gets, as opposed to a pack update. Creating the server's systemd unit and config entry is not part of it: the hub hands those over as a script for the host's owner to run.
+_Avoid_: provision, deploy (a deploy is a release of hub, dashboard or Mod)
+
 ### Releases
 
 **Release**:

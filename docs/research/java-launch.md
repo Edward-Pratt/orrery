@@ -10,8 +10,9 @@ Fedora SELinux policy source.
   scripts have no `$JAVA` either. Two tools have their own variable, a file setting that defaults to `java`.
 - So **putting `<runtime>/bin` first on the server's `PATH` picks the runtime for any pack**, without touching the
   pack's files.
-- **Without root, the hub can do that through a file that the unit reads at every start.** Either a hub-written
-  `EnvironmentFile=` or a hub-owned symlink named in a fixed `PATH`. The unit itself is written once, by root.
+- **Without root, the hub can do that through a hub-owned symlink that a fixed `PATH` in the unit names.** The unit
+  is written once, by root. A hub-written `EnvironmentFile=` would also work, but under `/home` SELinux may stop
+  systemd from reading it (§4).
 - **Editing the start script doesn't last.** A Pack update overwrites it, so a change there only survives as a
   Config edit. It is also tied to one pack's script name and command line.
 - **Keep `ExecStart=` on a system binary** (`/bin/bash`, as now). Executing a file under `/home` directly from
@@ -47,8 +48,12 @@ What they have in common:
 - **The java line changes between versions.** 2.9.0-RC-1 and the nightly add `-Duser.language=en` (DAXXL #311,
   2026-09-05) and a comment line. Anything that copies the pack's java line would go stale.
 - **Each script is a `while true` loop** that starts java again 12 s after it exits ("Rebooting in: 12…").
-  Something to check on the host: with the shipped script, `/stop` and `systemctl stop gtnh` can't end the unit
-  (the `ExecStop` waits on `$MAINPID`, which is bash). The host's copy may already be edited.
+  - Under the current unit, `systemctl stop` sends `stop`, and the `ExecStop` then waits on `$MAINPID`, which is
+    bash. Bash starts a fresh JVM, so `ExecStop` waits until `TimeoutStopSec` (600 s). Systemd then kills that
+    JVM, possibly mid-save.
+  - Restarts made by the loop happen inside the unit, so they don't pick up a runtime switch. Only a real restart
+    of the unit does.
+  - The host's copy may already be edited: check it.
 - **The `.sh` files aren't executable:** mode `0666` in the release zips, `0644` in 2.9 and the nightly. That is
   one more reason to run them as `/bin/bash ./startserver-java9.sh`, as `deploy/gtnh.service` does.
 - Server versions 2.6 to 2.8 each come in a Java 8 zip and a Java 17-2X zip. The upper bound of the 17-2X zips is
@@ -66,7 +71,7 @@ What they have in common:
 | ServerPackCreator (the scripts in many CurseForge server packs) ([`default_template.sh`](https://github.com/Griefed/ServerPackCreator/blob/main/serverpackcreator-api/src/main/resources/de/griefed/resources/server_files/default_template.sh), [`variables.txt`](https://github.com/Griefed/ServerPackCreator/blob/main/serverpackcreator-api/src/main/resources/de/griefed/resources/server_files/variables.txt)) | `"$JAVA" …` | Its own `JAVA` in `variables.txt`, set by `source ./variables.txt`, which wipes out any `JAVA` from the environment. The default is `java`, so `PATH`. If the version doesn't match it may run its own `install_java.sh`. |
 | ATLauncher server export ([`server-scripts/LaunchServer.sh`](https://github.com/ATLauncher/ATLauncher/blob/master/src/main/resources/server-scripts/LaunchServer.sh)) | `$JAVAPATH $FINALJAVAARGS -jar <serverjar>` | `JAVAPATH="java"` in the script, so `PATH` |
 
-Neither `JAVA` nor `JAVA_HOME` from the environment is honoured anywhere. `PATH` is honoured everywhere.
+In the sources sampled, none honours `JAVA` or `JAVA_HOME` from the environment, and all honour `PATH`. A handwritten pack script with a hard-coded java path would ignore `PATH`, and its server would need a Config edit.
 
 ## 2. Does a pack update overwrite the start scripts?
 
@@ -100,19 +105,27 @@ What systemd says (primary source:
 - **A `-` prefix makes the file optional:** if it is missing, the variables are simply not set.
 - **Values in the file aren't expanded.** `PATH=…:$PATH` doesn't work, so write the whole value.
 - **Settings in the file override `Environment=`.**
-- **The file is read by the service manager (root).** A file owned by the hub's user works.
+- **The file is read by the service manager (root, SELinux domain `init_t`).** Unix permissions are no obstacle,
+  but SELinux may be (§4).
 
 | Option | Hub can switch without root? | Works for any pack? | Notes |
 |---|---|---|---|
 | a. Absolute `<runtime>/bin/java` in `ExecStart` | No: it means editing the unit | No: it skips the pack's script and args | Also executes a file under `/home` straight from systemd, which SELinux blocks (§4) |
 | b. `Environment=PATH=<runtime>/bin:…` in the unit | No: the runtime is in the unit | Yes | Fine for a fixed runtime, not for switching |
-| c. **`EnvironmentFile=-<hub-owned file>`** holding `PATH=<runtime>/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` (and `JAVA_HOME=<runtime>` for tools that look) | **Yes**: the hub rewrites the file, and it applies at the next restart | **Yes**: the pack's script and args are untouched | If the file is missing, the server uses the system java, so it is opt-in. Root adds one line to the unit, once (the Install script can write it) |
+| c. `EnvironmentFile=-<hub-owned file>` holding `PATH=<runtime>/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` (and `JAVA_HOME=<runtime>` for tools that look) | **Yes**: the hub rewrites the file, and it applies at the next restart | **Yes**: the pack's script and args are untouched | If the file is missing, the server uses the system java, so it is opt-in. Root adds one line to the unit, once (the Install script can write it) |
 | d. **Hub-owned symlink** (e.g. `…/<id>/java -> <root>/runtimes/<name>`), with `Environment=PATH=<that link>/bin:/usr/local/sbin:…` fixed in the unit | **Yes**: the hub swaps the link (`rename` is atomic) | **Yes** | Same effect as c. If the link breaks, `PATH` lookup quietly falls back to the system java instead of failing |
 | e. Hub-written wrapper script that `exec`s `<runtime>/bin/java <args>` | Yes, if the unit runs `/bin/bash <wrapper>` | **No**: the hub has to know every pack's java line (`@java9args.txt`, `unix_args.txt` …) and keep up as it changes (2.9's `-Duser.language=en`) | It could drop GTNH's `while true` loop, but a Config edit can do that too |
 
-c and d are equivalent, and both are portable: they are plain systemd and plain `PATH`. c is the smaller idea. The
-unit names one file, and the hub writes two lines into it. Which runtime a server uses is then just the contents of
-that file, so "can this runtime be removed?" (#130) is a lookup in the hub's own state.
+c and d have the same effect, and both are portable: they are plain systemd and plain `PATH`. The difference is
+who reads the hub's file:
+
+- **In c, systemd (PID 1, `init_t`) reads it, and it lives under `/home`, where SELinux may refuse.** See §4. With
+  the `-` prefix, the denial is silent: the server starts on the system java and nothing reports it.
+- **In d, systemd only passes a fixed `PATH` string from the unit.** Bash, already in an unconfined domain, is what
+  follows the symlink.
+
+So d is the safer default. In both, the hub's own state (or `readlink`) says which runtime each server uses, so "can
+this runtime be removed?" (#130) is a lookup.
 
 ## 4. Portability traps
 
@@ -126,10 +139,17 @@ that file, so "can this runtime be removed?" (#130) is a lookup in the hub's own
     `deploy/gtnh.service`.
   - So keep `ExecStart=/bin/bash …`. The `java` that bash then starts from `<root>/runtimes` runs inside an
     unconfined domain, so it should be allowed. I could not confirm that here.
+  - **Reading an `EnvironmentFile=` under `/home` (option c only).** `init.te` lets `initrc_t` read
+    `user_home_t` files (`userdom_read_user_home_content_files(initrc_t)`). For `init_t`, the domain that reads
+    the file, it grants only `userdom_read_user_tmp_files`, deleting home content, and executing from `~/bin`. I
+    found no rule letting `init_t` read `user_home_t`, so expect a denial. A `-`-prefixed file would then be
+    silently skipped.
   - **Check it on the host** (this is #130's SELinux bullet):
     - Unpack a runtime under `/home/opc/orrery/runtimes`.
-    - Point the GTNH unit at it (option c).
-    - Restart, then run `ps -eZ | grep java` and `ausearch -m avc -ts recent`.
+    - Point the GTNH unit at it (option d, and option c too to settle it).
+    - Restart, then run `readlink /proc/$(pgrep -f lwjgl3ify)/exe` to see which java actually runs (`ps -eZ`
+      alone doesn't show it).
+    - Run `ausearch -m avc -ts recent` and look for denials on `java` and on the env file.
   - Don't extract runtimes outside `/home` and then `mv` them in. `mv` keeps the old label. Extracting in place
     gives `user_home_t`.
 - **AppArmor (Debian/Ubuntu).** It confines a process only when a profile is attached to its path. No stock profile
@@ -156,14 +176,17 @@ A cheap check that catches most of these:
 
 ## Recommendation for #130
 
-- **Wiring:** Option c.
-  - The unit keeps `ExecStart=/bin/bash ./<pack's script>` and gains
-    `EnvironmentFile=-<hub-owned path for this server>`. The Install script writes this for new servers; root adds
-    it once to `gtnh.service`, and that one line is how the existing server opts in.
-  - The hub writes `PATH=<root>/runtimes/<name>/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` and
-    `JAVA_HOME=<root>/runtimes/<name>` into the file.
-  - A switch applies at the next restart.
-  - Put the file outside the pack-managed folder, or make it a Kept path, so a Pack update never touches it.
+- **Wiring:** Option d.
+  - The unit keeps `ExecStart=/bin/bash ./<pack's script>` and gains a fixed
+    `Environment=PATH=<link>/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` (and
+    `JAVA_HOME=<link>`). The Install script writes this for new servers; root adds it once to `gtnh.service`, and
+    that one line is how the existing server opts in.
+  - `<link>` is a hub-owned symlink per server pointing at `<root>/runtimes/<name>`. The hub switches the runtime
+    by swapping the link (`ln -s` to a temporary name, then `rename`).
+  - A switch applies at the next restart of the unit.
+  - Keep the link outside the pack-managed folder, or make it a Kept path, so a Pack update never touches it.
+  - Option c (`EnvironmentFile=`) would do the same job, but only if the host check shows systemd may read the file
+    under `/home`.
 - **No start-script edits and no wrapper script.** Leave the pack's script alone.
 - **Download the glibc or musl build to match the host** and run `java -version` before calling a runtime installed.
 - **Separately:** check whether the host's `startserver-java9.sh` still has GTNH's `while true` loop. If it does, a

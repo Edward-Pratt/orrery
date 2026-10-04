@@ -38,6 +38,7 @@ const handle = await startHub(config, {
   run: execRun,
   restore: execRestore,
   github: github && githubToken ? githubReader(github.repo, githubToken) : undefined,
+  githubToken: githubToken || undefined,
   oauth: web && clientSecret ? discordOAuth(web.clientId, clientSecret) : undefined,
 });
 

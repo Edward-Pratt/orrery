@@ -104,6 +104,24 @@ describe('library page', () => {
     expect(document.querySelector('[data-sheet]')).toBeNull();
   });
 
+  it('adds an Actions artifact from its link, which the hub fetches with its token', async () => {
+    const { q, type, render, backend } = await setup(EMPTY);
+    q('[data-add]').click();
+    await render();
+    q('[data-from-artifact]').click();
+    await render();
+    expect(document.querySelector('[data-sheet]')?.textContent).toContain('its own GitHub token');
+    await type('[data-name]', 'GT New Horizons');
+    await type('[data-version]', 'nightly-123');
+    await type('[data-artifact]', 'https://github.com/GTNewHorizons/DreamAssemblerXXL/actions/runs/123/artifacts');
+    expect(q<HTMLButtonElement>('[data-go]').disabled).toBe(true); // not an artifact's link
+    const link = 'https://github.com/GTNewHorizons/DreamAssemblerXXL/actions/runs/123/artifacts/456';
+    await type('[data-artifact]', link);
+    q('[data-go]').click();
+    await render();
+    expect(backend.expectOne('/api/library/packs').request.body).toEqual({ url: link, name: 'GT New Horizons', version: 'nightly-123', mc: '', loader: '' });
+  });
+
   it('shows the running add, follows its progress and cancels it; no Add meanwhile', async () => {
     const { el, text, q, render, backend, push, reload } = await setup(RUNNING);
     expect(text(el.querySelector('[data-running]'))).toContain('Adding GT New Horizons 2.7.5 (by alex)');

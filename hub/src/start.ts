@@ -3,7 +3,7 @@ import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
-import { fetchDownload, Library, type Download } from './library.ts';
+import { Library, type Fetch } from './library.ts';
 import { Packs, type PacksOptions } from './packs.ts';
 import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
@@ -49,8 +49,10 @@ export type HubDeps = {
   github?: GitHub;
   /** Shorter deploy timings, for tests. */
   deploys?: DeploysOptions;
-  /** Downloads a pack zip from a URL into the library (default: `fetch`). */
-  download?: Download;
+  /** The library's download requests (default: `fetch`); redirects, the token and resuming are the hub's. */
+  download?: Fetch;
+  /** `GITHUB_TOKEN`, for Actions artifacts in the library: sent only to api.github.com. */
+  githubToken?: string;
   /** Shorter pack update timings, for tests. */
   packs?: PacksOptions;
   /** How long an upload is kept after its last chunk (default an hour), for tests. */
@@ -170,7 +172,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       db,
       uploads,
       root: dirname(config.dbPath),
-      download: deps.download ?? fetchDownload,
+      download: deps.download ?? fetch,
+      githubToken: deps.githubToken,
       installing: (id) => packs?.installing(id) ?? [],
     });
   packs =

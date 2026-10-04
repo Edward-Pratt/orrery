@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { AuditLog, CompareReport, LibraryAdd, LibraryState, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer, UploadProgress } from '../src/api.ts';
 import type { Config, ServerSettings } from '../src/config.ts';
-import type { Download } from '../src/library.ts';
+import type { Fetch } from '../src/library.ts';
 import type { RunRestore } from '../src/restore.ts';
 import type { Run } from '../src/services.ts';
 import { Db } from '../src/db.ts';
@@ -97,6 +97,7 @@ type Setup = {
   /** The unit's state when the hub starts (default active). */
   unit?: string;
   uploadIdleMs?: number;
+  githubToken?: string;
   /** How long a Compare is held (default an hour). */
   compareMs?: number;
 };
@@ -165,6 +166,15 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     /** A stop that never ends: the unit stays active. */
     stopHangs: false,
     downloadGate: Promise.resolve(),
+    /** Every download request, with the headers it carried. */
+    requests: [] as { url: string; headers: Record<string, string> }[],
+    /** Redirects the fake server answers: from a URL to another. */
+    redirects: {} as Record<string, string>,
+    /** How many answers to cut short after `dropAt` bytes. */
+    drops: 0,
+    dropAt: 100,
+    /** Answer a Range with the whole file (200). */
+    ignoreRange: false,
     /** Holds the Mod's answer to `backup start`: an update waits in Backup. */
     backupGate: Promise.resolve(),
     downloads: [] as string[],
@@ -212,13 +222,32 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     }
     return `ActiveState=${state[unit] ?? 'inactive'}\nSubState=running\n`;
   };
-  const download: Download = async (url, dest, onProgress, signal) => {
+  /** A fake HTTP server for downloads: `w.urls`' files, with an ETag, honouring Range with If-Range; it can redirect and drop. */
+  const download: Fetch = async (url, { headers, signal }) => {
     fake.downloads.push(url);
+    fake.requests.push({ url, headers });
     await Promise.race([fake.downloadGate, new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted'))))]);
+    if (fake.redirects[url]) return new Response(null, { status: 302, headers: { location: fake.redirects[url]! } });
     const from = w.urls[url];
-    if (!from) throw new Error('HTTP 404');
-    onProgress(1, 2);
-    copyFileSync(from, dest);
+    if (!from) return new Response('not found', { status: 404 });
+    const data = readFileSync(from);
+    const etag = `"${sha(from)}"`;
+    const start = headers.range && headers['if-range'] === etag && !fake.ignoreRange ? Number(/^bytes=(\d+)-$/.exec(headers.range)![1]) : 0;
+    const drop = fake.drops > 0 && start + fake.dropAt < data.length;
+    if (drop) fake.drops--;
+    let sent = false;
+    const body = new ReadableStream({
+      pull(c) {
+        if (sent && !drop) return c.close();
+        // The connection drops a moment after the bytes arrive, as a real one would, so they reach the disk.
+        if (sent) return new Promise((r) => setTimeout(r, 20)).then(() => c.error(new Error('connection reset')));
+        sent = true;
+        c.enqueue(new Uint8Array(data.subarray(start, drop ? start + fake.dropAt : data.length)));
+      },
+    });
+    return start
+      ? new Response(body, { status: 206, headers: { etag, 'content-range': `bytes ${start}-${data.length - 1}/${data.length}` } })
+      : new Response(body, { status: 200, headers: { etag, 'content-length': String(data.length) } });
   };
   const handle = await startHub(w.config, {
     startFrontend: () => assert.fail('Discord is off'),
@@ -231,6 +260,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000, ...(setup.stopMs && { stopMs: setup.stopMs }), ...(setup.compareMs && { compareMs: setup.compareMs }) },
     deploys: { watchMs: 10, countdownMinutes: 60 },
     uploadIdleMs: setup.uploadIdleMs,
+    githubToken: setup.githubToken,
   });
   let closed = false;
   const close = async () => {
@@ -1148,7 +1178,7 @@ test('an add streams its progress then its end; the replay holds only the latest
   release();
   await finished();
   const phases = adds.map((e) => (e.phase === 'progress' ? e.detail : `${e.phase} ${e.outcome}`));
-  assert.deepEqual(phases, ['Downloading', 'Downloading 1 B of 2 B', 'Checking the zip', 'Storing', 'finished ok']);
+  assert.deepEqual(phases, ['Downloading', 'Downloading 1.7 KB of 1.7 KB', 'Checking the zip', 'Storing', 'finished ok']);
   assert.ok(adds.every((e) => e.add === n));
   assert.deepEqual(replay().map((e) => 'phase' in e && e.phase), ['finished']);
 });
@@ -1331,4 +1361,101 @@ test("a Mod deploy picks the build for the server pack's Minecraft version, else
   await s.json(s.req('POST', '/api/servers/gtnh/pack/adopt', { keep: [] }));
   assert.deepEqual(await deploy(), ['orrery-1.12.2-1.5.0.jar']); // the older build removed
   assert.equal(readFileSync(join(w.dir, 'mods', 'orrery-1.12.2-1.5.0.jar'), 'utf8'), 'orrery-1.12.2-1.5.0.jar');
+});
+
+// Downloads: Actions artifacts, redirects and resuming (#140).
+
+const ARTIFACT = 'https://github.com/GTNewHorizons/DreamAssemblerXXL/actions/runs/123/artifacts/456';
+const ARTIFACT_API = 'https://api.github.com/repos/GTNewHorizons/DreamAssemblerXXL/actions/artifacts/456/zip';
+const BLOB = 'https://blob.example/artifact.zip?sig=abc';
+
+test('an Actions artifact is fetched through the API with the token, which never goes to the blob link it redirects to', async (t) => {
+  const { w, s, lib, add, finished } = await libraryHub(t, { githubToken: 'ghp_secret' });
+  w.urls[BLOB] = w.urls[URL_FORGE]!;
+  s.fake.redirects[ARTIFACT_API] = BLOB;
+  await add({ url: ARTIFACT, name: 'GT New Horizons', version: 'nightly-123' });
+  assert.deepEqual(await finished(), ['ok', '']);
+  assert.deepEqual(
+    s.fake.requests.map((r) => [r.url, r.headers.authorization]),
+    [
+      [ARTIFACT_API, 'Bearer ghp_secret'],
+      [BLOB, undefined],
+    ],
+  );
+  const [entry] = (await lib()).packs;
+  assert.deepEqual([entry!.source, entry!.sha256], [ARTIFACT, sha(w.urls[URL_FORGE]!)]);
+});
+
+test('an Actions artifact without a token is refused, saying why', async (t) => {
+  const { s } = await libraryHub(t);
+  const res = await s.req('POST', '/api/library/packs', { url: ARTIFACT, ...NEW });
+  assert.equal(res.status, 400);
+  assert.equal(await res.text(), 'An Actions artifact needs a GitHub token: set GITHUB_TOKEN (Actions: read) for the hub, or paste a release link.');
+  assert.deepEqual(s.fake.requests, []);
+});
+
+test('a dropped download resumes with Range and If-Range, an artifact through the API again for a fresh link', async (t) => {
+  const { w, s, lib, add, finished } = await libraryHub(t, { githubToken: 'ghp_secret' });
+  w.urls[BLOB] = w.urls[URL_FORGE]!;
+  s.fake.redirects[ARTIFACT_API] = BLOB;
+  s.fake.drops = 2;
+  await add({ url: ARTIFACT, name: 'GT New Horizons', version: 'nightly-123' });
+  assert.deepEqual(await finished(), ['ok', '']);
+  const etag = `"${sha(w.urls[URL_FORGE]!)}"`;
+  assert.deepEqual(
+    s.fake.requests.map((r) => [r.url, r.headers.range, r.headers['if-range']]),
+    [
+      [ARTIFACT_API, undefined, undefined],
+      [BLOB, undefined, undefined],
+      [ARTIFACT_API, 'bytes=100-', etag],
+      [BLOB, 'bytes=100-', etag],
+      [ARTIFACT_API, 'bytes=200-', etag],
+      [BLOB, 'bytes=200-', etag],
+    ],
+  );
+  assert.equal((await lib()).packs[0]!.sha256, sha(w.urls[URL_FORGE]!));
+  // A plain URL resumes against itself.
+  s.fake.requests.length = 0;
+  s.fake.drops = 1;
+  await add({ url: URL_NEW, ...NEW });
+  assert.deepEqual(await finished(2), ['ok', '']);
+  assert.deepEqual(s.fake.requests.map((r) => [r.url, r.headers.range]), [[URL_NEW, undefined], [URL_NEW, 'bytes=100-']]);
+  assert.equal((await lib()).packs.find((p) => p.version === '2.7.5')!.sha256, sha(w.urls[URL_NEW]!));
+});
+
+test('a 200 to a Range starts the file over; a fourth drop fails the add', async (t) => {
+  const { w, s, lib, add, finished, files } = await libraryHub(t);
+  s.fake.drops = 1;
+  s.fake.ignoreRange = true;
+  await add({ url: URL_NEW, ...NEW });
+  assert.deepEqual(await finished(), ['ok', '']);
+  assert.deepEqual(s.fake.requests.map((r) => r.headers.range), [undefined, 'bytes=100-']);
+  assert.equal((await lib()).packs[0]!.sha256, sha(w.urls[URL_NEW]!)); // not the first 100 bytes twice
+  s.fake.ignoreRange = false;
+  s.fake.drops = 4;
+  await add({ url: URL_FORGE, name: 'GT New Horizons', version: '2.7.6' });
+  assert.deepEqual(await finished(2), ['failed', 'Downloading the pack failed: connection reset (after 3 resumes)']);
+  assert.deepEqual(files(), [`${sha(w.urls[URL_NEW]!)}.zip`]);
+});
+
+test('more than 5 redirects, a redirect off https, and an HTTP error fail the add without resuming', async (t) => {
+  const { w, s, add, finished } = await libraryHub(t);
+  for (let i = 0; i < 6; i++) s.fake.redirects[`https://hop.example/${i}`] = `https://hop.example/${i + 1}`;
+  w.urls['https://hop.example/6'] = w.urls[URL_NEW]!;
+  s.fake.redirects['https://plain.example/a.zip'] = 'http://plain.example/a.zip';
+  for (const [i, [url, why]] of [
+    ['https://hop.example/0', 'more than 5 redirects'],
+    ['https://plain.example/a.zip', "a redirect to http://plain.example/a.zip isn't https: refused"],
+    ['https://packs.example/missing.zip', 'HTTP 404'],
+  ].entries()) {
+    s.fake.requests.length = 0;
+    await add({ url, ...NEW });
+    assert.deepEqual(await finished(i + 1), ['failed', `Downloading the pack failed: ${why}`]);
+  }
+  assert.equal(s.fake.requests.length, 1); // the 404: asked once
+  s.fake.requests.length = 0;
+  delete s.fake.redirects['https://hop.example/0'];
+  s.fake.redirects['https://hop.example/1'] = 'https://hop.example/2';
+  await add({ url: 'https://hop.example/1', ...NEW }); // five redirects are fine
+  assert.deepEqual(await finished(4), ['ok', '']);
 });

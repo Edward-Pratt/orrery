@@ -18,6 +18,8 @@ import { formatBytes } from '../units';
 import { Uploader } from '../uploads';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
+/** A GitHub Actions artifact's page, as the hub accepts it. */
+const ARTIFACT = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+\/artifacts\/\d+\/?$/;
 
 /** A pack's name and version from its zip's file name ("GT_New_Horizons_2.7.4_Server_Java_17-21.zip"): a guess to correct. */
 export function fromFileName(file: string): { name: string; version: string } {
@@ -109,10 +111,23 @@ export function fromFileName(file: string): { name: string; version: string } {
           <div class="flex flex-col gap-3 px-4 pb-4 text-sm">
             <hlm-toggle-group type="single" [value]="from()" (valueChange)="from.set($any($event) || from())" class="w-full">
               <button hlmToggleGroupItem value="url" class="flex-1" data-from-url>Link</button>
+              <button hlmToggleGroupItem value="artifact" class="flex-1" data-from-artifact>Actions artifact</button>
               <button hlmToggleGroupItem value="upload" class="flex-1" data-from-upload>Upload</button>
             </hlm-toggle-group>
             @if (from() === 'url') {
               <label>Pack URL <input hlmInput class="mt-1 w-full" [value]="url()" (input)="setUrl($any($event.target).value)" data-url /></label>
+            } @else if (from() === 'artifact') {
+              <label
+                >Artifact link
+                <input
+                  hlmInput
+                  class="mt-1 w-full"
+                  placeholder="https://github.com/…/actions/runs/…/artifacts/…"
+                  [value]="artifact()"
+                  (input)="artifact.set($any($event.target).value)"
+                  data-artifact
+              /></label>
+              <p class="text-xs text-muted-foreground">The hub fetches it with its own GitHub token: no expiring blob link to copy.</p>
             } @else {
               <label>Zip <input type="file" accept=".zip" hlmInput class="mt-1 w-full" (change)="setFile($any($event.target).files?.[0])" data-file /></label>
             }
@@ -156,15 +171,19 @@ export default class Library {
   protected readonly busy = signal(false);
   protected readonly uploaded = signal<number | null>(null);
   protected readonly sheet = signal(false);
-  protected readonly from = signal<'url' | 'upload'>('url');
+  protected readonly from = signal<'url' | 'artifact' | 'upload'>('url');
   protected readonly url = signal('');
+  protected readonly artifact = signal('');
   protected readonly file = signal<File | null>(null);
   protected readonly name = signal('');
   protected readonly version = signal('');
   protected readonly mc = signal('');
   protected readonly loader = signal('');
   protected readonly ready = computed(
-    () => (this.from() === 'url' ? /^https:\/\//.test(this.url().trim()) : !!this.file()) && !!this.name().trim() && !!this.version().trim(),
+    () =>
+      (this.from() === 'url' ? /^https:\/\//.test(this.url().trim()) : this.from() === 'artifact' ? ARTIFACT.test(this.artifact().trim()) : !!this.file()) &&
+      !!this.name().trim() &&
+      !!this.version().trim(),
   );
 
   constructor() {
@@ -239,6 +258,7 @@ export default class Library {
     const answer = await this.#request(`Adding ${fields.name} ${fields.version}`, async () => {
       let body: LibraryAddRequest;
       if (this.from() === 'url') body = { url: this.url().trim(), ...fields };
+      else if (this.from() === 'artifact') body = { url: this.artifact().trim(), ...fields };
       else {
         this.uploaded.set(0);
         try {

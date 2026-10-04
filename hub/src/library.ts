@@ -12,24 +12,78 @@ import type { LibraryAdd, TargetEvent } from './types.ts';
 import { formatBytes } from './units.ts';
 import type { Uploads } from './uploads.ts';
 
-/** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
-export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
+/** One HTTP request, redirects not followed (`redirect: 'manual'`): what downloads go through. The real one is `fetch`. */
+export type Fetch = (url: string, init: { headers: Record<string, string>; redirect: 'manual'; signal?: AbortSignal }) => Promise<Response>;
 
-/** The real download: `fetch` (following redirects, as GitHub release assets need) streamed to the file. */
-export const fetchDownload: Download = async (url, dest, onProgress, signal) => {
-  const res = await fetch(url, { redirect: 'follow', signal });
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length')) || null;
-  let bytes = 0;
-  const count = new Transform({
-    transform(chunk: Buffer, _, done) {
-      bytes += chunk.length;
-      onProgress(bytes, total);
-      done(null, chunk);
-    },
-  });
-  await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest), { signal });
-};
+const GITHUB_API = 'https://api.github.com';
+const REDIRECTS = 5;
+const RESUMES = 3;
+/** A GitHub Actions artifact's page, which the API serves as a zip. */
+const ARTIFACT = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/\d+\/artifacts\/(\d+)\/?$/;
+
+/** An answer that isn't a drop: an HTTP error or a refused redirect fails the download at once. */
+class Refused extends Error {}
+
+/** `url` requested with up to 5 redirects followed here: every hop `https:`, the token sent only to api.github.com. */
+async function request(fetcher: Fetch, url: string, headers: Record<string, string>, token: string | undefined, signal?: AbortSignal): Promise<Response> {
+  for (let hop = 0; ; hop++) {
+    if (URL.parse(url)?.protocol !== 'https:') throw new Refused(`a redirect to ${url} isn't https: refused`);
+    const auth: Record<string, string> = token && new URL(url).origin === GITHUB_API ? { authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } : {};
+    const res = await fetcher(url, { headers: { ...headers, ...auth }, redirect: 'manual', signal });
+    if (![301, 302, 303, 307, 308].includes(res.status)) return res;
+    await res.body?.cancel();
+    const to = res.headers.get('location');
+    if (!to) throw new Refused(`HTTP ${res.status} without a Location`);
+    if (hop === REDIRECTS) throw new Refused(`more than ${REDIRECTS} redirects`);
+    url = new URL(to, url).href;
+  }
+}
+
+/**
+ * Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. A drop
+ * (a network error, or a body cut short) is resumed from `url` again (an artifact's API link gives a fresh blob link)
+ * with `Range` from the bytes on disk and `If-Range` with the first answer's ETag; a `200` instead of a `206` starts
+ * the file over, as does an answer without an ETag. After three resumes it fails.
+ */
+export async function download(
+  fetcher: Fetch,
+  url: string,
+  dest: string,
+  onProgress: (bytes: number, total: number | null) => void,
+  signal?: AbortSignal,
+  token?: string,
+): Promise<void> {
+  let etag: string | null = null;
+  let have = 0;
+  for (let resumes = 0; ; resumes++) {
+    try {
+      const res = await request(fetcher, url, have && etag ? { range: `bytes=${have}-`, 'if-range': etag } : {}, token, signal);
+      if (res.status === 206 && have) {
+        // appended
+      } else if (res.status === 200) {
+        have = 0;
+        etag = res.headers.get('etag');
+      } else throw new Refused(`HTTP ${res.status}`);
+      if (!res.body) throw new Refused(`HTTP ${res.status} without a body`);
+      const total = Number(res.status === 206 ? /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1] : res.headers.get('content-length')) || null;
+      let bytes = have;
+      const count = new Transform({
+        transform(chunk: Buffer, _, done) {
+          bytes += chunk.length;
+          onProgress(bytes, total);
+          done(null, chunk);
+        },
+      });
+      await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest, { flags: have ? 'a' : 'w' }), { signal });
+      if (total === null || bytes >= total) return;
+      throw new Error(`the download stopped at ${bytes} of ${total} bytes`);
+    } catch (err) {
+      if (err instanceof Refused || signal?.aborted) throw err;
+      if (resumes === RESUMES) throw new Error(`${(err as Error).message} (after ${RESUMES} resumes)`);
+      have = (await stat(dest).catch(() => undefined))?.size ?? 0;
+    }
+  }
+}
 
 /** Why a library action wasn't done: 400 (bad input), 404 (no such entry) or 409 (not now). */
 export class LibraryRefused extends Error {
@@ -47,7 +101,10 @@ export type LibraryDeps = {
   uploads: Pick<Uploads, 'get' | 'take'>;
   /** The Environment's root (the folder holding `hub.db`): zips live in `<root>/library/<sha256>.zip`. */
   root: string;
-  download: Download;
+  /** Downloads' HTTP requests. */
+  download: Fetch;
+  /** `GITHUB_TOKEN`, for Actions artifacts; sent only to api.github.com. */
+  githubToken?: string;
   /** The servers whose running pack update installs an entry. */
   installing: (id: number) => string[];
 };
@@ -188,7 +245,10 @@ export class Library {
     let from: { url: string } | { upload: string };
     if (typeof b.url === 'string') {
       if (URL.parse(b.url)?.protocol !== 'https:') throw new LibraryRefused(400, 'The pack URL must be https.');
-      from = { url: b.url };
+      if (ARTIFACT.test(b.url) && !this.#d.githubToken) {
+        throw new LibraryRefused(400, 'An Actions artifact needs a GitHub token: set GITHUB_TOKEN (Actions: read) for the hub, or paste a release link.');
+      }
+      from = { url: b.url.trim() };
     } else if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) from = { upload: b.upload };
     else throw new LibraryRefused(400, 'Give a pack URL, or upload the zip again.');
     if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);
@@ -246,9 +306,12 @@ export class Library {
       if (typeof src === 'string') {
         this.#progress(add, 'Downloading');
         let last = 0;
+        const artifact = ARTIFACT.exec(src);
+        const url = artifact ? `${GITHUB_API}/repos/${artifact[1]}/${artifact[2]}/actions/artifacts/${artifact[3]}/zip` : src;
         try {
-          await this.#d.download(
-            src,
+          await download(
+            this.#d.download,
+            url,
             temp,
             (bytes, total) => {
               if (Date.now() - last < TICK_MS) return;
@@ -256,6 +319,7 @@ export class Library {
               this.#progress(add, `Downloading ${formatBytes(bytes)}${total ? ` of ${formatBytes(total)}` : ''}`);
             },
             add.abort.signal,
+            this.#d.githubToken,
           );
         } catch (err) {
           throw add.cancelled ? err : new Error(`Downloading the pack failed: ${(err as Error).message}`);

@@ -90,7 +90,7 @@ place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and
 ## Secrets
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`, `DISCORD_CLIENT_SECRET`) are git-ignored. Never commit them.
-`GITHUB_TOKEN` (only with `integrations.github`: a fine-grained token with read access to the repo's contents) lives in
+`GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
 the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
 
 ## Agent skills

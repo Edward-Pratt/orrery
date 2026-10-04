@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
@@ -25,7 +25,7 @@ import type { HubEvent, ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from './types.ts';
 import { formatDuration } from './units.ts';
-import { sha256File, type Upload, type Uploads } from './uploads.ts';
+import type { Upload, Uploads } from './uploads.ts';
 
 /** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
 export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
@@ -79,7 +79,7 @@ export type PacksDeps = {
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
   servers: ServerSettings[];
   hasMod: (serverId: string) => boolean;
-  /** The folder holding `hub.db`: downloads, the Extras and the installed packs' zips live under it. */
+  /** The folder holding `hub.db`: downloads (`downloads/`), the Extras and the installed packs' zips live under it. */
   dataDir: string;
   /** Finished uploads, taken as a source or an Extra. */
   uploads: Pick<Uploads, 'get' | 'take'>;
@@ -132,6 +132,12 @@ const unzip = (args: string[]) =>
   new Promise<string>((resolve, reject) =>
     execFile('unzip', args, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error(`unzip: ${stderr.trim() || err.message}`)) : resolve(stdout))),
   );
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(path), hash);
+  return hash.digest('hex');
+}
 
 async function isFile(path: string): Promise<boolean> {
   return (await lstat(path).catch(() => undefined))?.isFile() ?? false;
@@ -262,7 +268,7 @@ const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2)} MB`;
 export class Packs {
   #d: PacksDeps;
   #o: Required<PacksOptions>;
-  #uploadsDir: string;
+  #downloadsDir: string;
   #compared = new Map<string, Compared>();
   #jobs = new Map<string, Job>();
   /** Stops each wait and ticker without resolving it: a closing hub leaves a running update as a crash would. */
@@ -272,11 +278,12 @@ export class Packs {
   constructor(deps: PacksDeps, o: PacksOptions = {}) {
     this.#d = deps;
     this.#o = { gateMs: 10 * 60_000, backupMs: 30 * 60_000, pollMs: 2_000, stopMs: 15 * 60_000, compareMs: 60 * 60_000, ...o };
-    this.#uploadsDir = join(deps.dataDir, 'uploads');
+    this.#downloadsDir = join(deps.dataDir, 'downloads');
   }
 
-  /** Clears leftover staging (downloads go with the uploads, at their start), and closes updates the last hub left running as interrupted. */
+  /** Clears leftover downloads and staging, and closes updates the last hub left running as interrupted. */
   async start(): Promise<void> {
+    await rm(this.#downloadsDir, { recursive: true, force: true });
     await rm(join(this.#d.dataDir, 'staging'), { recursive: true, force: true });
     for (const row of this.#d.db.packUpdates(undefined, 1000)) {
       const dir = this.#settings(row.serverId)?.dir;
@@ -971,7 +978,7 @@ export class Packs {
     return up;
   }
 
-  /** A source's zip in `<data>/uploads`, with its sha256 and what to record as its source. */
+  /** A source's zip (a download in `<data>/downloads`, or an upload), with its sha256 and what to record as its source. */
   async #fetch(
     src: PackSource,
     signal?: AbortSignal,
@@ -981,8 +988,8 @@ export class Packs {
       const up = this.#take(src.upload);
       return { zip: up.path, sha256: up.sha256, source: up.fileName };
     }
-    await mkdir(this.#uploadsDir, { recursive: true });
-    const zip = join(this.#uploadsDir, randomBytes(16).toString('hex'));
+    await mkdir(this.#downloadsDir, { recursive: true });
+    const zip = join(this.#downloadsDir, randomBytes(16).toString('hex'));
     try {
       await this.#d.download(src.url, zip, onProgress, signal);
     } catch (err) {

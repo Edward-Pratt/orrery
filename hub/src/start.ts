@@ -156,15 +156,17 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
   const uploads = services && minecraft ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
   packs =
+    services &&
+    minecraft &&
     uploads &&
     new Packs(
       {
         hub,
         db,
-        services: services!,
+        services,
         restarts,
         servers: config.servers,
-        hasMod: (id) => Boolean(minecraft!.tokens[id]),
+        hasMod: (id) => Boolean(minecraft.tokens[id]),
         uploads,
         dataDir: dirname(config.dbPath),
         download: deps.download ?? fetchDownload,

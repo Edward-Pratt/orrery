@@ -446,8 +446,8 @@ test('a zip with "..", an absolute path or a symlink is refused before anything 
     assert.equal(await res.text(), why);
   }
   assert.ok(!existsSync(join(w.root, 'evil.txt')) && !existsSync('/tmp/evil.txt'));
-  assert.deepEqual(readdirSync(join(w.root, 'data')).sort(), ['hub.db', 'uploads']);
-  assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), []); // each download deleted once refused
+  assert.deepEqual(readdirSync(join(w.root, 'data')).sort(), ['downloads', 'hub.db']);
+  assert.deepEqual(readdirSync(join(w.root, 'data', 'downloads')), []); // each download deleted once refused
 });
 
 test('a zip with no mods/ or config/ is refused; a nested content root is found', async (t) => {
@@ -779,7 +779,7 @@ for (const [why, setup, expected] of [
     assert.equal(p.installed!.version, '2.7.4');
     assert.equal(p.running, null);
     if (why === 'an edit matches nothing') assert.equal(p.edits.find((e) => e.path === 'config/gregtech.cfg')!.failedOn, '2.7.5');
-    assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), []);
+    assert.deepEqual(readdirSync(join(w.root, 'data', 'downloads')), []);
     const finished = s.events.find((e) => e.kind === 'packUpdateFinished')!;
     assert.deepEqual([finished.severity, 'outcome' in finished && finished.outcome], ['info', 'failed in staging']);
   });

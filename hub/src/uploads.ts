@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createHash, randomBytes, type Hash } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
 import { mkdir, rm, truncate, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -24,17 +24,12 @@ export class UploadRefused extends Error {
   }
 }
 
-export async function sha256File(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  await pipeline(createReadStream(path), hash);
-  return hash.digest('hex');
-}
-
-type Entry = { path: string; fileName: string; size: number; received: number; sha256?: string; writing: boolean; timer?: NodeJS.Timeout };
+/** `hash` holds the bytes received so far: each chunk hashes into a copy, kept only when the chunk is. */
+type Entry = { path: string; fileName: string; size: number; received: number; hash: Hash; sha256?: string; writing: boolean; timer?: NodeJS.Timeout };
 
 /**
  * Chunked uploads to `<dir>`: created with a name and size (≤ 4 GiB), filled by chunks (≤ 64 MiB) appended in order,
- * hashed once complete, then taken once as a source or an Extra. Dropped `idleMs` after their last chunk; wiped at start.
+ * hashed as they arrive, then taken once as a source or an Extra. Dropped `idleMs` after their last chunk; wiped at start.
  */
 export class Uploads {
   #dir: string;
@@ -61,14 +56,14 @@ export class Uploads {
     const path = join(this.#dir, id);
     await writeFile(path, '');
     const name = basename(typeof fileName === 'string' ? fileName : '').slice(0, NAME_MAX) || 'upload';
-    const e: Entry = { path, fileName: name, size: size as number, received: 0, writing: false };
+    const e: Entry = { path, fileName: name, size: size as number, received: 0, hash: createHash('sha256'), writing: false };
     this.#all.set(id, e);
     this.#touch(id, e);
-    if (e.size === 0) e.sha256 = await sha256File(path);
+    if (e.size === 0) e.sha256 = e.hash.digest('hex');
     return id;
   }
 
-  /** How much has arrived: `size` only once the file is hashed and ready. */
+  /** How much has arrived; at `size` the upload is ready. */
   received(id: string): number {
     return this.#get(id).received;
   }
@@ -79,17 +74,21 @@ export class Uploads {
     if (e.writing || offset !== e.received || e.sha256) throw new UploadRefused(409, `The upload has ${e.received} bytes.`, e.received);
     const max = Math.min(CHUNK_MAX, e.size - offset);
     e.writing = true;
+    const hash = e.hash.copy();
     let n = 0;
     const count = new Transform({
       transform(chunk: Buffer, _, done) {
         n += chunk.length;
-        done(n > max ? new UploadRefused(413, `A chunk is at most ${max} bytes here.`) : null, chunk);
+        if (n > max) return done(new UploadRefused(413, `A chunk is at most ${max} bytes here.`));
+        hash.update(chunk);
+        done(null, chunk);
       },
     });
     try {
       await pipeline(body ? Readable.fromWeb(body as never) : Readable.from([]), count, createWriteStream(e.path, { flags: 'r+', start: offset }));
-      if (offset + n === e.size) e.sha256 = await sha256File(e.path);
+      e.hash = hash;
       e.received = offset + n;
+      if (e.received === e.size) e.sha256 = hash.digest('hex');
     } catch (err) {
       await truncate(e.path, offset).catch(() => {});
       throw err instanceof UploadRefused ? err : new UploadRefused(400, `The chunk failed: ${(err as Error).message}`);

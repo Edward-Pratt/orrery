@@ -11,15 +11,15 @@ export F PATH=$T/bin:$PATH SYSTEMD_DIR=$T/systemd POLKIT_DIR=$T/polkit LC_ALL=C
 mkdir -p "$T/bin" "$F" "$SYSTEMD_DIR" "$POLKIT_DIR"
 ME=$(id -un)
 
-# Each fake notes its call in $F/calls. runuser -u <user> -- <cmd…>: runs it, unless $F/check-fails exists.
+# Each fake notes its call in $F/calls. runuser -u <user> -- <cmd…>: runs it, but check-config fails with $F/check-fails.
 cat > "$T/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$F/calls"
 EOF
 cat > "$T/bin/runuser" <<'EOF'
 #!/usr/bin/env bash
-echo "runuser $1 $2" >> "$F/calls"
-[[ ! -e $F/check-fails ]] || { echo "fake: the config is bad" >&2; exit 1; }
+echo "runuser $2 $4" >> "$F/calls"
+[[ ! -e $F/check-fails || $5 != *check-config.ts ]] || { echo "fake: the config is bad" >&2; exit 1; }
 shift 3
 exec "$@"
 EOF
@@ -77,7 +77,7 @@ check 'merges the server, its token and its service link into config.json, keepi
   const got = { servers: c.servers, tokens: c.integrations.minecraft.tokens, systemd: c.integrations.systemd };
   process.exit(JSON.stringify(got) === JSON.stringify(want) && c.integrations.minecraft.listenPort === 25580 ? 0 : 1);" "$R/config.json" "$R" "$TOKEN" "$NEW_TOKEN"'
 check 'keeps config.json.bak, and config.json its owner and mode' 'cmp -s "$R/config.json.bak" "$T/before.json" && [[ $(stat -c "%a %U" "$R/config.json") == "640 $ME" ]]'
-check 'checks the config as the hub user' 'grep -qx "runuser -u $ME" "$F/calls"'
+check 'reads, merges, checks and replaces the config only as the hub user' '[[ $(grep -c "^runuser $ME " "$F/calls") -ge 3 ]] && ! grep -q "^runuser" <(grep -v "^runuser $ME " "$F/calls")'
 check 'writes the unit: FIFO console, the hub user, the Java link on PATH' '
   grep -qx "User=$ME" "$SYSTEMD_DIR/new-1.service" &&
   grep -qx "WorkingDirectory=$R/servers/new-1" "$SYSTEMD_DIR/new-1.service" &&
@@ -96,8 +96,7 @@ check 'writes one polkit file allowing the hub user start, stop and restart of t
   grep -qF "subject.user === '\''$ME'\''" "$POLKIT_DIR/60-orrery-new-1.rules" &&
   grep -qF "action.lookup('\''unit'\'') === '\''new-1.service'\''" "$POLKIT_DIR/60-orrery-new-1.rules" &&
   grep -qF "['\''start'\'', '\''stop'\'', '\''restart'\'']" "$POLKIT_DIR/60-orrery-new-1.rules"'
-check 'enables the units without starting them, then restarts the hub; no SELinux steps with it off' '[[ $(cat "$F/calls") == "runuser -u $ME
-systemctl daemon-reload
+check 'enables the units without starting them, then restarts the hub; no SELinux steps with it off' '[[ $(grep -v ^runuser "$F/calls") == "systemctl daemon-reload
 systemctl enable new-1.socket new-1.service
 systemctl restart orrery-hub.service" ]]'
 written > "$T/first"
@@ -107,13 +106,27 @@ check 'a second run finishes the job: enables and restarts again' 'grep -qx "sys
 # The hub, restarted, takes the server over and removes the pending file.
 rm "$R/servers/new-1/.orrery-pending.json"
 check 'a run after the hub took the server over says so and changes nothing' 'add new-1 "$R" --hub-unit orrery-hub.service && grep -q "already" "$T/out" && written | cmp -s - "$T/first"'
+: > "$F/calls"
+rm "$SYSTEMD_DIR/new-1.service"
+check 'with no pending file and no unit, refuses rather than guess the start script' '! add new-1 "$R" --hub-unit orrery-hub.service && ! grep -q systemctl "$F/calls"'
 
 # A half-failed first run (the units' folder unwritable) is finished by the second.
 fresh
+cp "$R/config.json" "$T/before.json"
 chmod 555 "$SYSTEMD_DIR"
-check 'a run that fails writing the units stops there' '! add new-1 "$R" --hub-unit orrery-hub.service && ! grep -q restart "$F/calls"'
+check 'a run that fails writing the units stops there, before config.json: the pending file stays for the next' '! add new-1 "$R" --hub-unit orrery-hub.service && ! grep -q restart "$F/calls" &&
+  cmp -s "$R/config.json" "$T/before.json" && [[ ! -e $R/config.json.bak ]]'
 chmod 755 "$SYSTEMD_DIR"
 check 'the next run finishes it' 'add new-1 "$R" --hub-unit orrery-hub.service && written | cmp -s - "$T/first"'
+
+# The hub user's links can't steer a write: the files under <root> are written as that user, never root.
+fresh
+echo precious > "$T/elsewhere"
+chmod 444 "$T/elsewhere"
+ln -s "$T/elsewhere" "$R/.config.json.new"
+ln -s "$T/elsewhere" "$R/config.json.bak"
+check 'links left at the temp file and config.json.bak are replaced, not written through' 'add new-1 "$R" --hub-unit orrery-hub.service &&
+  [[ $(cat "$T/elsewhere") == precious && ! -L $R/config.json.bak && ! -L $R/config.json ]]'
 
 fresh
 touch "$F/selinux"
@@ -146,7 +159,7 @@ refuses 'an id config has with another dir' 'node -e "const f = process.argv[1],
 refuses 'a config with no integrations.minecraft' 'node -e "const f = process.argv[1], c = JSON.parse(require(\"fs\").readFileSync(f)); delete c.integrations.minecraft;
   require(\"fs\").writeFileSync(f, JSON.stringify(c))" "$R/config.json"; cp "$R/config.json" "$T/before.json"' new-1 "$R" --hub-unit orrery-hub.service
 refuses 'a config that fails the check' 'touch "$F/check-fails"' new-1 "$R" --hub-unit orrery-hub.service
-check 'leaves no temp file behind after a failed check' '[[ -z $(find "$R" -maxdepth 1 -name ".config.json.*") ]]'
+check 'leaves no temp file behind after a failed check' '[[ ! -e $R/.config.json.new ]]'
 refuses 'a real failed check (a token too short)' 'pending "{ \"name\": \"x\", \"startScript\": \"startserver-java9.sh\", \"token\": \"short\" }"' new-1 "$R" --hub-unit orrery-hub.service
 check 'shows why the check failed' 'grep -q "token" "$T/out"'
 

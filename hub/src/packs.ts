@@ -1066,20 +1066,24 @@ export class Packs {
 
       await writeFile(join(dir, PENDING_FILE), `${JSON.stringify({ name: i.name, startScript: f.startScript, token })}\n`, { mode: 0o600 });
       this.#d.db.addPendingServer({ id: i.id, name: i.name, dir, token, unit: `${i.id}.service`, gamePort: f.gamePort, runtime: f.runtime, by: i.byName, at: Date.now() });
+      await this.#endInstall(i, work);
       this.#installStep(i, 'done', '');
       this.#d.hub.audit(i.by, 'server install', i.id, `${i.name}: ok`);
     } catch (err) {
       if (this.#closed) return;
       const why = (err as Error).message;
       await this.#removeInstall(i.id).catch((e: Error) => console.error(`[packs] cleaning up ${i.id}'s install failed:`, e.message));
+      await this.#endInstall(i, work);
       this.#installStep(i, 'failed', why);
       this.#d.hub.audit(i.by, 'server install', i.id, `${i.name}: failed: ${why}`);
-    } finally {
-      // A closing hub leaves the marker: the next one removes what this install wrote.
-      if (!this.#closed) await rm(this.#installMarker(), { force: true }).catch(() => {});
-      await rm(work, { recursive: true, force: true }).catch(() => {});
-      if (this.#install === i) this.#install = undefined;
     }
+  }
+
+  /** Clears the install's scratch and marker, and its slot, before its end is announced (a closing hub leaves the marker for the next). */
+  async #endInstall(i: Install, work: string): Promise<void> {
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+    await rm(this.#installMarker(), { force: true }).catch(() => {});
+    if (this.#install === i) this.#install = undefined;
   }
 
   /** Removes everything an install wrote under an id: its folder, Java link, pack data and Pending row. */

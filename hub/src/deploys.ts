@@ -327,12 +327,13 @@ export class Deploys {
     if (!this.#d.hasMod(serverId)) throw new DeployRefused(409, `${serverName} has no Mod token.`);
     if (this.#d.restarts.pending(serverId)) throw new DeployRefused(409, `A countdown is running on ${serverName}: cancel it first.`);
     const v = version(release.tag).join('.');
-    const builds = release.assets.filter((a) => MOD_BUILD.test(a));
+    const builds = release.assets.map((a) => MOD_BUILD.exec(a)).filter((m) => m !== null);
     let asset: string;
     let jar: string;
     if (builds.length) {
-      asset = builds.find((a) => MOD_BUILD.exec(a)![1] === MC) ?? '';
-      if (!asset) throw new DeployRefused(409, `${release.tag} has no Mod build for Minecraft ${MC}.`);
+      const build = builds.find((m) => m[1] === MC);
+      if (!build) throw new DeployRefused(409, `${release.tag} has no Mod build for Minecraft ${MC}.`);
+      asset = build[0];
       jar = `orrery-${MC}-${v}.jar`;
     } else {
       // From before the rename: one gtnhdiscord jar, which reads its token from gtnhdiscord.cfg.
@@ -365,13 +366,13 @@ export class Deploys {
     // A rename never rewrites the file a running JVM has open; Forge crashes on two copies, so the others go.
     // A renamed jar reads orrery.cfg: the old config is copied over once, and kept for a pre-rename release.
     const swap = async () => {
-      await rename(part, join(mods, jar));
-      for (const f of await readdir(mods)) if (MOD_JAR.test(f) && f !== jar) await rm(join(mods, f), { force: true });
       if (jar.startsWith('orrery-')) {
         await copyFile(join(dir, 'config', 'gtnhdiscord.cfg'), join(dir, 'config', 'orrery.cfg'), constants.COPYFILE_EXCL).catch((err) => {
           if (!['ENOENT', 'EEXIST'].includes(err.code)) throw err;
         });
       }
+      await rename(part, join(mods, jar));
+      for (const f of await readdir(mods)) if (MOD_JAR.test(f) && f !== jar) await rm(join(mods, f), { force: true });
     };
     if (!this.#d.hub.get(serverId)?.online) {
       try {

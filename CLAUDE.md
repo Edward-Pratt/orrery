@@ -63,7 +63,7 @@ bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo
+bash .github/test-release.sh              # the release script against a throwaway repo, and mod-jars.sh
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual

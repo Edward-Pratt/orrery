@@ -60,8 +60,10 @@ export type Me = { id: string; username: string; avatar: string | null };
 /** `GET /api/environment`, the one read without a session: which Environment this hub is, for the dashboard's badge. */
 export type EnvironmentInfo = { environment: 'production' | 'staging' };
 
-/** `GET /api/integrations`: which integrations are switched on, and whether the hub has the Pack `library` (systemd and Minecraft). */
-/** `newServer`: New server is offered (Minecraft, GitHub and the library on). */
+/**
+ * `GET /api/integrations`: which integrations are switched on, whether the hub has the Pack `library` (systemd and
+ * Minecraft), and whether New server is offered (`newServer`: the library and GitHub on).
+ */
 export type Integrations = {
   minecraft: boolean;
   discord: boolean;
@@ -420,8 +422,11 @@ export type RuntimeAddRequest = { feature: 8 | 17 | 21 | 25 };
  */
 export type LibraryAddRequest = ({ url: string } | { upload: string }) & { name: string; version: string; mc?: string; loader?: string };
 export type LibraryAddAnswer = { add: number };
-/** `GET /api/library/packs/:id/scripts`: a pack's start scripts (its content root's `*.sh`), each with whether it loops (`while true`). */
-export type StartScript = { name: string; loops: boolean };
+/**
+ * `GET /api/library/packs/:id/scripts`: a pack's start scripts (its content root's `*.sh`), each with whether it loops
+ * (`while true`) and whether it sets the heap (`-Xmx`/`-Xms`: New server refuses one that doesn't).
+ */
+export type StartScript = { name: string; loops: boolean; memory: boolean };
 export type StartScripts = { scripts: StartScript[] };
 
 /**

@@ -63,12 +63,15 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
             @if (scripts(); as list) {
               <label
                 >Start script
-                <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" [value]="script() ?? ''" (change)="pickScript($any($event.target).value)" data-script>
+                <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="pickScript($any($event.target).value)" data-script>
                   @for (s of list; track s.name) {
-                    <option [value]="s.name">{{ s.name }}</option>
+                    <option [value]="s.name" [selected]="s.name === script()">{{ s.name }}</option>
                   }
                 </select>
               </label>
+              @if (chosen() && !chosen()!.memory) {
+                <p class="text-xs text-status-down" data-no-memory>This script sets no -Xmx or -Xms, so the memory can't be set: pick another.</p>
+              }
               @if (!list.length) {
                 <p class="text-xs text-status-down" data-no-scripts>This pack has no start script (*.sh) at its top.</p>
               }
@@ -81,11 +84,11 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
             }
             <label
               >Java runtime
-              <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" [value]="runtime()" (change)="runtime.set($any($event.target).value)" data-runtime>
+              <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="runtime.set($any($event.target).value)" data-runtime>
                 @for (r of lib.runtimes; track r.name) {
-                  <option [value]="r.name">{{ r.label }}</option>
+                  <option [value]="r.name" [selected]="r.name === runtime()">{{ r.label }}</option>
                 }
-                <option value="">System java</option>
+                <option value="" [selected]="runtime() === ''">System java</option>
               </select>
             </label>
           }
@@ -129,7 +132,8 @@ export class NewServer {
 
   protected readonly idOk = computed(() => ID.test(this.id()));
   protected readonly memoryOk = computed(() => MEMORY.test(this.memory()));
-  protected readonly loops = computed(() => this.scripts()?.find((s) => s.name === this.script())?.loops ?? false);
+  protected readonly chosen = computed(() => this.scripts()?.find((s) => s.name === this.script()));
+  protected readonly loops = computed(() => this.chosen()?.loops ?? false);
   readonly ready = computed(
     () =>
       this.idOk() &&
@@ -139,7 +143,7 @@ export class NewServer {
       this.port() <= 65535 &&
       this.memoryOk() &&
       this.pack() !== null &&
-      !!this.script() &&
+      !!this.chosen()?.memory &&
       this.eula(),
   );
 
@@ -163,7 +167,7 @@ export class NewServer {
       if (this.pack() !== id) return;
       this.scripts.set(scripts);
       // A looping script is the likely server one (GTNH's startserver-java9.sh).
-      this.pickScript((scripts.find((s) => s.loops) ?? scripts[0])?.name ?? null);
+      this.pickScript((scripts.find((s) => s.loops && s.memory) ?? scripts.find((s) => s.memory) ?? scripts[0])?.name ?? null);
     } catch (err) {
       if (err instanceof HttpErrorResponse) this.#feedback.failed('Reading its start scripts', err);
       else throw err;

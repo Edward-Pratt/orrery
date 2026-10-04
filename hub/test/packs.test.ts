@@ -1617,6 +1617,7 @@ const PACK_SERVER = {
   'server.properties': 'level-name=world\nserver-port=25565\nmotd=pack default\n',
   'startserver-java9.sh': LOOPING,
   'startserver.sh': '#!/bin/bash\njava -Xms6G -Xmx6G -jar forge.jar nogui\n',
+  'run-plain.sh': 'java -jar forge.jar nogui\n',
   'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar': 'forge',
 };
 /** Another pack, for a Minecraft version no Mod release has a build for. */
@@ -1687,8 +1688,9 @@ test("New server: a pack's start scripts are its content root's .sh files, each 
   const { s, library } = await newServerHub(t);
   assert.deepEqual(await s.json<StartScripts>(s.req('GET', `/api/library/packs/${library}/scripts`)), {
     scripts: [
-      { name: 'startserver-java9.sh', loops: true },
-      { name: 'startserver.sh', loops: false },
+      { name: 'run-plain.sh', loops: false, memory: false },
+      { name: 'startserver-java9.sh', loops: true, memory: true },
+      { name: 'startserver.sh', loops: false, memory: true },
     ],
   });
   assert.equal((await s.req('GET', '/api/library/packs/99/scripts')).status, 404);
@@ -1711,6 +1713,7 @@ test('New server: each refusal comes before anything is written', async (t) => {
     [{ memory: '8 GB' }, 400, 'Memory is a size like 6G or 512M.'],
     [{ startScript: 'run.sh' }, 400, "run.sh isn't a start script in GT New Horizons 2.7.6."],
     [{ startScript: '../x.sh' }, 400, 'Pick a start script from the pack.'],
+    [{ startScript: 'run-plain.sh' }, 400, 'run-plain.sh sets no -Xmx or -Xms for the memory: pick another start script.'],
     [{ runtime: 'temurin-21.0.8+9' }, 404, 'No such runtime in the library.'],
     [{ library: 99 }, 404, 'No such pack in the library.'],
   ] as const) {
@@ -1762,7 +1765,7 @@ test('New server: the install unpacks the pack, writes eula.txt, the port, the M
   const db = new Db(w.config.dbPath);
   t.after(() => db.close());
   assert.equal(db.pack('new-1')!.how, 'installed');
-  assert.deepEqual(db.packFiles('new-1'), ['config/gregtech.cfg', 'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar', 'mods/gregtech.jar', 'startserver-java9.sh', 'startserver.sh']);
+  assert.deepEqual(db.packFiles('new-1'), ['config/gregtech.cfg', 'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar', 'mods/gregtech.jar', 'run-plain.sh', 'startserver-java9.sh', 'startserver.sh']);
   assert.deepEqual(db.configEdits('new-1').map((e) => [e.path, e.find, e.replace]), [
     ['startserver-java9.sh', '-Xm([sx])\\S+', '-Xm$18G'],
     ['startserver-java9.sh', LOOP, '$1'],
@@ -1843,4 +1846,23 @@ test('New server: once its id is in config, the Pending server becomes a server 
   assert.deepEqual(p.pending, []);
   assert.equal(p.mod, 'mods/orrery-1.7.10-1.5.0.jar');
   assert.equal((await again.req('DELETE', '/api/servers/pending/new-1')).status, 409);
+});
+
+test('New server: an install the hub stopped in the middle of is removed by the next hub', async (t) => {
+  const h = await newServerHub(t);
+  await h.addRuntime();
+  assert.deepEqual(await h.finished(2), ['ok', '']);
+  h.mod.gate = new Promise(() => {});
+  await h.s.json(h.install({ runtime: 'temurin-21.0.8+9' }), 202);
+  await until(() => h.steps.some((x) => x.startsWith('new-1 mod')));
+  assert.ok(existsSync(h.folder));
+  await h.s.close();
+  const again = await start(t, h.w, { github: { releases: async () => [], download: async () => new Uint8Array() } });
+  assert.ok(!existsSync(h.folder));
+  assert.ok(!existsSync(join(h.data, 'java', 'new-1')));
+  assert.ok(!existsSync(join(h.data, 'work', 'installing.json')));
+  assert.deepEqual((await again.json<PendingServers>(again.req('GET', '/api/servers/pending'))).pending, []);
+  const db = new Db(h.w.config.dbPath);
+  t.after(() => db.close());
+  assert.equal(db.hasPackData('new-1'), false);
 });

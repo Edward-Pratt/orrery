@@ -103,7 +103,7 @@ describe('New server', () => {
     await set('[data-memory]', '8G');
     await set('[data-port]', '25570');
     await set('[data-pick]', '2', 'change');
-    backend.expectOne('/api/library/packs/2/scripts').flush({ scripts: [{ name: 'startserver-java9.sh', loops: true }, { name: 'startserver.sh', loops: false }] });
+    backend.expectOne('/api/library/packs/2/scripts').flush({ scripts: [{ name: 'run-plain.sh', loops: false, memory: false }, { name: 'startserver-java9.sh', loops: true, memory: true }, { name: 'startserver.sh', loops: false, memory: true }] });
     await render();
     expect(q<HTMLSelectElement>('[data-script]').value).toBe('startserver-java9.sh');
     expect(q<HTMLInputElement>('[data-loop]').checked).toBe(true);
@@ -112,6 +112,9 @@ describe('New server', () => {
     expect(go()).toBe(false);
     await set('[data-script]', 'startserver.sh', 'change');
     expect(q('[data-loop]')).toBeNull(); // no loop to remove
+    await set('[data-script]', 'run-plain.sh', 'change');
+    expect(q('[data-no-memory]')).not.toBeNull();
+    expect(go()).toBe(true);
     await set('[data-script]', 'startserver-java9.sh', 'change');
     await click('[data-loop]'); // unticked
     await set('[data-runtime]', '', 'change');
@@ -141,7 +144,7 @@ describe('New server', () => {
     await set('[data-id]', 'gtnh');
     await set('[data-name]', 'Again');
     await set('[data-pick]', '2', 'change');
-    backend.expectOne('/api/library/packs/2/scripts').flush({ scripts: [{ name: 'startserver.sh', loops: false }] });
+    backend.expectOne('/api/library/packs/2/scripts').flush({ scripts: [{ name: 'startserver.sh', loops: false, memory: true }] });
     await render();
     await click('[data-eula]');
     await click('[data-go]');

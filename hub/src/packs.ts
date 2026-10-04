@@ -87,6 +87,8 @@ export const SERVER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const SCRIPT = /^[A-Za-z0-9._-]+\.sh$/;
 /** The Config edit that takes a start script's `while true` loop out, keeping its `java` line. */
 export const LOOP = '^while true.*\\n(?:.*\\n)*?(.*\\bjava\\b.*)\\n(?:.*\\n)*?done\\b.*$';
+/** The heap flags the memory Config edit sets. */
+const MEMORY_FLAG = /-Xm([sx])\S+/;
 /** What `add-server.sh` reads: the name, start script and Mod token. */
 const PENDING_FILE = '.orrery-pending.json';
 /** The root copy `add-server.sh` runs from, and the checked-in one it is installed from. */
@@ -305,6 +307,14 @@ export class Packs {
         console.log(`[packs] ${p.id} is a server now`);
       } else console.warn(`[packs] ${p.id} is in config with another folder (${s.dir ?? 'none'}) than its Pending server's (${p.dir}): left as it is`);
     }
+    // An install the last hub left running (it stopped or crashed): what it wrote goes, unless it got as far as a server.
+    const marker = await readFile(this.#installMarker(), 'utf8').catch(() => undefined);
+    const left = marker === undefined ? undefined : (JSON.parse(marker) as { id?: unknown }).id;
+    if (typeof left === 'string' && SERVER_ID.test(left) && !this.#settings(left) && !this.#d.db.pendingServers().some((p) => p.id === left)) {
+      await this.#removeInstall(left);
+      console.log(`[packs] removed ${left}'s install, interrupted by the hub's restart`);
+    }
+    await rm(this.#installMarker(), { force: true });
     await rm(join(this.#d.dataDir, 'work', 'install'), { recursive: true, force: true });
     // `downloads/` and `staging/` are from before the library (#139).
     for (const old of ['downloads', 'staging']) await rm(join(this.#d.dataDir, old), { recursive: true, force: true });
@@ -390,6 +400,7 @@ export class Packs {
     const install: Install = { id, name, by, byName, started: Date.now(), step: 'unpack', detail: 'Checking', libraryId: entry.id };
     this.#install = install; // claimed before the first await: two requests can't both pass
     let build: { tag: string; asset: string } | undefined;
+    let script: StartScript | undefined;
     try {
       const pending = this.#d.db.pendingServers();
       if (this.#settings(id)) throw new PackRefused(409, `The id ${id} is a server in config already.`);
@@ -409,15 +420,15 @@ export class Packs {
       if (unit) throw new PackRefused(409, `systemd has a unit ${id}.service already: pick another id.`);
       build = cfg.mods.modBuild(entry.mc);
       if (!build) throw new PackRefused(409, `No Mod release has a build for Minecraft ${entry.mc}.`);
-      if (!(await startScripts(this.#d.library.zip(entry.id))).some((sc) => sc.name === startScript)) {
-        throw new PackRefused(400, `${startScript} isn't a start script in ${entry.name} ${entry.version}.`);
-      }
+      script = (await startScripts(this.#d.library.zip(entry.id))).find((sc) => sc.name === startScript);
+      if (!script) throw new PackRefused(400, `${startScript} isn't a start script in ${entry.name} ${entry.version}.`);
+      if (!script.memory) throw new PackRefused(400, `${startScript} sets no -Xmx or -Xms for the memory: pick another start script.`);
     } catch (err) {
       this.#install = undefined;
       throw err;
     }
     this.#d.hub.audit(by, 'server install', id, `${name}: ${entry.name} ${entry.version}, port ${gamePort}, ${memory}, ${runtime ?? 'system java'}`);
-    void this.#runInstall(install, entry, build, { gamePort, memory, startScript, removeLoop, runtime });
+    void this.#runInstall(install, entry, build, { gamePort, memory, startScript, removeLoop: removeLoop && script!.loops, runtime });
     return id;
   }
 
@@ -1010,6 +1021,8 @@ export class Packs {
     const work = join(this.#d.dataDir, 'work', 'install');
     const cfg = this.#d.install!;
     try {
+      await mkdir(dirname(this.#installMarker()), { recursive: true });
+      await writeFile(this.#installMarker(), JSON.stringify({ id: i.id }));
       this.#installStep(i, 'unpack', `Unpacking ${entry.name} ${entry.version}`);
       if (f.runtime) {
         // First: a runtime the install will use is in use from now on.
@@ -1036,7 +1049,7 @@ export class Packs {
 
       this.#installStep(i, 'write', 'Applying the Config edits');
       const at = Date.now();
-      this.#d.db.addEdit(i.id, { path: f.startScript, find: '-Xm([sx])\\S+', replace: `-Xm$1${f.memory}`, note: 'Memory, set at install', by: i.byName, at });
+      this.#d.db.addEdit(i.id, { path: f.startScript, find: MEMORY_FLAG.source, replace: `-Xm$1${f.memory}`, note: 'Memory, set at install', by: i.byName, at });
       if (f.removeLoop) this.#d.db.addEdit(i.id, { path: f.startScript, find: LOOP, replace: '$1', note: "No restart loop: systemd restarts the server", by: i.byName, at });
       for (const e of this.#d.db.configEdits(i.id)) {
         const file = join(dir, e.path);
@@ -1062,6 +1075,8 @@ export class Packs {
       this.#installStep(i, 'failed', why);
       this.#d.hub.audit(i.by, 'server install', i.id, `${i.name}: failed: ${why}`);
     } finally {
+      // A closing hub leaves the marker: the next one removes what this install wrote.
+      if (!this.#closed) await rm(this.#installMarker(), { force: true }).catch(() => {});
       await rm(work, { recursive: true, force: true }).catch(() => {});
       if (this.#install === i) this.#install = undefined;
     }
@@ -1090,6 +1105,11 @@ export class Packs {
       if (props !== undefined && Number(/^server-port=\s*(\d+)/m.exec(props)?.[1] ?? 25565) === port) return s.name;
     }
     return undefined;
+  }
+
+  /** Names the running install's id, so the next hub can clean up after a crash. */
+  #installMarker(): string {
+    return join(this.#d.dataDir, 'work', 'installing.json');
   }
 
   #serverDir(id: string): string {
@@ -1254,7 +1274,7 @@ export class Packs {
   }
 }
 
-/** A pack's start scripts: the plain `*.sh` files at its content root, each with whether it loops (`LOOP` matches). */
+/** A pack's start scripts: the plain `*.sh` files at its content root, each with whether it loops (`LOOP` matches) and sets the heap. */
 export async function startScripts(zip: string): Promise<StartScript[]> {
   const entries = await zipEntries(zip);
   const root = contentRoot(entries);
@@ -1264,7 +1284,7 @@ export async function startScripts(zip: string): Promise<StartScript[]> {
     const name = e.startsWith(prefix) ? e.slice(prefix.length) : '';
     if (!SCRIPT.test(name)) continue;
     const content = await unzip(['-p', zip, e]).catch(() => '');
-    scripts.push({ name, loops: new RegExp(LOOP, 'm').test(content) });
+    scripts.push({ name, loops: new RegExp(LOOP, 'm').test(content), memory: MEMORY_FLAG.test(content) });
   }
   return scripts.sort((a, b) => a.name.localeCompare(b.name));
 }

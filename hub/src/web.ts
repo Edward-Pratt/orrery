@@ -154,6 +154,16 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
+  /** Runs a library or New server action as the admin, mapping its refusals to their status. */
+  const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
+    try {
+      const answer = await fn(actor(c.get('user')), c.get('user'));
+      return answer === undefined ? c.body(null, 204) : c.json(answer, status);
+    } catch (err) {
+      if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
+      throw err;
+    }
+  };
   // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
   const newServer = Boolean(packs && library && deploys);
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
@@ -320,15 +330,6 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   }
   if (newServer) {
     // Before `/servers/:id`: "pending" isn't a server id.
-    const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
-      try {
-        const answer = await fn(actor(c.get('user')), c.get('user'));
-        return answer === undefined ? c.body(null, 204) : c.json(answer, status);
-      } catch (err) {
-        if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
-        throw err;
-      }
-    };
     app.post('/servers', (c) => act(c, async (by, user) => ({ id: await packs!.install(await jsonBody(c.req), by, user.username) }) satisfies NewServerAnswer, 202));
     app.get('/servers/pending', (c) => c.json(packs!.pending() satisfies PendingServers));
     app.delete('/servers/pending/:id', (c) => act(c, (by) => packs!.discard(c.req.param('id'), by)));
@@ -408,16 +409,6 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     });
   }
   if (library) {
-    /** Runs a library action as the admin, mapping its refusals to their status. */
-    const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
-      try {
-        const answer = await fn(actor(c.get('user')), c.get('user'));
-        return answer === undefined ? c.body(null, 204) : c.json(answer, status);
-      } catch (err) {
-        if (err instanceof LibraryRefused) return c.text(err.message, err.status);
-        throw err;
-      }
-    };
     app.get('/library', (c) => c.json(library.state() satisfies LibraryState));
     app.post('/library/packs', (c) =>
       act(c, async (by, user) => ({ add: library.addPack(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),

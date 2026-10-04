@@ -209,10 +209,11 @@ describe('server pack tab', () => {
     expect(text(el.querySelector('[data-report-mod]'))).toContain('mods/gtnhdiscord-1.4.0.jar');
     expect(el.querySelector('[data-report-mod] input')).toBeNull(); // locked
     expect(text(el.querySelector('[data-report]'))).toContain('a Config edit is better');
-    expect(text(q('[data-adopt-keep]'))).toBe('Adopt, keep 2 files');
+    expect(text(q('[data-adopt-keep]'))).toBe('Adopt, keep 0 files'); // nothing ticked to start
+    expect([...el.querySelectorAll<HTMLInputElement>('[data-report] input[type=checkbox]')].some((i) => i.checked)).toBe(false);
     el.querySelector<HTMLInputElement>('[data-group=different] input')!.click();
     await render();
-    el.querySelector<HTMLInputElement>('[data-group=notInPack] input')!.click();
+    el.querySelectorAll<HTMLInputElement>('[data-group=notInPack] input')[1]!.click();
     await render();
     expect(text(q('[data-adopt-keep]'))).toBe('Adopt, keep 2 files');
     q('[data-adopt-keep]').click();

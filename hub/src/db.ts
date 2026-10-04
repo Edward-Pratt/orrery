@@ -446,6 +446,14 @@ export class Db {
     return this.#db.prepare('SELECT server_id FROM packs WHERE library_id = ? ORDER BY server_id').all(libraryId).map((r) => r.server_id as string);
   }
 
+  /** Pack rows linked to no library entry (none yet, written by an older hub, or the entry gone), with their zip's sha256. */
+  unlinkedPacks(): { serverId: string; sha256: string }[] {
+    return this.#db
+      .prepare('SELECT server_id AS serverId, sha256 FROM packs WHERE library_id IS NULL OR library_id NOT IN (SELECT id FROM library)')
+      .all()
+      .map((r) => ({ ...r }) as { serverId: string; sha256: string });
+  }
+
   /** Points a server's pack row at a library entry (moving `packs/` over). */
   setPackLibrary(serverId: string, libraryId: number): void {
     this.#db.prepare('UPDATE packs SET library_id = ? WHERE server_id = ?').run(libraryId, serverId);

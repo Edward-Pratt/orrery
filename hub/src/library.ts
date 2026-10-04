@@ -182,13 +182,28 @@ export class Library {
     const work = join(this.#d.root, 'work');
     for (const f of await readdir(work).catch(() => [])) if (f.startsWith('runtime-')) await rm(join(work, f), { recursive: true, force: true });
     await this.#moveOver();
+    this.#relink();
+  }
+
+  /**
+   * Links each pack row with no library entry to the entry holding its zip (by sha256): a row an older hub wrote after
+   * a Rollback, or one whose zip is added to the library later.
+   */
+  #relink(): void {
+    const bySha = new Map(this.#d.db.library().map((e) => [e.sha256, e]));
+    for (const { serverId, sha256 } of this.#d.db.unlinkedPacks()) {
+      const entry = bySha.get(sha256);
+      if (!entry) continue;
+      this.#d.db.setPackLibrary(serverId, entry.id);
+      console.log(`[library] ${serverId}'s pack linked to ${entry.name} ${entry.version}`);
+    }
   }
 
   /**
    * Each `packs/<server>.zip` with a pack row joins the library under that row's name and version (as 1.7.10 Forge,
-   * all such packs were), or is the entry with its sha256 already there; the row points at it and the file goes. A
-   * file with no row is deleted. One whose name and version are taken by another file is logged and left, so nothing
-   * is lost; `packs/` goes once empty.
+   * all such packs were), or is the entry with its sha256 already there; the row points at it and the file goes. When
+   * another file has that name and version, it joins as "<version> (<server>)". A file with no row is deleted; one that
+   * still clashes is logged and left, so nothing is lost; `packs/` goes once empty.
    */
   async #moveOver(): Promise<void> {
     const old = join(this.#d.root, 'packs');
@@ -207,15 +222,17 @@ export class Library {
       const rows = this.#d.db.library();
       let entry = rows.find((r) => r.sha256 === sha256);
       if (!entry) {
-        if (rows.some((r) => r.name === row.name && r.version === row.version)) {
-          console.error(`[library] ${file}: ${row.name} ${row.version} is in the library with a different file; left in place`);
+        const taken = (version: string) => rows.some((r) => r.name === row.name && r.version === version);
+        const version = taken(row.version) ? `${row.version} (${serverId})` : row.version;
+        if (taken(version)) {
+          console.error(`[library] ${file}: ${row.name} ${version} is in the library with a different file; left in place`);
           continue;
         }
         const zip = join(this.#dir, `${sha256}.zip`);
         const size = (await stat(file)).size;
         await rename(file, zip);
-        const id = this.#d.db.addLibraryEntry({ name: row.name, version: row.version, mc: '1.7.10', loader: 'forge', sha256, size, source: row.source, by: row.by, at: row.at });
-        entry = { id, ...row, mc: '1.7.10', loader: 'forge', sha256, size };
+        const id = this.#d.db.addLibraryEntry({ name: row.name, version, mc: '1.7.10', loader: 'forge', sha256, size, source: row.source, by: row.by, at: row.at });
+        entry = { id, ...row, version, mc: '1.7.10', loader: 'forge', sha256, size };
       } else await rm(file, { force: true });
       this.#d.db.setPackLibrary(serverId, entry.id);
       console.log(`[library] moved packs/${f} in as ${entry.name} ${entry.version}`);
@@ -505,6 +522,7 @@ export class Library {
         await rm(zip, { force: true });
         throw err;
       }
+      this.#relink(); // a server's installed zip, added back
       await this.#finish(add, 'ok', '', temp);
     } catch (err) {
       await this.#finish(add, add.cancelled ? 'cancelled' : 'failed', add.cancelled ? '' : (err as Error).message, temp);

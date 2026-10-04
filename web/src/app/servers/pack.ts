@@ -683,7 +683,7 @@ export default class Pack {
   protected async compare(): Promise<void> {
     const report = await this.#request('Comparing', async () => firstValueFrom(this.#http.post<CompareReport>(`${this.#base}/compare`, { library: this.pick()! })));
     if (!report) return;
-    this.keep.set(new Set(report.notInPack.map((f) => f.path)));
+    this.keep.set(new Set()); // nothing kept unless ticked
     this.report.set(report);
   }
 

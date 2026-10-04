@@ -1279,7 +1279,7 @@ test('bad adds are 400; Delete removes the entry and its zip, audited; an unknow
   assert.deepEqual((await s.audit('library delete')).map((e) => e.details), ['GT New Horizons 2.7.5']);
 });
 
-test('at start, packs/<id>.zip moves into the library: added, or reused by sha256; no row: deleted; a name clash: left and logged', async (t) => {
+test('at start, packs/<id>.zip moves into the library: added, reused by sha256, or added as "<version> (<server>)" on a clash; no row: deleted', async (t) => {
   const w = world(t);
   w.urls[URL_FORGE] = w.zip('GTNH_2.7.6.zip', { ...PACK_NEW, 'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar': 'forge' });
   const data = dirname(w.config.dbPath);
@@ -1298,14 +1298,15 @@ test('at start, packs/<id>.zip moves into the library: added, or reused by sha25
   copyFileSync(w.urls[URL_FORGE]!, join(data, 'packs', 'clash.zip'));
   writeFileSync(join(data, 'packs', 'gone.zip'), 'no row');
   const s = await start(t, w);
-  assert.deepEqual(readdirSync(join(data, 'packs')), ['clash.zip']);
-  assert.deepEqual(readdirSync(join(data, 'library')).sort(), [`${sha(w.urls[URL_OLD]!)}.zip`, `${sha(w.urls[URL_NEW]!)}.zip`].sort());
+  assert.ok(!existsSync(join(data, 'packs')));
+  assert.deepEqual(readdirSync(join(data, 'library')).sort(), [`${sha(w.urls[URL_OLD]!)}.zip`, `${sha(w.urls[URL_NEW]!)}.zip`, `${sha(w.urls[URL_FORGE]!)}.zip`].sort());
   const { packs } = await s.json<LibraryState>(s.req('GET', '/api/library'));
   assert.deepEqual(
     packs.map(({ name, version, mc, loader, source, usedBy }) => ({ name, version, mc, loader, source, usedBy })),
     [
       { name: 'GT New Horizons', version: '2.7.5', mc: '1.7.10', loader: 'forge', source: URL_NEW, usedBy: ['reused'] },
       { name: 'GT New Horizons', version: '2.7.4', mc: '1.7.10', loader: 'forge', source: URL_OLD, usedBy: ['gtnh'] },
+      { name: 'GT New Horizons', version: '2.7.5 (clash)', mc: '1.7.10', loader: 'forge', source: 'by hand', usedBy: ['clash'] },
     ],
   );
   // The moved pack is the server's: Apply changes unzips it.
@@ -1314,11 +1315,39 @@ test('at start, packs/<id>.zip moves into the library: added, or reused by sha25
   await s.json(s.req('POST', '/api/servers/gtnh/pack/update', { pending: true }), 202);
   assert.equal((await s.finished()).outcome, 'ok');
   assert.equal(readFileSync(join(w.dir, 'mods/old-only.jar'), 'utf8'), 'gone in 2.7.5');
-  // Once moved, packs/ goes.
-  rmSync(join(data, 'packs', 'clash.zip'));
+});
+
+test("a pack row with no library link (an older hub's, after a Rollback) is linked by its zip's sha256: at start, or once that zip is added", async (t) => {
+  const w = world(t);
+  let s = await start(t, w);
+  await s.connect();
+  await s.adopt();
+  const linked = async () => (await s.json<LibraryState>(s.req('GET', '/api/library'))).packs.map((p) => `${p.version}: ${p.usedBy.join(',')}`);
+  assert.deepEqual(await linked(), ['2.7.4: gtnh']);
   await s.close();
-  await start(t, w);
-  assert.ok(!existsSync(join(data, 'packs')));
+  // What an older hub's INSERT OR REPLACE leaves: no library_id.
+  const unlink = () => {
+    const db = new Db(w.config.dbPath);
+    db.setPack('gtnh', { ...db.pack('gtnh')!, libraryId: null }, db.packFiles('gtnh'), new Set(db.packFiles('gtnh', true)));
+    db.close();
+  };
+  unlink();
+  s = await start(t, w);
+  assert.deepEqual(await linked(), ['2.7.4: gtnh']);
+  await s.connect();
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'startserver.sh', find: '-Xmx6G', replace: '-Xmx8G' }));
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', { pending: true }), 202); // Apply works again
+  assert.equal((await s.finished()).outcome, 'ok');
+  // An entry deleted from under an unlinked row comes back linked when its zip is added again.
+  await s.close();
+  unlink();
+  const db = new Db(w.config.dbPath);
+  db.deleteLibraryEntry(db.library()[0]!.id);
+  db.close();
+  s = await start(t, w);
+  assert.deepEqual(await linked(), []);
+  await s.entry(URL_OLD, '2.7.4');
+  assert.deepEqual(await linked(), ['2.7.4: gtnh']);
 });
 
 test('an entry a server uses, or a running update installs, is not deleted (409 naming them); once unused it is', async (t) => {

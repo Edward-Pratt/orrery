@@ -39,7 +39,7 @@ import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
 import { LibraryRefused, type Library } from './library.ts';
 import type { LiveFeed } from './live.ts';
-import { DownloadFailed, PackRefused, type Packs } from './packs.ts';
+import { PackRefused, type Packs } from './packs.ts';
 import { UploadRefused, type Uploads } from './uploads.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
@@ -419,8 +419,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         const answer = await fn(id, c.get('user'));
         return answer === undefined ? c.body(null, 204) : c.json(answer as object, status);
       } catch (err) {
-        if (err instanceof PackRefused) return c.text(err.message, err.status);
-        if (err instanceof DownloadFailed) return c.text(err.message, 502);
+        if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
         throw err;
       }
     };

@@ -1,9 +1,8 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
-import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type {
   CompareReport,
@@ -12,39 +11,20 @@ import type {
   InstalledPack,
   PackChange,
   PackRollback,
-  PackSource,
   PackState,
   PendingChange,
   ReportFile,
 } from './api.ts';
 import { listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
-import type { Db, EditRow, PackRow } from './db.ts';
+import type { Db, EditRow, LibraryRow, PackRow } from './db.ts';
+import type { Library } from './library.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from './types.ts';
 import { formatDuration } from './units.ts';
 import type { Upload, Uploads } from './uploads.ts';
-
-/** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
-export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
-
-/** The real download: `fetch` (following redirects, as GitHub release assets need) streamed to the file. */
-export const fetchDownload: Download = async (url, dest, onProgress, signal) => {
-  const res = await fetch(url, { redirect: 'follow', signal });
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length')) || null;
-  let bytes = 0;
-  const count = new Transform({
-    transform(chunk: Buffer, _, done) {
-      bytes += chunk.length;
-      onProgress(bytes, total);
-      done(null, chunk);
-    },
-  });
-  await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest), { signal });
-};
 
 /** Why a pack action wasn't done: 400 (bad input), 404 (no such thing) or 409 (not now). */
 export class PackRefused extends Error {
@@ -54,9 +34,6 @@ export class PackRefused extends Error {
     this.status = status;
   }
 }
-
-/** A pack URL couldn't be downloaded (the web API's 502). */
-export class DownloadFailed extends Error {}
 
 /** Shortened in tests. */
 export type PacksOptions = {
@@ -79,45 +56,49 @@ export type PacksDeps = {
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
   servers: ServerSettings[];
   hasMod: (serverId: string) => boolean;
-  /** The folder holding `hub.db`: downloads (`downloads/`), the Extras and the installed packs' zips live under it. */
+  /** The Environment's root (the folder holding `hub.db`): Compare's scratch (`work/<server>/`) and the Extras live under it. */
   dataDir: string;
-  /** Finished uploads, taken as a source or an Extra. */
+  /** Finished uploads, taken as an Extra. */
   uploads: Pick<Uploads, 'get' | 'take'>;
-  download: Download;
+  /** Where every pack comes from: Compare, Adopt and updates install a library entry's zip. */
+  library: Pick<Library, 'entry' | 'zip'>;
   /** Whether a restore runs on a server. */
   restoring: (serverId: string) => boolean;
   /** What deploy runs that a pack update on a server must wait for: a hub deploy, or a Mod deploy onto it. */
   deploying: (serverId: string) => 'hub' | 'mod' | null;
 };
 
-const STAGING = '.orrery-staging';
+/** Where Prepare builds the staged set, in the server folder. */
+const UPDATE = '.orrery-update';
+/** Its name before the rename: Kept, and deleted by the next update. */
+const LEGACY_STAGING = '.orrery-staging';
 const PRE = '.pre-update-';
 /** The Mod's jar, from before the rename and after: put back by every update, never an Extra. The only thing the hub knows about the pack's contents. */
 const MOD_JAR = /^mods\/(gtnhdiscord|orrery)-[^/]*\.jar$/;
 const HISTORY = 50;
 const LOG_LINES = 40;
 const TEXT_MAX = 200;
-/** How often live detail (download progress, countdown, gate) goes on the stream. */
+/** How often live detail (countdown, gate) goes on the stream. */
 const TICK_MS = 1_000;
 const STEPS: PackStep[] = ['prepare', 'backup', 'stop', 'swap', 'gate'];
 
 /** What the last apply laid over the pack: each Extra's sha256 by target, and each edited file's edits as JSON. */
 type Snapshot = { extras: Record<string, string>; edits: Record<string, string> };
-type Source = { url: string; name: string; version: string } | { upload: string; name: string; version: string };
-type Compared = { report: CompareReport; source: string; sha256: string; zip: string; manifest: string[]; own: Set<string>; timer: NodeJS.Timeout };
+type Compared = { report: CompareReport; entry: LibraryRow; manifest: string[]; own: Set<string>; timer: NodeJS.Timeout };
 type Job = {
   id: number;
   serverId: string;
   name: string;
   version: string;
+  /** The library entry it installs. */
+  libraryId: number;
   from: string;
   actor: string;
   byName: string;
   started: number;
   steps: PackStepState[];
-  /** Set by `cancel`; Prepare checks it between its parts, and it aborts the download. */
+  /** Set by `cancel`; Prepare checks it between its parts. */
   cancelled: boolean;
-  abort: AbortController;
   /** Where Cancel is accepted now. */
   window: 'prepare' | 'countdown' | null;
   stopped: boolean;
@@ -258,7 +239,6 @@ const clock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2)} MB`;
 
 /**
  * Server packs: the installed pack, its manifest, Extras, Config edits and changes pending; Adopt; pack updates (Prepare,
@@ -268,7 +248,6 @@ const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2)} MB`;
 export class Packs {
   #d: PacksDeps;
   #o: Required<PacksOptions>;
-  #downloadsDir: string;
   #compared = new Map<string, Compared>();
   #jobs = new Map<string, Job>();
   /** Stops each wait and ticker without resolving it: a closing hub leaves a running update as a crash would. */
@@ -278,18 +257,18 @@ export class Packs {
   constructor(deps: PacksDeps, o: PacksOptions = {}) {
     this.#d = deps;
     this.#o = { gateMs: 10 * 60_000, backupMs: 30 * 60_000, pollMs: 2_000, stopMs: 15 * 60_000, compareMs: 60 * 60_000, ...o };
-    this.#downloadsDir = join(deps.dataDir, 'downloads');
   }
 
-  /** Clears leftover downloads and staging, and closes updates the last hub left running as interrupted. */
+  /** Clears Compare's leftover scratch, and closes updates the last hub left running as interrupted. */
   async start(): Promise<void> {
-    await rm(this.#downloadsDir, { recursive: true, force: true });
-    await rm(join(this.#d.dataDir, 'staging'), { recursive: true, force: true });
+    // `downloads/` and `staging/` are from before the library (#139).
+    for (const old of ['downloads', 'staging']) await rm(join(this.#d.dataDir, old), { recursive: true, force: true });
+    for (const s of this.#d.servers) await rm(this.#work(s.id), { recursive: true, force: true });
     for (const row of this.#d.db.packUpdates(undefined, 1000)) {
       const dir = this.#settings(row.serverId)?.dir;
       const swapped = ['swap', 'gate', 'rollback'].includes(row.step);
       const pre = swapped && dir ? (await readdir(dir).catch(() => [])).filter((f) => f.startsWith(PRE)).sort().at(-1) : undefined;
-      if (dir && !swapped) await rm(join(dir, STAGING), { recursive: true, force: true });
+      if (dir && !swapped) await rm(join(dir, UPDATE), { recursive: true, force: true });
       const why = `interrupted during ${row.step}: the hub restarted${pre ? `. The old files are in ${pre}/` : ''}`;
       this.#d.db.setPackUpdate(row.id, { outcome: 'failed', finished: Date.now(), log: [row.log, why].filter(Boolean).join('\n') });
     }
@@ -308,6 +287,11 @@ export class Packs {
   /** Whether a pack update runs on a server (`serverId` undefined: on any). */
   busy(serverId?: string): boolean {
     return serverId === undefined ? this.#jobs.size > 0 : this.#jobs.has(serverId);
+  }
+
+  /** The servers whose running update installs a library entry (it can't be deleted meanwhile). */
+  installing(libraryId: number): string[] {
+    return [...this.#jobs.values()].filter((j) => j.libraryId === libraryId).map((j) => j.serverId);
   }
 
   /** The restore offer after the server's latest update rolled back; null otherwise. */
@@ -353,44 +337,38 @@ export class Packs {
   async compare(serverId: string, source: unknown, by: string): Promise<CompareReport> {
     const s = this.#server(serverId);
     if (this.#d.db.pack(serverId)) throw new PackRefused(409, `${s.name} has a pack already.`);
-    const src = this.#source(source);
-    const got = await this.#fetch(src);
+    const entry = this.#source(source);
+    const into = this.#work(serverId);
+    const kept = await this.#kept(s);
     try {
-      const into = join(this.#d.dataDir, 'staging', serverId);
-      const kept = await this.#kept(s);
-      try {
-        const { root, files } = await unpack(got.zip, into);
-        const manifest = files.filter((f) => !keptBy(f, kept)).sort();
-        const own = new Set(manifest);
-        const report: CompareReport = { name: src.name, version: src.version, matching: 0, mod: await modJars(s.dir!), notInPack: [], different: [] };
-        const size = async (f: string) => (await lstat(join(s.dir!, f))).size;
-        for (const f of manifest) {
-          if (!(await isFile(join(s.dir!, f)))) continue;
-          if ((await sha256File(join(root, f))) === (await sha256File(join(s.dir!, f)))) report.matching++;
-          else report.different.push({ path: f, size: await size(f) });
-        }
-        const inPack = new Set(files);
-        for (const top of ['mods', 'config']) {
-          for (const f of await walk(s.dir!, top)) {
-            if (!inPack.has(f) && !keptBy(f, kept)) report.notInPack.push({ path: f, size: await size(f) });
-          }
-        }
-        report.notInPack.sort((a, b) => a.path.localeCompare(b.path));
-        // Files the pack lacks count as the last apply's too: the next update drops them, unless kept as Extras.
-        manifest.push(...report.notInPack.map((f) => f.path));
-        manifest.sort();
-        this.#forget(serverId);
-        const timer = setTimeout(() => this.#forget(serverId), this.#o.compareMs);
-        timer.unref();
-        this.#compared.set(serverId, { report, source: got.source, sha256: got.sha256, zip: got.zip, manifest, own, timer });
-        this.#d.hub.audit(by, 'pack compare', serverId, `${src.name} ${src.version}: ${report.matching} files match`);
-        return report;
-      } finally {
-        await rm(into, { recursive: true, force: true });
+      const { root, files } = await unpack(this.#d.library.zip(entry.id), into);
+      const manifest = files.filter((f) => !keptBy(f, kept)).sort();
+      const own = new Set(manifest);
+      const report: CompareReport = { name: entry.name, version: entry.version, matching: 0, mod: await modJars(s.dir!), notInPack: [], different: [] };
+      const size = async (f: string) => (await lstat(join(s.dir!, f))).size;
+      for (const f of manifest) {
+        if (!(await isFile(join(s.dir!, f)))) continue;
+        if ((await sha256File(join(root, f))) === (await sha256File(join(s.dir!, f)))) report.matching++;
+        else report.different.push({ path: f, size: await size(f) });
       }
-    } catch (err) {
-      await rm(got.zip, { force: true });
-      throw err;
+      const inPack = new Set(files);
+      for (const top of ['mods', 'config']) {
+        for (const f of await walk(s.dir!, top)) {
+          if (!inPack.has(f) && !keptBy(f, kept)) report.notInPack.push({ path: f, size: await size(f) });
+        }
+      }
+      report.notInPack.sort((a, b) => a.path.localeCompare(b.path));
+      // Files the pack lacks count as the last apply's too: the next update drops them, unless kept as Extras.
+      manifest.push(...report.notInPack.map((f) => f.path));
+      manifest.sort();
+      this.#forget(serverId);
+      const timer = setTimeout(() => this.#forget(serverId), this.#o.compareMs);
+      timer.unref();
+      this.#compared.set(serverId, { report, entry, manifest, own, timer });
+      this.#d.hub.audit(by, 'pack compare', serverId, `${entry.name} ${entry.version}: ${report.matching} files match`);
+      return report;
+    } finally {
+      await rm(into, { recursive: true, force: true });
     }
   }
 
@@ -404,6 +382,7 @@ export class Packs {
     const offered = new Set([...c.report.notInPack, ...c.report.different].map((f: ReportFile) => f.path));
     const bad = (keep as string[]).find((k) => !offered.has(k));
     if (bad !== undefined) throw new PackRefused(400, `${bad} isn't in the report.`);
+    if (!this.#d.library.entry(c.entry.id)) throw new PackRefused(409, `${c.entry.name} ${c.entry.version} is no longer in the library: compare again.`);
     const at = Date.now();
     for (const target of new Set(keep as string[])) {
       const from = join(s.dir!, target);
@@ -412,10 +391,8 @@ export class Packs {
       await mkdir(this.#extrasDir(serverId), { recursive: true });
       await copyFile(from, join(this.#extrasDir(serverId), String(id)));
     }
-    await mkdir(join(this.#d.dataDir, 'packs'), { recursive: true });
-    await rename(c.zip, this.#zipOf(serverId));
-    const { name, version } = c.report;
-    this.#d.db.setPack(serverId, { name, version, source: c.source, sha256: c.sha256, by: byName, at, how: 'adopted', snapshot: JSON.stringify(this.#snapshot(serverId)) }, c.manifest, c.own);
+    const { id: libraryId, name, version, source, sha256 } = c.entry;
+    this.#d.db.setPack(serverId, { name, version, source, sha256, by: byName, at, how: 'adopted', snapshot: JSON.stringify(this.#snapshot(serverId)), libraryId }, c.manifest, c.own);
     clearTimeout(c.timer);
     this.#compared.delete(serverId);
     this.#d.hub.audit(by, 'pack adopt', serverId, `${name} ${version}, keeping ${(keep as string[]).length} files`);
@@ -513,32 +490,31 @@ export class Packs {
     if (blocked) throw new PackRefused(409, blocked);
     if (!this.#d.hub.get(serverId)?.online) throw new PackRefused(409, `${s.name} is offline: an update needs it running, for the backup.`);
     const pending = this.#pending(serverId, JSON.parse(pack.snapshot));
-    let src: Source | undefined;
+    let entry: LibraryRow | undefined;
     if (source === 'pending') {
       if (!pending.length) throw new PackRefused(409, `Nothing is pending: ${pack.version} is installed as it is.`);
+      if (pack.libraryId === null || !this.#d.library.entry(pack.libraryId)) {
+        throw new PackRefused(409, `${pack.name} ${pack.version} isn't in the library: update to a version from the library instead.`);
+      }
     } else {
-      src = this.#source(source);
-      const up = 'upload' in src ? this.#d.uploads.get(src.upload) : undefined;
-      // An upload's sha256 is known now; a URL's only after the download, so the same URL stands in for it here.
-      const same = up ? up.sha256 === pack.sha256 : 'url' in src && src.url === pack.source;
-      if (same && src.version === pack.version && !pending.length) {
+      entry = this.#source(source);
+      if (entry.sha256 === pack.sha256 && entry.version === pack.version && !pending.length) {
         throw new PackRefused(409, `${pack.name} ${pack.version} is installed already, with nothing pending.`);
       }
     }
-    const upload = src && 'upload' in src ? this.#take(src.upload) : undefined;
-    const changes = src ? null : pending.map((p) => `${p.path} ${p.change}`);
+    const changes = entry ? null : pending.map((p) => `${p.path} ${p.change}`);
     const job: Job = {
       id: 0,
       serverId,
-      name: src?.name ?? pack.name,
-      version: src?.version ?? pack.version,
+      name: entry?.name ?? pack.name,
+      version: entry?.version ?? pack.version,
+      libraryId: entry?.id ?? pack.libraryId!,
       from: pack.version,
       actor: by,
       byName,
       started: Date.now(),
       steps: STEPS.map((step) => ({ step, state: 'waiting', detail: '' })),
       cancelled: false,
-      abort: new AbortController(),
       window: 'prepare',
       stopped: false,
       touched: false,
@@ -550,7 +526,7 @@ export class Packs {
     this.#jobs.set(serverId, job);
     this.#d.hub.audit(by, 'pack update', serverId, changes ? `changes applied to ${job.version}: ${changes.join(', ')}` : `${job.from} → ${job.version}`);
     this.#d.hub.publish(serverId, { severity: 'info', kind: 'packUpdateStarted', from: job.from, to: job.version, by: byName });
-    void this.#run(job, s, pack, src && 'url' in src ? src : upload ? { upload, name: job.name, version: job.version } : undefined);
+    void this.#run(job, s, pack, entry);
     return job.id;
   }
 
@@ -562,44 +538,25 @@ export class Packs {
     if (!job.window) throw new PackRefused(409, 'Too late to cancel: only while preparing or during the countdown.');
     this.#d.hub.audit(by, 'pack update cancel', serverId, `${job.from} → ${job.version}`);
     if (job.window === 'countdown') this.#d.restarts.cancel(serverId, by, byName); // the update sees the cancelled countdown
-    else {
-      job.cancelled = true;
-      job.abort.abort();
-    }
+    else job.cancelled = true;
   }
 
   // The update itself.
 
-  async #run(job: Job, s: ServerSettings, pack: PackRow, src: { url: string; name: string; version: string } | { upload: Upload; name: string; version: string } | undefined): Promise<void> {
+  async #run(job: Job, s: ServerSettings, pack: PackRow, entry: LibraryRow | undefined): Promise<void> {
     const dir = s.dir!;
-    const staging = join(dir, STAGING);
+    const staging = join(dir, UPDATE);
     const service = this.#d.services.ofServer(s.id)!;
     const oldFiles = this.#d.db.packFiles(s.id);
     const oldOwn = new Set(this.#d.db.packFiles(s.id, true));
-    let zip: string | undefined;
     let next: PackRow | undefined;
     let manifest: string[] = [];
     let own = new Set<string>();
     try {
       // 1. Prepare: the staged set, while the server runs.
-      this.#step(job, 'prepare', 'running', src ? 'Getting the pack' : 'Building the staged set');
-      let got: { zip: string; sha256: string; source: string };
-      if (!src) got = { zip: this.#zipOf(s.id), sha256: pack.sha256, source: pack.source };
-      else if ('url' in src) {
-        let last = 0;
-        got = await this.#fetch(src, job.abort.signal, (bytes, total) => {
-          if (Date.now() - last < TICK_MS) return;
-          last = Date.now();
-          this.#step(job, 'prepare', 'running', `Downloading ${mb(bytes)}${total ? ` of ${mb(total)}` : ''}`);
-        });
-      } else got = { zip: src.upload.path, sha256: src.upload.sha256, source: src.upload.fileName };
-      if (src) zip = got.zip;
-      if (src && got.sha256 === pack.sha256 && job.version === pack.version && !this.#pending(s.id, JSON.parse(pack.snapshot)).length) {
-        throw new Error(`${pack.name} ${pack.version} is installed already, with nothing pending.`);
-      }
-      this.#cancelled(job);
       this.#step(job, 'prepare', 'running', 'Unpacking');
-      const { root, files } = await unpack(got.zip, join(staging, 'zip'));
+      await rm(join(dir, LEGACY_STAGING), { recursive: true, force: true });
+      const { root, files } = await unpack(this.#d.library.zip(job.libraryId), join(staging, 'zip'));
       const kept = await this.#kept(s);
       for (const f of files) if (keptBy(f, kept)) await rm(join(root, f), { force: true });
       own = new Set(files.filter((f) => !keptBy(f, kept)));
@@ -617,7 +574,17 @@ export class Packs {
       const staged = await walk(root);
       for (const f of staged) if (!(await inside(dir, f))) throw new Error(`${f} would be written outside the server folder.`);
       manifest = staged.filter((f) => !MOD_JAR.test(f)).sort();
-      next = { name: job.name, version: job.version, source: got.source, sha256: got.sha256, by: job.byName, at: 0, how: 'updated', snapshot: JSON.stringify(snapshot) };
+      next = {
+        name: job.name,
+        version: job.version,
+        source: entry?.source ?? pack.source,
+        sha256: entry?.sha256 ?? pack.sha256,
+        by: job.byName,
+        at: 0,
+        how: 'updated',
+        snapshot: JSON.stringify(snapshot),
+        libraryId: job.libraryId,
+      };
       this.#cancelled(job);
       job.window = null;
       this.#step(job, 'prepare', 'done', `Staged: ${manifest.length.toLocaleString('en')} files`);
@@ -651,7 +618,7 @@ export class Packs {
         job.window = null;
         if (how === 'cancelled') {
           job.stopped = false;
-          return await this.#end(job, 'cancelled', staging, zip);
+          return await this.#end(job, 'cancelled', staging);
         }
         if (how === undefined) throw new Error("The countdown didn't end in time.");
       }
@@ -683,29 +650,25 @@ export class Packs {
       // 5. Health gate: the Mod's hello.
       const waited = await this.#gate(job, service.id, 'gate');
       if (waited !== null) {
-        if (zip) {
-          await mkdir(join(this.#d.dataDir, 'packs'), { recursive: true });
-          await rename(zip, this.#zipOf(s.id));
-        }
         for (const e of this.#d.db.extras(s.id)) if (e.removed) await this.#purge(s.id, e.id);
         for (const e of this.#d.db.configEdits(s.id)) if (e.failedOn) this.#d.db.updateEdit(e.id, { ...e, failedOn: null });
         this.#step(job, 'gate', 'done', `Hello after ${clock(waited)}`);
         return await this.#end(job, 'ok', staging);
       }
       this.#step(job, 'gate', 'failed', `No hello within ${formatDuration(this.#o.gateMs)}`);
-      return await this.#rollback(job, s, service.id, pack, { oldFiles, oldOwn, manifest }, zip);
+      return await this.#rollback(job, s, service.id, pack, { oldFiles, oldOwn, manifest });
     } catch (err) {
       if (this.#closed) return; // left running: the next hub closes it as interrupted
       const why = (err as Error).message;
       this.#log(job, why);
       const at = job.steps.find((x) => x.state === 'running');
       if (at) this.#step(job, at.step, 'failed', why);
-      if (job.touched) return await this.#rollback(job, s, service.id, pack, { oldFiles, oldOwn, manifest }, zip);
+      if (job.touched) return await this.#rollback(job, s, service.id, pack, { oldFiles, oldOwn, manifest });
       if (job.stopped) {
         await this.#d.services.act(service.id, 'start', job.actor, job.byName).catch(() => {});
-        return await this.#end(job, 'failed before swap', staging, zip);
+        return await this.#end(job, 'failed before swap', staging);
       }
-      return await this.#end(job, job.cancelled ? 'cancelled' : 'failed in staging', staging, zip);
+      return await this.#end(job, job.cancelled ? 'cancelled' : 'failed in staging', staging);
     }
   }
 
@@ -716,7 +679,6 @@ export class Packs {
     serviceId: string,
     pack: PackRow,
     { oldFiles, oldOwn, manifest }: { oldFiles: string[]; oldOwn: Set<string>; manifest: string[] },
-    zip: string | undefined,
   ): Promise<void> {
     const dir = s.dir!;
     try {
@@ -730,7 +692,7 @@ export class Packs {
       const waited = await this.#gate(job, serviceId, 'rollback');
       if (waited !== null) {
         this.#step(job, 'rollback', 'done', `${pack.version} is running again`);
-        return await this.#end(job, 'rolled back', join(dir, STAGING), zip);
+        return await this.#end(job, 'rolled back', join(dir, UPDATE));
       }
       this.#log(job, `${s.name} didn't come back after the rollback either. The old files are in ${job.pre}/`);
       this.#step(job, 'rollback', 'failed', `No hello after the rollback either. The old files are in ${job.pre}/`);
@@ -739,7 +701,7 @@ export class Packs {
       this.#log(job, `The rollback failed: ${(err as Error).message}. The old files are in ${job.pre}/`);
       this.#step(job, 'rollback', 'failed', (err as Error).message);
     }
-    return await this.#end(job, 'failed', join(dir, STAGING), zip);
+    return await this.#end(job, 'failed', join(dir, UPDATE));
   }
 
   /** Starts the service and waits for the Mod's hello; resolves with how long it took, or null without one. */
@@ -797,10 +759,9 @@ export class Packs {
     if (job.cancelled) throw new Error('Cancelled.');
   }
 
-  async #end(job: Job, outcome: PackFinished, staging: string, zip?: string): Promise<void> {
+  async #end(job: Job, outcome: PackFinished, staging: string): Promise<void> {
     if (this.#closed) return;
     await rm(staging, { recursive: true, force: true }).catch(() => {});
-    if (zip && outcome !== 'ok') await rm(zip, { force: true }).catch(() => {});
     if (outcome === 'cancelled') this.#log(job, 'Cancelled: the server was not touched.');
     const finished = Date.now();
     this.#d.db.setPackUpdate(job.id, { outcome, finished, log: job.log.slice(-LOG_LINES).join('\n') });
@@ -910,8 +871,9 @@ export class Packs {
     return join(this.#d.dataDir, 'extras', serverId);
   }
 
-  #zipOf(serverId: string): string {
-    return join(this.#d.dataDir, 'packs', `${serverId}.zip`);
+  /** Compare's scratch folder for a server. */
+  #work(serverId: string): string {
+    return join(this.#d.dataDir, 'work', serverId);
   }
 
   async #builtIn(s: ServerSettings): Promise<string[]> {
@@ -932,7 +894,8 @@ export class Packs {
       'crash-reports/',
       ...(backups && !backups.startsWith('..') && !isAbsolute(backups) ? [`${backups}/`] : []),
       `${PRE}*/`,
-      `${STAGING}/`,
+      `${UPDATE}/`,
+      `${LEGACY_STAGING}/`,
       'mods/gtnhdiscord-*.jar',
       'mods/orrery-*.jar',
     ];
@@ -959,16 +922,13 @@ export class Packs {
     return { path, find: body.find as string, replace: body.replace, note: text(body.note, 'a note') };
   }
 
-  #source(raw: unknown): Source {
-    const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const name = text(b.name, 'the pack name', true);
-    const version = text(b.version, 'the pack version', true);
-    if (typeof b.url === 'string') {
-      if (URL.parse(b.url)?.protocol !== 'https:') throw new PackRefused(400, 'The pack URL must be https.');
-      return { url: b.url, name, version };
-    }
-    if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) return { upload: b.upload, name, version };
-    throw new PackRefused(400, 'Give a pack URL, or upload the zip again.');
+  /** A source: `{ library: <id> }`, an entry in the library. */
+  #source(raw: unknown): LibraryRow {
+    const id = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    if (!Number.isSafeInteger(id.library) || (id.library as number) < 1) throw new PackRefused(400, 'Pick a pack version from the library.');
+    const entry = this.#d.library.entry(id.library as number);
+    if (!entry) throw new PackRefused(404, 'No such pack in the library.');
+    return entry;
   }
 
   /** Takes an upload for use: it is gone from the list (its file is the caller's). */
@@ -976,27 +936,6 @@ export class Packs {
     const up = this.#d.uploads.take(id);
     if (!up) throw new PackRefused(400, 'Upload the file (again).');
     return up;
-  }
-
-  /** A source's zip (a download in `<data>/downloads`, or an upload), with its sha256 and what to record as its source. */
-  async #fetch(
-    src: PackSource,
-    signal?: AbortSignal,
-    onProgress: (bytes: number, total: number | null) => void = () => {},
-  ): Promise<{ zip: string; sha256: string; source: string }> {
-    if ('upload' in src) {
-      const up = this.#take(src.upload);
-      return { zip: up.path, sha256: up.sha256, source: up.fileName };
-    }
-    await mkdir(this.#downloadsDir, { recursive: true });
-    const zip = join(this.#downloadsDir, randomBytes(16).toString('hex'));
-    try {
-      await this.#d.download(src.url, zip, onProgress, signal);
-    } catch (err) {
-      await rm(zip, { force: true });
-      throw new DownloadFailed(`Downloading the pack failed: ${(err as Error).message}`);
-    }
-    return { zip, sha256: await sha256File(zip), source: src.url };
   }
 
   async #store(serverId: string, id: number, upload: Upload): Promise<void> {
@@ -1014,7 +953,6 @@ export class Packs {
     if (!c) return;
     clearTimeout(c.timer);
     this.#compared.delete(serverId);
-    void rm(c.zip, { force: true });
   }
 
   #snapshot(serverId: string): Snapshot {

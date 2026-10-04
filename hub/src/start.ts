@@ -3,8 +3,8 @@ import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { HostMonitor, type HostReaders } from './host.ts';
-import { Library } from './library.ts';
-import { fetchDownload, Packs, type Download, type PacksOptions } from './packs.ts';
+import { fetchDownload, Library, type Download } from './library.ts';
+import { Packs, type PacksOptions } from './packs.ts';
 import { Restores, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
 import type { Config, DiscordConfig } from './config.ts';
@@ -49,7 +49,7 @@ export type HubDeps = {
   github?: GitHub;
   /** Shorter deploy timings, for tests. */
   deploys?: DeploysOptions;
-  /** Downloads a pack zip from a URL (default: `fetch`). */
+  /** Downloads a pack zip from a URL into the library (default: `fetch`). */
   download?: Download;
   /** Shorter pack update timings, for tests. */
   packs?: PacksOptions;
@@ -151,6 +151,10 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         restoring: () => restores?.busy() ?? false,
         packing: (id) => packs?.busy(id) ?? false,
         libraryAdding: () => library?.busy() ?? false,
+        mcOf: (id) => {
+          const libraryId = db.pack(id)?.libraryId;
+          return libraryId ? db.library().find((e) => e.id === libraryId)?.mc : undefined;
+        },
         dbCopies,
       },
       deps.deploys,
@@ -158,6 +162,17 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   deploys?.start();
   // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
   const uploads = services && minecraft ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
+  // The library takes uploads and is one per Environment: on whenever packs are.
+  library =
+    uploads &&
+    new Library({
+      hub,
+      db,
+      uploads,
+      root: dirname(config.dbPath),
+      download: deps.download ?? fetchDownload,
+      installing: (id) => packs?.installing(id) ?? [],
+    });
   packs =
     services &&
     minecraft &&
@@ -171,16 +186,13 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft.tokens[id]),
         uploads,
+        library: library!, // on whenever uploads are
         dataDir: dirname(config.dbPath),
-        download: deps.download ?? fetchDownload,
         restoring: (id) => restores?.busy(id) ?? false,
         deploying: (id) => (deploys?.busy() ? 'hub' : deploys?.modBusy(id) ? 'mod' : null),
       },
       deps.packs,
     );
-
-  // The library takes uploads and is one per Environment: on whenever packs are.
-  library = uploads && new Library({ hub, db, uploads, root: dirname(config.dbPath), download: deps.download ?? fetchDownload });
 
   const stats = new Stats(hub, db, config.servers);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;

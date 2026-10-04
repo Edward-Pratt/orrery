@@ -7,6 +7,7 @@ import type { LibraryAdd, LibraryPack, LibraryState } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { dialog, dialogButton, fakeEvents } from '../testing';
 import routes from './routes';
+import { fromFileName } from './library';
 
 const PACK: LibraryPack = {
   id: 2,
@@ -58,6 +59,14 @@ async function setup(state: LibraryState) {
   };
   return { el, backend, render, text, q, type, reload, push };
 }
+
+describe('pack names from file names', () => {
+  it('reads the name and version a pack zip is called by', () => {
+    expect(fromFileName('GT_New_Horizons_2.7.4_Server_Java_17-21.zip')).toEqual({ name: 'GT New Horizons', version: '2.7.4' });
+    expect(fromFileName('https://x/releases/download/2.8.0-beta-2/GT_New_Horizons_2.8.0-beta-2_Server_Java_17-21.zip')).toEqual({ name: 'GT New Horizons', version: '2.8.0-beta-2' });
+    expect(fromFileName('pack.zip')).toEqual({ name: 'pack', version: '' });
+  });
+});
 
 describe('library page', () => {
   it('starts empty, with Add pack', async () => {

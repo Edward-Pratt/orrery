@@ -359,8 +359,8 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { integrations: _, ...c } = valid(dir);
-  const github = (g: unknown) => validateConfig({ ...c, integrations: { github: g } });
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }), []);
+  const github = (g: unknown, dbPath = '/srv/orrery-staging/hub.db') => validateConfig({ ...c, dbPath, integrations: { github: g } });
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, 'hub.db'), []); // no root set: nothing to compare
   const staging = {
     root: '/srv/orrery-staging',
     hubUnit: 'orrery-hub-staging.service',
@@ -369,6 +369,10 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
     webDir: '/var/www/orrery-staging',
   };
   assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', newerAfterDays: 7, deploys: staging }), []);
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: { root: '/srv/orrery-staging/' } }, '/srv/orrery-staging/./hub.db'), []);
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: staging }, '/srv/orrery/hub.db'), [
+    'integrations.github.deploys: "root" must be the folder holding dbPath (/srv/orrery)',
+  ]);
   assert.deepEqual(github('orrery'), ['integrations: "github" must be an object']);
   assert.deepEqual(github({ repo: 'orrery', newerAfterDays: 0, deploys: [] }), [
     'integrations.github: "repo" must be owner/name',
@@ -384,7 +388,7 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   ]);
 
   const path = join(dir, 'config.json');
-  await writeFile(path, JSON.stringify({ ...c, integrations: { github: { repo: 'a/b', deploys: { root: '/srv/x' } } } }));
+  await writeFile(path, JSON.stringify({ ...c, dbPath: '/srv/x/hub.db', integrations: { github: { repo: 'a/b', deploys: { root: '/srv/x' } } } }));
   assert.deepEqual(loadConfig(path).integrations.github, {
     repo: 'a/b',
     newerAfterDays: 14,

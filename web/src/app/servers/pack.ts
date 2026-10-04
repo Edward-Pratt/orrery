@@ -9,8 +9,9 @@ import type {
   EditPreview,
   EditRequest,
   Extra,
+  LibraryPack,
+  LibraryState,
   PackFinished,
-  PackSource,
   PackState,
   PackStep,
   PackUpdateAnswer,
@@ -24,7 +25,6 @@ import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
-import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
 import { catchError, debounceTime, defer, EMPTY, filter, firstValueFrom, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
@@ -46,14 +46,6 @@ const FLOW =
   'The pack is prepared while the server runs; then a backup, a 5-minute countdown if players are online, the swap, and up to 10 minutes for the Mod to say hello, or it rolls back.';
 const PENDING_TOAST = 'Saved: changes pending, not on the server until you apply them.';
 
-/** A pack's name and version from its zip's file name ("GT_New_Horizons_2.7.4_Server_Java_17-21.zip"): a guess to correct. */
-export function fromFileName(file: string): { name: string; version: string } {
-  const base = file.split(/[/?#]/).filter(Boolean).at(-1)?.replace(/\.zip$/i, '') ?? '';
-  const m = /\d+\.\d+(?:\.\d+)*(?:-(?:beta|rc|pre)(?:[-.]?\d+)*)?/i.exec(base);
-  if (!m) return { name: base.replace(/[_-]+/g, ' ').trim(), version: '' };
-  return { name: base.slice(0, m.index).replace(/[_-]+/g, ' ').trim(), version: m[0] };
-}
-
 type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: boolean } | { kind: 'edit'; edit?: ConfigEdit };
 
 /**
@@ -65,7 +57,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
  */
 @Component({
   selector: 'app-server-pack',
-  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner, HlmToggleGroupImports],
+  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner],
   viewProviders: [provideIcons({ lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLoaderCircle, lucideLock, lucidePackage, lucidePlus, lucideX })],
   template: `
     @if (state(); as p) {
@@ -76,17 +68,16 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
               <ng-icon name="lucidePackage" class="text-3xl text-muted-foreground" />
               <p class="mt-2 font-medium">orrery doesn't know this server's pack yet</p>
               <p class="mx-auto mb-4 max-w-md text-sm text-muted-foreground">
-                Tell it which pack and version the server runs now. It gets that pack and compares: nothing on the server changes.
+                Pick the pack version the server runs now from the library. It compares the two: nothing on the server changes.
               </p>
               <div class="mx-auto flex max-w-md flex-col gap-2 text-left text-sm">
                 <ng-container [ngTemplateOutlet]="sourceFields" />
-                <button hlmBtn class="mt-2" [disabled]="busy() || !sourceReady()" (click)="compare()" data-compare>
+                <button hlmBtn class="mt-2" [disabled]="busy() || !picked()" (click)="compare()" data-compare>
                   @if (busy()) {
                     <hlm-spinner />
                   }
                   Compare with the server
                 </button>
-                <ng-container [ngTemplateOutlet]="uploading" />
               </div>
             </div>
           } @else {
@@ -204,7 +195,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 </div>
                 <div class="flex flex-col items-end gap-1">
                   <div class="flex gap-2">
-                    <button hlmBtn [variant]="p.pending.length ? 'outline' : 'default'" [disabled]="!!blocked() || busy()" (click)="sheet.set({ kind: 'update' })" data-update>
+                    <button hlmBtn [variant]="p.pending.length ? 'outline' : 'default'" [disabled]="!!blocked() || busy()" (click)="openSheet({ kind: 'update' })" data-update>
                       Update pack
                     </button>
                     @if (p.pending.length) {
@@ -394,20 +385,22 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
       }
     </ng-template>
     <ng-template #sourceFields>
-      <hlm-toggle-group type="single" [value]="from()" (valueChange)="from.set($any($event) || from())" class="w-full">
-        <button hlmToggleGroupItem value="url" class="flex-1" data-from-url>From a URL</button>
-        <button hlmToggleGroupItem value="upload" class="flex-1" data-from-upload>Upload a zip</button>
-      </hlm-toggle-group>
-      @if (from() === 'url') {
-        <label>Pack URL <input hlmInput class="mt-1 w-full" [value]="url()" (input)="setUrl($any($event.target).value)" data-url /></label>
-      } @else {
-        <label>Zip <input type="file" accept=".zip" hlmInput class="mt-1 w-full" (change)="setFile($any($event.target).files?.[0])" data-file /></label>
+      @if (library(); as packs) {
+        @if (packs.length) {
+          <label
+            >Pack version
+            <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" [value]="pick() ?? ''" (change)="pick.set(+$any($event.target).value || null)" data-pick>
+              <option value="">Choose a version…</option>
+              @for (e of packs; track e.id) {
+                <option [value]="e.id">{{ e.name }} {{ e.version }} · Minecraft {{ e.mc }}</option>
+              }
+            </select>
+          </label>
+        } @else {
+          <p class="text-muted-foreground" data-library-empty>The library has no pack versions yet.</p>
+        }
       }
-      <div class="grid grid-cols-2 gap-2">
-        <label>Name <input hlmInput class="mt-1 w-full" [value]="name()" (input)="name.set($any($event.target).value)" data-name /></label>
-        <label>Version <input hlmInput class="mt-1 w-full" [value]="version()" (input)="version.set($any($event.target).value)" data-version /></label>
-      </div>
-      <p class="text-xs text-muted-foreground">Name and version are read from the file name; fix them if wrong.</p>
+      <p class="text-xs text-muted-foreground">Not there? <a routerLink="/library" class="underline" data-library-link>Add it on the Library page</a> first.</p>
     </ng-template>
 
     @if (sheet(); as s) {
@@ -421,8 +414,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
               @case ('update') {
                 <ng-container [ngTemplateOutlet]="sourceFields" />
                 <p class="text-xs text-muted-foreground">{{ flow }}</p>
-                <button hlmBtn [disabled]="busy() || !sourceReady()" (click)="update()" data-update-go>Update to {{ version() || '…' }}…</button>
-                <ng-container [ngTemplateOutlet]="uploading" />
+                <button hlmBtn [disabled]="busy() || !picked()" (click)="update()" data-update-go>Update to {{ picked()?.version ?? '…' }}…</button>
               }
               @case ('extra') {
                 @if (!s.extra || s.replace) {
@@ -493,12 +485,10 @@ export default class Pack {
   protected readonly report = signal<CompareReport | null>(null);
   protected readonly keep = signal(new Set<string>());
 
-  // The source fields (Adopt and Update pack).
-  protected readonly from = signal<'url' | 'upload'>('url');
-  protected readonly url = signal('');
-  protected readonly file = signal<File | null>(null);
-  protected readonly name = signal('');
-  protected readonly version = signal('');
+  // The library version picked (Adopt and Update pack).
+  protected readonly library = signal<LibraryPack[] | null>(null);
+  protected readonly pick = signal<number | null>(null);
+  protected readonly picked = computed(() => this.library()?.find((e) => e.id === this.pick()) ?? null);
   // The Extra and Config edit sheets.
   protected readonly extraFile = signal<File | null>(null);
   protected readonly target = signal('');
@@ -511,9 +501,6 @@ export default class Pack {
   readonly #previews = new Subject<void>();
   readonly #reload = new Subject<void>();
 
-  protected readonly sourceReady = computed(
-    () => (this.from() === 'url' ? /^https:\/\//.test(this.url().trim()) : !!this.file()) && !!this.name().trim() && !!this.version().trim(),
-  );
   protected readonly replacesPack = computed(() => this.state()?.packFiles.includes(this.target().trim()) ?? false);
   /** Why an update can't start now: the hub's reason, or the server being offline (the backup needs it). */
   protected readonly blocked = computed(() => {
@@ -547,7 +534,10 @@ export default class Pack {
         ),
         takeUntilDestroyed(),
       )
-      .subscribe((p) => this.#show(p));
+      .subscribe((p) => {
+        this.#show(p);
+        if (!p.installed && !this.library()) this.#fetchLibrary();
+      });
     const events = inject(LiveEvents).all$;
     // A Mod deploy starting or ending changes why an update can't start.
     events.pipe(filter(ofTarget('deploy')), takeUntilDestroyed()).subscribe(() => this.#reload.next());
@@ -592,20 +582,12 @@ export default class Pack {
   protected isUrl = (s: string) => /^https:\/\//.test(s);
   protected took = (ms: number) => formatDuration(ms);
 
-  protected setUrl(url: string): void {
-    this.url.set(url);
-    this.#guess(url);
-  }
-
-  protected setFile(file: File | undefined): void {
-    this.file.set(file ?? null);
-    if (file) this.#guess(file.name);
-  }
-
-  #guess(file: string): void {
-    const { name, version } = fromFileName(file);
-    if (name) this.name.set(name);
-    if (version) this.version.set(version);
+  /** The library's versions, to pick from. */
+  #fetchLibrary(): void {
+    this.#http.get<LibraryState>('/api/library').subscribe({
+      next: (l) => this.library.set(l.packs),
+      error: (err: HttpErrorResponse) => this.#feedback.failed('Reading the library', err),
+    });
   }
 
   protected setExtraFile(file: File | undefined): void {
@@ -617,7 +599,10 @@ export default class Pack {
   protected openSheet(s: Sheet): void {
     this.extraFile.set(null);
     this.preview.set(null);
-    if (s.kind === 'extra') {
+    if (s.kind === 'update') {
+      this.pick.set(null);
+      this.#fetchLibrary();
+    } else if (s.kind === 'extra') {
       this.target.set('');
       this.label.set(s.extra?.label ?? '');
       this.note.set(s.extra?.note ?? '');
@@ -643,7 +628,7 @@ export default class Pack {
     });
   }
 
-  /** Uploads a file for the hub to use once (a pack zip or an Extra), showing how much is sent; its upload id. */
+  /** Uploads an Extra for the hub to use once, showing how much is sent; its upload id. */
   async #upload(file: File): Promise<string> {
     this.uploaded.set(0);
     try {
@@ -651,14 +636,6 @@ export default class Pack {
     } finally {
       this.uploaded.set(null);
     }
-  }
-
-  /** The source from the fields, its zip uploaded first when it is one. */
-  async #source(): Promise<PackSource> {
-    const name = this.name().trim();
-    const version = this.version().trim();
-    if (this.from() === 'url') return { url: this.url().trim(), name, version };
-    return { upload: await this.#upload(this.file()!), name, version };
   }
 
   /** Runs a request with the buttons disabled; reports a failure as a toast. Resolves with the answer, or undefined. */
@@ -676,7 +653,7 @@ export default class Pack {
   }
 
   protected async compare(): Promise<void> {
-    const report = await this.#request('Comparing', async () => firstValueFrom(this.#http.post<CompareReport>(`${this.#base}/compare`, await this.#source())));
+    const report = await this.#request('Comparing', async () => firstValueFrom(this.#http.post<CompareReport>(`${this.#base}/compare`, { library: this.pick()! })));
     if (!report) return;
     this.keep.set(new Set(report.notInPack.map((f) => f.path)));
     this.report.set(report);
@@ -697,10 +674,10 @@ export default class Pack {
 
   protected async update(): Promise<void> {
     const server = this.#server.card()!.name;
-    const [name, version] = [this.name().trim(), this.version().trim()];
+    const { id, name, version } = this.picked()!;
     this.sheet.set(null);
     const ok = await this.#feedback.confirm({ title: `Update ${server} to ${name} ${version}?`, description: this.#confirmText(), verb: `Update to ${version}` });
-    if (ok) await this.#start(async () => this.#source());
+    if (ok) await this.#start(async () => ({ library: id }));
   }
 
   protected async apply(): Promise<void> {

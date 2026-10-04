@@ -1,13 +1,35 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { LibraryPack, LibraryState, RunningLibraryAdd } from './api.ts';
 import type { Db, LibraryRow } from './db.ts';
-import { contentRoot, sha256File, zipEntries, type Download } from './packs.ts';
+import { contentRoot, sha256File, zipEntries } from './packs.ts';
 import type { ServerHub } from './servers.ts';
 import type { LibraryAdd, TargetEvent } from './types.ts';
 import { formatBytes } from './units.ts';
 import type { Uploads } from './uploads.ts';
+
+/** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
+export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
+
+/** The real download: `fetch` (following redirects, as GitHub release assets need) streamed to the file. */
+export const fetchDownload: Download = async (url, dest, onProgress, signal) => {
+  const res = await fetch(url, { redirect: 'follow', signal });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || null;
+  let bytes = 0;
+  const count = new Transform({
+    transform(chunk: Buffer, _, done) {
+      bytes += chunk.length;
+      onProgress(bytes, total);
+      done(null, chunk);
+    },
+  });
+  await pipeline(Readable.fromWeb(res.body as never), count, createWriteStream(dest), { signal });
+};
 
 /** Why a library action wasn't done: 400 (bad input), 404 (no such entry) or 409 (not now). */
 export class LibraryRefused extends Error {
@@ -26,6 +48,8 @@ export type LibraryDeps = {
   /** The Environment's root (the folder holding `hub.db`): zips live in `<root>/library/<sha256>.zip`. */
   root: string;
   download: Download;
+  /** The servers whose running pack update installs an entry. */
+  installing: (id: number) => string[];
 };
 
 const TEXT_MAX = 100;
@@ -78,9 +102,49 @@ export class Library {
     this.#dir = join(deps.root, 'library');
   }
 
-  /** Clears what adds left when the last hub stopped. */
+  /** Clears what adds left when the last hub stopped, and moves the zips of `packs/` (from before the library) in. */
   async start(): Promise<void> {
     for (const f of await readdir(this.#dir).catch(() => [])) if (f.startsWith(TEMP)) await rm(join(this.#dir, f), { force: true });
+    await this.#moveOver();
+  }
+
+  /**
+   * Each `packs/<server>.zip` with a pack row joins the library under that row's name and version (as 1.7.10 Forge,
+   * all such packs were), or is the entry with its sha256 already there; the row points at it and the file goes. A
+   * file with no row is deleted. One whose name and version are taken by another file is logged and left, so nothing
+   * is lost; `packs/` goes once empty.
+   */
+  async #moveOver(): Promise<void> {
+    const old = join(this.#d.root, 'packs');
+    const files = await readdir(old).catch(() => undefined);
+    if (!files) return;
+    await mkdir(this.#dir, { recursive: true });
+    for (const f of files) {
+      const file = join(old, f);
+      const serverId = f.endsWith('.zip') ? f.slice(0, -4) : '';
+      const row = serverId ? this.#d.db.pack(serverId) : undefined;
+      if (!row) {
+        await rm(file, { recursive: true, force: true });
+        continue;
+      }
+      const sha256 = await sha256File(file);
+      const rows = this.#d.db.library();
+      let entry = rows.find((r) => r.sha256 === sha256);
+      if (!entry) {
+        if (rows.some((r) => r.name === row.name && r.version === row.version)) {
+          console.error(`[library] ${file}: ${row.name} ${row.version} is in the library with a different file; left in place`);
+          continue;
+        }
+        const zip = join(this.#dir, `${sha256}.zip`);
+        const size = (await stat(file)).size;
+        await rename(file, zip);
+        const id = this.#d.db.addLibraryEntry({ name: row.name, version: row.version, mc: '1.7.10', loader: 'forge', sha256, size, source: row.source, by: row.by, at: row.at });
+        entry = { id, ...row, mc: '1.7.10', loader: 'forge', sha256, size };
+      } else await rm(file, { force: true });
+      this.#d.db.setPackLibrary(serverId, entry.id);
+      console.log(`[library] moved packs/${f} in as ${entry.name} ${entry.version}`);
+    }
+    await rmdir(old).catch(() => {}); // not empty: a clash was left
   }
 
   stop(): void {
@@ -96,9 +160,14 @@ export class Library {
   state(): LibraryState {
     const a = this.#add;
     return {
-      packs: this.#d.db.library().map((r): LibraryPack => ({ ...r, usedBy: [] })),
+      packs: this.#d.db.library().map((r): LibraryPack => ({ ...r, usedBy: this.#usedBy(r.id) })),
       running: a ? { add: a.add, name: a.name, version: a.version, by: a.by, started: a.started, detail: a.detail } : null,
     };
+  }
+
+  /** An entry, or undefined for an unknown id. */
+  entry(id: number): LibraryRow | undefined {
+    return this.#d.db.library().find((r) => r.id === id);
   }
 
   /** An entry's zip; 404 for an unknown id. */
@@ -159,8 +228,11 @@ export class Library {
     a.abort.abort();
   }
 
+  /** Deletes an entry and its zip; refused (409, naming them) while a server's pack is it or an update installs it. */
   async deletePack(id: number, by: string): Promise<void> {
     const e = this.#entry(id);
+    const users = this.#usedBy(id);
+    if (users.length) throw new LibraryRefused(409, `${e.name} ${e.version} is used by ${users.join(', ')}.`);
     this.#d.db.deleteLibraryEntry(id);
     await rm(join(this.#dir, `${e.sha256}.zip`), { force: true });
     this.#d.hub.audit(by, 'library delete', 'library', `${e.name} ${e.version}`);
@@ -258,8 +330,13 @@ export class Library {
     this.#d.hub.publishTarget({ target: 'library', id: 'packs', type: 'libraryAdd', add: add.add, name: add.name, version: add.version, by: add.by, ...e } as TargetEvent);
   }
 
+  /** The servers using an entry: their pack is it, or their running update installs it. */
+  #usedBy(id: number): string[] {
+    return [...new Set([...this.#d.db.packsOf(id), ...this.#d.installing(id)])].sort();
+  }
+
   #entry(id: number): LibraryRow {
-    const e = this.#d.db.library().find((r) => r.id === id);
+    const e = this.entry(id);
     if (!e) throw new LibraryRefused(404, 'No such pack in the library.');
     return e;
   }

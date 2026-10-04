@@ -3,11 +3,10 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { CompareReport, Extra, Notice, PackState, PackUpdateRow, ServerCard, ServerDetail } from '@hub/api';
+import type { CompareReport, Extra, LibraryPack, LibraryState, Notice, PackState, PackUpdateRow, ServerCard, ServerDetail } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle } from '../testing';
-import { fromFileName } from './pack';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -86,6 +85,21 @@ const INSTALLED: PackState = {
   packFiles: ['config/forge.cfg', 'mods/gregtech.jar'],
 };
 
+const entry = (id: number, version: string, mc = '1.7.10'): LibraryPack => ({
+  id,
+  name: 'GT New Horizons',
+  version,
+  mc,
+  loader: 'forge',
+  sha256: 'a',
+  size: 1,
+  source: 'x',
+  by: 'alex',
+  at: 0,
+  usedBy: [],
+});
+const LIBRARY: LibraryState = { packs: [entry(2, '2.7.5'), entry(1, '2.7.4')], running: null };
+
 /** Opens the server's Pack tab and answers its detail and pack state. */
 async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
   const events = fakeEvents();
@@ -111,6 +125,18 @@ async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
     input.dispatchEvent(new Event('input'));
     await render();
   };
+  /** Picks a library version in the Adopt or Update picker. */
+  const pick = async (id: number) => {
+    const select = q<HTMLSelectElement>('[data-pick]');
+    select.value = String(id);
+    select.dispatchEvent(new Event('change'));
+    await render();
+  };
+  /** Answers the dashboard's read of the library. */
+  const library = async (state = LIBRARY) => {
+    backend.expectOne('/api/library').flush(state);
+    await render();
+  };
   /** Answers the reload a change or an event asks for (debounced). */
   const reload = async (next: PackState) => {
     await render(70);
@@ -122,16 +148,8 @@ async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
     events.push(n++, { ...e, type: 'notice', serverId: 'gtnh' });
     await render();
   };
-  return { harness, backend, events, el, render, text, q, type, reload, notice };
+  return { harness, backend, events, el, render, text, q, type, pick, library, reload, notice };
 }
-
-describe('pack names from file names', () => {
-  it('reads the name and version a pack zip is called by', () => {
-    expect(fromFileName('GT_New_Horizons_2.7.4_Server_Java_17-21.zip')).toEqual({ name: 'GT New Horizons', version: '2.7.4' });
-    expect(fromFileName('https://x/releases/download/2.8.0-beta-2/GT_New_Horizons_2.8.0-beta-2_Server_Java_17-21.zip')).toEqual({ name: 'GT New Horizons', version: '2.8.0-beta-2' });
-    expect(fromFileName('pack.zip')).toEqual({ name: 'pack', version: '' });
-  });
-});
 
 describe('server pack tab', () => {
   it('appears last, only for a server that can have a pack, in a tab row that scrolls on a phone', async () => {
@@ -160,19 +178,19 @@ describe('server pack tab', () => {
     expect(el.querySelector('[data-summary]')).toBeNull();
   });
 
-  it('adopts: the name and version from the URL, Compare, the report with keep boxes, then the summary card', async () => {
-    const { el, q, type, text, render, backend } = await setup(EMPTY);
-    await type('[data-url]', 'https://packs.example/GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-    expect(q<HTMLInputElement>('[data-name]').value).toBe('GT New Horizons');
-    expect(q<HTMLInputElement>('[data-version]').value).toBe('2.7.4');
-    await type('[data-version]', '2.7.4-fixed');
+  it('adopts: a version picked from the library, Compare, the report with keep boxes, then the summary card', async () => {
+    const { el, q, text, render, backend, pick, library } = await setup(EMPTY);
+    await library();
+    expect([...el.querySelectorAll('[data-pick] option')].map(text)).toEqual(['Choose a version…', 'GT New Horizons 2.7.5 · Minecraft 1.7.10', 'GT New Horizons 2.7.4 · Minecraft 1.7.10']);
+    expect(q<HTMLButtonElement>('[data-compare]').disabled).toBe(true);
+    await pick(1);
     q('[data-compare]').click();
     await render();
     const compare = backend.expectOne('/api/servers/gtnh/pack/compare');
-    expect(compare.request.body).toEqual({ url: 'https://packs.example/GT_New_Horizons_2.7.4_Server_Java_17-21.zip', name: 'GT New Horizons', version: '2.7.4-fixed' });
+    expect(compare.request.body).toEqual({ library: 1 });
     const report: CompareReport = {
       name: 'GT New Horizons',
-      version: '2.7.4-fixed',
+      version: '2.7.4',
       matching: 2241,
       mod: ['mods/gtnhdiscord-1.4.0.jar'],
       notInPack: [
@@ -206,28 +224,13 @@ describe('server pack tab', () => {
     expect(text(el.querySelector('[data-installed-by]'))).toContain('sha256 9f2c1e012345…');
   });
 
-  it('adopts from an uploaded zip, sent raw with its name', async () => {
-    const { q, text, render, backend } = await setup(EMPTY);
-    q('[data-from-upload]').click();
-    await render();
-    const file = new File(['zip'], 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-    const input = q<HTMLInputElement>('[data-file]');
-    Object.defineProperty(input, 'files', { value: [file] });
-    input.dispatchEvent(new Event('change'));
-    await render();
-    expect(q<HTMLInputElement>('[data-version]').value).toBe('2.7.4');
-    q('[data-compare]').click();
-    await render();
-    const start = backend.expectOne('/api/uploads');
-    expect(start.request.body).toEqual({ fileName: 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip', size: 3 });
-    start.flush({ upload: 'abc' });
-    await render();
-    const chunk = backend.expectOne('/api/uploads/abc?offset=0');
-    expect(chunk.request.headers.get('content-type')).toBe('application/octet-stream');
-    expect(text(q('[data-uploaded]'))).toBe('Uploading… 0%');
-    chunk.flush({ received: 3 });
-    await render();
-    expect(backend.expectOne('/api/servers/gtnh/pack/compare').request.body).toEqual({ upload: 'abc', name: 'GT New Horizons', version: '2.7.4' });
+  it('links to the Library page, and says so when the library is empty', async () => {
+    const { el, library } = await setup(EMPTY);
+    await library({ packs: [], running: null });
+    expect(el.querySelector('[data-pick]')).toBeNull();
+    expect(el.querySelector('[data-library-empty]')).not.toBeNull();
+    expect(el.querySelector<HTMLAnchorElement>('[data-library-link]')!.getAttribute('href')).toBe('/library');
+    expect(el.querySelector('[data-url]')).toBeNull(); // no URL or upload: the library is the only way in
   });
 
   it('shows Extras with their pills, removed ones struck through, and the Mod as a locked last row', async () => {
@@ -352,12 +355,15 @@ describe('server pack tab', () => {
     req.flush({ id: 2 }, { status: 202, statusText: 'Accepted' });
   });
 
-  it('updates from a URL in the sheet, after the dialog naming the server and the version', async () => {
-    const { q, type, render, backend } = await setup();
+  it('updates to a library version picked in the sheet, after the dialog naming the server and the version', async () => {
+    const { q, render, backend, pick, library } = await setup();
     q('[data-update]').click();
     await render();
+    await library();
     expect(document.querySelector('[data-sheet]')?.textContent).toContain('rolls back');
-    await type('[data-url]', 'https://packs.example/GT_New_Horizons_2.7.5_Server_Java_17-21.zip');
+    expect(document.querySelector('[data-sheet] [data-library-link]')).not.toBeNull();
+    expect(q('[data-update-go]').textContent?.trim()).toBe('Update to ……');
+    await pick(2);
     expect(q('[data-update-go]').textContent?.trim()).toBe('Update to 2.7.5…');
     q('[data-update-go]').click();
     await render(320);
@@ -366,7 +372,7 @@ describe('server pack tab', () => {
     dialogButton('ok').click();
     await render();
     const req = backend.expectOne('/api/servers/gtnh/pack/update');
-    expect(req.request.body).toEqual({ url: 'https://packs.example/GT_New_Horizons_2.7.5_Server_Java_17-21.zip', name: 'GT New Horizons', version: '2.7.5' });
+    expect(req.request.body).toEqual({ library: 2 });
     req.flush({ id: 2 }, { status: 202, statusText: 'Accepted' });
   });
 

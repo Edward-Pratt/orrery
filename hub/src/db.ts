@@ -84,6 +84,10 @@ export class Db {
     if (!(this.#db.prepare('PRAGMA table_info(web_sessions)').all() as { name: string }[]).some((c) => c.name === 'avatar')) {
       this.#db.exec('ALTER TABLE web_sessions ADD COLUMN avatar TEXT');
     }
+    // A pack row's library entry (#139); null on rows from before it, or written by an older hub after a Rollback.
+    if (!(this.#db.prepare('PRAGMA table_info(packs)').all() as { name: string }[]).some((c) => c.name === 'library_id')) {
+      this.#db.exec('ALTER TABLE packs ADD COLUMN library_id INTEGER');
+    }
   }
 
   /** Writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
@@ -431,8 +435,18 @@ export class Db {
   // Packs. These writes throw: an admin's change must not be reported as done when it wasn't stored.
 
   pack(serverId: string): PackRow | undefined {
-    const r = this.#db.prepare('SELECT name, version, source, sha256, by, at, how, snapshot FROM packs WHERE server_id = ?').get(serverId);
+    const r = this.#db.prepare('SELECT name, version, source, sha256, by, at, how, snapshot, library_id AS libraryId FROM packs WHERE server_id = ?').get(serverId);
     return r && ({ ...r } as PackRow);
+  }
+
+  /** The servers whose pack row is a library entry. */
+  packsOf(libraryId: number): string[] {
+    return this.#db.prepare('SELECT server_id FROM packs WHERE library_id = ? ORDER BY server_id').all(libraryId).map((r) => r.server_id as string);
+  }
+
+  /** Points a server's pack row at a library entry (moving `packs/` over). */
+  setPackLibrary(serverId: string, libraryId: number): void {
+    this.#db.prepare('UPDATE packs SET library_id = ? WHERE server_id = ?').run(libraryId, serverId);
   }
 
   /** Writes a server's pack row and manifest (`files`; `own`: those the pack itself ships) at once. */
@@ -440,8 +454,8 @@ export class Db {
     this.#db.exec('BEGIN');
     try {
       this.#db
-        .prepare('INSERT OR REPLACE INTO packs (server_id, name, version, source, sha256, by, at, how, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(serverId, p.name, p.version, p.source, p.sha256, p.by, p.at, p.how, p.snapshot);
+        .prepare('INSERT OR REPLACE INTO packs (server_id, name, version, source, sha256, by, at, how, snapshot, library_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(serverId, p.name, p.version, p.source, p.sha256, p.by, p.at, p.how, p.snapshot, p.libraryId);
       this.#db.prepare('DELETE FROM pack_files WHERE server_id = ?').run(serverId);
       const add = this.#db.prepare('INSERT INTO pack_files (server_id, path, pack) VALUES (?, ?, ?)');
       for (const f of files) add.run(serverId, f, own.has(f) ? 1 : 0);
@@ -561,7 +575,18 @@ export class Db {
 /** A pack version in the library; its zip is `<root>/library/<sha256>.zip`. */
 export type LibraryRow = { id: number; name: string; version: string; mc: string; loader: string; sha256: string; size: number; source: string; by: string; at: number };
 /** A server's installed pack as stored; `snapshot` is what the last apply laid over it, as JSON. */
-export type PackRow = { name: string; version: string; source: string; sha256: string; by: string; at: number; how: 'adopted' | 'updated'; snapshot: string };
+export type PackRow = {
+  name: string;
+  version: string;
+  source: string;
+  sha256: string;
+  by: string;
+  at: number;
+  how: 'adopted' | 'updated';
+  snapshot: string;
+  /** Its library entry; null when it has none (from before the library, until `packs/` is moved over). */
+  libraryId: number | null;
+};
 export type ExtraRow = { id: number; target: string; sha256: string; label: string; note: string; by: string; at: number; removed: boolean };
 export type EditRow = { id: number; path: string; find: string; replace: string; note: string; by: string; at: number; failedOn: string | null };
 export type PackUpdateDbRow = {

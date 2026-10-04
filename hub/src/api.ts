@@ -228,7 +228,7 @@ export type CommandOutput = { output: string[] };
  * server's folder. Actions are audited as the admin; `PackRefused` answers 400 (bad input), 404 or 409 (not now; Extras and Config edits change
  * only while no update runs).
  */
-/** The installed pack: `source` is its URL, or the uploaded file's name; `how` it arrived. */
+/** The installed pack, as its library entry recorded it: `source` is its URL, or the uploaded file's name; `how` it arrived. */
 export type InstalledPack = {
   name: string;
   version: string;
@@ -321,12 +321,12 @@ export type PackState = {
 export type UploadRequest = { fileName: string; size: number };
 export type UploadAnswer = { upload: string };
 export type UploadProgress = { received: number };
-/** A pack zip: an `https:` URL the hub downloads, or an upload. */
-export type PackSource = { url: string; name: string; version: string } | { upload: string; name: string; version: string };
+/** A pack version from the library (`LibraryPack.id`): Compare, Adopt and updates never download anything. 404: no such entry. */
+export type PackSource = { library: number };
 /** A file in the Adopt report, with its size on the server. */
 export type ReportFile = { path: string; size: number };
 /**
- * `POST /api/servers/:id/pack/compare` (a `PackSource`; 409 once adopted, 502 if the download fails): how the server
+ * `POST /api/servers/:id/pack/compare` (a `PackSource`; 409 once adopted): how the server
  * folder compares with the pack. `matching` files are the same; `mod` is the Mod's jar; `notInPack` files under
  * `mods/` and `config/` the pack lacks; `different` pack files changed on the server. Kept paths are left out. Held
  * for an hour for `POST …/pack/adopt`.
@@ -354,7 +354,7 @@ export type PackUpdateAnswer = { id: number };
 /**
  * The Pack library (only with systemd and Minecraft): one per Environment. A pack version, by name and version, with
  * its Minecraft version and loader, its zip's size and sha256, where it came from (a URL, or the uploaded file's
- * name), who added it and when, and the servers using it (`usedBy`: ids).
+ * name), who added it and when, and the servers using it (`usedBy`: ids, whose pack is it or whose running update installs it).
  */
 export type LibraryPack = {
   id: number;
@@ -381,7 +381,7 @@ export type LibraryState = { packs: LibraryPack[]; running: RunningLibraryAdd | 
  * upload whose file, or name and version, is in the library already (a URL's only once downloaded: an add of the same
  * file under the same name and version finishes ok, saying so; the other duplicates fail). `POST /api/library/cancel`
  * stops the running add (409 when none, or once it is being stored); it leaves nothing behind. `DELETE
- * /api/library/packs/:id` deletes one (404 unknown). All audited.
+ * /api/library/packs/:id` deletes one (404 unknown, 409 while used, naming the servers). All audited.
  */
 export type LibraryAddRequest = ({ url: string } | { upload: string }) & { name: string; version: string; mc?: string; loader?: string };
 export type LibraryAddAnswer = { add: number };

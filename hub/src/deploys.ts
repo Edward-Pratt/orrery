@@ -67,7 +67,7 @@ const newestFirst = (a: Release, b: Release) => {
 export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0' } as const;
 /** A renamed Mod release's builds, one per Minecraft target: `orrery-<mc>-<version>.jar`. */
 const MOD_BUILD = /^orrery-(.+)-(\d+\.\d+\.\d+)\.jar$/;
-/** The Minecraft version every server's Mod is built for, until the pack library knows each server's. */
+/** The Minecraft version of a server without a pack (or whose pack isn't in the library). */
 const MC = '1.7.10';
 /** Every Mod jar in `mods/`, from before the rename (`gtnhdiscord-`) and after. */
 const MOD_JAR = /^(gtnhdiscord|orrery)-.*\.jar$/;
@@ -96,6 +96,8 @@ export type DeploysDeps = {
   packing: (serverId?: string) => boolean;
   /** Whether a library add runs (a hub deploy's restart would lose it). */
   libraryAdding: () => boolean;
+  /** The Minecraft version of a server's pack, from its library entry; undefined: none known. */
+  mcOf: (serverId: string) => string | undefined;
   /** Where the database copy before a hub deploy goes. */
   dbCopies: string;
 };
@@ -334,10 +336,11 @@ export class Deploys {
     let asset: string;
     let jar: string;
     if (builds.length) {
-      const build = builds.find((m) => m[1] === MC);
-      if (!build) throw new DeployRefused(409, `${release.tag} has no Mod build for Minecraft ${MC}.`);
+      const mc = this.#d.mcOf(serverId) ?? MC;
+      const build = builds.find((m) => m[1] === mc);
+      if (!build) throw new DeployRefused(409, `${release.tag} has no Mod build for Minecraft ${mc}.`);
       asset = build[0];
-      jar = `orrery-${MC}-${v}.jar`;
+      jar = `orrery-${mc}-${v}.jar`;
     } else {
       // From before the rename: one gtnhdiscord jar, which reads its token from gtnhdiscord.cfg.
       const jars = release.assets.filter((a) => a.endsWith('.jar') && !a.endsWith('-dev.jar') && !a.endsWith('-sources.jar'));

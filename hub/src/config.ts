@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { parseDaily } from './daily.ts';
 import type { LagConfig } from './lag.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
@@ -393,6 +393,11 @@ export function validateConfig(raw: unknown): string[] {
       for (const key of ['root', 'webDir']) {
         const path = str(deploys, key, at, false);
         if (path !== undefined && !isAbsolute(path)) err(at, `"${key}" must be an absolute path`);
+      }
+      // One root per Environment (docs/adr/0003): the deploys' root is the folder holding hub.db.
+      const root = deploys.root;
+      if (typeof root === 'string' && isAbsolute(root) && typeof raw.dbPath === 'string' && resolvePath(root) !== resolvePath(dirname(raw.dbPath))) {
+        err(at, `"root" must be the folder holding dbPath (${resolvePath(dirname(raw.dbPath))})`);
       }
       const unit = str(deploys, 'hubUnit', at, false);
       if (unit !== undefined && !UNIT.test(unit)) err(at, '"hubUnit" must be a systemd unit name, like orrery-hub.service');

@@ -14,11 +14,18 @@ import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
 import { catchError, debounceTime, EMPTY, filter, firstValueFrom, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 import { Feedback } from '../feedback';
-import { fromFileName } from '../servers/pack';
 import { formatBytes } from '../units';
 import { Uploader } from '../uploads';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/** A pack's name and version from its zip's file name ("GT_New_Horizons_2.7.4_Server_Java_17-21.zip"): a guess to correct. */
+export function fromFileName(file: string): { name: string; version: string } {
+  const base = file.split(/[/?#]/).filter(Boolean).at(-1)?.replace(/\.zip$/i, '') ?? '';
+  const m = /\d+\.\d+(?:\.\d+)*(?:-(?:beta|rc|pre)(?:[-.]?\d+)*)?/i.exec(base);
+  if (!m) return { name: base.replace(/[_-]+/g, ' ').trim(), version: '' };
+  return { name: base.slice(0, m.index).replace(/[_-]+/g, ' ').trim(), version: m[0] };
+}
 
 /**
  * The Library page: the Environment's pack versions, newest first, an add sheet (a link or an upload) and the running

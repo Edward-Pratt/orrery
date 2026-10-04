@@ -7,9 +7,10 @@ import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { AuditLog, CompareReport, LibraryAdd, LibraryState, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer, UploadProgress } from '../src/api.ts';
 import type { Config, ServerSettings } from '../src/config.ts';
-import type { Download } from '../src/packs.ts';
+import type { Download } from '../src/library.ts';
 import type { RunRestore } from '../src/restore.ts';
 import type { Run } from '../src/services.ts';
+import { Db } from '../src/db.ts';
 import { startHub, type HubDeps } from '../src/start.ts';
 import { formatEvent } from '../src/format.ts';
 import type { Notice } from '../src/types.ts';
@@ -29,6 +30,8 @@ const ACTOR = `web:alex (${ADMIN.id})`;
 const oauth: OAuth = { token: async (code) => code, member: async () => ADMIN };
 const URL_OLD = 'https://packs.example/GTNH_2.7.4.zip';
 const URL_NEW = 'https://packs.example/GTNH_2.7.5.zip';
+
+const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 /** Every file under a folder, with its sha256: what "byte-for-byte unchanged" compares. */
 function snapshot(dir: string, rel = ''): Record<string, string> {
@@ -94,6 +97,8 @@ type Setup = {
   /** The unit's state when the hub starts (default active). */
   unit?: string;
   uploadIdleMs?: number;
+  /** How long a Compare is held (default an hour). */
+  compareMs?: number;
 };
 
 /**
@@ -160,6 +165,8 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     /** A stop that never ends: the unit stays active. */
     stopHangs: false,
     downloadGate: Promise.resolve(),
+    /** Holds the Mod's answer to `backup start`: an update waits in Backup. */
+    backupGate: Promise.resolve(),
     downloads: [] as string[],
   };
   const state: Record<string, string> = { 'gtnh.service': setup.unit ?? 'active' };
@@ -179,6 +186,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
         if (msg.type !== 'cmd') continue;
         m.send({ type: 'cmdResult', id: msg.id, output: [] });
         if (msg.command !== 'backup start') continue;
+        await fake.backupGate;
         if (fake.backupFails) m.send({ type: 'backup', ok: false, detail: 'disk full' });
         else {
           writeFileSync(join(w.backupDir, `2026-10-02-12-00-0${backups++}.zip`), 'backup');
@@ -220,7 +228,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     download,
     restore: setup.restore,
     github: setup.github,
-    packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000, ...(setup.stopMs && { stopMs: setup.stopMs }) },
+    packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000, ...(setup.stopMs && { stopMs: setup.stopMs }), ...(setup.compareMs && { compareMs: setup.compareMs }) },
     deploys: { watchMs: 10, countdownMinutes: 60 },
     uploadIdleMs: setup.uploadIdleMs,
   });
@@ -233,7 +241,9 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
   t.after(close);
   port = handle.port!;
   const events: Notice[] = [];
+  const libraryEnds: number[] = [];
   handle.live.on('event', (_, { at: _at, ...e }: LiveEvent) => {
+    if ('target' in e && e.type === 'libraryAdd' && e.phase === 'finished') libraryEnds.push(e.add);
     if ('serverId' in e && e.type === 'notice' && e.kind.startsWith('pack')) {
       const { type: _t, serverId: _s, ...n } = e;
       events.push(n as Notice);
@@ -270,9 +280,23 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
       .filter((e) => e.action.startsWith(prefix))
       .map(({ actor, action, target, details }) => ({ actor, action, target, details }))
       .reverse();
-  /** Adopts 2.7.4 from its URL, keeping the third-party jar, our own config, and the changed forge.cfg. */
+  const entries = new Map<string, number>();
+  /** A library entry for a URL's zip (added once per hub), as a pack source. */
+  const entry = async (url: string, version: string, mc = '1.7.10') => {
+    if (!entries.has(url)) {
+      const { add } = await json<{ add: number }>(req('POST', '/api/library/packs', { url, name: 'GT New Horizons', version, mc, loader: 'forge' }), 202);
+      await until(() => libraryEnds.includes(add));
+      const found = (await json<LibraryState>(req('GET', '/api/library'))).packs.find((p) => p.version === version);
+      if (!found) assert.fail(`${url} wasn't added`);
+      entries.set(url, found.id);
+    }
+    return { library: entries.get(url)! };
+  };
+  /** 2.7.5 from the library. */
+  const toNew = () => entry(URL_NEW, '2.7.5');
+  /** Adopts 2.7.4 from the library, keeping the third-party jar, our own config, and the changed forge.cfg. */
   const adopt = async (keep = ['config/custom.cfg', 'config/forge.cfg', 'mods/journeymap-fairplay.jar']) => {
-    await json(req('POST', '/api/servers/gtnh/pack/compare', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' }));
+    await json(req('POST', '/api/servers/gtnh/pack/compare', await entry(URL_OLD, '2.7.4')));
     return json<PackState>(req('POST', '/api/servers/gtnh/pack/adopt', { keep }));
   };
   /** Waits for the running update to finish; returns its history row. */
@@ -281,7 +305,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     return (await pack()).history[0]!;
   };
   const systemctl = () => calls.filter((c) => c[0] === 'systemctl' && c[1] !== 'show').map((c) => `${c[1]} ${c.at(-1)}`);
-  return { handle, app, cookie, req, json, pack, chunk, upload, audit, adopt, finished, events, fake, state, calls, systemctl, connect, close, mod: () => mod! };
+  return { handle, app, cookie, req, json, pack, chunk, upload, audit, entry, toNew, adopt, finished, events, fake, state, calls, systemctl, connect, close, mod: () => mod! };
 }
 
 test('a server with a folder, a service and a Mod has a Pack: Kept paths from keep first, then the built-in ones', async (t) => {
@@ -305,6 +329,7 @@ test('a server with a folder, a service and a Mod has a Pack: Kept paths from ke
       'crash-reports/',
       'backups/',
       '.pre-update-*/',
+      '.orrery-update/',
       '.orrery-staging/',
       'mods/gtnhdiscord-*.jar',
       'mods/orrery-*.jar',
@@ -336,7 +361,7 @@ test('no Pack without a folder, a linked service or a Mod token', async (t) => {
     const s = await start(t, w, without === 'dir' ? { server: { dir: undefined } } : without === 'service' ? { server: { service: undefined } } : {});
     const id = without === 'token' ? 'other' : 'gtnh';
     assert.equal((await s.req('GET', `/api/servers/${id}/pack`)).status, 404, without);
-    assert.equal((await s.req('POST', `/api/servers/${id}/pack/compare`, { url: URL_OLD, name: 'x', version: '1' })).status, 404, without);
+    assert.equal((await s.req('POST', `/api/servers/${id}/pack/compare`, { library: 1 })).status, 404, without);
     assert.equal((await s.json<ServerDetail>(s.req('GET', `/api/servers/${id}`))).pack, false, without);
     await s.close();
   }
@@ -354,7 +379,7 @@ test('Compare reports matching, the Mod, files not in the pack and different one
   const w = world(t);
   const s = await start(t, w);
   const before = snapshot(w.dir);
-  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' }));
+  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4')));
   assert.deepEqual(report, {
     name: 'GT New Horizons',
     version: '2.7.4',
@@ -402,14 +427,14 @@ test('Adopt keeps the ticked files as Extras and records the pack, changing noth
   const stored = join(w.root, 'data', 'extras', 'gtnh');
   assert.deepEqual(readdirSync(stored).sort(), p.extras.map((e) => String(e.id)).sort());
   assert.equal(readFileSync(join(stored, String(p.extras[0]!.id)), 'utf8'), 'our own config');
-  const again = await s.req('POST', '/api/servers/gtnh/pack/compare', { url: URL_OLD, name: 'x', version: '1' });
+  const again = await s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4'));
   assert.equal(again.status, 409);
   assert.deepEqual(await s.audit('pack adopt'), [{ actor: ACTOR, action: 'pack adopt', target: 'gtnh', details: 'GT New Horizons 2.7.4, keeping 3 files' }]);
 });
 
 test('Adopt takes only paths from the report', async (t) => {
   const s = await start(t, world(t));
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' }));
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4')));
   for (const keep of [['ops.json'], ['../etc/passwd'], ['mods/orrery-1.7.10-1.4.0.jar'], 'config/custom.cfg']) {
     assert.equal((await s.req('POST', '/api/servers/gtnh/pack/adopt', { keep })).status, 400, String(keep));
   }
@@ -429,47 +454,32 @@ z.close()`;
   return path;
 }
 
-test('a zip with "..", an absolute path or a symlink is refused before anything is extracted', async (t) => {
+test('a source is a library entry: anything else is 400, an unknown one 404; Compare needs no packs/ or downloads/', async (t) => {
   const w = world(t);
   const s = await start(t, w);
-  const ok = { 'mods/a.jar': 'a' };
-  w.urls['https://x/dots.zip'] = rawZip(w, 'dots.zip', { ...ok, 'mods/../../../evil.txt': 'x' });
-  w.urls['https://x/abs.zip'] = rawZip(w, 'abs.zip', { ...ok, '/tmp/evil.txt': 'x' });
-  w.urls['https://x/link.zip'] = rawZip(w, 'link.zip', ok, 'config/link');
-  for (const [url, why] of [
-    ['https://x/dots.zip', 'The zip has a path outside its folder (mods/../../../evil.txt): refused.'],
-    ['https://x/abs.zip', 'The zip has a path outside its folder (/tmp/evil.txt): refused.'],
-    ['https://x/link.zip', 'The zip has a symlink (config/link): refused.'],
-  ]) {
-    const res = await s.req('POST', '/api/servers/gtnh/pack/compare', { url, name: 'x', version: '1' });
-    assert.equal(res.status, 400, url);
-    assert.equal(await res.text(), why);
-  }
-  assert.ok(!existsSync(join(w.root, 'evil.txt')) && !existsSync('/tmp/evil.txt'));
-  assert.deepEqual(readdirSync(join(w.root, 'data')).sort(), ['downloads', 'hub.db']);
-  assert.deepEqual(readdirSync(join(w.root, 'data', 'downloads')), []); // each download deleted once refused
-});
-
-test('a zip with no mods/ or config/ is refused; a nested content root is found', async (t) => {
-  const w = world(t);
-  const s = await start(t, w);
-  w.urls['https://x/client.zip'] = w.zip('client.zip', { 'readme.txt': 'not a server pack', 'docs/mods.txt': 'no folder' });
-  const res = await s.req('POST', '/api/servers/gtnh/pack/compare', { url: 'https://x/client.zip', name: 'x', version: '1' });
-  assert.equal(res.status, 400);
-  assert.equal(await res.text(), 'The zip has no mods/ or config/ folder: is it a server pack?');
-  w.urls['https://x/deep.zip'] = w.zip('deep.zip', PACK_OLD, 'a/b/c');
-  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { url: 'https://x/deep.zip', name: 'x', version: '1' }));
-  assert.equal(report.matching, 5);
-});
-
-test('a failed download is 502; a source needs an https URL or an upload, a name and a version', async (t) => {
-  const s = await start(t, world(t));
-  const res = await s.req('POST', '/api/servers/gtnh/pack/compare', { url: 'https://packs.example/missing.zip', name: 'x', version: '1' });
-  assert.equal(res.status, 502);
-  assert.equal(await res.text(), 'Downloading the pack failed: HTTP 404');
-  for (const body of [{ url: 'http://packs.example/a.zip', name: 'x', version: '1' }, { url: URL_OLD, version: '1' }, { url: URL_OLD, name: 'x' }, { upload: 'nope', name: 'x', version: '1' }]) {
+  for (const body of [{}, { library: '1' }, { library: 0 }, { library: 1.5 }, { url: URL_OLD, name: 'x', version: '1' }]) {
     assert.equal((await s.req('POST', '/api/servers/gtnh/pack/compare', body)).status, 400, JSON.stringify(body));
   }
+  const unknown = await s.req('POST', '/api/servers/gtnh/pack/compare', { library: 999 });
+  assert.equal(unknown.status, 404);
+  assert.equal(await unknown.text(), 'No such pack in the library.');
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4')));
+  assert.deepEqual(readdirSync(join(w.root, 'data')).sort(), ['hub.db', 'library', 'work']);
+  assert.deepEqual(readdirSync(join(w.root, 'data', 'work')), []); // Compare's scratch is gone again
+});
+
+test("a library zip outlives an expired Compare, and Compare's scratch is cleared at start", async (t) => {
+  const w = world(t);
+  const s = await start(t, w, { compareMs: 50 });
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4')));
+  await sleep(100);
+  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/adopt', { keep: [] })).status, 409); // forgotten
+  assert.ok(existsSync(join(w.root, 'data', 'library', `${sha(w.urls[URL_OLD]!)}.zip`)));
+  await s.close();
+  write(join(w.root, 'data'), { 'work/gtnh/mods/a.jar': 'left by a crash', 'staging/gtnh/x': 'before the rename', 'downloads/abc': 'before the library' });
+  await start(t, w);
+  assert.deepEqual(readdirSync(join(w.root, 'data')).sort(), ['hub.db', 'library', 'work']);
+  assert.deepEqual(readdirSync(join(w.root, 'data', 'work')), []);
 });
 
 test('chunks in order make an upload, hashed once complete, that can be adopted from, once', async (t) => {
@@ -478,15 +488,13 @@ test('chunks in order make an upload, hashed once complete, that can be adopted 
   const id = await s.upload(w.urls[URL_OLD]!, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip', 700);
   assert.deepEqual(await s.json<UploadProgress>(s.req('GET', `/api/uploads/${id}`)), { received: statSync(w.urls[URL_OLD]!).size });
   assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), [id]);
-  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { upload: id, name: 'GT New Horizons', version: '2.7.4' }));
-  assert.equal(report.matching, 5);
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/compare', { upload: id, name: 'x', version: '1' })).status, 400); // used
-  const p = await s.json<PackState>(s.req('POST', '/api/servers/gtnh/pack/adopt', { keep: [] }));
-  assert.equal(p.installed!.source, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-  // The same zip by upload, with nothing pending, is the installed pack: its sha256 was right.
-  const again = await s.upload(w.urls[URL_OLD]!);
-  const same = await s.req('POST', '/api/servers/gtnh/pack/update', { upload: again, name: 'GT New Horizons', version: '2.7.4' });
-  assert.equal(same.status, 409);
+  const body = { upload: id, name: 'GT New Horizons', version: '2.7.4', mc: '1.7.10', loader: 'forge' };
+  await s.json(s.req('POST', '/api/library/packs', body), 202);
+  assert.equal((await s.req('POST', '/api/library/packs', { ...body, version: '2' })).status, 400); // used
+  while ((await s.json<LibraryState>(s.req('GET', '/api/library'))).packs.length === 0) await sleep(10);
+  const [entry] = (await s.json<LibraryState>(s.req('GET', '/api/library'))).packs;
+  assert.deepEqual([entry!.source, entry!.sha256], ['GT_New_Horizons_2.7.4_Server_Java_17-21.zip', sha(w.urls[URL_OLD]!)]); // its sha256 was right
+  assert.equal((await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { library: entry!.id }))).matching, 5);
 });
 
 test('a chunk only at the bytes received: a wrong offset is 409 with the size, a failed or oversize chunk leaves nothing', async (t) => {
@@ -659,11 +667,10 @@ async function updatable(t: TestContext, setup: Setup = {}) {
   await s.json(s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'config/custom.cfg', find: '^our', replace: 'my' }));
   return { w, s };
 }
-const toNew = { url: URL_NEW, name: 'GT New Horizons', version: '2.7.5' };
 
 test('an update onto a new version swaps exactly the old manifest for the staged set, with a backup and a hello', async (t) => {
   const { w, s } = await updatable(t);
-  const res = await s.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  const res = await s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew());
   assert.equal(res.status, 202);
   const { id } = (await res.json()) as { id: number };
   const row = await s.finished();
@@ -721,8 +728,9 @@ test('an update onto a new version swaps exactly the old manifest for the staged
   assert.equal(readdirSync(w.dir).filter((f) => f.startsWith('.pre-update-')).length, 1);
 });
 
-test('applying pending changes onto the installed version, and refusing with nothing pending', async (t) => {
+test('applying pending changes onto the installed version unzips its library entry (no packs/), clearing a leftover .orrery-staging', async (t) => {
   const { w, s } = await updatable(t);
+  write(w.dir, { '.orrery-staging/zip/mods/x.jar': 'from before the rename' });
   const p = await s.pack();
   assert.deepEqual(p.pending.map((x) => `${x.path} ${x.change}`), ['mods/bq.jar added', 'config/custom.cfg added', 'startserver.sh added']);
   await s.json(s.req('POST', '/api/servers/gtnh/pack/update', { pending: true }), 202);
@@ -731,16 +739,16 @@ test('applying pending changes onto the installed version, and refusing with not
   assert.equal(readFileSync(join(w.dir, 'mods/bq.jar'), 'utf8'), 'bq pinned');
   assert.equal(readFileSync(join(w.dir, 'mods/old-only.jar'), 'utf8'), 'gone in 2.7.5'); // still 2.7.4
   assert.equal(readFileSync(join(w.dir, 'startserver.sh'), 'utf8'), 'java -Xmx12G -Dold=6 -jar forge.jar\n');
+  assert.ok(!existsSync(join(w.dir, '.orrery-staging')) && !existsSync(join(w.dir, '.orrery-update')));
+  assert.ok(!existsSync(join(w.root, 'data', 'packs')));
   assert.deepEqual((await s.pack()).pending, []);
   const again = await s.req('POST', '/api/servers/gtnh/pack/update', { pending: true });
   assert.equal(again.status, 409);
   assert.equal(await again.text(), 'Nothing is pending: 2.7.4 is installed as it is.');
-  // The same zip and version, by upload or from the same URL, with nothing pending, is refused as well.
-  const same = await s.req('POST', '/api/servers/gtnh/pack/update', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' });
+  // The same entry, with nothing pending, is refused as well.
+  const same = await s.req('POST', '/api/servers/gtnh/pack/update', await s.entry(URL_OLD, '2.7.4'));
   assert.equal(same.status, 409);
   assert.equal(await same.text(), 'GT New Horizons 2.7.4 is installed already, with nothing pending.');
-  const up = await s.upload(w.urls[URL_OLD]!);
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update', { upload: up, name: 'GT New Horizons', version: '2.7.4' })).status, 409);
   assert.match(await s.audit('pack update').then((a) => a[0]!.details), /^changes applied to 2\.7\.4: mods\/bq\.jar added/);
 });
 
@@ -756,19 +764,16 @@ test('a removed Extra is deleted by the next apply, and its row and file go once
   assert.equal(readdirSync(join(w.root, 'data', 'extras', 'gtnh')).length, p.extras.length);
 });
 
-for (const [why, setup, expected] of [
-  ['the download fails', (w: World) => delete w.urls[URL_NEW], 'Downloading the pack failed: HTTP 404'],
-  ['the zip has no content root', (w: World) => (w.urls[URL_NEW] = w.zip('bad.zip', { 'readme.txt': 'x' })), 'The zip has no mods/ or config/ folder: is it a server pack?'],
-  ['an edit matches nothing', null, 'The Config edit on config/gregtech.cfg (pollution=false) matched nothing in 2.7.5.'],
-  ['the backup fails', null, 'The backup failed: disk full'],
+for (const [why, expected] of [
+  ['an edit matches nothing', 'The Config edit on config/gregtech.cfg (pollution=false) matched nothing in 2.7.5.'],
+  ['the backup fails', 'The backup failed: disk full'],
 ] as const) {
   test(`when ${why}, the update fails in staging with the server folder unchanged and the server running`, async (t) => {
     const { w, s } = await updatable(t);
-    if (typeof setup === 'function') setup(w);
     if (why === 'an edit matches nothing') await s.json(s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'config/gregtech.cfg', find: 'pollution=false', replace: 'x' }));
     if (why === 'the backup fails') s.fake.backupFails = true;
     const before = snapshot(w.dir);
-    await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+    await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
     const row = await s.finished();
     assert.equal(row.outcome, 'failed in staging');
     assert.ok(row.log.includes(expected), row.log);
@@ -779,7 +784,7 @@ for (const [why, setup, expected] of [
     assert.equal(p.installed!.version, '2.7.4');
     assert.equal(p.running, null);
     if (why === 'an edit matches nothing') assert.equal(p.edits.find((e) => e.path === 'config/gregtech.cfg')!.failedOn, '2.7.5');
-    assert.deepEqual(readdirSync(join(w.root, 'data', 'downloads')), []);
+    assert.ok(existsSync(join(w.root, 'data', 'library', `${sha(w.urls[URL_NEW]!)}.zip`))); // the library's, never the update's to delete
     const finished = s.events.find((e) => e.kind === 'packUpdateFinished')!;
     assert.deepEqual([finished.severity, 'outcome' in finished && finished.outcome], ['info', 'failed in staging']);
   });
@@ -788,22 +793,23 @@ for (const [why, setup, expected] of [
 test('an update is refused while one runs, without a pack, offline, and for bad input', async (t) => {
   const w = world(t);
   const s = await start(t, w);
-  const update = (body: object = toNew) => s.req('POST', '/api/servers/gtnh/pack/update', body);
+  const update = async (body?: object) => s.req('POST', '/api/servers/gtnh/pack/update', body ?? (await s.toNew()));
   assert.equal(await (await update()).text(), "orrery doesn't know GTNH's pack yet: adopt it first.");
   await s.adopt();
   const offline = await update();
   assert.equal(offline.status, 409);
   assert.equal(await offline.text(), 'GTNH is offline: an update needs it running, for the backup.');
   await s.connect();
-  for (const body of [{}, { url: 'ftp://x', name: 'a', version: '1' }, { url: URL_NEW, name: '', version: '1' }, { pending: 'yes' }]) {
+  for (const body of [{}, { url: URL_NEW, name: 'a', version: '1' }, { library: 'x' }, { pending: 'yes' }]) {
     assert.equal((await update(body)).status, 400, JSON.stringify(body));
   }
-  s.fake.downloadGate = new Promise(() => {}); // holds the first update in Prepare
+  assert.equal((await update({ library: 999 })).status, 404);
+  s.fake.backupGate = new Promise(() => {}); // holds the first update in Backup
   assert.equal((await update()).status, 202);
   const twice = await update();
   assert.equal(twice.status, 409);
   assert.equal(await twice.text(), 'A pack update is already running on GTNH.');
-  // Extras and edits wait too: Prepare is reading them.
+  // Extras and edits wait too: the update read them.
   for (const res of [
     await s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'config/custom.cfg', find: '^our', replace: 'my' }),
     await s.req('POST', '/api/servers/gtnh/pack/extras', { upload: 'f'.repeat(32), target: 'mods/x.jar' }),
@@ -812,7 +818,7 @@ test('an update is refused while one runs, without a pack, offline, and for bad 
     assert.equal(res.status, 409);
     assert.equal(await res.text(), 'A pack update is running on GTNH: change Extras and edits once it is done.');
   }
-  assert.equal((await s.req('POST', '/api/servers/nope/pack/update', toNew)).status, 404);
+  assert.equal((await s.req('POST', '/api/servers/nope/pack/update', { library: 1 })).status, 404);
 });
 
 test('files the pack lacks that Adopt did not keep are dropped by the next update, into the .pre-update folder', async (t) => {
@@ -820,7 +826,7 @@ test('files the pack lacks that Adopt did not keep are dropped by the next updat
   const s = await start(t, w);
   await s.connect();
   await s.adopt(['mods/journeymap-fairplay.jar']);
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   assert.equal((await s.finished()).outcome, 'ok');
   assert.ok(!existsSync(join(w.dir, 'config/custom.cfg')));
   assert.equal(readFileSync(join(w.dir, 'mods/journeymap-fairplay.jar'), 'utf8'), 'a third-party mod');
@@ -832,9 +838,9 @@ test('files the pack lacks that Adopt did not keep are dropped by the next updat
 test('each step goes on the stream, the replay keeps only the latest, none is posted, and the state shows the running update', async (t) => {
   const { s } = await updatable(t);
   let release!: () => void;
-  s.fake.downloadGate = new Promise((r) => (release = r));
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
-  await until(() => s.events.some((e) => e.kind === 'packUpdateStep'));
+  s.fake.backupGate = new Promise((r) => (release = r));
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
+  await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'backup'));
   const running = (await s.pack()).running!;
   assert.deepEqual({ ...running, id: 0, started: 0 }, {
     id: 0,
@@ -842,10 +848,10 @@ test('each step goes on the stream, the replay keeps only the latest, none is po
     version: '2.7.5',
     by: 'alex',
     started: 0,
-    cancellable: true,
+    cancellable: false,
     steps: [
-      { step: 'prepare', state: 'running', detail: 'Getting the pack' },
-      { step: 'backup', state: 'waiting', detail: '' },
+      { step: 'prepare', state: 'done', detail: 'Staged: 8 files' },
+      { step: 'backup', state: 'running', detail: 'Backing up' },
       { step: 'stop', state: 'waiting', detail: '' },
       { step: 'swap', state: 'waiting', detail: '' },
       { step: 'gate', state: 'waiting', detail: '' },
@@ -868,27 +874,11 @@ test('each step goes on the stream, the replay keeps only the latest, none is po
 
 test("a running update's latest step is replayed, and only that", async (t) => {
   const { s } = await updatable(t);
-  s.fake.downloadGate = new Promise(() => {});
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  s.fake.backupGate = new Promise(() => {});
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   await until(() => s.events.filter((e) => e.kind === 'packUpdateStep').length >= 1);
   const replay = s.handle.live.since().map(([, e]) => e).filter((e) => 'serverId' in e && e.type === 'notice' && e.kind === 'packUpdateStep');
   assert.equal(replay.length, 1);
-});
-
-test('Cancel while preparing stops the download and ends the update as cancelled with nothing touched', async (t) => {
-  const { w, s } = await updatable(t);
-  s.fake.downloadGate = new Promise(() => {}); // a download that would never end
-  const before = snapshot(w.dir);
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
-  await until(() => s.fake.downloads.length === 1);
-  assert.equal((await s.pack()).running!.cancellable, true);
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update/cancel')).status, 204);
-  const row = await s.finished();
-  assert.equal(row.outcome, 'cancelled');
-  assert.deepEqual(snapshot(w.dir), before);
-  assert.deepEqual(s.systemctl(), []);
-  assert.deepEqual((await s.audit('pack update cancel')).map((e) => e.details), ['2.7.4 → 2.7.5']);
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update/cancel')).status, 409); // nothing running
 });
 
 test('with players online the stop counts down; cancelling it, here or anywhere, ends the update as cancelled', async (t) => {
@@ -898,7 +888,7 @@ test('with players online the stop counts down; cancelling it, here or anywhere,
     s.mod().send({ type: 'heartbeat', tps: 20, players: ['Steve'] });
     await sleep(20);
     const before = snapshot(w.dir);
-    await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+    await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
     await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'stop' && e.cancellable && e.detail.startsWith('1 player online: stopping in')), 5000);
     const card = (await s.json<ServerCard[]>(s.req('GET', '/api/servers')))[0]!;
     assert.equal(card.restart?.stop, true);
@@ -917,7 +907,7 @@ test('with players online the stop counts down; cancelling it, here or anywhere,
 test('an update is refused while a countdown runs on the server, as its blocked reason says', async (t) => {
   const { s } = await updatable(t);
   assert.equal((await s.req('POST', '/api/servers/gtnh/restart', { minutes: 5 })).status, 204);
-  const res = await s.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  const res = await s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew());
   assert.equal(res.status, 409);
   assert.equal(await res.text(), 'A countdown is running on GTNH: cancel it first.');
   assert.equal((await s.pack()).blocked, 'A countdown is running on GTNH: cancel it first.');
@@ -929,7 +919,7 @@ test('a stop that never ends fails the update before the swap: the folder is unc
   const { w, s } = await updatable(t, { stopMs: 200 });
   s.fake.stopHangs = true;
   const before = snapshot(w.dir);
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   const row = await s.finished();
   assert.equal(row.outcome, 'failed before swap');
   assert.ok(row.log.includes("The service didn't stop within"), row.log);
@@ -942,7 +932,7 @@ test('a stop that never ends fails the update before the swap: the folder is unc
 
 test('Cancel after the server was stopped is 409', async (t) => {
   const { s } = await updatable(t, { comesBack: () => false, gateMs: 3_000 });
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'gate' && e.state === 'running'), 5000);
   assert.equal((await s.pack()).running!.cancellable, false);
   const res = await s.req('POST', '/api/servers/gtnh/pack/update/cancel');
@@ -958,7 +948,7 @@ test('no hello within the gate rolls back to exactly the old files, offering the
   // The new files never say hello (the 1st start); the old ones do (the 2nd).
   const { w, s } = await updatable(t, { gateMs: 300, restore, comesBack: (n) => n === 2 });
   const before = snapshot(w.dir);
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   const row = await s.finished();
   assert.equal(row.outcome, 'rolled back', row.log);
   assert.equal(row.backup, '2026-10-02-12-00-00.zip');
@@ -985,7 +975,7 @@ test('no hello within the gate rolls back to exactly the old files, offering the
 
 test('no hello after the rollback either ends as failed, leaving the .pre-update folder and naming it', async (t) => {
   const { w, s } = await updatable(t, { gateMs: 200, comesBack: () => false });
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   const row = await s.finished();
   assert.equal(row.outcome, 'failed');
   const pre = readdirSync(w.dir).find((f) => f.startsWith('.pre-update-'))!;
@@ -1003,7 +993,7 @@ test('an update left running by the last hub is closed as interrupted, naming it
   await s.connect();
   await s.adopt();
   s.fake.comesBack = () => false;
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   await until(() => s.events.some((e) => e.kind === 'packUpdateStep' && e.step === 'gate' && e.state === 'running'), 5000);
   await s.close(); // mid-gate, as a hub restart would
   const pre = readdirSync(w.dir).find((f) => f.startsWith('.pre-update-'))!;
@@ -1020,8 +1010,8 @@ test('a pack update and a restore refuse each other (GitHub off: no deploys to a
   const restore: RunRestore = () => new Promise((r) => (gate = () => r('Restored.')));
   const { w: first, s } = await updatable(t, { restore });
   write(first.backupDir, { '2026-10-02-12-00-00.zip': 'backup' });
-  s.fake.downloadGate = new Promise(() => {});
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  s.fake.backupGate = new Promise(() => {});
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   const refused = await s.req('POST', '/api/servers/gtnh/restore', { name: '2026-10-02-12-00-00.zip' });
   assert.equal(refused.status, 409);
   assert.equal(await refused.text(), 'A pack update is running on GTNH: restore once it is done.');
@@ -1036,7 +1026,7 @@ test('a pack update and a restore refuse each other (GitHub off: no deploys to a
   await until(() => gate !== undefined);
   await sleep(20);
   assert.equal((await r.pack()).blocked, 'A restore is running on GTNH.');
-  const update = await r.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  const update = await r.req('POST', '/api/servers/gtnh/pack/update', await r.toNew());
   assert.equal(update.status, 409);
   assert.equal(await update.text(), 'A restore is running on GTNH.');
   gate();
@@ -1054,11 +1044,10 @@ const github: HubDeps['github'] = {
 
 async function withGithub(t: TestContext) {
   const w = world(t);
-  mkdirSync(join(w.root, 'deploy-root'));
   w.config.integrations.github = {
     repo: 'Edward-Pratt/orrery',
     newerAfterDays: 14,
-    deploys: { root: join(w.root, 'deploy-root'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
+    deploys: { root: join(w.root, 'data'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
   };
   const s = await start(t, w, { github });
   while (((await s.json<{ checkedAt: number | null }>(s.req('GET', '/api/deploys'))).checkedAt) === null) await sleep(5);
@@ -1069,8 +1058,8 @@ async function withGithub(t: TestContext) {
 
 test('a pack update and a Mod deploy onto the same server refuse each other', async (t) => {
   const { s } = await withGithub(t);
-  s.fake.downloadGate = new Promise(() => {});
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  s.fake.backupGate = new Promise(() => {});
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   assert.deepEqual((await s.json<{ packing: string[] }>(s.req('GET', '/api/deploys'))).packing, ['gtnh']);
   const deploy = await s.req('POST', '/api/deploys', { part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' });
   assert.equal(deploy.status, 409);
@@ -1080,15 +1069,15 @@ test('a pack update and a Mod deploy onto the same server refuse each other', as
   const other = await withGithub(t);
   assert.equal((await other.s.req('POST', '/api/deploys', { part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' })).status, 202); // counts down
   assert.equal((await other.s.pack()).blocked, 'A Mod deploy onto GTNH is running.');
-  const update = await other.s.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  const update = await other.s.req('POST', '/api/servers/gtnh/pack/update', await other.s.toNew());
   assert.equal(update.status, 409);
   assert.equal(await update.text(), 'A Mod deploy onto GTNH is running.');
 });
 
 test('a pack update and a hub deploy refuse each other', async (t) => {
   const { s } = await withGithub(t);
-  s.fake.downloadGate = new Promise(() => {});
-  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', toNew), 202);
+  s.fake.backupGate = new Promise(() => {});
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', await s.toNew()), 202);
   const deploy = await s.req('POST', '/api/deploys', { part: 'hub', tag: 'hub-v2.7.0' });
   assert.equal(deploy.status, 409);
   assert.equal(await deploy.text(), 'A pack update is running: deploy the hub once it is done.');
@@ -1096,7 +1085,7 @@ test('a pack update and a hub deploy refuse each other', async (t) => {
 
   const other = await withGithub(t);
   assert.equal((await other.s.req('POST', '/api/deploys', { part: 'hub', tag: 'hub-v2.7.0' })).status, 202);
-  const update = await other.s.req('POST', '/api/servers/gtnh/pack/update', toNew);
+  const update = await other.s.req('POST', '/api/servers/gtnh/pack/update', await other.s.toNew());
   assert.equal(update.status, 409);
   assert.equal(await update.text(), 'A hub deploy is running.');
 });
@@ -1105,7 +1094,6 @@ test('a pack update and a hub deploy refuse each other', async (t) => {
 
 const URL_FORGE = 'https://packs.example/GTNH_2.7.6.zip';
 const NEW = { name: 'GT New Horizons', version: '2.7.5', mc: '1.7.10', loader: 'forge' };
-const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 /** A hub on a world with 2.7.6 (a Forge jar at its root) behind a URL too, recording the library's add events. */
 async function libraryHub(t: TestContext, setup: Setup = {}, w = world(t)) {
@@ -1167,11 +1155,10 @@ test('an add streams its progress then its end; the replay holds only the latest
 
 test('Cancel stops an add and leaves nothing behind; a second add while one runs, and a hub deploy, are refused', async (t) => {
   const w = world(t);
-  mkdirSync(join(w.root, 'deploy-root'));
   w.config.integrations.github = {
     repo: 'Edward-Pratt/orrery',
     newerAfterDays: 14,
-    deploys: { root: join(w.root, 'deploy-root'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
+    deploys: { root: join(w.root, 'data'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
   };
   const { s, lib, add, finished, files } = await libraryHub(t, { github }, w);
   while ((await s.json<{ checkedAt: number | null }>(s.req('GET', '/api/deploys'))).checkedAt === null) await sleep(5);
@@ -1257,4 +1244,91 @@ test('bad adds are 400; Delete removes the entry and its zip, audited; an unknow
   assert.deepEqual(files(), []);
   for (const id of [entry!.id, 'x']) assert.equal((await s.req('DELETE', `/api/library/packs/${id}`)).status, 404);
   assert.deepEqual((await s.audit('library delete')).map((e) => e.details), ['GT New Horizons 2.7.5']);
+});
+
+test('at start, packs/<id>.zip moves into the library: added, or reused by sha256; no row: deleted; a name clash: left and logged', async (t) => {
+  const w = world(t);
+  w.urls[URL_FORGE] = w.zip('GTNH_2.7.6.zip', { ...PACK_NEW, 'forge-1.7.10-10.13.4.1614-1.7.10-universal.jar': 'forge' });
+  const data = dirname(w.config.dbPath);
+  const db = new Db(w.config.dbPath);
+  const row = (name: string, version: string, source: string) => ({ name, version, source, sha256: 'x', by: 'alex', at: 1, how: 'adopted' as const, snapshot: '{"extras":{},"edits":{}}', libraryId: null });
+  db.setPack('gtnh', row('GT New Horizons', '2.7.4', URL_OLD), [], new Set());
+  db.setPack('reused', row('Renamed', '9', 'by hand'), [], new Set());
+  db.setPack('clash', row('GT New Horizons', '2.7.5', 'by hand'), [], new Set());
+  db.addLibraryEntry({ name: 'GT New Horizons', version: '2.7.5', mc: '1.7.10', loader: 'forge', sha256: sha(w.urls[URL_NEW]!), size: 1, source: URL_NEW, by: 'alex', at: 2 });
+  db.close();
+  mkdirSync(join(data, 'packs'));
+  mkdirSync(join(data, 'library'));
+  copyFileSync(w.urls[URL_NEW]!, join(data, 'library', `${sha(w.urls[URL_NEW]!)}.zip`));
+  copyFileSync(w.urls[URL_OLD]!, join(data, 'packs', 'gtnh.zip'));
+  copyFileSync(w.urls[URL_NEW]!, join(data, 'packs', 'reused.zip'));
+  copyFileSync(w.urls[URL_FORGE]!, join(data, 'packs', 'clash.zip'));
+  writeFileSync(join(data, 'packs', 'gone.zip'), 'no row');
+  const s = await start(t, w);
+  assert.deepEqual(readdirSync(join(data, 'packs')), ['clash.zip']);
+  assert.deepEqual(readdirSync(join(data, 'library')).sort(), [`${sha(w.urls[URL_OLD]!)}.zip`, `${sha(w.urls[URL_NEW]!)}.zip`].sort());
+  const { packs } = await s.json<LibraryState>(s.req('GET', '/api/library'));
+  assert.deepEqual(
+    packs.map(({ name, version, mc, loader, source, usedBy }) => ({ name, version, mc, loader, source, usedBy })),
+    [
+      { name: 'GT New Horizons', version: '2.7.5', mc: '1.7.10', loader: 'forge', source: URL_NEW, usedBy: ['reused'] },
+      { name: 'GT New Horizons', version: '2.7.4', mc: '1.7.10', loader: 'forge', source: URL_OLD, usedBy: ['gtnh'] },
+    ],
+  );
+  // The moved pack is the server's: Apply changes unzips it.
+  await s.connect();
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/edits', { path: 'startserver.sh', find: '-Xmx6G', replace: '-Xmx8G' }));
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', { pending: true }), 202);
+  assert.equal((await s.finished()).outcome, 'ok');
+  assert.equal(readFileSync(join(w.dir, 'mods/old-only.jar'), 'utf8'), 'gone in 2.7.5');
+  // Once moved, packs/ goes.
+  rmSync(join(data, 'packs', 'clash.zip'));
+  await s.close();
+  await start(t, w);
+  assert.ok(!existsSync(join(data, 'packs')));
+});
+
+test('an entry a server uses, or a running update installs, is not deleted (409 naming them); once unused it is', async (t) => {
+  const { w, s } = await updatable(t);
+  const old = await s.entry(URL_OLD, '2.7.4');
+  const refused = await s.req('DELETE', `/api/library/packs/${old.library}`);
+  assert.equal(refused.status, 409);
+  assert.equal(await refused.text(), 'GT New Horizons 2.7.4 is used by gtnh.');
+  const next = await s.toNew();
+  s.fake.backupGate = new Promise(() => {});
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/update', next), 202);
+  assert.equal(await (await s.req('DELETE', `/api/library/packs/${next.library}`)).text(), 'GT New Horizons 2.7.5 is used by gtnh.');
+  assert.deepEqual((await s.json<LibraryState>(s.req('GET', '/api/library'))).packs.map((p) => p.usedBy), [['gtnh'], ['gtnh']]);
+  await s.close(); // the update is interrupted: the next hub closes it
+  const again = await start(t, w);
+  // The interrupted update no longer installs 2.7.5; 2.7.4 is still the server's.
+  assert.equal((await again.req('DELETE', `/api/library/packs/${next.library}`)).status, 204);
+  assert.equal((await again.req('DELETE', `/api/library/packs/${old.library}`)).status, 409);
+});
+
+test("a Mod deploy picks the build for the server pack's Minecraft version, else 1.7.10", async (t) => {
+  const w = world(t);
+  w.config.integrations.github = {
+    repo: 'Edward-Pratt/orrery',
+    newerAfterDays: 14,
+    deploys: { root: join(w.root, 'data'), hubUnit: 'orrery-hub.service', hubTemplate: 'orrery-deploy', webTemplate: 'orrery-deploy-web', webDir: join(w.root, 'www') },
+  };
+  const assets = ['orrery-1.7.10-1.5.0.jar', 'orrery-1.12.2-1.5.0.jar'];
+  const s = await start(t, w, {
+    github: {
+      releases: async () => [{ tag: 'mod-v1.5.0', draft: false, prerelease: false, publishedAt: 1, assets }],
+      download: async (_tag, asset) => new TextEncoder().encode(asset),
+    },
+  });
+  while ((await s.json<{ checkedAt: number | null }>(s.req('GET', '/api/deploys'))).checkedAt === null) await sleep(5);
+  const deploy = async () => {
+    await s.json(s.req('POST', '/api/deploys', { part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' }), 202);
+    await sleep(50);
+    return readdirSync(join(w.dir, 'mods')).filter((f) => f.startsWith('orrery-'));
+  };
+  assert.deepEqual(await deploy(), ['orrery-1.7.10-1.5.0.jar']); // no pack yet
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', await s.entry(URL_OLD, '2.7.4', '1.12.2')));
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/adopt', { keep: [] }));
+  assert.deepEqual(await deploy(), ['orrery-1.12.2-1.5.0.jar']); // the older build removed
+  assert.equal(readFileSync(join(w.dir, 'mods', 'orrery-1.12.2-1.5.0.jar'), 'utf8'), 'orrery-1.12.2-1.5.0.jar');
 });

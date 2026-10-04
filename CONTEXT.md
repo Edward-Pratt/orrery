@@ -58,7 +58,7 @@ _Avoid_: old world, backup (it is not one)
 ### Packs
 
 **Pack**:
-The versioned base content a server runs: a modpack release (GTNH 2.7.4) or plain Minecraft. Not always GTNH.
+The versioned base content a server runs: a modpack release (GTNH 2.7.4) or plain Minecraft. Not always GTNH. Each pack version is for one Minecraft version and loader (1.7.10 Forge), which decides the Mod build a server needs.
 _Avoid_: modpack (for the general term), instance
 
 **Extra**:
@@ -88,6 +88,14 @@ _Avoid_: cache, store, repository
 **Install**:
 Putting a pack version from the library into a new server's empty folder: the first pack a server gets, as opposed to a pack update. Creating the server's systemd unit and config entry is not part of it: the hub hands those over as a script for the host's owner to run.
 _Avoid_: provision, deploy (a deploy is a release of hub, dashboard or Mod)
+
+**Pending server**:
+A server the hub has installed but that isn't in config yet, because the host's owner hasn't run its setup script. It can't start. It becomes a server when the hub finds it in config, or disappears when it is discarded, folder and all.
+_Avoid_: draft, new server, unconfigured server
+
+**Java runtime**:
+A Java build the hub keeps for its Environment's servers, named by vendor and full version (Temurin 21.0.8+9). Each server runs on the one it is set to, or on the host's own Java when none is set; a change applies at its next restart. A runtime is removed only by hand, and only while no server is set to it.
+_Avoid_: JDK, JRE, Java version (a version is the number)
 
 ### Releases
 

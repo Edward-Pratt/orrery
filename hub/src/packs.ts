@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type {
@@ -16,7 +16,6 @@ import type {
   PackState,
   PendingChange,
   ReportFile,
-  UploadAnswer,
 } from './api.ts';
 import { listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
@@ -26,6 +25,7 @@ import type { HubEvent, ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from './types.ts';
 import { formatDuration } from './units.ts';
+import { sha256File, type Upload, type Uploads } from './uploads.ts';
 
 /** Fetches `url` into the file `dest`, reporting bytes so far and the total (null: unknown); `signal` aborts it. Rejects on failure. */
 export type Download = (url: string, dest: string, onProgress: (bytes: number, total: number | null) => void, signal?: AbortSignal) => Promise<void>;
@@ -79,8 +79,10 @@ export type PacksDeps = {
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
   servers: ServerSettings[];
   hasMod: (serverId: string) => boolean;
-  /** The folder holding `hub.db`: uploads, the Extras and the installed packs' zips live under it. */
+  /** The folder holding `hub.db`: downloads, the Extras and the installed packs' zips live under it. */
   dataDir: string;
+  /** Finished uploads, taken as a source or an Extra. */
+  uploads: Pick<Uploads, 'get' | 'take'>;
   download: Download;
   /** Whether a restore runs on a server. */
   restoring: (serverId: string) => boolean;
@@ -92,8 +94,6 @@ const STAGING = '.orrery-staging';
 const PRE = '.pre-update-';
 /** The Mod's jar, from before the rename and after: put back by every update, never an Extra. The only thing the hub knows about the pack's contents. */
 const MOD_JAR = /^mods\/(gtnhdiscord|orrery)-[^/]*\.jar$/;
-const UPLOAD_MAX = 4 * 1024 ** 3;
-const UPLOAD_ID = /^[0-9a-f]{32}$/;
 const HISTORY = 50;
 const LOG_LINES = 40;
 const TEXT_MAX = 200;
@@ -103,7 +103,6 @@ const STEPS: PackStep[] = ['prepare', 'backup', 'stop', 'swap', 'gate'];
 
 /** What the last apply laid over the pack: each Extra's sha256 by target, and each edited file's edits as JSON. */
 type Snapshot = { extras: Record<string, string>; edits: Record<string, string> };
-type Upload = { path: string; fileName: string; size: number; sha256: string };
 type Source = { url: string; name: string; version: string } | { upload: string; name: string; version: string };
 type Compared = { report: CompareReport; source: string; sha256: string; zip: string; manifest: string[]; own: Set<string>; timer: NodeJS.Timeout };
 type Job = {
@@ -133,12 +132,6 @@ const unzip = (args: string[]) =>
   new Promise<string>((resolve, reject) =>
     execFile('unzip', args, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error(`unzip: ${stderr.trim() || err.message}`)) : resolve(stdout))),
   );
-
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  await pipeline(createReadStream(path), hash);
-  return hash.digest('hex');
-}
 
 async function isFile(path: string): Promise<boolean> {
   return (await lstat(path).catch(() => undefined))?.isFile() ?? false;
@@ -270,7 +263,6 @@ export class Packs {
   #d: PacksDeps;
   #o: Required<PacksOptions>;
   #uploadsDir: string;
-  #uploads = new Map<string, Upload>();
   #compared = new Map<string, Compared>();
   #jobs = new Map<string, Job>();
   /** Stops each wait and ticker without resolving it: a closing hub leaves a running update as a crash would. */
@@ -283,9 +275,8 @@ export class Packs {
     this.#uploadsDir = join(deps.dataDir, 'uploads');
   }
 
-  /** Clears unused uploads and leftover staging, and closes updates the last hub left running as interrupted. */
+  /** Clears leftover staging (downloads go with the uploads, at their start), and closes updates the last hub left running as interrupted. */
   async start(): Promise<void> {
-    await rm(this.#uploadsDir, { recursive: true, force: true });
     await rm(join(this.#d.dataDir, 'staging'), { recursive: true, force: true });
     for (const row of this.#d.db.packUpdates(undefined, 1000)) {
       const dir = this.#settings(row.serverId)?.dir;
@@ -349,32 +340,6 @@ export class Packs {
       rolledBack: this.rollback(serverId),
       packFiles: [...own],
     };
-  }
-
-  /** Streams an upload to `<data>/uploads`, hashing it on the way; at most 4 GiB. */
-  async upload(body: ReadableStream<Uint8Array> | null, fileName: string): Promise<UploadAnswer> {
-    await mkdir(this.#uploadsDir, { recursive: true });
-    const upload = randomBytes(16).toString('hex');
-    const path = join(this.#uploadsDir, upload);
-    const hash = createHash('sha256');
-    let size = 0;
-    const count = new Transform({
-      transform(chunk: Buffer, _, done) {
-        size += chunk.length;
-        if (size > UPLOAD_MAX) return done(new PackRefused(400, 'The file is larger than 4 GiB.'));
-        hash.update(chunk);
-        done(null, chunk);
-      },
-    });
-    try {
-      await pipeline(body ? Readable.fromWeb(body as never) : Readable.from([]), count, createWriteStream(path));
-    } catch (err) {
-      await rm(path, { force: true });
-      throw err instanceof PackRefused ? err : new PackRefused(400, `The upload failed: ${(err as Error).message}`);
-    }
-    const name = basename(fileName).slice(0, TEXT_MAX) || 'upload';
-    this.#uploads.set(upload, { path, fileName: name, size, sha256: hash.digest('hex') });
-    return { upload, fileName: name, size };
   }
 
   /** Compares a pack with the server folder; held for `adopt`. Refused once the server has a pack. */
@@ -546,7 +511,7 @@ export class Packs {
       if (!pending.length) throw new PackRefused(409, `Nothing is pending: ${pack.version} is installed as it is.`);
     } else {
       src = this.#source(source);
-      const up = 'upload' in src ? this.#uploads.get(src.upload) : undefined;
+      const up = 'upload' in src ? this.#d.uploads.get(src.upload) : undefined;
       // An upload's sha256 is known now; a URL's only after the download, so the same URL stands in for it here.
       const same = up ? up.sha256 === pack.sha256 : 'url' in src && src.url === pack.source;
       if (same && src.version === pack.version && !pending.length) {
@@ -995,15 +960,14 @@ export class Packs {
       if (URL.parse(b.url)?.protocol !== 'https:') throw new PackRefused(400, 'The pack URL must be https.');
       return { url: b.url, name, version };
     }
-    if (typeof b.upload === 'string' && this.#uploads.has(b.upload)) return { upload: b.upload, name, version };
+    if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) return { upload: b.upload, name, version };
     throw new PackRefused(400, 'Give a pack URL, or upload the zip again.');
   }
 
   /** Takes an upload for use: it is gone from the list (its file is the caller's). */
   #take(id: unknown): Upload {
-    const up = typeof id === 'string' && UPLOAD_ID.test(id) ? this.#uploads.get(id) : undefined;
+    const up = this.#d.uploads.take(id);
     if (!up) throw new PackRefused(400, 'Upload the file (again).');
-    this.#uploads.delete(id as string);
     return up;
   }
 

@@ -311,11 +311,15 @@ export type PackState = {
   packFiles: string[];
 };
 /**
- * `POST /api/servers/:id/pack/uploads`: the raw file as the body (`application/zip`, `application/java-archive` or
- * `application/octet-stream`, the one exception to the JSON rule; Origin still checked), its name in `x-file-name`;
- * at most 4 GiB. `upload` names it in a source or an Extra, once; unused ones are cleared when the hub restarts.
+ * `POST /api/uploads` (`UploadRequest`, `size` at most 4 GiB) starts a chunked upload. `PUT /api/uploads/:upload?offset=<n>`
+ * appends a raw `application/octet-stream` body of at most 64 MiB (the one exception to the JSON rule; Origin still
+ * checked), only at `offset` = the bytes received so far: otherwise 409 with `UploadProgress`. `GET /api/uploads/:upload`
+ * answers `UploadProgress`. Once `received` is `size`, `upload` names it in a source or an Extra, once; uploads are dropped
+ * an hour after their last chunk, and cleared when the hub restarts.
  */
-export type UploadAnswer = { upload: string; fileName: string; size: number };
+export type UploadRequest = { fileName: string; size: number };
+export type UploadAnswer = { upload: string };
+export type UploadProgress = { received: number };
 /** A pack zip: an `https:` URL the hub downloads, or an upload. */
 export type PackSource = { url: string; name: string; version: string } | { upload: string; name: string; version: string };
 /** A file in the Adopt report, with its size on the server. */

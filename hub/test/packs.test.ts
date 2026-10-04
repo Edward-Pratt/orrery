@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import type { AuditLog, CompareReport, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer } from '../src/api.ts';
+import type { AuditLog, CompareReport, LiveEvent, PackState, ServerCard, ServerDetail, UploadAnswer, UploadProgress } from '../src/api.ts';
 import type { Config, ServerSettings } from '../src/config.ts';
 import type { Download } from '../src/packs.ts';
 import type { RunRestore } from '../src/restore.ts';
@@ -93,6 +93,7 @@ type Setup = {
   stopMs?: number;
   /** The unit's state when the hub starts (default active). */
   unit?: string;
+  uploadIdleMs?: number;
 };
 
 /**
@@ -221,6 +222,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     github: setup.github,
     packs: { gateMs: setup.gateMs ?? 1_000, pollMs: 10, backupMs: 2_000, ...(setup.stopMs && { stopMs: setup.stopMs }) },
     deploys: { watchMs: 10, countdownMinutes: 60 },
+    uploadIdleMs: setup.uploadIdleMs,
   });
   let closed = false;
   const close = async () => {
@@ -249,12 +251,20 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     return r.json() as Promise<T>;
   };
   const pack = () => json<PackState>(req('GET', '/api/servers/gtnh/pack'));
-  const upload = async (file: string, name = 'GTNH_2.7.5.zip', type = 'application/zip') =>
-    app.request('/api/servers/gtnh/pack/uploads', {
-      method: 'POST',
-      headers: { cookie, origin: WEB.publicUrl, 'content-type': type, 'x-file-name': encodeURIComponent(name) },
-      body: readFileSync(file),
+  /** A raw chunk at `offset` of an upload, as the dashboard sends it. */
+  const chunk = (upload: string, offset: number, body: BodyInit, headers: Record<string, string> = {}) =>
+    app.request(`/api/uploads/${upload}?offset=${offset}`, {
+      method: 'PUT',
+      headers: { cookie, origin: WEB.publicUrl, 'content-type': 'application/octet-stream', ...headers },
+      body,
     });
+  /** Uploads a file in chunks of `size` bytes; returns its upload id. */
+  const upload = async (file: string, name = 'GTNH_2.7.5.zip', size = 1000) => {
+    const data = readFileSync(file);
+    const { upload: id } = await json<UploadAnswer>(req('POST', '/api/uploads', { fileName: name, size: data.length }));
+    for (let at = 0; at < data.length; at += size) await json<UploadProgress>(chunk(id, at, Buffer.from(data.subarray(at, at + size))));
+    return id;
+  };
   const audit = async (prefix = 'pack') =>
     ((await (await app.request('/api/audit', { headers: { cookie } })).json()) as AuditLog).entries
       .filter((e) => e.action.startsWith(prefix))
@@ -271,7 +281,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     return (await pack()).history[0]!;
   };
   const systemctl = () => calls.filter((c) => c[0] === 'systemctl' && c[1] !== 'show').map((c) => `${c[1]} ${c.at(-1)}`);
-  return { handle, app, cookie, req, json, pack, upload, audit, adopt, finished, events, fake, state, calls, systemctl, connect, close, mod: () => mod! };
+  return { handle, app, cookie, req, json, pack, chunk, upload, audit, adopt, finished, events, fake, state, calls, systemctl, connect, close, mod: () => mod! };
 }
 
 test('a server with a folder, a service and a Mod has a Pack: Kept paths from keep first, then the built-in ones', async (t) => {
@@ -462,25 +472,82 @@ test('a failed download is 502; a source needs an https URL or an upload, a name
   }
 });
 
-test('an upload streams to <data>/uploads and can be adopted from, once; uploads are cleared at start; only zips and jars', async (t) => {
+test('chunks in order make an upload, hashed once complete, that can be adopted from, once', async (t) => {
   const w = world(t);
   const s = await start(t, w);
-  const res = await s.upload(w.urls[URL_OLD]!, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-  const up = await s.json<UploadAnswer>(res);
-  assert.equal(up.fileName, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-  assert.equal(up.size, statSync(w.urls[URL_OLD]!).size);
-  assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), [up.upload]);
-  assert.equal((await s.upload(w.urls[URL_OLD]!, 'a.zip', 'application/json')).status, 415);
-  assert.equal((await s.upload(w.urls[URL_OLD]!, 'a.zip', 'text/plain')).status, 415);
-  const elsewhere = { cookie: s.cookie, origin: 'https://evil.example', 'content-type': 'application/zip' };
-  assert.equal((await s.app.request('/api/servers/gtnh/pack/uploads', { method: 'POST', headers: elsewhere, body: 'x' })).status, 403);
-  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { upload: up.upload, name: 'GT New Horizons', version: '2.7.4' }));
+  const id = await s.upload(w.urls[URL_OLD]!, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip', 700);
+  assert.deepEqual(await s.json<UploadProgress>(s.req('GET', `/api/uploads/${id}`)), { received: statSync(w.urls[URL_OLD]!).size });
+  assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), [id]);
+  const report = await s.json<CompareReport>(s.req('POST', '/api/servers/gtnh/pack/compare', { upload: id, name: 'GT New Horizons', version: '2.7.4' }));
   assert.equal(report.matching, 5);
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/compare', { upload: up.upload, name: 'x', version: '1' })).status, 400); // used
+  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/compare', { upload: id, name: 'x', version: '1' })).status, 400); // used
   const p = await s.json<PackState>(s.req('POST', '/api/servers/gtnh/pack/adopt', { keep: [] }));
   assert.equal(p.installed!.source, 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-  await s.json<UploadAnswer>(s.upload(w.urls[URL_NEW]!));
-  assert.equal(readdirSync(join(w.root, 'data', 'uploads')).length, 1);
+  // The same zip by upload, with nothing pending, is the installed pack: its sha256 was right.
+  const again = await s.upload(w.urls[URL_OLD]!);
+  const same = await s.req('POST', '/api/servers/gtnh/pack/update', { upload: again, name: 'GT New Horizons', version: '2.7.4' });
+  assert.equal(same.status, 409);
+});
+
+test('a chunk only at the bytes received: a wrong offset is 409 with the size, a failed or oversize chunk leaves nothing', async (t) => {
+  const w = world(t);
+  const s = await start(t, w);
+  await s.adopt();
+  const { upload: id } = await s.json<UploadAnswer>(s.req('POST', '/api/uploads', { fileName: 'a.jar', size: 10 }));
+  assert.deepEqual(await s.json<UploadProgress>(s.chunk(id, 0, 'abcd')), { received: 4 });
+  for (const offset of [0, 2, 6]) {
+    const res = await s.chunk(id, offset, 'efgh');
+    assert.equal(res.status, 409, String(offset));
+    assert.deepEqual(await res.json(), { received: 4 });
+  }
+  const over = await s.chunk(id, 4, 'efghijk'); // 7 bytes where 6 are left
+  assert.equal(over.status, 413);
+  assert.deepEqual(await s.json<UploadProgress>(s.req('GET', `/api/uploads/${id}`)), { received: 4 });
+  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/extras', { upload: id, target: 'mods/a.jar' })).status, 400); // not complete
+  assert.deepEqual(await s.json<UploadProgress>(s.chunk(id, 4, 'efghij')), { received: 10 }); // re-sent after the 409s
+  assert.equal(readFileSync(join(w.root, 'data', 'uploads', id), 'utf8'), 'abcdefghij');
+  assert.equal((await s.chunk(id, 10, 'k')).status, 409); // complete
+  const p = await s.json<PackState>(s.req('POST', '/api/servers/gtnh/pack/extras', { upload: id, target: 'mods/a.jar' }));
+  assert.equal(p.extras.find((e) => e.target === 'mods/a.jar')!.sha256, createHash('sha256').update('abcdefghij').digest('hex'));
+  // An empty file is complete at once.
+  const { upload: empty } = await s.json<UploadAnswer>(s.req('POST', '/api/uploads', { fileName: 'empty.cfg', size: 0 }));
+  assert.deepEqual(await s.json<UploadProgress>(s.req('GET', `/api/uploads/${empty}`)), { received: 0 });
+  await s.json(s.req('POST', '/api/servers/gtnh/pack/extras', { upload: empty, target: 'config/empty.cfg' }));
+});
+
+test('uploads are capped at 4 GiB and chunks at 64 MiB; bad requests are refused', async (t) => {
+  const w = world(t);
+  const s = await start(t, w);
+  for (const body of [{ fileName: 'a.zip', size: 4 * 1024 ** 3 + 1 }, { fileName: 'a.zip', size: -1 }, { fileName: 'a.zip', size: 1.5 }, { fileName: 'a.zip' }]) {
+    assert.equal((await s.req('POST', '/api/uploads', body)).status, 400, JSON.stringify(body));
+  }
+  const { upload: id } = await s.json<UploadAnswer>(s.req('POST', '/api/uploads', { fileName: 'big.zip', size: 4 * 1024 ** 3 }));
+  assert.equal((await s.chunk(id, 0, Buffer.alloc(64 * 1024 ** 2 + 1))).status, 413);
+  assert.deepEqual(await s.json<UploadProgress>(s.req('GET', `/api/uploads/${id}`)), { received: 0 });
+  assert.equal(statSync(join(w.root, 'data', 'uploads', id)).size, 0);
+  assert.deepEqual(await s.json<UploadProgress>(s.chunk(id, 0, Buffer.alloc(64 * 1024 ** 2))), { received: 64 * 1024 ** 2 });
+  for (const offset of ['', 'x', '-1', '1e3']) assert.equal((await s.app.request(`/api/uploads/${id}?offset=${offset}`, { method: 'PUT', headers: { cookie: s.cookie, origin: WEB.publicUrl, 'content-type': 'application/octet-stream' }, body: 'x' })).status, 400, offset);
+  assert.equal((await s.chunk('f'.repeat(32), 0, 'x')).status, 404);
+  assert.equal((await s.req('GET', `/api/uploads/${'f'.repeat(32)}`)).status, 404);
+  // The chunk route is the one exception to JSON, and only for raw bytes; its Origin is checked all the same.
+  assert.equal((await s.chunk(id, 64 * 1024 ** 2, 'x', { 'content-type': 'application/json' })).status, 415);
+  assert.equal((await s.chunk(id, 64 * 1024 ** 2, 'x', { 'content-type': 'text/plain' })).status, 415);
+  assert.equal((await s.chunk(id, 64 * 1024 ** 2, 'x', { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await s.app.request('/api/uploads', { method: 'POST', headers: { cookie: s.cookie, origin: WEB.publicUrl, 'content-type': 'application/octet-stream' }, body: '{}' })).status, 415);
+  assert.equal((await s.app.request(`/api/uploads/${id}`, { headers: {} })).status, 401);
+});
+
+test('uploads are dropped an hour after their last chunk, and cleared at start', async (t) => {
+  const w = world(t);
+  const s = await start(t, w, { uploadIdleMs: 200 });
+  const { upload: idle } = await s.json<UploadAnswer>(s.req('POST', '/api/uploads', { fileName: 'a.zip', size: 10 }));
+  const { upload: busy } = await s.json<UploadAnswer>(s.req('POST', '/api/uploads', { fileName: 'b.zip', size: 10 }));
+  for (let i = 0; i < 4; i++) {
+    await sleep(100);
+    await s.json(s.chunk(busy, i, 'x'));
+  }
+  assert.equal((await s.req('GET', `/api/uploads/${idle}`)).status, 404);
+  assert.deepEqual(readdirSync(join(w.root, 'data', 'uploads')), [busy]);
   await s.close();
   await start(t, w);
   assert.ok(!existsSync(join(w.root, 'data', 'uploads')));
@@ -490,7 +557,7 @@ test('an upload streams to <data>/uploads and can be adopted from, once; uploads
 async function uploaded(s: Awaited<ReturnType<typeof start>>, w: World, name: string, content: string): Promise<string> {
   const file = join(w.root, name);
   writeFileSync(file, content);
-  return (await s.json<UploadAnswer>(s.upload(file, name, 'application/java-archive'))).upload;
+  return s.upload(file, name);
 }
 
 test('adding, replacing and removing Extras and edits gives exactly the pending changes, each audited', async (t) => {
@@ -672,8 +739,8 @@ test('applying pending changes onto the installed version, and refusing with not
   const same = await s.req('POST', '/api/servers/gtnh/pack/update', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' });
   assert.equal(same.status, 409);
   assert.equal(await same.text(), 'GT New Horizons 2.7.4 is installed already, with nothing pending.');
-  const up = await s.json<UploadAnswer>(s.upload(w.urls[URL_OLD]!));
-  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update', { upload: up.upload, name: 'GT New Horizons', version: '2.7.4' })).status, 409);
+  const up = await s.upload(w.urls[URL_OLD]!);
+  assert.equal((await s.req('POST', '/api/servers/gtnh/pack/update', { upload: up, name: 'GT New Horizons', version: '2.7.4' })).status, 409);
   assert.match(await s.audit('pack update').then((a) => a[0]!.details), /^changes applied to 2\.7\.4: mods\/bq\.jar added/);
 });
 

@@ -207,7 +207,7 @@ describe('server pack tab', () => {
   });
 
   it('adopts from an uploaded zip, sent raw with its name', async () => {
-    const { q, render, backend } = await setup(EMPTY);
+    const { q, text, render, backend } = await setup(EMPTY);
     q('[data-from-upload]').click();
     await render();
     const file = new File(['zip'], 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
@@ -218,11 +218,14 @@ describe('server pack tab', () => {
     expect(q<HTMLInputElement>('[data-version]').value).toBe('2.7.4');
     q('[data-compare]').click();
     await render();
-    const up = backend.expectOne('/api/servers/gtnh/pack/uploads');
-    expect(up.request.body).toBe(file);
-    expect(up.request.headers.get('content-type')).toBe('application/zip');
-    expect(up.request.headers.get('x-file-name')).toBe('GT_New_Horizons_2.7.4_Server_Java_17-21.zip');
-    up.flush({ upload: 'abc', fileName: file.name, size: 3 });
+    const start = backend.expectOne('/api/uploads');
+    expect(start.request.body).toEqual({ fileName: 'GT_New_Horizons_2.7.4_Server_Java_17-21.zip', size: 3 });
+    start.flush({ upload: 'abc' });
+    await render();
+    const chunk = backend.expectOne('/api/uploads/abc?offset=0');
+    expect(chunk.request.headers.get('content-type')).toBe('application/octet-stream');
+    expect(text(q('[data-uploaded]'))).toBe('Uploading… 0%');
+    chunk.flush({ received: 3 });
     await render();
     expect(backend.expectOne('/api/servers/gtnh/pack/compare').request.body).toEqual({ upload: 'abc', name: 'GT New Horizons', version: '2.7.4' });
   });
@@ -287,9 +290,9 @@ describe('server pack tab', () => {
     await type('[data-note]', 'pregen');
     q('[data-save]').click();
     await render();
-    const up = backend.expectOne('/api/servers/gtnh/pack/uploads');
-    expect(up.request.headers.get('content-type')).toBe('application/java-archive');
-    up.flush({ upload: 'u1', fileName: file.name, size: 3 });
+    backend.expectOne('/api/uploads').flush({ upload: 'u1' });
+    await render();
+    backend.expectOne('/api/uploads/u1?offset=0').flush({ received: 3 });
     await render();
     const add = backend.expectOne('/api/servers/gtnh/pack/extras');
     expect(add.request.body).toEqual({ upload: 'u1', target: 'mods/pregen.jar', label: '4.4.4', note: 'pregen' });

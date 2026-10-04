@@ -1,4 +1,4 @@
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -16,7 +16,6 @@ import type {
   PackUpdateAnswer,
   PackUpdateRequest,
   RunningPackUpdate,
-  UploadAnswer,
 } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLoaderCircle, lucideLock, lucidePackage, lucidePlus, lucideX } from '@ng-icons/lucide';
@@ -26,10 +25,11 @@ import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
-import { catchError, debounceTime, EMPTY, filter, firstValueFrom, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
+import { catchError, debounceTime, defer, EMPTY, filter, firstValueFrom, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { formatBytes, formatDuration } from '../units';
+import { Uploader } from '../uploads';
 import ServerPage from './server';
 
 const STEP_LABELS: Record<PackStep, string> = { prepare: 'Prepare', backup: 'Backup', stop: 'Stop', swap: 'Swap', gate: 'Health gate', rollback: 'Rollback' };
@@ -54,9 +54,6 @@ export function fromFileName(file: string): { name: string; version: string } {
   return { name: base.slice(0, m.index).replace(/[_-]+/g, ' ').trim(), version: m[0] };
 }
 
-/** The content type an upload is sent as: the hub takes only these. */
-const uploadType = (file: File) => (/\.zip$/i.test(file.name) ? 'application/zip' : /\.jar$/i.test(file.name) ? 'application/java-archive' : 'application/octet-stream');
-
 type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: boolean } | { kind: 'edit'; edit?: ConfigEdit };
 
 /**
@@ -68,7 +65,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
  */
 @Component({
   selector: 'app-server-pack',
-  imports: [DatePipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner, HlmToggleGroupImports],
+  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner, HlmToggleGroupImports],
   viewProviders: [provideIcons({ lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLoaderCircle, lucideLock, lucidePackage, lucidePlus, lucideX })],
   template: `
     @if (state(); as p) {
@@ -89,6 +86,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                   }
                   Compare with the server
                 </button>
+                <ng-container [ngTemplateOutlet]="uploading" />
               </div>
             </div>
           } @else {
@@ -390,6 +388,11 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
       <p class="text-muted-foreground">{{ why }}</p>
     }
 
+    <ng-template #uploading>
+      @if (uploaded() !== null) {
+        <p class="text-xs text-muted-foreground" data-uploaded>Uploading… {{ uploaded()! * 100 | number: '1.0-0' }}%</p>
+      }
+    </ng-template>
     <ng-template #sourceFields>
       <hlm-toggle-group type="single" [value]="from()" (valueChange)="from.set($any($event) || from())" class="w-full">
         <button hlmToggleGroupItem value="url" class="flex-1" data-from-url>From a URL</button>
@@ -419,6 +422,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <ng-container [ngTemplateOutlet]="sourceFields" />
                 <p class="text-xs text-muted-foreground">{{ flow }}</p>
                 <button hlmBtn [disabled]="busy() || !sourceReady()" (click)="update()" data-update-go>Update to {{ version() || '…' }}…</button>
+                <ng-container [ngTemplateOutlet]="uploading" />
               }
               @case ('extra') {
                 @if (!s.extra || s.replace) {
@@ -437,6 +441,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <button hlmBtn [disabled]="busy() || ((!s.extra || s.replace) && !extraFile()) || (!s.extra && !target().trim())" (click)="saveExtra(s)" data-save>
                   {{ s.extra ? 'Save' : 'Add' }}
                 </button>
+                <ng-container [ngTemplateOutlet]="uploading" />
                 <p class="text-xs text-muted-foreground">Nothing changes on the server until you apply.</p>
               }
               @case ('edit') {
@@ -459,6 +464,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
 export default class Pack {
   readonly #server = inject(ServerPage);
   readonly #http = inject(HttpClient);
+  readonly #uploader = inject(Uploader);
   readonly #feedback = inject(Feedback);
   readonly #base = `/api/servers/${encodeURIComponent(this.#server.id)}/pack`;
   protected readonly stepLabels = STEP_LABELS;
@@ -481,6 +487,8 @@ export default class Pack {
   /** The version an update watched here just put in place, for the summary card's "Done" line. */
   protected readonly done = signal<string | null>(null);
   protected readonly busy = signal(false);
+  /** The share of a file sent so far while one uploads. */
+  protected readonly uploaded = signal<number | null>(null);
   protected readonly sheet = signal<Sheet | null>(null);
   protected readonly report = signal<CompareReport | null>(null);
   protected readonly keep = signal(new Set<string>());
@@ -635,11 +643,14 @@ export default class Pack {
     });
   }
 
-  /** Uploads a file for the hub to use once (a pack zip or an Extra). */
-  #upload(file: File): Observable<UploadAnswer> {
-    return this.#http.post<UploadAnswer>(`${this.#base}/uploads`, file, {
-      headers: { 'content-type': uploadType(file), 'x-file-name': encodeURIComponent(file.name) },
-    });
+  /** Uploads a file for the hub to use once (a pack zip or an Extra), showing how much is sent; its upload id. */
+  async #upload(file: File): Promise<string> {
+    this.uploaded.set(0);
+    try {
+      return await this.#uploader.send(file, (share) => this.uploaded.set(share));
+    } finally {
+      this.uploaded.set(null);
+    }
   }
 
   /** The source from the fields, its zip uploaded first when it is one. */
@@ -647,7 +658,7 @@ export default class Pack {
     const name = this.name().trim();
     const version = this.version().trim();
     if (this.from() === 'url') return { url: this.url().trim(), name, version };
-    return { upload: (await firstValueFrom(this.#upload(this.file()!))).upload, name, version };
+    return { upload: await this.#upload(this.file()!), name, version };
   }
 
   /** Runs a request with the buttons disabled; reports a failure as a toast. Resolves with the answer, or undefined. */
@@ -723,7 +734,7 @@ export default class Pack {
 
   protected saveExtra(s: Extract<Sheet, { kind: 'extra' }>): Promise<void> {
     const file = this.extraFile();
-    const upload = (): Observable<string | undefined> => (file ? this.#upload(file).pipe(map((u) => u.upload)) : of(undefined));
+    const upload = (): Observable<string | undefined> => (file ? defer(() => this.#upload(file)) : of(undefined));
     if (!s.extra) {
       return this.#change('Adding the Extra', () =>
         upload().pipe(switchMap((up) => this.#http.post<PackState>(`${this.#base}/extras`, { upload: up, target: this.target().trim(), label: this.label(), note: this.note() }))),

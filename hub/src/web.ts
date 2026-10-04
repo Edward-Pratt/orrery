@@ -21,6 +21,7 @@ import type {
   PackUpdateAnswer,
   PlayerAnswer,
   UploadAnswer,
+  UploadProgress,
   ServerCard,
   ServerDetail,
   ServerHistory,
@@ -36,6 +37,7 @@ import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
 import type { LiveFeed } from './live.ts';
 import { DownloadFailed, PackRefused, type Packs } from './packs.ts';
+import { UploadRefused, type Uploads } from './uploads.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
@@ -78,8 +80,8 @@ function unseal(sealed: string, session: string): string {
 }
 
 const AUDIT_LIMIT = 200;
-const UPLOAD = /^\/api\/servers\/[^/]+\/pack\/uploads$/;
-const UPLOAD_TYPES = ['application/zip', 'application/java-archive', 'application/octet-stream'];
+/** An upload's chunk: the one request that isn't JSON. */
+const CHUNK = /^\/api\/uploads\/[^/]+$/;
 const MAX_HOURS = 90 * 24;
 
 /** A history period's `hours` query (default 24); undefined unless a whole number from 1 to 2160. */
@@ -117,12 +119,14 @@ export type WebDeps = {
   deploys?: Deploys;
   /** Only with the systemd and Minecraft integrations. */
   packs?: Packs;
+  /** With packs. */
+  uploads?: Uploads;
   integrations: Config['integrations'];
   environment: Config['environment'];
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -222,10 +226,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
     if (c.req.header('origin') !== origin) return c.text('Wrong origin', 403);
     const type = c.req.header('content-type')?.split(';')[0]!.trim().toLowerCase();
-    // The one exception: a pack or Extra upload is the raw file.
-    if (UPLOAD.test(c.req.path) ? !UPLOAD_TYPES.includes(type ?? '') : type !== 'application/json') {
-      return c.text(UPLOAD.test(c.req.path) ? 'Send the file as application/zip, application/java-archive or application/octet-stream' : 'Send JSON', 415);
-    }
+    // The one exception: an upload's chunk is raw bytes (a cross-site form can't send that type either).
+    const chunk = c.req.method === 'PUT' && CHUNK.test(c.req.path);
+    if (type !== (chunk ? 'application/octet-stream' : 'application/json')) return c.text(chunk ? 'Send the chunk as application/octet-stream' : 'Send JSON', 415);
     await next();
   });
   app.get('/me', (c) => c.json(c.get('user') satisfies Me));
@@ -356,6 +359,27 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     });
   }
   // Packs work on a stopped server too (an update checks for itself), so they come before the online check below.
+  if (uploads) {
+    /** Runs an upload action, mapping its refusals to their status (a 409 with how much arrived). */
+    const upload = async (c: Context<Env>, fn: (id: string) => Promise<object>) => {
+      try {
+        return c.json(await fn(c.req.param('upload')!));
+      } catch (err) {
+        if (!(err instanceof UploadRefused)) throw err;
+        return err.status === 409 ? c.json({ received: err.received! } satisfies UploadProgress, 409) : c.text(err.message, err.status);
+      }
+    };
+    app.post('/uploads', async (c) => {
+      const body = await jsonBody(c.req);
+      return upload(c, async () => ({ upload: await uploads.create(body.fileName, body.size) }) satisfies UploadAnswer);
+    });
+    app.get('/uploads/:upload', (c) => upload(c, async (id) => ({ received: uploads.received(id) }) satisfies UploadProgress));
+    app.put('/uploads/:upload', async (c) => {
+      const offset = c.req.query('offset') ?? '';
+      if (!/^(0|[1-9]\d{0,15})$/.test(offset)) return c.text('Give the offset in bytes', 400);
+      return upload(c, async (id) => ({ received: await uploads.append(id, Number(offset), c.req.raw.body) }) satisfies UploadProgress);
+    });
+  }
   if (packs) {
     /** Runs a pack action for a server that has packs, mapping its refusals to their status. */
     const pack = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<unknown>, status: 200 | 202 = 200) => {
@@ -372,15 +396,6 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     };
     const id = (c: Context<Env>, key: string) => Number(/^[1-9]\d{0,15}$/.test(c.req.param(key) ?? '') ? c.req.param(key) : NaN);
     app.get('/servers/:id/pack', (c) => pack(c, async (sid) => (await packs.state(sid)) satisfies PackState));
-    app.post('/servers/:id/pack/uploads', (c) =>
-      pack(c, async () => {
-        let name = 'upload';
-        try {
-          name = decodeURIComponent(c.req.header('x-file-name') ?? 'upload');
-        } catch {}
-        return (await packs.upload(c.req.raw.body, name)) satisfies UploadAnswer;
-      }),
-    );
     app.post('/servers/:id/pack/compare', (c) =>
       pack(c, async (sid, user) => (await packs.compare(sid, await jsonBody(c.req), actor(user))) satisfies CompareReport),
     );

@@ -19,6 +19,7 @@ import { RestartScheduler } from './restarts.ts';
 import { ServerHub } from './servers.ts';
 import { Stats } from './stats.ts';
 import { scheduleSummaries } from './summary.ts';
+import { Uploads } from './uploads.ts';
 import { serveWebApi, webApi, type OAuth, type WebApi } from './web.ts';
 
 /** What the hub needs from a frontend once it is running. */
@@ -51,6 +52,8 @@ export type HubDeps = {
   download?: Download;
   /** Shorter pack update timings, for tests. */
   packs?: PacksOptions;
+  /** How long an upload is kept after its last chunk (default an hour), for tests. */
+  uploadIdleMs?: number;
 };
 
 export type HubHandle = {
@@ -151,17 +154,18 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     );
   deploys?.start();
   // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
+  const uploads = services && minecraft ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
   packs =
-    services &&
-    minecraft &&
+    uploads &&
     new Packs(
       {
         hub,
         db,
-        services,
+        services: services!,
         restarts,
         servers: config.servers,
-        hasMod: (id) => Boolean(minecraft.tokens[id]),
+        hasMod: (id) => Boolean(minecraft!.tokens[id]),
+        uploads,
         dataDir: dirname(config.dbPath),
         download: deps.download ?? fetchDownload,
         restoring: (id) => restores?.busy(id) ?? false,
@@ -176,10 +180,11 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
   const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, target));
+  await uploads?.start();
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -200,6 +205,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       services?.stop();
       deploys?.stop();
       packs?.stop();
+      uploads?.stop();
       stopSummaries();
       upkeep();
       stopPing();

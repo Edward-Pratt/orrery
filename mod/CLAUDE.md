@@ -1,15 +1,16 @@
-# mod (gtnhdiscord)
+# mod (orrery)
 
 Server-side-only Forge 1.7.10 mod, built from the GTNewHorizons ExampleMod1.7.10 template
-(RetroFuturaGradle, Gradle 9.3.1). Package `io.github.edwardpratt.gtnhdiscord`, modid `gtnhdiscord`.
+(RetroFuturaGradle, Gradle 9.3.1). Package `io.github.edwardpratt.orrery`, modid `orrery`, config
+`config/orrery.cfg` (all `gtnhdiscord` before the rename; the next Mod deploy moves a server over).
 
 ```bash
 ./gradlew spotlessApply build   # spotless is enforced; build also runs the JUnit 5 tests
 ./gradlew test
 ```
 
-- Needs a full JDK 25 (`javac`). The jar to deploy is the newest `build/libs/gtnhdiscord-<version>.jar`
-  (not `-dev`/`-sources`); version comes from the nearest `mod-v*` tag (`build.gradle.kts`; hub tags are ignored, see docs/adr/0001).
+- Needs a full JDK 25 (`javac`). The jar to deploy is the newest `build/libs/orrery-<version>.jar`
+  (not `-dev`/`-sources`; a release attaches it as `orrery-<minecraft>-<version>.jar`, `.github/mod-jars.sh`); version comes from the nearest `mod-v*` tag (`build.gradle.kts`; hub tags are ignored, see docs/adr/0001).
 - Don't edit `build.gradle.kts`; project settings go in `gradle.properties` / `dependencies.gradle`. The one
   exception is its versioning block: the plugin can't filter tags by prefix, so the version is computed there (docs/adr/0001).
 - Checkstyle rejects wildcard imports.
@@ -55,5 +56,5 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 
 ## Tests
 
-`HubClientTest` plays the hub over a real `ServerSocket`. `SayLineTest` shows Minecraft's plain classes (chat components) load fine in JUnit. `GameEvents`/`GtnhDiscord` can only be verified by
+`HubClientTest` plays the hub over a real `ServerSocket`. `SayLineTest` shows Minecraft's plain classes (chat components) load fine in JUnit. `GameEvents`/`Orrery` can only be verified by
 the manual smoke test on a real GTNH server (see the release's tickets; the v1 list is in `docs/archive/plans/`).

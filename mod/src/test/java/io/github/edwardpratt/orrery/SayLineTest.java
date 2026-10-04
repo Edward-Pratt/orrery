@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

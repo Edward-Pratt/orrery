@@ -90,8 +90,8 @@ export type PacksDeps = {
 
 const STAGING = '.orrery-staging';
 const PRE = '.pre-update-';
-/** The Mod's jar: put back by every update, never an Extra. The only thing the hub knows about the pack's contents. */
-const MOD_JAR = /^mods\/gtnhdiscord-[^/]*\.jar$/;
+/** The Mod's jar, from before the rename and after: put back by every update, never an Extra. The only thing the hub knows about the pack's contents. */
+const MOD_JAR = /^mods\/(gtnhdiscord|orrery)-[^/]*\.jar$/;
 const UPLOAD_MAX = 4 * 1024 ** 3;
 const UPLOAD_ID = /^[0-9a-f]{32}$/;
 const HISTORY = 50;
@@ -962,6 +962,7 @@ export class Packs {
       `${PRE}*/`,
       `${STAGING}/`,
       'mods/gtnhdiscord-*.jar',
+      'mods/orrery-*.jar',
     ];
   }
 

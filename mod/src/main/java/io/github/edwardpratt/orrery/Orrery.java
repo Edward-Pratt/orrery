@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.Configuration;
@@ -16,14 +16,14 @@ import cpw.mods.fml.common.event.FMLServerStoppedEvent;
 import cpw.mods.fml.common.event.FMLServerStoppingEvent;
 
 @Mod(
-    modid = GtnhDiscord.MODID,
+    modid = Orrery.MODID,
     version = Tags.VERSION,
-    name = "GTNH Discord",
+    name = "Orrery",
     acceptedMinecraftVersions = "[1.7.10]",
     acceptableRemoteVersions = "*")
-public class GtnhDiscord {
+public class Orrery {
 
-    public static final String MODID = "gtnhdiscord";
+    public static final String MODID = "orrery";
     public static final Logger LOG = LogManager.getLogger(MODID);
 
     private String hubHost;
@@ -38,7 +38,7 @@ public class GtnhDiscord {
     public void preInit(FMLPreInitializationEvent event) {
         Configuration config = new Configuration(event.getSuggestedConfigurationFile());
         String general = Configuration.CATEGORY_GENERAL;
-        hubHost = config.getString("hubHost", general, "127.0.0.1", "Address of the gtnh-discord hub");
+        hubHost = config.getString("hubHost", general, "127.0.0.1", "Address of the orrery hub");
         hubPort = config.getInt("hubPort", general, 25580, 1, 65535, "TCP port of the hub");
         serverId = config.getString("serverId", general, "gtnh", "This server's id in the hub's config.json");
         token = config.getString("token", general, "", "This server's token from the hub's config.json");
@@ -55,7 +55,7 @@ public class GtnhDiscord {
         if (!event.getServer()
             .isDedicatedServer()) return;
         if (token.isEmpty()) {
-            LOG.warn("No token set in config/gtnhdiscord.cfg - Discord bridge disabled");
+            LOG.warn("No token set in config/orrery.cfg - Discord bridge disabled");
             return;
         }
         client = new HubClient(hubHost, hubPort, serverId, token, Tags.VERSION);
@@ -75,7 +75,7 @@ public class GtnhDiscord {
         // the client is already stopped, so this send is never delivered.
         final HubClient c = client;
         Runtime.getRuntime()
-            .addShutdownHook(new Thread(() -> announceStop(c), "GTNHDiscord-shutdown"));
+            .addShutdownHook(new Thread(() -> announceStop(c), "Orrery-shutdown"));
     }
 
     @Mod.EventHandler

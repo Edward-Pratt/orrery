@@ -5,8 +5,8 @@ GT: New Horizons servers to Discord: two-way chat, console commands, status,
 and start/stop/crash alerts.
 
 ```
-[GTNH server] ─ gtnhdiscord mod ─┐
-[GTNH server] ─ gtnhdiscord mod ─┼─ TCP 127.0.0.1:25580 ─> orrery hub (Node) ─> Discord
+[GTNH server] ─ orrery mod ─┐
+[GTNH server] ─ orrery mod ─┼─ TCP 127.0.0.1:25580 ─> orrery hub (Node) ─> Discord
                                  ┘                              └─ SQLite uptime log
 ```
 
@@ -82,9 +82,9 @@ cd mod
 ./gradlew build
 ```
 
-Copy `build/libs/gtnhdiscord-<version>.jar` (not `-dev` or `-sources`) into the
+Copy `build/libs/orrery-<version>.jar` (not `-dev` or `-sources`) into the
 server's `mods/` folder. Clients don't need it. Start the server once to create
-`config/gtnhdiscord.cfg`, then set the server id and its token from the hub's
+`config/orrery.cfg`, then set the server id and its token from the hub's
 `config.json` (`integrations.minecraft.tokens`):
 
 ```

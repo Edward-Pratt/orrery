@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -19,7 +19,7 @@ import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 
 /**
  * BetterQuesting completions → {@code quest} messages. The only class that touches BetterQuesting types, and it is
- * only loaded when BetterQuesting is installed (see GtnhDiscord.serverStarting). Public because Forge's event bus
+ * only loaded when BetterQuesting is installed (see Orrery.serverStarting). Public because Forge's event bus
  * generates its caller in another package.
  */
 public final class QuestEvents {
@@ -72,12 +72,12 @@ public final class QuestEvents {
             // A different BetterQuesting build (NoSuchFieldError/NoSuchMethodError). Not a RuntimeException, and it
             // would otherwise escape FML's event bus into the tick loop and crash the server.
             disabled = true;
-            GtnhDiscord.LOG.error(
+            Orrery.LOG.error(
                 "BetterQuesting API mismatch: Discord quest announcements disabled until restart. "
-                    + "Rebuild gtnhdiscord against the server's BetterQuesting version.",
+                    + "Rebuild orrery against the server's BetterQuesting version.",
                 err);
         } catch (RuntimeException ex) {
-            GtnhDiscord.LOG.error("Discord bridge quest handler failed", ex);
+            Orrery.LOG.error("Discord bridge quest handler failed", ex);
         }
     }
 }

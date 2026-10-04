@@ -1,9 +1,9 @@
 [{
 	"modid": "${modId}",
 	"name": "${modName}",
-	"description": "Server-side bridge between a GTNH server and the gtnh-discord hub.",
+	"description": "Server-side bridge between a GTNH server and the orrery hub.",
 	"version": "${modVersion}",
 	"mcversion": "${minecraftVersion}",
-	"url": "https://github.com/Edward-Pratt/gtnh-discord",
+	"url": "https://github.com/Edward-Pratt/orrery",
 	"authorList": ["Edward-Pratt"]
 }]

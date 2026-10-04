@@ -79,7 +79,7 @@ const SERVER_OWN = {
   'config/JourneyMapServer/world.cfg': 'kept by config',
   'mods/journeymap-fairplay.jar': 'a third-party mod',
   'config/custom.cfg': 'our own config',
-  'mods/gtnhdiscord-1.4.0.jar': 'the Mod',
+  'mods/orrery-1.7.10-1.4.0.jar': 'the Mod',
 };
 
 type Setup = {
@@ -297,10 +297,11 @@ test('a server with a folder, a service and a Mod has a Pack: Kept paths from ke
       '.pre-update-*/',
       '.orrery-staging/',
       'mods/gtnhdiscord-*.jar',
+      'mods/orrery-*.jar',
     ],
   });
   assert.deepEqual([p.history, p.extras, p.edits, p.pending, p.running, p.rolledBack], [[], [], [], [], null, null]);
-  assert.equal(p.mod, 'mods/gtnhdiscord-1.4.0.jar');
+  assert.equal(p.mod, 'mods/orrery-1.7.10-1.4.0.jar');
   assert.deepEqual(p.packFiles, []);
   assert.equal((await s.json<ServerDetail>(s.req('GET', '/api/servers/gtnh'))).pack, true);
 });
@@ -349,7 +350,7 @@ test('Compare reports matching, the Mod, files not in the pack and different one
     version: '2.7.4',
     // gregtech.jar, old-only.jar, bq.jar, gregtech.cfg, startserver.sh; server.properties and World/ are kept
     matching: 5,
-    mod: ['mods/gtnhdiscord-1.4.0.jar'],
+    mod: ['mods/orrery-1.7.10-1.4.0.jar'],
     notInPack: [
       { path: 'config/custom.cfg', size: 14 },
       { path: 'mods/journeymap-fairplay.jar', size: 17 },
@@ -399,7 +400,7 @@ test('Adopt keeps the ticked files as Extras and records the pack, changing noth
 test('Adopt takes only paths from the report', async (t) => {
   const s = await start(t, world(t));
   await s.json(s.req('POST', '/api/servers/gtnh/pack/compare', { url: URL_OLD, name: 'GT New Horizons', version: '2.7.4' }));
-  for (const keep of [['ops.json'], ['../etc/passwd'], ['mods/gtnhdiscord-1.4.0.jar'], 'config/custom.cfg']) {
+  for (const keep of [['ops.json'], ['../etc/passwd'], ['mods/orrery-1.7.10-1.4.0.jar'], 'config/custom.cfg']) {
     assert.equal((await s.req('POST', '/api/servers/gtnh/pack/adopt', { keep })).status, 400, String(keep));
   }
   assert.equal((await s.pack()).installed, null);
@@ -548,7 +549,7 @@ test('Extras and edits are refused outside the folder, at a Kept path, at the Mo
   await s.adopt();
   mkdirSync(join(w.root, 'elsewhere'));
   symlinkSync(join(w.root, 'elsewhere'), join(w.dir, 'outside'));
-  for (const target of ['../evil.jar', '/etc/passwd', 'mods/../../evil.jar', 'outside/evil.jar', 'World/level.dat', 'server.properties', 'journeymap/x', 'config/JourneyMapServer/a.cfg', 'mods/gtnhdiscord-9.9.9.jar', '.pre-update-20261002-120000/mods/a.jar', '.orrery-staging/a', '', '.']) {
+  for (const target of ['../evil.jar', '/etc/passwd', 'mods/../../evil.jar', 'outside/evil.jar', 'World/level.dat', 'server.properties', 'journeymap/x', 'config/JourneyMapServer/a.cfg', 'mods/gtnhdiscord-9.9.9.jar', 'mods/orrery-1.7.10-9.9.9.jar', '.pre-update-20261002-120000/mods/a.jar', '.orrery-staging/a', '', '.']) {
     const extra = await s.req('POST', '/api/servers/gtnh/pack/extras', { upload: await uploaded(s, w, 'x.jar', 'x'), target });
     assert.equal(extra.status, 400, `extra at ${target}: ${await extra.text()}`);
     const edit = await s.req('POST', '/api/servers/gtnh/pack/edits', { path: target, find: 'a', replace: 'b' });
@@ -622,14 +623,14 @@ test('an update onto a new version swaps exactly the old manifest for the staged
   assert.equal(read('config/forge.cfg'), 'changed on the server'); // kept at adopt
   assert.equal(read('startserver.sh'), 'java -Xmx12G -Dold=6 -jar forge.jar\n'); // edits last, with $1
   assert.equal(read('config/custom.cfg'), 'my own config'); // an edit of an Extra's file
-  assert.equal(read('mods/gtnhdiscord-1.4.0.jar'), 'the Mod');
+  assert.equal(read('mods/orrery-1.7.10-1.4.0.jar'), 'the Mod');
   for (const kept of ['World/level.dat', 'World/region/r.0.0.mca', 'server.properties', 'ops.json', 'logs/latest.log', 'journeymap/data.dat', 'config/JourneyMapServer/world.cfg']) {
     assert.equal(read(kept), { ...SERVER_OWN, 'config/forge.cfg': '' }[kept], kept);
   }
   const pre = readdirSync(w.dir).find((f) => f.startsWith('.pre-update-'))!;
   assert.match(pre, /^\.pre-update-\d{8}-\d{6}$/);
   assert.equal(readFileSync(join(w.dir, pre, 'mods/old-only.jar'), 'utf8'), 'gone in 2.7.5');
-  assert.equal(readFileSync(join(w.dir, pre, 'mods/gtnhdiscord-1.4.0.jar'), 'utf8'), 'the Mod');
+  assert.equal(readFileSync(join(w.dir, pre, 'mods/orrery-1.7.10-1.4.0.jar'), 'utf8'), 'the Mod');
   assert.ok(!existsSync(join(w.dir, '.orrery-staging')));
   const p = await s.pack();
   assert.deepEqual([p.installed!.version, p.installed!.how, p.installed!.source, p.pending, p.running], ['2.7.5', 'updated', URL_NEW, [], null]);
@@ -979,7 +980,7 @@ test('a pack update and a restore refuse each other (GitHub off: no deploys to a
 const github: HubDeps['github'] = {
   releases: async () => [
     { tag: 'hub-v2.7.0', draft: false, prerelease: false, publishedAt: 1, assets: [] },
-    { tag: 'mod-v1.5.0', draft: false, prerelease: false, publishedAt: 1, assets: ['gtnhdiscord-1.5.0.jar'] },
+    { tag: 'mod-v1.5.0', draft: false, prerelease: false, publishedAt: 1, assets: ['orrery-1.7.10-1.5.0.jar'] },
   ],
   download: async () => new TextEncoder().encode('jar'),
 };

@@ -1,5 +1,5 @@
-import { readFileSync, realpathSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { constants, existsSync, readFileSync, realpathSync } from 'node:fs';
+import { copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Environment, GithubIntegration, ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
@@ -65,6 +65,12 @@ const newestFirst = (a: Release, b: Release) => {
 };
 /** The first hub and dashboard releases that can deploy: an older one would take the deploy flow away. */
 export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0' } as const;
+/** A renamed Mod release's builds, one per Minecraft target: `orrery-<mc>-<version>.jar`. */
+const MOD_BUILD = /^orrery-(.+)-(\d+\.\d+\.\d+)\.jar$/;
+/** The Minecraft version every server's Mod is built for, until the pack library knows each server's. */
+const MC = '1.7.10';
+/** Every Mod jar in `mods/`, from before the rename (`gtnhdiscord-`) and after. */
+const MOD_JAR = /^(gtnhdiscord|orrery)-.*\.jar$/;
 const LOG_LINES = 40;
 const HISTORY = 50;
 /** A oneshot deploy unit is `activating` while its script runs; inactive or failed once it is over. */
@@ -320,19 +326,32 @@ export class Deploys {
     if (!dir) throw new DeployRefused(409, `${serverName} has no server folder.`);
     if (!this.#d.hasMod(serverId)) throw new DeployRefused(409, `${serverName} has no Mod token.`);
     if (this.#d.restarts.pending(serverId)) throw new DeployRefused(409, `A countdown is running on ${serverName}: cancel it first.`);
-    const jars = release.assets.filter((a) => a.endsWith('.jar') && !a.endsWith('-dev.jar') && !a.endsWith('-sources.jar'));
-    if (jars.length !== 1) throw new DeployRefused(409, `${release.tag} has no single Mod jar.`);
-
     const v = version(release.tag).join('.');
+    const builds = release.assets.filter((a) => MOD_BUILD.test(a));
+    let asset: string;
+    let jar: string;
+    if (builds.length) {
+      asset = builds.find((a) => MOD_BUILD.exec(a)![1] === MC) ?? '';
+      if (!asset) throw new DeployRefused(409, `${release.tag} has no Mod build for Minecraft ${MC}.`);
+      jar = `orrery-${MC}-${v}.jar`;
+    } else {
+      // From before the rename: one gtnhdiscord jar, which reads its token from gtnhdiscord.cfg.
+      const jars = release.assets.filter((a) => a.endsWith('.jar') && !a.endsWith('-dev.jar') && !a.endsWith('-sources.jar'));
+      if (jars.length !== 1) throw new DeployRefused(409, `${release.tag} has no single Mod jar.`);
+      if (!existsSync(join(dir, 'config', 'gtnhdiscord.cfg'))) {
+        throw new DeployRefused(409, `${release.tag} reads config/gtnhdiscord.cfg, which ${serverName} doesn't have.`);
+      }
+      asset = jars[0]!;
+      jar = `gtnhdiscord-${v}.jar`;
+    }
     const mods = join(dir, 'mods');
-    const jar = `gtnhdiscord-${v}.jar`;
     const part = join(mods, `.${jar}.part`);
     this.#starting = true;
     let row: DeployRow;
     try {
       row = this.#begin('mod', serverId, from, release.tag, by);
       try {
-        const bytes = await this.#d.github.download(release.tag, jars[0]!);
+        const bytes = await this.#d.github.download(release.tag, asset);
         await mkdir(mods, { recursive: true });
         await writeFile(part, bytes);
       } catch (err) {
@@ -344,9 +363,15 @@ export class Deploys {
       this.#starting = false;
     }
     // A rename never rewrites the file a running JVM has open; Forge crashes on two copies, so the others go.
+    // A renamed jar reads orrery.cfg: the old config is copied over once, and kept for a pre-rename release.
     const swap = async () => {
       await rename(part, join(mods, jar));
-      for (const f of await readdir(mods)) if (/^gtnhdiscord-.*\.jar$/.test(f) && f !== jar) await rm(join(mods, f), { force: true });
+      for (const f of await readdir(mods)) if (MOD_JAR.test(f) && f !== jar) await rm(join(mods, f), { force: true });
+      if (jar.startsWith('orrery-')) {
+        await copyFile(join(dir, 'config', 'gtnhdiscord.cfg'), join(dir, 'config', 'orrery.cfg'), constants.COPYFILE_EXCL).catch((err) => {
+          if (!['ENOENT', 'EEXIST'].includes(err.code)) throw err;
+        });
+      }
     };
     if (!this.#d.hub.get(serverId)?.online) {
       try {

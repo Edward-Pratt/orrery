@@ -69,4 +69,13 @@ commit web/a 'fix: web two'; git push -q origin main; before=$(remote)
 check '--yes pushes only the tag, no prompt' \
   'release web patch --yes < /dev/null && ! says "[y/N]" && [[ -n $(git ls-remote "$T/origin.git" refs/tags/web-v0.0.1) ]] &&
    diff <(remote | grep -v web-v0.0.1) <(echo "$before") > /dev/null'
+# The Mod's release asset: orrery-<minecraft>-<version>.jar, from the one built jar (not -dev or -sources).
+mod_jars() { bash "$HERE/mod-jars.sh" "$T/mod" "$T/dist" > "$T/out" 2>&1; }
+mkdir -p "$T/mod/build/libs"
+printf 'modId = orrery\nminecraftVersion = 1.7.10\n' > "$T/mod/gradle.properties"
+check 'the Mod jar needs a build' '! mod_jars && says "want one built jar"'
+touch "$T/mod/build/libs/orrery-1.5.0"{,-dev,-sources}.jar
+check 'the Mod jar is named for its Minecraft target' 'mod_jars && [[ $(ls "$T/dist") == orrery-1.7.10-1.5.0.jar ]]'
+touch "$T/mod/build/libs/orrery-1.4.0.jar"
+check 'the Mod jar must be the only one' '! mod_jars && says "want one built jar"'
 exit $fail

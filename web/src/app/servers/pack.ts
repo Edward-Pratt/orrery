@@ -281,7 +281,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
               <li class="flex items-center gap-3 bg-muted/40 px-3 py-2.5 text-sm" data-mod-row>
                 <ng-icon name="lucideLock" class="text-muted-foreground" />
                 <div class="min-w-0 flex-1">
-                  <p class="truncate font-mono text-xs">{{ p.mod ?? 'mods/gtnhdiscord-*.jar' }}</p>
+                  <p class="truncate font-mono text-xs">{{ p.mod ?? 'mods/orrery-*.jar' }}</p>
                   <p class="text-xs text-muted-foreground">The orrery Mod: put back on every update. Deployed from Host.</p>
                 </div>
               </li>

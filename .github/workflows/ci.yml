@@ -71,13 +71,11 @@ jobs:
           java-version: 25
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew spotlessCheck build
+      - run: bash ../.github/mod-jars.sh . dist
       - uses: actions/upload-artifact@v4
         with:
           name: mod-jar
-          path: |
-            mod/build/libs/gtnhdiscord-*.jar
-            !mod/build/libs/*-dev.jar
-            !mod/build/libs/*-sources.jar
+          path: mod/dist/orrery-*.jar
 
   web:
     needs: changes

@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import java.util.ArrayList;
 import java.util.List;

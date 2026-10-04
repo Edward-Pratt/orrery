@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -27,7 +27,7 @@ import cpw.mods.fml.common.gameevent.PlayerEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 
 /**
- * Game-side half of the bridge. Registered on both buses by {@link GtnhDiscord}: chat/death/achievement are Forge-bus
+ * Game-side half of the bridge. Registered on both buses by {@link Orrery}: chat/death/achievement are Forge-bus
  * events, login/logout/tick are FML-bus events. Everything here runs on the server thread.
  */
 public class GameEvents {
@@ -122,7 +122,7 @@ public class GameEvents {
                 client.send(heartbeat(server));
             }
         } catch (RuntimeException ex) {
-            GtnhDiscord.LOG.error("Discord bridge tick failed", ex);
+            Orrery.LOG.error("Discord bridge tick failed", ex);
         }
     }
 

@@ -94,6 +94,8 @@ function world(t: TestContext, { servers, restore }: Setup = {}) {
   mkdirSync(join(serverDir, 'backups'));
   mkdirSync(root);
   writeFileSync(join(serverDir, 'mods', 'gtnhdiscord-1.3.0.jar'), 'old jar');
+  mkdirSync(join(serverDir, 'config'));
+  writeFileSync(join(serverDir, 'config', 'gtnhdiscord.cfg'), 'token=old');
   writeFileSync(join(serverDir, 'backups', '2026-09-26-06-00-00.zip'), 'zip');
   const gtnh: ServerSettings = {
     id: 'gtnh',
@@ -369,6 +371,55 @@ test('a Mod deploy onto a stopped server puts exactly the new jar in place', asy
   assert.equal(readFileSync(join(w.serverDir, 'mods', 'gtnhdiscord-1.4.0.jar'), 'utf8'), 'jar mod-v1.4.0');
   assert.deepEqual(await rows(s), [{ part: 'mod', target: 'gtnh', from: null, to: 'mod-v1.4.0', by: ACTOR, outcome: 'ok', log: 'applied at next start' }]);
   assert.deepEqual(s.notices.map((n) => n.type === 'notice' && n.kind), ['deployStarted', 'deployFinished']);
+});
+
+/** A renamed release: one jar per Minecraft target, besides its dev and sources jars. */
+const ORRERY = rel('mod-v1.5.0', 0, {
+  assets: ['orrery-1.12.2-1.5.0.jar', 'orrery-1.7.10-1.5.0.jar', 'orrery-1.7.10-1.5.0-dev.jar', 'orrery-1.7.10-1.5.0-sources.jar'],
+});
+const cfg = (w: World, name: string) => {
+  const f = join(w.serverDir, 'config', name);
+  return existsSync(f) ? readFileSync(f, 'utf8') : null;
+};
+
+test("a renamed Mod deploy picks 1.7.10's jar, removes every older Mod jar and copies the old config over", async (t) => {
+  const w = world(t);
+  w.github.list = [...RELEASES, ORRERY];
+  writeFileSync(join(w.serverDir, 'mods', 'orrery-1.7.10-1.4.9.jar'), 'older orrery');
+  const s = await start(t, w);
+  assert.equal((await s.deploy({ part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' })).status, 202);
+  assert.deepEqual(w.github.downloads, ['mod-v1.5.0 orrery-1.7.10-1.5.0.jar']);
+  assert.deepEqual(jars(w), ['orrery-1.7.10-1.5.0.jar']);
+  assert.deepEqual([cfg(w, 'gtnhdiscord.cfg'), cfg(w, 'orrery.cfg')], ['token=old', 'token=old']);
+  assert.equal((await rows(s))[0]!.outcome, 'ok');
+});
+
+test("a renamed Mod deploy keeps an orrery.cfg that's there, and needs no old one", async (t) => {
+  const w = world(t);
+  w.github.list = [...RELEASES, ORRERY];
+  writeFileSync(join(w.serverDir, 'config', 'orrery.cfg'), 'token=new');
+  const s = await start(t, w);
+  assert.equal((await s.deploy({ part: 'mod', tag: 'mod-v1.5.0', server: 'gtnh' })).status, 202);
+  assert.equal(cfg(w, 'orrery.cfg'), 'token=new');
+  rmSync(join(w.serverDir, 'config'), { recursive: true });
+  // Back to a pre-rename release: no gtnhdiscord.cfg, so its jar would find no token.
+  const old = await s.deploy({ part: 'mod', tag: 'mod-v1.4.0', server: 'gtnh' });
+  assert.deepEqual([old.status, await old.text()], [409, "mod-v1.4.0 reads config/gtnhdiscord.cfg, which GTNH doesn't have."]);
+  assert.equal((await rows(s)).length, 1);
+  assert.deepEqual(jars(w), ['orrery-1.7.10-1.5.0.jar']);
+  assert.equal(cfg(w, 'orrery.cfg'), null); // and no new one written
+});
+
+test('a pre-rename Mod deploy replaces a renamed jar; a release without a 1.7.10 build is refused', async (t) => {
+  const w = world(t);
+  w.github.list = [...RELEASES, rel('mod-v1.6.0', 0, { assets: ['orrery-1.12.2-1.6.0.jar'] })];
+  writeFileSync(join(w.serverDir, 'mods', 'orrery-1.7.10-1.5.0.jar'), 'renamed');
+  const s = await start(t, w);
+  const none = await s.deploy({ part: 'mod', tag: 'mod-v1.6.0', server: 'gtnh' });
+  assert.deepEqual([none.status, await none.text()], [409, 'mod-v1.6.0 has no Mod build for Minecraft 1.7.10.']);
+  assert.equal((await s.deploy({ part: 'mod', tag: 'mod-v1.4.0', server: 'gtnh' })).status, 202);
+  assert.deepEqual(jars(w), ['gtnhdiscord-1.4.0.jar']);
+  assert.equal(cfg(w, 'orrery.cfg'), null);
 });
 
 test('a Mod deploy onto a running server swaps at the end of the countdown and is ok once the new Mod says hello', async (t) => {

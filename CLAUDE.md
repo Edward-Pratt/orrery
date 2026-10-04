@@ -76,7 +76,7 @@ Hub, mod and dashboard are versioned separately (`docs/adr/0001`); a part's vers
 from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N (`--yes` skips) and pushes only that tag.
 Never delete or move a tag; fix a failed release forward with the next patch.
 `.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`), then creates the GitHub release. Its notes are
-that part's commits (`.github/notes.sh`); for the mod it attaches the jar, for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
+that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in

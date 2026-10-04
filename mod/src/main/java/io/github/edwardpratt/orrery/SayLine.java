@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.ChatStyle;

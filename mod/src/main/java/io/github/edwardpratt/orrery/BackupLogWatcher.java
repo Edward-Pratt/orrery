@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import java.util.function.Consumer;
 
@@ -22,7 +22,7 @@ final class BackupLogWatcher extends AbstractAppender {
     private final Consumer<JsonObject> send;
 
     BackupLogWatcher(Consumer<JsonObject> send) {
-        super("GTNHDiscord-backups", null, null);
+        super("Orrery-backups", null, null);
         this.send = send;
     }
 

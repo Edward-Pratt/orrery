@@ -1,4 +1,4 @@
-package io.github.edwardpratt.gtnhdiscord;
+package io.github.edwardpratt.orrery;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -28,7 +28,7 @@ import com.google.gson.JsonParser;
 public class HubClient {
 
     static final int MAX_OUTBOX = 1000;
-    private static final Logger LOG = LogManager.getLogger("gtnhdiscord");
+    private static final Logger LOG = LogManager.getLogger("orrery");
 
     private final String host;
     private final int port;
@@ -55,7 +55,7 @@ public class HubClient {
     public synchronized void start() {
         if (running) return;
         running = true;
-        thread = new Thread(this::run, "GTNHDiscord-hub");
+        thread = new Thread(this::run, "Orrery-hub");
         thread.setDaemon(true);
         thread.start();
     }
@@ -126,7 +126,7 @@ public class HubClient {
                     connected = true;
                     backoff = minBackoffMs;
                     LOG.info("Connected to hub at {}:{}", host, port);
-                    Thread reader = new Thread(() -> readLoop(s, in), "GTNHDiscord-hub-reader");
+                    Thread reader = new Thread(() -> readLoop(s, in), "Orrery-hub-reader");
                     reader.setDaemon(true);
                     reader.start();
                     writeLoop(s, out);

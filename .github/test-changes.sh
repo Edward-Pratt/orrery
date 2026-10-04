@@ -22,6 +22,7 @@ check '1 0 0 0' hub/src/servers.ts branch main
 check '0 1 0 0' mod/build.gradle branch main
 check '0 0 1 0' web/src/app/app.ts branch main
 check '0 0 0 1' deploy/install-web.sh branch main
+check '0 0 0 1' deploy/test-add-server.sh branch main
 check '1 0 1 0' hub/src/api.ts branch main
 check '1 0 1 0' hub/src/types.ts branch main
 check '1 0 0 0' hub/package.json branch main

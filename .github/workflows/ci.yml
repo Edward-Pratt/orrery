@@ -108,4 +108,5 @@ jobs:
       - run: bash deploy/test-restore-backup.sh
       - run: bash deploy/test-install-web.sh
       - run: bash deploy/test-deploy.sh
+      - run: bash deploy/test-add-server.sh
       - run: bash .github/test-release.sh

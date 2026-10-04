@@ -6,7 +6,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
-- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**), the `Caddyfile` (TLS for the dashboard and Grafana;
+- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
   there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
   tested by `test-restore-backup.sh`) and the deploys, which the hub starts per tag through polkit:
@@ -18,6 +18,9 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `start` on those templates for well-formed tags and `restart` on that environment's hub. Staging (`docs/ROADMAP.md`, #91) runs `orrery-hub-staging.service` as
   `orrery-staging` from `/srv/orrery-staging` (its header holds the one-time setup; config from
   `hub/config.staging.example.json`), behind the Caddyfile's `staging.orrery.run` site (port 25582, `/var/www/orrery-staging`).
+  `add-server.sh` (run as root from its root-owned copy in `/usr/local/lib/orrery`) finishes a Pending server: its
+  `config.json` entry, token and service link (checked as the hub user, `config.json.bak` kept), `<id>.service` and
+  `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
 - `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
 - `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
@@ -62,6 +65,7 @@ cd web && npm test && npm run build       # the build also type-checks against t
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
+bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
 bash .github/test-release.sh              # the release script against a throwaway repo, and mod-jars.sh
 ```
@@ -80,8 +84,8 @@ that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Mi
 (the server never builds Angular; `web-v0.x` until the dashboard is finished). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
-`hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh` and
-`install-web.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
+`hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
+`install-web.sh` and `add-server.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
 
 ## Secrets
 

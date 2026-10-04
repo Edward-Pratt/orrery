@@ -2,6 +2,7 @@
 # (No tmux: SELinux on RHEL/Oracle Linux doesn't let services start tmux.)
 # Install: sudo cp deploy/gtnh.service deploy/gtnh.socket /etc/systemd/system/
 # Edit User, WorkingDirectory and the start script to match your server (and SocketUser in gtnh.socket).
+# New servers get theirs from deploy/add-server.sh, which writes the same lines: keep the two alike.
 #
 # Restart=always because a 1.7.10 server exits with code 0 even after a crash, so on-failure would miss it:
 #   crash / kill -9      -> restarts after 10 s

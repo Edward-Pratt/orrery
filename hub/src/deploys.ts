@@ -96,6 +96,8 @@ export type DeploysDeps = {
   packing: (serverId?: string) => boolean;
   /** Whether a library add runs (a hub deploy's restart would lose it). */
   libraryAdding: () => boolean;
+  /** Whether a New server install runs (likewise). */
+  installing: () => boolean;
   /** The Minecraft version of a server's pack, from its library entry; undefined: none known. */
   mcOf: (serverId: string) => string | undefined;
   /** Where the database copy before a hub deploy goes. */
@@ -170,6 +172,20 @@ export class Deploys {
     return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'hub');
   }
 
+  /** The newest Mod release with a build for a Minecraft version (a New server's Mod): its tag and asset; undefined: none. */
+  modBuild(mc: string): { tag: string; asset: string } | undefined {
+    for (const r of this.#of('mod')) {
+      const asset = r.assets.find((a) => MOD_BUILD.exec(a)?.[1] === mc && !a.includes('/'));
+      if (asset) return { tag: r.tag, asset };
+    }
+    return undefined;
+  }
+
+  /** A release asset's bytes. */
+  download(tag: string, asset: string): Promise<Uint8Array> {
+    return this.#d.github.download(tag, asset);
+  }
+
   /** Whether a Mod deploy onto a server runs (a pack update must wait for it). */
   modBusy(serverId: string): boolean {
     return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'mod' && r.target === serverId);
@@ -217,6 +233,7 @@ export class Deploys {
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
     if (part === 'hub' && this.#d.packing()) throw new DeployRefused(409, 'A pack update is running: deploy the hub once it is done.');
     if (part === 'hub' && this.#d.libraryAdding()) throw new DeployRefused(409, 'A library add is running: deploy the hub once it is done.');
+    if (part === 'hub' && this.#d.installing()) throw new DeployRefused(409, 'A New server install is running: deploy the hub once it is done.');
     if (server && this.#d.packing(server.id)) throw new DeployRefused(409, `A pack update is running on ${server.name}: deploy the Mod once it is done.`);
     if (part !== 'mod' && newestFirst(release, { tag: FLOOR[part], publishedAt: 0, assets: [] }) > 0) {
       throw new DeployRefused(409, `${tag} is older than ${FLOOR[part]}, the first release that can deploy.`);

@@ -80,6 +80,8 @@ export class Db {
         UNIQUE (name, version));
       CREATE TABLE IF NOT EXISTS runtimes (name TEXT PRIMARY KEY, feature INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
         by TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS pending_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, dir TEXT NOT NULL, token TEXT NOT NULL,
+        unit TEXT NOT NULL, game_port INTEGER NOT NULL, runtime TEXT, by TEXT NOT NULL, at INTEGER NOT NULL);
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -593,6 +595,42 @@ export class Db {
     this.#db.prepare('DELETE FROM runtimes WHERE name = ?').run(name);
   }
 
+  // Pending servers: installed, not in config yet. Their writes throw.
+
+  pendingServers(): PendingRow[] {
+    return this.#db
+      .prepare('SELECT id, name, dir, token, unit, game_port AS gamePort, runtime, by, at FROM pending_servers ORDER BY at, id')
+      .all()
+      .map((r) => ({ ...r }) as PendingRow);
+  }
+
+  addPendingServer(p: PendingRow): void {
+    this.#db
+      .prepare('INSERT INTO pending_servers (id, name, dir, token, unit, game_port, runtime, by, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(p.id, p.name, p.dir, p.token, p.unit, p.gamePort, p.runtime, p.by, p.at);
+  }
+
+  deletePendingServer(id: string): void {
+    this.#db.prepare('DELETE FROM pending_servers WHERE id = ?').run(id);
+  }
+
+  /** Whether any pack data is stored under a server id (a pack row, Extras or Config edits). */
+  hasPackData(serverId: string): boolean {
+    return ['packs', 'pack_files', 'extras', 'config_edits'].some((t) => this.#db.prepare(`SELECT 1 FROM ${t} WHERE server_id = ? LIMIT 1`).get(serverId) !== undefined);
+  }
+
+  /** Deletes a server id's pack row, manifest, Extras and Config edits (a failed install or a discarded Pending server). */
+  deletePackData(serverId: string): void {
+    this.#db.exec('BEGIN');
+    try {
+      for (const t of ['packs', 'pack_files', 'extras', 'config_edits']) this.#db.prepare(`DELETE FROM ${t} WHERE server_id = ?`).run(serverId);
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      this.#db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   close(): void {
     this.#db.close();
   }
@@ -600,6 +638,8 @@ export class Db {
 
 /** A Java runtime in the library; its JDK is `<root>/runtimes/<name>/`. `feature`: 8, 17, 21 or 25; `size`: the tarball's. */
 export type RuntimeRow = { name: string; feature: number; size: number; sha256: string; by: string; at: number };
+/** A Pending server: its folder, Mod token, unit name, game port and Java runtime (null: system java). */
+export type PendingRow = { id: string; name: string; dir: string; token: string; unit: string; gamePort: number; runtime: string | null; by: string; at: number };
 /** A pack version in the library; its zip is `<root>/library/<sha256>.zip`. */
 export type LibraryRow = { id: number; name: string; version: string; mc: string; loader: string; sha256: string; size: number; source: string; by: string; at: number };
 /** A server's installed pack as stored; `snapshot` is what the last apply laid over it, as JSON. */
@@ -610,7 +650,7 @@ export type PackRow = {
   sha256: string;
   by: string;
   at: number;
-  how: 'adopted' | 'updated';
+  how: 'adopted' | 'updated' | 'installed';
   snapshot: string;
   /** Its library entry; null when it has none (from before the library, until `packs/` is moved over). */
   libraryId: number | null;

@@ -30,6 +30,7 @@ export type {
   HistoryAnswer,
   HostSample,
   HubEvent,
+  InstallStep,
   LibraryAdd,
   Lifecycle,
   Notice,
@@ -60,7 +61,18 @@ export type Me = { id: string; username: string; avatar: string | null };
 export type EnvironmentInfo = { environment: 'production' | 'staging' };
 
 /** `GET /api/integrations`: which integrations are switched on, and whether the hub has the Pack `library` (systemd and Minecraft). */
-export type Integrations = { minecraft: boolean; discord: boolean; web: boolean; checks: boolean; host: boolean; systemd: boolean; github: boolean; library: boolean };
+/** `newServer`: New server is offered (Minecraft, GitHub and the library on). */
+export type Integrations = {
+  minecraft: boolean;
+  discord: boolean;
+  web: boolean;
+  checks: boolean;
+  host: boolean;
+  systemd: boolean;
+  github: boolean;
+  library: boolean;
+  newServer: boolean;
+};
 
 /**
  * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
@@ -236,7 +248,7 @@ export type InstalledPack = {
   sha256: string;
   by: string;
   at: number;
-  how: 'adopted' | 'updated';
+  how: 'adopted' | 'updated' | 'installed';
 };
 /** How a file differs from what the last apply put on the server. */
 export type PackChange = 'added' | 'replaced' | 'removed';
@@ -408,3 +420,50 @@ export type RuntimeAddRequest = { feature: 8 | 17 | 21 | 25 };
  */
 export type LibraryAddRequest = ({ url: string } | { upload: string }) & { name: string; version: string; mc?: string; loader?: string };
 export type LibraryAddAnswer = { add: number };
+/** `GET /api/library/packs/:id/scripts`: a pack's start scripts (its content root's `*.sh`), each with whether it loops (`while true`). */
+export type StartScript = { name: string; loops: boolean };
+export type StartScripts = { scripts: StartScript[] };
+
+/**
+ * `POST /api/servers` (only with `Integrations.newServer`): installs a library pack into `<root>/servers/<id>` as a
+ * Pending server, in the background. `memory` is a heap size like `6G` (a Config edit on the start script's `-Xmx`/`-Xms`);
+ * `runtime` a library runtime's name, null for system java; `removeLoop` adds the Config edit that takes the start
+ * script's `while true` loop out. Refused before anything is written: 400 bad input (an id not `^[a-z][a-z0-9-]{0,31}$`,
+ * a port outside 1–65535, no EULA, a bad memory or an unknown start script), 404 an unknown pack or runtime, 409 an id,
+ * game port or unit already taken, a pack whose Minecraft version has no Mod build, or while an install or a library
+ * add runs. Answers 202; its steps follow as `install` events (`target` `install`, `id` the server's). Audited.
+ */
+export type NewServerRequest = {
+  id: string;
+  name: string;
+  gamePort: number;
+  memory: string;
+  library: number;
+  startScript: string;
+  runtime: string | null;
+  eula: boolean;
+  removeLoop: boolean;
+};
+export type NewServerAnswer = { id: string };
+/**
+ * A Pending server: installed, waiting for its owner to run `command` (`add-server.sh`) as root. `installScript`: the
+ * line that installs the root copy of the script first, null when it is there already.
+ */
+export type PendingServer = {
+  id: string;
+  name: string;
+  dir: string;
+  gamePort: number;
+  runtime: string | null;
+  by: string;
+  at: number;
+  command: string;
+  installScript: string | null;
+};
+/** The install running now: its server's id and name, who started it, and its latest step. */
+export type RunningInstall = { id: string; name: string; by: string; started: number; step: string; detail: string };
+/**
+ * `GET /api/servers/pending`: the Pending servers, oldest first, and the running install. `DELETE
+ * /api/servers/pending/:id` discards one, folder, Java link and all (404 unknown, 409 once it is in config). Audited.
+ */
+export type PendingServers = { pending: PendingServer[]; installing: RunningInstall | null };

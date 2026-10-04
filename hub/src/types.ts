@@ -151,7 +151,7 @@ export type ServiceVerb = 'start' | 'stop' | 'restart';
  * What an event that isn't about a server is about; its `id` is that thing's config id (a deploy's: its target, the
  * environment or, for a Mod, the server id; the library's: `packs`).
  */
-export type Target = 'host' | 'service' | 'check' | 'deploy' | 'library';
+export type Target = 'host' | 'service' | 'check' | 'deploy' | 'library' | 'install';
 /** Something a hub-core module wants people to know about the host, a service, a check or a deploy. */
 export type TargetNotice = { severity: Severity } & (
   | { kind: 'checkDown'; url: string; error: string }
@@ -206,6 +206,7 @@ export type TargetEvent = { target: Target; id: string } & (
   | { type: 'state'; state: string; sub: string }
   | { type: 'checked'; status: CheckStatus }
   | LibraryAdd
+  | InstallStep
 );
 /**
  * A library add (`target` `library`, `id` `packs`): its progress (`detail`: "Downloading 412 MB of 1,024 MB"; the live
@@ -215,6 +216,11 @@ export type LibraryAdd = { type: 'libraryAdd'; add: number; name: string; versio
   | { phase: 'progress'; detail: string }
   | { phase: 'finished'; outcome: 'ok' | 'cancelled' | 'failed'; reason: string }
 );
+/**
+ * A New server install (`target` `install`, `id` the new server's): each step as it starts (`unpack`, `write`, `mod`),
+ * then `done` or `failed` (`detail`: why). `name` is the server's name, `by` the admin's.
+ */
+export type InstallStep = { type: 'install'; step: 'unpack' | 'write' | 'mod' | 'done' | 'failed'; detail: string; name: string; by: string };
 /** Everything on the live stream: server events and the rest. */
 export type LiveEvent = HubEvent | TargetEvent;
 /** A live event as the feed keeps it: `at` is when it entered the feed (epoch ms, the hub's clock). */

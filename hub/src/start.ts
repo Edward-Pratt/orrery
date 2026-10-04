@@ -153,6 +153,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         restoring: () => restores?.busy() ?? false,
         packing: (id) => packs?.busy(id) ?? false,
         libraryAdding: () => library?.busy() ?? false,
+        installing: () => packs?.installRunning() ?? false,
         mcOf: (id) => {
           const libraryId = db.pack(id)?.libraryId;
           return libraryId ? db.library().find((e) => e.id === libraryId)?.mc : undefined;
@@ -175,6 +176,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       download: deps.download ?? fetch,
       githubToken: deps.githubToken,
       installing: (id) => packs?.installing(id) ?? [],
+      installRunning: () => packs?.installRunning() ?? false,
     });
   packs =
     services &&
@@ -193,6 +195,13 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         dataDir: dirname(config.dbPath),
         restoring: (id) => restores?.busy(id) ?? false,
         deploying: (id) => (deploys?.busy() ? 'hub' : deploys?.modBusy(id) ? 'mod' : null),
+        // New server: the Mod comes from GitHub's releases, and the setup command names the hub's unit.
+        install: deploys && {
+          mods: deploys,
+          hubUnit: github!.deploys.hubUnit,
+          hubPort: port!, // Minecraft is on with packs
+          unitExists: async (unit) => /^LoadState=(?!not-found$)\S+$/m.test(await deps.run!('systemctl', ['show', '--property=LoadState', '--', unit])),
+        },
       },
       deps.packs,
     );

@@ -2,6 +2,8 @@ import type { Routes } from '@angular/router';
 
 export default [
   { path: '', loadComponent: () => import('./cards') },
+  // Before ':id': a Pending server isn't a server yet.
+  { path: 'waiting/:id', loadComponent: () => import('./waiting') },
   {
     path: ':id',
     loadComponent: () => import('./server'),

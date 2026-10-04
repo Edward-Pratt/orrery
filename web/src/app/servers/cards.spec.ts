@@ -53,6 +53,7 @@ async function setup(cards: ServerCard[] = [GTNH, SITE]) {
   await fixture.whenStable();
   const skeleton = !!el.querySelector('[data-skeleton]');
   backend.expectOne('/api/servers').flush(cards);
+  backend.expectOne('/api/integrations').flush({ newServer: false }); // New server has its own tests
   await settle();
   await fixture.whenStable();
   const text = (server: string, field: string) => el.querySelector(`[data-server=${server}] [data-${field}]`)?.textContent?.trim();

@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { createReadStream, existsSync } from 'node:fs';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import type {
   CompareReport,
@@ -14,16 +15,19 @@ import type {
   PackRuntime,
   PackState,
   PendingChange,
+  PendingServers,
   ReportFile,
+  StartScript,
 } from './api.ts';
 import { listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
-import type { Db, EditRow, LibraryRow, PackRow } from './db.ts';
+import type { Db, EditRow, LibraryRow, PackRow, PendingRow } from './db.ts';
+import type { Deploys } from './deploys.ts';
 import { RUNTIME, type Library } from './library.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
-import type { PackFinished, PackStep, PackStepState, Severity } from './types.ts';
+import type { InstallStep, PackFinished, PackStep, PackStepState, Severity } from './types.ts';
 import { formatDuration } from './units.ts';
 import type { Upload, Uploads } from './uploads.ts';
 
@@ -51,7 +55,7 @@ export type PacksOptions = {
 };
 
 export type PacksDeps = {
-  hub: Pick<ServerHub, 'get' | 'on' | 'off' | 'publish' | 'audit' | 'runCommand'>;
+  hub: Pick<ServerHub, 'get' | 'on' | 'off' | 'publish' | 'publishTarget' | 'audit' | 'runCommand'>;
   db: Db;
   services: Pick<Services, 'ofServer' | 'act' | 'read' | 'environment'>;
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
@@ -62,12 +66,34 @@ export type PacksDeps = {
   /** Finished uploads, taken as an Extra. */
   uploads: Pick<Uploads, 'get' | 'take'>;
   /** Where every pack comes from: Compare, Adopt and updates install a library entry's zip. */
-  library: Pick<Library, 'entry' | 'zip' | 'runtime'>;
+  library: Pick<Library, 'entry' | 'zip' | 'runtime' | 'busy'>;
   /** Whether a restore runs on a server. */
   restoring: (serverId: string) => boolean;
   /** What deploy runs that a pack update on a server must wait for: a hub deploy, or a Mod deploy onto it. */
   deploying: (serverId: string) => 'hub' | 'mod' | null;
+  /** New server, only with GitHub on: the Mod's releases, the hub's own unit (for the setup command) and its Mod port. */
+  install?: {
+    mods: Pick<Deploys, 'modBuild' | 'download'>;
+    hubUnit: string;
+    hubPort: number;
+    /** Whether systemd knows a unit, loaded or not. */
+    unitExists: (unit: string) => Promise<boolean>;
+  };
 };
+
+/** A new server's id: also its unit's, folder's and polkit file's name (`add-server.sh` checks the same). */
+export const SERVER_ID = /^[a-z][a-z0-9-]{0,31}$/;
+/** A start script `add-server.sh` accepts: a plain `.sh` file at the content root. */
+const SCRIPT = /^[A-Za-z0-9._-]+\.sh$/;
+/** The Config edit that takes a start script's `while true` loop out, keeping its `java` line. */
+export const LOOP = '^while true.*\\n(?:.*\\n)*?(.*\\bjava\\b.*)\\n(?:.*\\n)*?done\\b.*$';
+/** What `add-server.sh` reads: the name, start script and Mod token. */
+const PENDING_FILE = '.orrery-pending.json';
+/** The root copy `add-server.sh` runs from, and the checked-in one it is installed from. */
+const ROOT_SCRIPT = '/usr/local/lib/orrery/add-server.sh';
+const REPO_SCRIPT = fileURLToPath(new URL('../../deploy/add-server.sh', import.meta.url));
+
+type Install = { id: string; name: string; by: string; byName: string; started: number; step: string; detail: string; libraryId: number };
 
 /** Where Prepare builds the staged set, in the server folder. */
 const UPDATE = '.orrery-update';
@@ -250,6 +276,7 @@ export class Packs {
   #d: PacksDeps;
   #o: Required<PacksOptions>;
   #compared = new Map<string, Compared>();
+  #install: Install | undefined;
   #jobs = new Map<string, Job>();
   /** Stops each wait and ticker without resolving it: a closing hub leaves a running update as a crash would. */
   #halts = new Set<() => void>();
@@ -268,6 +295,17 @@ export class Packs {
   /** Clears Compare's leftover scratch, and closes updates the last hub left running as interrupted. */
   async start(): Promise<void> {
     this.#d.hub.on('event', this.#started);
+    // A Pending server whose id is in config now: the setup script ran, so it is a server.
+    for (const p of this.#d.db.pendingServers()) {
+      const s = this.#settings(p.id);
+      if (!s) continue;
+      if (s.dir && resolve(s.dir) === resolve(p.dir)) {
+        this.#d.db.deletePendingServer(p.id);
+        await rm(join(p.dir, PENDING_FILE), { force: true });
+        console.log(`[packs] ${p.id} is a server now`);
+      } else console.warn(`[packs] ${p.id} is in config with another folder (${s.dir ?? 'none'}) than its Pending server's (${p.dir}): left as it is`);
+    }
+    await rm(join(this.#d.dataDir, 'work', 'install'), { recursive: true, force: true });
     // `downloads/` and `staging/` are from before the library (#139).
     for (const old of ['downloads', 'staging']) await rm(join(this.#d.dataDir, old), { recursive: true, force: true });
     for (const s of this.#d.servers) await rm(this.#work(s.id), { recursive: true, force: true });
@@ -297,9 +335,99 @@ export class Packs {
     return serverId === undefined ? this.#jobs.size > 0 : this.#jobs.has(serverId);
   }
 
-  /** The servers whose running update installs a library entry (it can't be deleted meanwhile). */
+  /** The servers whose running update or install installs a library entry (it can't be deleted meanwhile). */
   installing(libraryId: number): string[] {
-    return [...this.#jobs.values()].filter((j) => j.libraryId === libraryId).map((j) => j.serverId);
+    const install = this.#install?.libraryId === libraryId ? [this.#install.id] : [];
+    return [...[...this.#jobs.values()].filter((j) => j.libraryId === libraryId).map((j) => j.serverId), ...install];
+  }
+
+  /** Whether a New server install runs (a hub deploy and a library add wait for it). */
+  installRunning(): boolean {
+    return this.#install !== undefined;
+  }
+
+  /** The Pending servers, oldest first, each with its setup command, and the running install. */
+  pending(): PendingServers {
+    const i = this.#install;
+    const installScript = existsSync(ROOT_SCRIPT) ? null : `sudo install -D -m 755 -o root -g root -t ${dirname(ROOT_SCRIPT)} ${REPO_SCRIPT}`;
+    return {
+      pending: this.#d.db.pendingServers().map(({ token: _, unit: __, ...p }) => ({
+        ...p,
+        command: `sudo ${ROOT_SCRIPT} ${p.id} ${this.#d.dataDir} --hub-unit ${this.#d.install?.hubUnit ?? 'orrery-hub.service'}`,
+        installScript,
+      })),
+      installing: i ? { id: i.id, name: i.name, by: i.byName, started: i.started, step: i.step, detail: i.detail } : null,
+    };
+  }
+
+  /**
+   * Starts installing a library pack as a new server in `<root>/servers/<id>`, and resolves with its id once every check
+   * passed; the install runs in the background, announced as `install` events, and ends as a Pending server. Refused
+   * (`PackRefused`) before anything is written.
+   */
+  async install(body: Record<string, unknown>, by: string, byName: string): Promise<string> {
+    const cfg = this.#d.install;
+    if (!cfg) throw new PackRefused(404, 'New server needs the GitHub integration.');
+    const id = typeof body.id === 'string' ? body.id : '';
+    if (!SERVER_ID.test(id)) throw new PackRefused(400, 'The id must be a lowercase letter, then up to 31 lowercase letters, digits or dashes.');
+    const name = text(body.name, 'a name', true);
+    const port = body.gamePort;
+    if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) throw new PackRefused(400, 'The game port must be 1–65535.');
+    const gamePort = port as number;
+    if (typeof body.memory !== 'string' || !/^[1-9]\d{0,5}[MG]$/.test(body.memory)) throw new PackRefused(400, 'Memory is a size like 6G or 512M.');
+    const memory = body.memory;
+    if (body.eula !== true) throw new PackRefused(400, 'Accept the Minecraft EULA to install a server.');
+    if (typeof body.startScript !== 'string' || !SCRIPT.test(body.startScript)) throw new PackRefused(400, 'Pick a start script from the pack.');
+    const startScript = body.startScript;
+    const removeLoop = body.removeLoop === true;
+    const runtime = body.runtime ?? null;
+    if (runtime !== null && (typeof runtime !== 'string' || !RUNTIME.test(runtime) || !this.#d.library.runtime(runtime))) {
+      throw new PackRefused(404, 'No such runtime in the library.');
+    }
+    const entry = this.#source(body);
+    if (this.#install) throw new PackRefused(409, `${this.#install.name} is being installed: one install at a time.`);
+    if (this.#d.library.busy()) throw new PackRefused(409, 'A library add is running: install once it is done.');
+    const install: Install = { id, name, by, byName, started: Date.now(), step: 'unpack', detail: 'Checking', libraryId: entry.id };
+    this.#install = install; // claimed before the first await: two requests can't both pass
+    let build: { tag: string; asset: string } | undefined;
+    try {
+      const pending = this.#d.db.pendingServers();
+      if (this.#settings(id)) throw new PackRefused(409, `The id ${id} is a server in config already.`);
+      if (pending.some((p) => p.id === id)) throw new PackRefused(409, `The id ${id} is a Pending server already.`);
+      if (this.#d.db.hasPackData(id)) throw new PackRefused(409, `orrery still has pack data under the id ${id}: pick another id.`);
+      if ((await exists(this.#serverDir(id))) || (await exists(this.#javaLink(id)))) {
+        throw new PackRefused(409, `${this.#serverDir(id)} or ${this.#javaLink(id)} exists already: pick another id.`);
+      }
+      const taken = pending.find((p) => p.gamePort === gamePort)?.name ?? (await this.#portUser(gamePort));
+      if (taken) throw new PackRefused(409, `Port ${gamePort} is ${taken}'s game port.`);
+      let unit: boolean;
+      try {
+        unit = await cfg.unitExists(`${id}.service`);
+      } catch (err) {
+        throw new PackRefused(409, `Couldn't ask systemd about ${id}.service: ${(err as Error).message}`);
+      }
+      if (unit) throw new PackRefused(409, `systemd has a unit ${id}.service already: pick another id.`);
+      build = cfg.mods.modBuild(entry.mc);
+      if (!build) throw new PackRefused(409, `No Mod release has a build for Minecraft ${entry.mc}.`);
+      if (!(await startScripts(this.#d.library.zip(entry.id))).some((sc) => sc.name === startScript)) {
+        throw new PackRefused(400, `${startScript} isn't a start script in ${entry.name} ${entry.version}.`);
+      }
+    } catch (err) {
+      this.#install = undefined;
+      throw err;
+    }
+    this.#d.hub.audit(by, 'server install', id, `${name}: ${entry.name} ${entry.version}, port ${gamePort}, ${memory}, ${runtime ?? 'system java'}`);
+    void this.#runInstall(install, entry, build, { gamePort, memory, startScript, removeLoop, runtime });
+    return id;
+  }
+
+  /** Deletes a Pending server: its folder, Java link, pack data and row. Refused (409) once its id is in config. */
+  async discard(id: string, by: string): Promise<void> {
+    if (this.#settings(id)) throw new PackRefused(409, `${id} is in config: it is a server now, not a Pending one.`);
+    const p = this.#d.db.pendingServers().find((x) => x.id === id);
+    if (!p) throw new PackRefused(404, 'No such Pending server.');
+    await this.#removeInstall(id);
+    this.#d.hub.audit(by, 'server discard', id, p.name);
   }
 
   /** The restore offer after the server's latest update rolled back; null otherwise. */
@@ -870,6 +998,104 @@ export class Packs {
     return { done, stop };
   }
 
+  // New server.
+
+  async #runInstall(
+    i: Install,
+    entry: LibraryRow,
+    build: { tag: string; asset: string },
+    f: { gamePort: number; memory: string; startScript: string; removeLoop: boolean; runtime: string | null },
+  ): Promise<void> {
+    const dir = this.#serverDir(i.id);
+    const work = join(this.#d.dataDir, 'work', 'install');
+    const cfg = this.#d.install!;
+    try {
+      this.#installStep(i, 'unpack', `Unpacking ${entry.name} ${entry.version}`);
+      if (f.runtime) {
+        // First: a runtime the install will use is in use from now on.
+        await mkdir(dirname(this.#javaLink(i.id)), { recursive: true });
+        await symlink(join(this.#d.dataDir, 'runtimes', f.runtime), this.#javaLink(i.id));
+      }
+      const { root, files } = await unpack(this.#d.library.zip(entry.id), work);
+      await mkdir(dirname(dir), { recursive: true });
+      await rename(root, dir);
+
+      this.#installStep(i, 'write', 'Writing eula.txt and server.properties');
+      await writeFile(join(dir, 'eula.txt'), `# Accepted by ${i.byName} in orrery, ${new Date().toISOString()}\neula=true\n`);
+      const props = await readFile(join(dir, 'server.properties'), 'utf8').catch(() => '');
+      const port = `server-port=${f.gamePort}`;
+      await writeFile(join(dir, 'server.properties'), /^server-port=.*$/m.test(props) ? props.replace(/^server-port=.*$/m, port) : `${props}${props && !props.endsWith('\n') ? '\n' : ''}${port}\n`);
+
+      this.#installStep(i, 'mod', `Downloading ${build.asset} (${build.tag})`);
+      const jar = await cfg.mods.download(build.tag, build.asset);
+      await mkdir(join(dir, 'mods'), { recursive: true });
+      await writeFile(join(dir, 'mods', build.asset), jar);
+      const token = randomBytes(32).toString('hex');
+      await mkdir(join(dir, 'config'), { recursive: true });
+      await writeFile(join(dir, 'config', 'orrery.cfg'), forgeConfig({ hubHost: '127.0.0.1', hubPort: cfg.hubPort, serverId: i.id, token }), { mode: 0o600 });
+
+      this.#installStep(i, 'write', 'Applying the Config edits');
+      const at = Date.now();
+      this.#d.db.addEdit(i.id, { path: f.startScript, find: '-Xm([sx])\\S+', replace: `-Xm$1${f.memory}`, note: 'Memory, set at install', by: i.byName, at });
+      if (f.removeLoop) this.#d.db.addEdit(i.id, { path: f.startScript, find: LOOP, replace: '$1', note: "No restart loop: systemd restarts the server", by: i.byName, at });
+      for (const e of this.#d.db.configEdits(i.id)) {
+        const file = join(dir, e.path);
+        const content = await readFile(file, 'utf8');
+        const re = new RegExp(e.find, 'gm');
+        if (!re.test(content)) throw new Error(`The Config edit on ${e.path} (${e.find}) matched nothing.`);
+        await writeFile(file, content.replace(re, e.replace));
+      }
+      // The Kept paths of the server it becomes (no `keep` yet; the backup folder `<dir>/backups`, as config defaults it).
+      const kept = await this.#kept({ id: i.id, name: i.name, dir, backupDir: join(dir, 'backups'), keep: [] } as unknown as ServerSettings);
+      const manifest = files.filter((x) => !keptBy(x, kept) && !MOD_JAR.test(x)).sort();
+      const { name, version, source, sha256, id: libraryId } = entry;
+      this.#d.db.setPack(i.id, { name, version, source, sha256, by: i.byName, at, how: 'installed', snapshot: JSON.stringify(this.#snapshot(i.id)), libraryId }, manifest, new Set(manifest));
+
+      await writeFile(join(dir, PENDING_FILE), `${JSON.stringify({ name: i.name, startScript: f.startScript, token })}\n`, { mode: 0o600 });
+      this.#d.db.addPendingServer({ id: i.id, name: i.name, dir, token, unit: `${i.id}.service`, gamePort: f.gamePort, runtime: f.runtime, by: i.byName, at: Date.now() });
+      this.#installStep(i, 'done', '');
+      this.#d.hub.audit(i.by, 'server install', i.id, `${i.name}: ok`);
+    } catch (err) {
+      if (this.#closed) return;
+      const why = (err as Error).message;
+      await this.#removeInstall(i.id).catch((e: Error) => console.error(`[packs] cleaning up ${i.id}'s install failed:`, e.message));
+      this.#installStep(i, 'failed', why);
+      this.#d.hub.audit(i.by, 'server install', i.id, `${i.name}: failed: ${why}`);
+    } finally {
+      await rm(work, { recursive: true, force: true }).catch(() => {});
+      if (this.#install === i) this.#install = undefined;
+    }
+  }
+
+  /** Removes everything an install wrote under an id: its folder, Java link, pack data and Pending row. */
+  async #removeInstall(id: string): Promise<void> {
+    await rm(this.#serverDir(id), { recursive: true, force: true });
+    await rm(this.#javaLink(id), { force: true });
+    this.#d.db.deletePackData(id);
+    this.#d.db.deletePendingServer(id);
+  }
+
+  #installStep(i: Install, step: InstallStep['step'], detail: string): void {
+    if (this.#closed) throw new Error('The hub is closing.');
+    i.step = step;
+    i.detail = detail;
+    this.#d.hub.publishTarget({ target: 'install', id: i.id, type: 'install', step, detail, name: i.name, by: i.byName });
+  }
+
+  /** The name of the configured server whose `server.properties` sets this game port (25565 when it sets none). */
+  async #portUser(port: number): Promise<string | undefined> {
+    for (const s of this.#d.servers) {
+      if (!s.dir) continue;
+      const props = await readFile(join(s.dir, 'server.properties'), 'utf8').catch(() => undefined);
+      if (props !== undefined && Number(/^server-port=\s*(\d+)/m.exec(props)?.[1] ?? 25565) === port) return s.name;
+    }
+    return undefined;
+  }
+
+  #serverDir(id: string): string {
+    return join(this.#d.dataDir, 'servers', id);
+  }
+
   // Helpers.
 
   #settings(serverId: string): ServerSettings | undefined {
@@ -1026,6 +1252,43 @@ export class Packs {
       });
     return [...diff('extra', applied.extras, now.extras), ...diff('edit', applied.edits, now.edits)];
   }
+}
+
+/** A pack's start scripts: the plain `*.sh` files at its content root, each with whether it loops (`LOOP` matches). */
+export async function startScripts(zip: string): Promise<StartScript[]> {
+  const entries = await zipEntries(zip);
+  const root = contentRoot(entries);
+  const prefix = root ? `${root}/` : '';
+  const scripts: StartScript[] = [];
+  for (const e of entries) {
+    const name = e.startsWith(prefix) ? e.slice(prefix.length) : '';
+    if (!SCRIPT.test(name)) continue;
+    const content = await unzip(['-p', zip, e]).catch(() => '');
+    scripts.push({ name, loops: new RegExp(LOOP, 'm').test(content) });
+  }
+  return scripts.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Forge's config format, as the Mod reads `config/orrery.cfg` (`Configuration`, category `general`). */
+function forgeConfig(c: { hubHost: string; hubPort: number; serverId: string; token: string }): string {
+  return [
+    '# Configuration file',
+    '',
+    'general {',
+    '    # Address of the orrery hub',
+    `    S:hubHost=${c.hubHost}`,
+    '',
+    '    # TCP port of the hub [range: 1 ~ 65535, default: 25580]',
+    `    I:hubPort=${c.hubPort}`,
+    '',
+    "    # This server's id in the hub's config.json",
+    `    S:serverId=${c.serverId}`,
+    '',
+    "    # This server's token from the hub's config.json",
+    `    S:token=${c.token}`,
+    '}',
+    '',
+  ].join('\n');
 }
 
 const installed = ({ name, version, source, sha256, by, at, how }: PackRow): InstalledPack => ({ name, version, source, sha256, by, at, how });

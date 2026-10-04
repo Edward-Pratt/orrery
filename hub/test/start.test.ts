@@ -397,7 +397,7 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   assert.deepEqual(demo!.features, { chat: false, tps: false, quests: false });
   assert.deepEqual(((await get('/api/servers/demo')) as ServerDetail).backups, { configured: false });
   assert.deepEqual(await get('/api/integrations'), {
-    minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false,
+    minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false, newServer: false,
   } satisfies Integrations);
 });
 
@@ -637,7 +637,7 @@ const NO_MOD = { chat: false, tps: false, quests: false };
 
 test('the API says which integrations are on, and nothing else about them', async (t) => {
   const { get } = await apiHub(t);
-  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false, host: false, systemd: false, github: false, library: false });
+  assert.deepEqual(await get<Integrations>('/api/integrations'), { minecraft: true, discord: true, web: true, checks: false, host: false, systemd: false, github: false, library: false, newServer: false });
 });
 
 test('server cards while offline: features only for the server with the mod', async (t) => {

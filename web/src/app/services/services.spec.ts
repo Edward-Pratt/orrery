@@ -10,7 +10,7 @@ import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
 import Services from './services';
 
-const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, library: false };
+const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, library: false, newServer: false };
 const svc = (id: string, state: string | null, checks: string[] = []): ServiceStatus => ({ id, unit: `${id}.service`, state, sub: state, checks });
 const GRAFANA = svc('grafana', 'active', ['grafana']);
 const CADDY = svc('caddy', 'inactive');

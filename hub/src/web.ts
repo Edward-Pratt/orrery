@@ -19,6 +19,9 @@ import type {
   LibraryState,
   EditPreview,
   Me,
+  NewServerAnswer,
+  PendingServers,
+  StartScripts,
   PackState,
   PackUpdateAnswer,
   PlayerAnswer,
@@ -39,7 +42,7 @@ import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
 import { LibraryRefused, type Library } from './library.ts';
 import type { LiveFeed } from './live.ts';
-import { PackRefused, type Packs } from './packs.ts';
+import { PackRefused, startScripts, type Packs } from './packs.ts';
 import { UploadRefused, type Uploads } from './uploads.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
@@ -151,6 +154,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
+  // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
+  const newServer = Boolean(packs && library && deploys);
   const redirectUri = new URL('/api/callback', web.publicUrl).href;
   const origin = new URL(web.publicUrl).origin;
   const app = new Hono<Env>().basePath('/api');
@@ -252,6 +257,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       systemd: !!integrations.systemd,
       github: !!integrations.github,
       library: !!library,
+      newServer,
     } satisfies Integrations),
   );
   if (deploys) {
@@ -311,6 +317,21 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       const hours = hoursOf(c);
       return hours ? c.json(host.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
     });
+  }
+  if (newServer) {
+    // Before `/servers/:id`: "pending" isn't a server id.
+    const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
+      try {
+        const answer = await fn(actor(c.get('user')), c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer, status);
+      } catch (err) {
+        if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.post('/servers', (c) => act(c, async (by, user) => ({ id: await packs!.install(await jsonBody(c.req), by, user.username) }) satisfies NewServerAnswer, 202));
+    app.get('/servers/pending', (c) => c.json(packs!.pending() satisfies PendingServers));
+    app.delete('/servers/pending/:id', (c) => act(c, (by) => packs!.discard(c.req.param('id'), by)));
   }
   app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
   app.get('/servers/:id', async (c) => {
@@ -413,6 +434,17 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       act(c, async (by, user) => ({ add: library.addRuntime(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),
     );
     app.delete('/library/runtimes/:name', (c) => act(c, (by) => library.deleteRuntime(c.req.param('name'), by)));
+    app.get('/library/packs/:id/scripts', (c) =>
+      act(c, async () => {
+        const id = c.req.param('id');
+        if (!/^[1-9]\d{0,15}$/.test(id)) throw new LibraryRefused(404, 'No such pack in the library.');
+        try {
+          return { scripts: await startScripts(library.zip(Number(id))) } satisfies StartScripts;
+        } catch (err) {
+          throw err instanceof PackRefused ? new LibraryRefused(err.status, err.message) : err;
+        }
+      }),
+    );
   }
   if (packs) {
     /** Runs a pack action for a server that has packs, mapping its refusals to their status. */

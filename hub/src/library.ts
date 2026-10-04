@@ -122,6 +122,8 @@ export type LibraryDeps = {
   githubToken?: string;
   /** The servers whose running pack update installs an entry. */
   installing: (id: number) => string[];
+  /** Whether a New server install runs: adds wait for it. */
+  installRunning: () => boolean;
   /** Node's name for this host's architecture (default `process.arch`), for tests. */
   arch?: string;
 };
@@ -290,6 +292,7 @@ export class Library {
     } else if (typeof b.upload === 'string' && this.#d.uploads.get(b.upload)) from = { upload: b.upload };
     else throw new LibraryRefused(400, 'Give a pack URL, or upload the zip again.');
     if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);
+    if (this.#d.installRunning()) throw new LibraryRefused(409, 'A New server install is running: add once it is done.');
     if ('upload' in from) {
       // An upload's sha256 is known now: a duplicate is refused before the upload is used up.
       const known = this.#duplicate(fields, this.#d.uploads.get(from.upload)!.sha256);
@@ -329,6 +332,7 @@ export class Library {
     const arch = ARCH[this.#d.arch ?? process.arch];
     if (!arch) throw new LibraryRefused(400, `Temurin has no build for this host's architecture (${this.#d.arch ?? process.arch}).`);
     if (this.#add) throw new LibraryRefused(409, `${this.#add.name} ${this.#add.version} is being added: one add at a time.`);
+    if (this.#d.installRunning()) throw new LibraryRefused(409, 'A New server install is running: add once it is done.');
     const add: Add = {
       add: this.#next++,
       kind: 'runtime',

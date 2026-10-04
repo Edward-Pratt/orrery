@@ -3,6 +3,7 @@
   "dbPath": "/srv/orrery-staging/hub.db",
   "servers": [{ "id": "demo", "name": "Demo" }],
   "integrations": {
+    "minecraft": { "listenPort": 25583, "tokens": { "demo": "replace-with-openssl-rand-hex-32" } },
     "web": {
       "listenPort": 25582,
       "publicUrl": "https://staging.orrery.run",

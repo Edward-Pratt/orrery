@@ -9,7 +9,7 @@ import { FETCH } from './events';
 import { dialogButton, fakeEvents, settle } from './testing';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, library: false };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, library: false, newServer: false };
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
   name: id.toUpperCase(),

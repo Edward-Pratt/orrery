@@ -9,7 +9,8 @@
 #  3. A Discord OAuth app "orrery (staging)", redirect https://staging.orrery.run/api/callback. Its client id goes in
 #     the config; the env file, root-only, holds DISCORD_CLIENT_SECRET=... (its secret) and GITHUB_TOKEN=... (no
 #     DISCORD_TOKEN: no bot):  install -m 600 -o root -g root staging.env /etc/orrery-staging.env
-#  4. The config: hub/config.staging.example.json, with the app's client id and production's guild and admin role:
+#  4. The config: hub/config.staging.example.json, with the app's client id, production's guild and admin role, and a
+#     random demo token (`openssl rand -hex 32`; the Mod port, 25583, is apart from production's 25580):
 #       install -m 640 -o orrery-staging -g orrery-staging config.json /srv/orrery-staging/config.json
 #  5. DNS: staging.orrery.run → this host. Then deploy/Caddyfile to /etc/caddy/Caddyfile and `systemctl reload caddy`.
 #  6. polkit: install deploy/orrery-hub.rules as its header says (its staging block names orrery-staging).

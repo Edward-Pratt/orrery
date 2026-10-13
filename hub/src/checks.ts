@@ -9,7 +9,8 @@ function failure(err: unknown): string {
 }
 
 /**
- * Requests each check's URL at startup and then every interval: up means HTTP 2xx before `get` times out. Keeps only
+ * Requests each check's URL at startup and then every interval: up means HTTP 2xx before `get` times out, on the
+ * first try or on one retry made straight after a failure. Keeps only
  * the current state, and puts each result on the event stream (`checked`); going down, and coming back up, is also a
  * notice (never repeated while the state holds). Hub core.
  */
@@ -44,18 +45,25 @@ export class Checks {
     return [...this.#states.values()].map((s) => ({ ...s }));
   }
 
-  async #run(c: CheckConfig): Promise<void> {
+  /** One GET of `url`: null when up, else why not; and how long it took. */
+  async #attempt(url: string): Promise<{ error: string | null; ms: number }> {
     const start = Date.now();
-    let error: string | null;
     try {
-      const res = await this.#get(c.url);
-      error = res.ok ? null : `HTTP ${res.status}`;
+      const res = await this.#get(url);
+      return { error: res.ok ? null : `HTTP ${res.status}`, ms: Date.now() - start };
     } catch (err) {
-      error = failure(err);
+      return { error: failure(err), ms: Date.now() - start };
     }
+  }
+
+  async #run(c: CheckConfig): Promise<void> {
+    let result = await this.#attempt(c.url);
+    // Asked again at once before it counts as down: one lost packet is not an outage.
+    if (result.error !== null) result = await this.#attempt(c.url);
+    const { error, ms } = result;
     const state = this.#states.get(c.id)!;
     const was = state.up;
-    Object.assign(state, { up: error === null, ms: Date.now() - start, error, checkedAt: Date.now() });
+    Object.assign(state, { up: error === null, ms, error, checkedAt: Date.now() });
     this.#hub.publishTarget({ target: 'check', id: c.id, type: 'checked', status: { ...state } });
     if (error !== null && was !== false) {
       this.#hub.publishTarget({ target: 'check', id: c.id, type: 'notice', severity: 'problem', kind: 'checkDown', url: c.url, error });

@@ -984,11 +984,19 @@ test('a notice about a check reaches the stream, its replay and a resume, keyed 
 
 const SITE = { id: 'site', url: 'https://site.example', intervalSeconds: 60 };
 type Answer = { ok: boolean; status: number } | Error;
+const failed = (a: Answer) => a instanceof Error || !a.ok;
 const timeout = () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
 const refused = () => new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
 
-/** A web hub with one check (no health ping); `answers` are the check's results in order, the first at startup. */
-async function checksHub(t: TestContext, answers: Answer[]) {
+/**
+ * A web hub with one check (no health ping); `answers` are the check's runs in order, the first at startup. A failure
+ * answers its run's retry too; `[first, retry]` answers the two apart.
+ */
+async function checksHub(t: TestContext, runs: (Answer | [Answer, Answer])[]) {
+  const tries = runs.map((r) => (Array.isArray(r) ? r : failed(r) ? [r, r] : [r]));
+  const answers = tries.flat();
+  /** Requests made once run `n` (1-based) is done. */
+  const madeBy = (n: number) => tries.slice(0, n).reduce((sum, r) => sum + r.length, 0);
   t.mock.timers.enable({ apis: ['setInterval'] });
   const cfg = config(t, { web: WEB, checks: [SITE] });
   delete cfg.healthcheckUrl;
@@ -1013,12 +1021,12 @@ async function checksHub(t: TestContext, answers: Answer[]) {
   handle.live.on('event', (_, e) => add(e));
   const app = handle.web!.app;
   const cookie = await loginCookie(app);
-  /** Waits for the check's `n`th request to be answered. */
-  const answered = async (n: number) => (await until(() => requests.length === n), await new Promise((r) => setImmediate(r)));
+  let runsDone = 1;
+  /** Waits for the check's `n`th run to be answered. */
+  const answered = async (n: number) => (await until(() => requests.length === madeBy(n)), await new Promise((r) => setImmediate(r)));
   const next = async () => {
-    const n = requests.length + 1;
     t.mock.timers.tick(60_000);
-    await answered(n);
+    await answered(++runsDone);
   };
   const checks = async () => (await app.request('/api/checks', { headers: { cookie } })).json() as Promise<CheckStatus[]>;
   await answered(1);
@@ -1058,6 +1066,16 @@ test('a check that goes down publishes one notice, and one when it is back up', 
   assert.equal(notices.length, 2);
   assert.deepEqual((await checks()).map((c) => [c.up, c.error]), [[true, null]]);
   assert.deepEqual(new Set(requests), new Set([SITE.url]));
+});
+
+test('a check that fails once but answers its retry stays up, with nothing to say', async (t) => {
+  const { requests, notices, next, checks } = await checksHub(t, [UP, [refused(), UP], [timeout(), { ok: false, status: 503 }]]);
+  await next();
+  assert.equal(notices.length, 0);
+  assert.deepEqual((await checks()).map((c) => [c.up, c.error]), [[true, null]]);
+  await next();
+  assert.deepEqual(kinds(notices), [['site', 'checkDown', 'HTTP 503']]); // the retry's failure is the one told
+  assert.equal(requests.length, 5);
 });
 
 test('a check that times out or cannot connect is down', async (t) => {

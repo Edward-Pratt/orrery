@@ -1,3 +1,4 @@
+import net from 'node:net';
 import { loadConfig } from './config.ts';
 import { githubReader } from './deploys.ts';
 import { startDiscord } from './discord.ts';
@@ -7,6 +8,10 @@ import { execRestore } from './restore.ts';
 import { execRun } from './services.ts';
 import { startHub } from './start.ts';
 import { discordOAuth } from './web.ts';
+
+// fetch tries a name's addresses in turn, giving each only 250 ms by default. One lost SYN (resent after 1 s) on every
+// IPv4 address then fails the connect with ETIMEDOUT, within ~0.5 s on a host without IPv6, whose attempts fail at once.
+net.setDefaultAutoSelectFamilyAttemptTimeout(2_500);
 
 const config = loadConfig(process.argv[2] ?? 'config.json');
 const token = process.env.DISCORD_TOKEN;

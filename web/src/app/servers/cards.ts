@@ -82,6 +82,9 @@ export const changesCard = (e: LiveEvent) =>
     @if (sheet()) {
       @defer {
         <app-new-server (closed)="sheet.set(false)" (started)="started()" />
+      } @error {
+        <!-- a deploy replaced the build under this open page, so the sheet's chunk is gone -->
+        <p class="text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to add a server.</p>
       }
     }
   `,

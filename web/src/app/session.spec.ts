@@ -48,5 +48,17 @@ describe('Session', () => {
     TestBed.inject(HttpClient).get('/api/servers').subscribe({ error: () => {} });
     backend.expectOne('/api/servers').flush('Not logged in', { status: 401, statusText: 'Unauthorized' });
     expect(session.user()).toBeNull();
+    expect(session.ended()).toBe(true); // the login card says the session ended
+  });
+
+  it('was not ended when it never started, or by logging out', () => {
+    const { session, backend } = setup();
+    session.load();
+    backend.expectOne('/api/me').flush('Not logged in', { status: 401, statusText: 'Unauthorized' });
+    expect(session.ended()).toBe(false);
+    session.user.set(ALEX);
+    session.logout();
+    backend.expectOne('/api/logout').flush(null, { status: 204, statusText: 'No Content' });
+    expect(session.ended()).toBe(false);
   });
 });

@@ -51,7 +51,7 @@ export class LiveEvents {
             signal: abort.signal,
           });
           if (res.status === 401) {
-            this.#session.user.set(null);
+            this.#session.lost();
             return sub.complete();
           }
           if (res.ok && res.body) {

@@ -224,7 +224,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     }
     if (member?.roles.includes(web.adminRoleId)) return;
     db.deleteWebSession(id);
-    console.log(`[web] ${user.username} (${user.id}) is no longer an admin: logged out`);
+    const why = member ? 'lost the admin role' : 'not in the guild, or Discord refused the token';
+    console.log(`[web] ${user.username} (${user.id}) is no longer an admin (${why}): logged out`);
   };
   app.use(async (c, next) => {
     const session = getCookie(c, 'session');

@@ -8,12 +8,20 @@ import { catchError, of, throwError } from 'rxjs';
 export class Session {
   readonly #http = inject(HttpClient);
   readonly user = signal<Me | null | undefined>(undefined);
+  /** Whether the hub ended the session under this open page (expired, or the admin role re-check), for the login card. */
+  readonly ended = signal(false);
 
   load(): void {
     this.#http
       .get<Me>('/api/me')
       .pipe(catchError(() => of(null))) // 401 (the interceptor saw it) or the hub is down: show the login
       .subscribe((me) => this.user.set(me));
+  }
+
+  /** The hub answered 401: logged out. */
+  lost(): void {
+    if (this.user()) this.ended.set(true);
+    this.user.set(null);
   }
 
   /** The hub wants JSON on every POST (CSRF); HttpClient adds no content type for an empty body. */
@@ -29,7 +37,7 @@ export const loggedOutOn401: HttpInterceptorFn = (req, next) => {
   const session = inject(Session);
   return next(req).pipe(
     catchError((err: unknown) => {
-      if (err instanceof HttpErrorResponse && err.status === 401) session.user.set(null);
+      if (err instanceof HttpErrorResponse && err.status === 401) session.lost();
       return throwError(() => err);
     }),
   );

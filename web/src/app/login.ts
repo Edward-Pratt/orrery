@@ -1,6 +1,7 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { StagingBadge } from './environment';
+import { Session } from './session';
 
 /** Why the hub sent a failed login back here (`/?login=<why>`). */
 const REASONS = new Map([
@@ -9,7 +10,7 @@ const REASONS = new Map([
   ['discord', 'Discord did not answer. Try again.'],
 ]);
 
-/** The logged-out view: a centred card, no sidebar. */
+/** The logged-out view: a centred card, no sidebar; says so when the hub ended the session under the open page. */
 @Component({
   selector: 'app-login',
   imports: [HlmButton, StagingBadge],
@@ -31,5 +32,7 @@ const REASONS = new Map([
   `,
 })
 export class Login {
-  protected readonly reason = REASONS.get(new URLSearchParams(location.search).get('login') ?? '');
+  protected readonly reason =
+    REASONS.get(new URLSearchParams(location.search).get('login') ?? '') ??
+    (inject(Session).ended() ? 'Your session ended. Log in again.' : undefined);
 }

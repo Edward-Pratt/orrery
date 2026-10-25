@@ -335,10 +335,27 @@ test("a session ends once Discord says its user lost the admin role, re-checked 
   assert.equal(await me(), 200); // Discord unreachable: the session stays
   assert.match(String(errors.mock.calls[0]?.arguments[0]), /re-checking alex/);
 
+  const logs = t.mock.method(console, 'log', () => {});
   discord = 'demoted';
   t.mock.timers.tick(10 * 60_000);
   assert.equal(await me(), 200); // the request that asks still goes through
   assert.equal(await me(), 401);
+  assert.match(String(logs.mock.calls.at(-1)?.arguments[0]), /alex \(\d+\) is no longer an admin \(lost the admin role\): logged out/);
+});
+
+test('a re-check Discord answers with no member (left the guild, or the token refused) ends the session and says so', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { oauth } = fakeOAuth();
+  let gone = false;
+  const app = await webHub(t, { ...oauth, member: async (token, guildId) => (gone ? undefined : oauth.member(token, guildId)) });
+  const cookie = await loginCookie(app);
+  const logs = t.mock.method(console, 'log', () => {});
+  gone = true;
+  t.mock.timers.tick(10 * 60_000);
+  await app.request('/api/me', { headers: { cookie } });
+  await new Promise((r) => setImmediate(r));
+  assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
+  assert.match(String(logs.mock.calls.at(-1)?.arguments[0]), /no longer an admin \(not in the guild, or Discord refused the token\)/);
 });
 
 test('logging out ends the session on the hub', async (t) => {

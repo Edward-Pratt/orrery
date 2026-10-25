@@ -19,12 +19,13 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 
 | File | Job |
 |---|---|
-| `src/app/session.ts` | `Session` (who is logged in, logout) and the `loggedOutOn401` interceptor. |
+| `src/app/session.ts` | `Session` (who is logged in, logout; `lost()` on a 401, setting `ended` when a session was open) and the `loggedOutOn401` interceptor. |
+| `src/app/reload.ts` | `reloadOnStaleBuild`, the router's navigation error handler: a lazy page whose chunk failed to load (a dashboard deploy replaced the build under an open page) is loaded as a whole page instead (`RELOAD`), never on the first navigation. |
 | `src/app/integrations.ts` | `Integrations` (`GET /api/integrations`, asked once) and `enabled(...names)`, the `canMatch` guard (any of them on). |
 | `src/app/environment.ts` | `Environment.staging` (`GET /api/environment`, asked once, before login; false on an error) and `StagingBadge`, the amber "Staging" next to "orrery" in the sidebar, phone header and login card (nothing on Production). |
 | `src/app/app.routes.ts` | `servers` (always: every hub has servers; a server without a Mod token just has no Mod features) and `audit`, and one lazy route per other integration with pages, matched only when it is on (`host`; systemd or checks: `services`, which holds the checks too; there is no `checks` route; `library` when the hub has one). |
 | `src/app/app.ts` | The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages (`PAGES`), `UserMenu` (avatar → Theme, Log out); the attention strip above `<router-outlet>` and amber count badges on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging. |
-| `src/app/login.ts` | The logged-out card; shows the reason the hub gave in `?login=`. |
+| `src/app/login.ts` | The logged-out card; shows the reason the hub gave in `?login=`, else "Your session ended" when the hub ended it under the open page. |
 | `src/app/theme.ts` | `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as `dark` on `<html>`. |
 | `src/app/status.ts` | `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`; teal `--brand`; Figtree). |
 | `src/app/events.ts` | `LiveEvents.all$`: `GET /api/events` as an observable (fetch, not EventSource: a reconnect sends Last-Event-ID and skips ids already seen; `cache: 'no-store'`, since the browser's cache lock would hold a second stream to the same URL behind the first forever). Ends on 401. `ofServer(id)` keeps one server's events (not a same-named check's), `ofTarget(target)` the host's, services' or checks'. |
@@ -46,7 +47,8 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 - Every POST, PUT and DELETE sends `content-type: application/json`, even with no body (HttpClient adds none for `null`):
   the hub rejects anything else (CSRF). The one exception is an upload's chunk (`PUT /api/uploads/:upload`), raw
   `application/octet-stream`; files go up only through `uploads.ts`'s `Uploader`. The browser adds `Origin` itself.
-- Any 401 means logged out: the `loggedOutOn401` interceptor clears `Session.user` (the event stream does too).
+- Any 401 means logged out: the `loggedOutOn401` interceptor calls `Session.lost()` (the event stream does too).
+- A deploy deletes the old build's chunks: a lazy page that fails to load after the first navigation reloads the page (`reload.ts`). The New server sheet's `@defer` says to reload instead; `chart.ts`'s lazy `echarts` import has no such fallback yet.
 - Features come from the card (`features.chat`, `features.tps`): a server without the mod shows neither.
 - spartan/ui components are generated into `libs/ui` (`npx ng g @spartan-ng/cli:ui <name>`, config in
   `components.json`), and are ours to edit.

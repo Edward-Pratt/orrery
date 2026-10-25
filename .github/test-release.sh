@@ -62,7 +62,7 @@ git pull -q --ff-only origin main
 head=$(git rev-parse HEAD)
 check 'y pushes only the tag' \
   'release hub minor <<< y && says "actions/workflows/release.yml" &&
-   [[ $(git ls-remote "$T/origin.git" refs/tags/hub-v1.11.0) == "$head"* ]] &&
+   [[ $(git ls-remote "$T/origin.git" "refs/tags/hub-v1.11.0^{}") == "$head"* ]] && [[ $(git cat-file -t hub-v1.11.0) == tag ]] &&
    diff <(remote | grep -v hub-v1.11.0) <(echo "$before") > /dev/null && ! remote | grep -q local-only'
 check 'refuses again on the same commit' '! release hub patch --yes && says "nothing to release"'
 commit web/a 'fix: web two'; git push -q origin main; before=$(remote)

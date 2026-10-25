@@ -40,7 +40,8 @@ if [[ $yes != --yes ]]; then
   [[ $answer == y ]] || { echo 'Nothing pushed.'; exit 1; }
 fi
 
-git tag "$new"
+# With a message: tag.gpgsign makes every tag an annotated one, which needs one.
+git tag -m "$new" "$new"
 git push -q origin "refs/tags/$new"
 slug=$(git remote get-url origin)
 slug=${slug#*github.com[:/]}

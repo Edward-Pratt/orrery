@@ -6,7 +6,7 @@ import type { ServerDetail, ServiceStatus } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { LiveEvents, ofServer, ofTarget } from '../events';
-import { changesCard } from './cards';
+import { changesCard } from './changes';
 import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
 import { BackupProgress } from './backup-progress';

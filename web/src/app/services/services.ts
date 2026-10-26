@@ -15,7 +15,7 @@ import { catchError, debounceTime, EMPTY, Observable, of, startWith, Subject, Su
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
 import { ServerActions } from '../servers/actions';
-import { changesCard } from '../servers/cards';
+import { changesCard } from '../servers/changes';
 import { Health, Status } from '../status';
 import { ServiceControl } from './actions';
 

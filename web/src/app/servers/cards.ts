@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import type { Lifecycle, LiveEvent, PendingServers, ServerCard } from '@hub/api';
+import type { PendingServers, ServerCard } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCircleAlert, lucidePlus } from '@ng-icons/lucide';
 import { catchError, debounceTime, EMPTY, filter, of, startWith, Subject, switchMap } from 'rxjs';
@@ -12,16 +12,9 @@ import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
+import { changesCard } from './changes';
 import { NewServer } from './new-server';
 import { ServerRow } from './row';
-
-/** Events that change a card beyond its TPS: it is fetched again (and a server page's detail). */
-const CARD_EVENTS: LiveEvent['type'][] = ['connected', 'started', 'stopped', 'crashed', 'hung', 'recovered', 'offline', 'join', 'leave'] satisfies (Lifecycle | 'join' | 'leave')[];
-export const changesCard = (e: LiveEvent) =>
-  'serverId' in e &&
-  (CARD_EVENTS.includes(e.type) ||
-    (e.type === 'notice' &&
-      (e.kind.startsWith('restart') || e.kind === 'lag' || e.kind === 'lagRecovered' || e.kind === 'packUpdateStarted' || e.kind === 'packUpdateFinished')));
 
 @Component({
   selector: 'app-cards',

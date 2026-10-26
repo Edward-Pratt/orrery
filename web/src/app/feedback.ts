@@ -1,8 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { ApplicationRef, Component, EnvironmentInjector, Injectable, createComponent, inject, signal } from '@angular/core';
+import { ApplicationRef, EnvironmentInjector, Injectable, createComponent, inject } from '@angular/core';
 import { toast } from '@spartan-ng/brain/sonner';
-import { HlmAlertDialogImports } from '@spartan-ng/helm/alert-dialog';
-import { HlmInput } from '@spartan-ng/helm/input';
 
 /** What a confirmation says: the title names the target and the consequence, the red button carries the verb. */
 export type ConfirmOptions = {
@@ -15,54 +13,21 @@ export type ConfirmOptions = {
   typeName?: string;
 };
 
-@Component({
-  selector: 'app-confirm-dialog',
-  imports: [HlmAlertDialogImports, HlmInput],
-  template: `
-    <hlm-alert-dialog state="open" (closed)="done(false)">
-      <hlm-alert-dialog-content *hlmAlertDialogPortal="let ctx">
-        <hlm-alert-dialog-header>
-          <h2 hlmAlertDialogTitle>{{ o.title }}</h2>
-          @if (o.description) {
-            <p hlmAlertDialogDescription>{{ o.description }}</p>
-          }
-        </hlm-alert-dialog-header>
-        @if (o.typeName) {
-          <label class="text-sm">
-            Type <b>{{ o.typeName }}</b> to confirm
-            <input hlmInput class="mt-1 w-full" autocomplete="off" data-confirm-typed (input)="typed.set($any($event.target).value)" />
-          </label>
-        }
-        <hlm-alert-dialog-footer>
-          <button hlmAlertDialogCancel data-confirm-cancel>Cancel</button>
-          <button
-            hlmAlertDialogAction
-            [variant]="o.destructive ? 'destructive' : 'default'"
-            [disabled]="!!o.typeName && typed() !== o.typeName"
-            (click)="done(true)"
-            data-confirm-ok
-          >
-            {{ o.verb }}
-          </button>
-        </hlm-alert-dialog-footer>
-      </hlm-alert-dialog-content>
-    </hlm-alert-dialog>
-  `,
-})
-class ConfirmDialog {
-  o!: ConfirmOptions;
-  done!: (ok: boolean) => void;
-  protected readonly typed = signal('');
-}
-
 /** The one place the dashboard asks "are you sure?", and reports the outcome of its own requests as toasts. */
 @Injectable({ providedIn: 'root' })
 export class Feedback {
   readonly #app = inject(ApplicationRef);
   readonly #env = inject(EnvironmentInjector);
 
+  /**
+   * The dialog's chunk, fetched once the page is idle so a confirmation opens at once, and so it's in hand before a
+   * dashboard deploy can replace the build under the open page.
+   */
+  readonly #dialog = new Promise<void>((r) => (globalThis.requestIdleCallback ?? setTimeout)(() => r())).then(() => import('./confirm-dialog'));
+
   /** Resolves true once confirmed; harmless or undoable actions don't ask at all. */
-  confirm(o: ConfirmOptions): Promise<boolean> {
+  async confirm(o: ConfirmOptions): Promise<boolean> {
+    const { default: ConfirmDialog } = await this.#dialog;
     return new Promise((resolve) => {
       const ref = createComponent(ConfirmDialog, { environmentInjector: this.#env });
       let over = false;

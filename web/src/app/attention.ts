@@ -12,7 +12,7 @@ import { LiveEvents, ofTarget } from './events';
 import { Integrations } from './integrations';
 import { Session } from './session';
 import { BackupProgress } from './servers/backup-progress';
-import { changesCard } from './servers/cards';
+import { changesCard } from './servers/changes';
 import { ServiceControl } from './services/actions';
 import { restartLeft } from './units';
 

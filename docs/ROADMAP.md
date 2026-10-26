@@ -135,6 +135,13 @@ Staging badge and tab title, the Servers page without the Minecraft integration 
 `deploy/orrery-hub-staging.service` (its header: the one-time setup), the Caddyfile's `staging.orrery.run` site and
 `hub/config.staging.example.json`. Still to do on the host: the setup and the spec's manual smoke test.
 
+**Logs, history and console — done (`hub-v2.13.0` + `web-v0.11.0`, deployed 2026-10-26):** no spec, three issues.
+Chat and console history survive hub restarts and deploys: a server's chat lines and console entries go to a `feed`
+table that seeds the live feed at start, newest 500 per server kept (#145). A Logs tab on the server page: `logs/`,
+crash reports and the linked service's journal, the last 1000 lines of a file the hub listed (#146). The console
+remembers this browser's commands (↑/↓) and keeps saved commands as chips (#148). Still to check on the real server:
+the Logs tab against `gtnh`'s folder.
+
 | # | Spec | Where | Size | Needs |
 |---|---|---|---|---|
 | 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |

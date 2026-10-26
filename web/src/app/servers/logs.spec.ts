@@ -54,7 +54,10 @@ describe('server logs section', () => {
   it('is a tab only when the server has a folder', async () => {
     expect((await setup()).tabs()).toContain('Logs');
     TestBed.resetTestingModule();
-    expect((await setup({ logs: false })).tabs()).not.toContain('Logs');
+    const folderless = await setup({ logs: false });
+    expect(folderless.tabs()).not.toContain('Logs');
+    expect(folderless.text(folderless.el)).toContain('no server folder');
+    folderless.backend.verify(); // nothing asked of the hub
   });
 
   it('lists the files newest first with size and time, and shows latest.log first', async () => {
@@ -121,6 +124,12 @@ describe('server logs section', () => {
     backend.expectOne('/api/servers/gtnh/logs/latest.log').flush('Reading latest.log failed: EACCES', { status: 502, statusText: 'Bad Gateway' });
     await render();
     expect(el.querySelector('[data-log-error]')?.textContent).toContain('latest.log couldn\'t be read (HTTP 502: Reading latest.log failed: EACCES)');
+    el.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    backend.expectOne('/api/servers/gtnh/logs').flush('Bad Gateway', { status: 502, statusText: 'Bad Gateway' });
+    await render();
+    expect(el.querySelectorAll('[data-file]').length).toBe(3);
+    expect(el.querySelector('[data-log-error]')?.textContent).toContain("The logs couldn't be listed (HTTP 502: Bad Gateway)");
+    expect(el.querySelector<HTMLButtonElement>('[data-refresh]')!.disabled).toBe(false);
   });
 
   it("with a linked service, shows its journal from the services logs, with its own Refresh", async () => {

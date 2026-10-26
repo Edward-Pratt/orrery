@@ -55,7 +55,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]), env D
 | `src/index.ts` | Entry point: raises Node's per-address connect attempt to 2.5 s (a lost SYN at 250 ms failed whole fetches with ETIMEDOUT), reads config and env, starts the hub with the real Discord frontend, HTTP get, Discord OAuth and GitHub reader, wires signals. |
 
 The web API (`src/web.ts`, for the separate dashboard app) calls `ServerHub`, `RestartScheduler`, `Stats` (the audit log too), `LiveFeed`, and `HostMonitor`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads` and `Library` when those are on (and `Db` only for its own sessions) — never the mod sockets or systemctl.
-Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `db`) must not import `discord.js` or `format.ts`.
+Hub-core modules (`servers`, `restarts`, `stats`, `crashlogs`, `logs`, `db`) must not import `discord.js` or `format.ts`.
 New hub-core output should be a typed `Notice` on the event stream (`ServerHub.publish`), worded and coloured in
 `format.ts` — not a text callback. Quest batches, new links and the daily summary go on it too (`ServerHub.announce`).
 
@@ -73,6 +73,7 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   `allowedMentions: { parse: [] }` so nothing the bot posts can ping.
 - Services: only units listed in `integrations.systemd` are passed to systemctl/journalctl (validated unit names, after `--` or as `--unit=`, `execFile` without a shell); polkit (`deploy/orrery-hub.rules`) allows exactly those.
 - New server: the id (`^[a-z][a-z0-9-]{0,31}$`) is the only request string that becomes a path or a unit name (`<root>/servers/<id>`, `<root>/java/<id>`, `<id>.service`, asked of systemd only with `show --property=LoadState --`, the one call on an unlisted unit); the start script must be a plain `*.sh` at the pack's content root; the runtime one in the table. The Mod token is random, written only to the 0600 `orrery.cfg` and `.orrery-pending.json`, and never in an API answer; `add-server.sh` treats the pending file as untrusted.
+- Server logs: `GET /api/servers/:id/logs/:name` reads only a name the hub's own listing of that server's `logs/`, `crash-reports/` and `hs_err_pid*.log` holds right now (plain files by `lstat`), never a path built from the request, and opens it `O_NOFOLLOW`; `..`, slashes, unlisted names and symlinks are 404. At most a file's last 4 MB is held.
 - Restore: the hub passes the restore script only a backup name it listed itself, as an argument (no shell), and only while the linked service is stopped; the script re-checks both and refuses to run as root.
 - Deploys: GitHub is read with `GITHUB_TOKEN` (env only); only a tag GitHub listed, matching `^(hub|web|mod)-v\d+\.\d+\.\d+$`, for
   its own part, ever goes into a unit name. Deploy units are outside `integrations.systemd`: only

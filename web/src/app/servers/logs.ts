@@ -24,7 +24,9 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
   selector: 'app-server-logs',
   imports: [DatePipe, HlmButton, HlmSkeleton, HlmSpinner, StickBottom],
   template: `
-    @if (files(); as list) {
+    @if (!server.detail()!.logs) {
+      <p class="text-muted-foreground">This server has no server folder, so no logs to show.</p>
+    } @else if (files(); as list) {
       <section class="flex max-w-5xl flex-col gap-4">
         @if (list.length) {
           <div class="grid gap-4 lg:grid-cols-[16rem_1fr]">
@@ -129,6 +131,7 @@ export default class Logs {
   protected readonly loadingJournal = signal(false);
 
   constructor() {
+    if (!this.server.detail()!.logs) return;
     this.refresh();
     if (this.server.service()) this.fetchJournal();
   }
@@ -147,7 +150,10 @@ export default class Logs {
       },
       error: (err: HttpErrorResponse) => {
         this.loading.set(false);
-        this.listError.set(`The logs couldn't be listed (${why(err)}).`);
+        const message = `The logs couldn't be listed (${why(err)}).`;
+        // Once listed, the list stays and the failure shows where the file's would.
+        if (this.files()) this.error.set(message);
+        else this.listError.set(message);
       },
     });
   }

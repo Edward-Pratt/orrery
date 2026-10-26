@@ -31,6 +31,14 @@ export function fakeEvents() {
 /** Lets pending promises and stream reads run. */
 export const settle = () => new Promise((r) => setTimeout(r, 10));
 
+/**
+ * Repeats `step` (default: `settle`) until `done()` holds, for what a fixed wait can't promise on a busy machine
+ * (a reconnect, an overlay opening).
+ */
+export async function until(done: () => boolean, step: () => Promise<unknown> = settle, ms = 2_000) {
+  for (const end = Date.now() + ms; !done(); await step()) if (Date.now() > end) throw new Error('until: timed out');
+}
+
 /** The confirmation dialog (it lives in the overlay, outside the component under test) and its parts. */
 export const dialog = () => document.querySelector<HTMLElement>('[data-slot=alert-dialog-content]');
 export const dialogButton = (which: 'ok' | 'cancel') => document.querySelector<HTMLButtonElement>(`[data-confirm-${which}]`)!;

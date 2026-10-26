@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { AuditEntry, HostSample, Lifecycle } from './servers.ts';
+import type { AuditEntry, FeedEvent, HostSample, Lifecycle } from './servers.ts';
 import type { AuditRow, DeployOutcome, DeployRow, PackOutcome, PackStep } from './types.ts';
 
 export type AuditFilter = { target?: string; actor?: string; before?: number };
@@ -12,6 +12,8 @@ const SAMPLES_KEEP_MS = 90 * 24 * 60 * 60_000;
 const COPIES_KEPT = 7;
 /** Copies taken before a hub deploy (`hub-before-<tag>-<ms>.db`) kept: one per Rollback anyone would still want. */
 const DEPLOY_COPIES_KEPT = 3;
+/** A server's chat and console entries kept for the live feed, in its memory and in the `feed` table. */
+export const FEED_KEPT = 500;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
@@ -40,7 +42,7 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
   return known === 0 ? null : up / known;
 }
 
-/** SQLite store: server up/down transitions (uptime), player sessions (playtime), the audit log, and nightly upkeep. */
+/** SQLite store: server up/down transitions (uptime), player sessions (playtime), the audit log, recent chat and console (the live feed), and nightly upkeep. */
 export class Db {
   #db: DatabaseSync;
 
@@ -82,6 +84,8 @@ export class Db {
         by TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS pending_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, dir TEXT NOT NULL, token TEXT NOT NULL,
         unit TEXT NOT NULL, game_port INTEGER NOT NULL, runtime TEXT, by TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS feed (id INTEGER PRIMARY KEY, server_id TEXT NOT NULL, at INTEGER NOT NULL, event TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS feed_server_id ON feed (server_id, id);
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -309,9 +313,28 @@ export class Db {
       .map((r) => JSON.parse(r.sample as string) as HostSample);
   }
 
+  /** A live feed event (a chat line or console entry) under its feed id, kept as JSON. */
+  recordFeed(id: number, e: FeedEvent & { serverId: string }): void {
+    this.#write('feed', 'INSERT INTO feed (id, server_id, at, event) VALUES (?, ?, ?, ?)', id, e.serverId, e.at, JSON.stringify(e));
+  }
+
+  /** A server's newest `limit` stored feed events, oldest first. */
+  feed(serverId: string, limit = FEED_KEPT): [number, FeedEvent][] {
+    return this.#db
+      .prepare('SELECT id, event FROM feed WHERE server_id = ? ORDER BY id DESC LIMIT ?')
+      .all(serverId, limit)
+      .map((r): [number, FeedEvent] => [r.id as number, JSON.parse(r.event as string) as FeedEvent])
+      .reverse();
+  }
+
+  /** The highest stored feed id, of any server (removed ones too); 0 if there is none. */
+  feedMaxId(): number {
+    return ((this.#db.prepare('SELECT MAX(id) AS id FROM feed').get() as { id: number | null }).id ?? 0);
+  }
+
   /**
-   * Nightly upkeep: drops TPS and host samples older than 90 days (every other table is small and kept for all-time
-   * stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies, and the 3 newest of the
+   * Nightly upkeep: drops TPS and host samples older than 90 days and all but each server's newest 500 feed events
+   * (every other table is small and kept for all-time stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies, and the 3 newest of the
    * copies taken before hub deploys. Never throws.
    */
   maintain(copyDir: string, now = Date.now()): void {
@@ -319,6 +342,11 @@ export class Db {
     this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
     this.#write('prune web session checks', 'DELETE FROM web_session_checks WHERE id NOT IN (SELECT id FROM web_sessions)');
+    this.#write(
+      'prune feed',
+      'DELETE FROM feed WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY server_id ORDER BY id DESC) AS n FROM feed) WHERE n > ?)',
+      FEED_KEPT,
+    );
     try {
       mkdirSync(copyDir, { recursive: true });
       const file = join(copyDir, `hub-${localDay(now)}.db`);

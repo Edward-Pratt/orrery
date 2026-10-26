@@ -2,6 +2,7 @@ import { backupStats, freeBytes, growthPerDay, listBackups } from './backups.ts'
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
 import type { AuditFilter, Db } from './db.ts';
+import { listLogs, tailLog, type LogFile } from './logs.ts';
 import type { ServerHub } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
 import { bucketMs, HISTORY_POINTS } from './host.ts';
@@ -83,6 +84,27 @@ export class Stats {
   crashLogs(serverId: string, sinceMs: number): Promise<string[]> {
     const dir = this.#folders.get(serverId)?.dir;
     return dir ? findCrashLogs(dir, sinceMs) : Promise.resolve([]);
+  }
+
+  /** Whether a known server has a folder, so its logs can be read. */
+  hasLogs(serverId: string): boolean {
+    return this.#logDir(serverId) !== undefined;
+  }
+
+  #logDir(serverId: string): string | undefined {
+    return this.#hub.get(serverId) ? this.#folders.get(serverId)?.dir || undefined : undefined;
+  }
+
+  /** The server folder's logs and crash reports, newest first; undefined unknown or without a folder. Never throws. */
+  async logs(serverId: string): Promise<LogFile[] | undefined> {
+    const dir = this.#logDir(serverId);
+    return dir ? listLogs(dir) : undefined;
+  }
+
+  /** The last lines of one listed log (see `tailLog`); undefined unknown, without a folder or not listed. */
+  async log(serverId: string, name: string): Promise<string[] | undefined> {
+    const dir = this.#logDir(serverId);
+    return dir ? tailLog(dir, name) : undefined;
   }
 
   /** Stats for the day before `at` (the summary's scheduled time, not Date.now()); Backups only with a folder. */

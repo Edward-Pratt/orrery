@@ -38,6 +38,8 @@ export type ChatSource = 'discord' | 'dashboard';
 
 export type Backup = { name: string; size: number; mtimeMs: number };
 export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };
+/** A log file or crash report in a server folder: its name (no folder), size in bytes and modified time (epoch ms). */
+export type LogFile = { name: string; size: number; modified: number };
 
 /** The daily summary, as `Stats.summary` answers it. */
 export type Summary = {

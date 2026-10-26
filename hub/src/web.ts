@@ -30,6 +30,8 @@ import type {
   ServerCard,
   ServerDetail,
   ServerHistory,
+  ServerLog,
+  ServerLogFiles,
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
@@ -349,7 +351,22 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
       pack: packs?.has(id) ?? false,
+      logs: stats.hasLogs(id),
     } satisfies ServerDetail);
+  });
+  // Reads, so not audited. A file is only ever one of the listing's names, never a path from the request.
+  app.get('/servers/:id/logs', async (c) => {
+    const files = await stats.logs(c.req.param('id'));
+    return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+  });
+  app.get('/servers/:id/logs/:name', async (c) => {
+    const name = c.req.param('name');
+    try {
+      const lines = await stats.log(c.req.param('id'), name);
+      return lines ? c.json({ lines } satisfies ServerLog) : c.notFound();
+    } catch (err) {
+      return c.text(`Reading ${name} failed: ${(err as Error).message}`, 502);
+    }
   });
   app.get('/servers/:id/history', (c) => {
     const id = c.req.param('id');

@@ -4,6 +4,15 @@ import { join } from 'node:path';
 /** Discord's upload limit is 10 MB; stay under it. */
 const MAX_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Where a server's crash logs live: Minecraft's crash reports in `crash-reports/`, and the JVM's `hs_err_pid*.log`
+ * in the server folder itself (`folder` ''). The dashboard's server logs (`logs.ts`) list these too.
+ */
+export const CRASH_LOCATIONS: readonly { folder: string; match: (name: string) => boolean }[] = [
+  { folder: 'crash-reports', match: (n) => n.endsWith('.txt') },
+  { folder: '', match: (n) => /^hs_err_pid\d+\.log$/.test(n) },
+];
+
 async function newest(dir: string, match: (name: string) => boolean, sinceMs: number): Promise<string | null> {
   let names: string[];
   try {
@@ -31,9 +40,6 @@ async function newest(dir: string, match: (name: string) => boolean, sinceMs: nu
  * each only if written at or after `sinceMs` and small enough to upload. Returns 0–2 paths; never throws.
  */
 export async function findCrashLogs(serverDir: string, sinceMs: number): Promise<string[]> {
-  const found = await Promise.all([
-    newest(join(serverDir, 'crash-reports'), (n) => n.endsWith('.txt'), sinceMs),
-    newest(serverDir, (n) => /^hs_err_pid\d+\.log$/.test(n), sinceMs),
-  ]);
+  const found = await Promise.all(CRASH_LOCATIONS.map((l) => newest(join(serverDir, l.folder), l.match, sinceMs)));
   return found.filter((p): p is string => p !== null);
 }

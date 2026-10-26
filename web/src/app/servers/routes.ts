@@ -16,6 +16,7 @@ export default [
       { path: 'players', loadComponent: () => import('./players') },
       { path: 'stats', redirectTo: 'players' },
       { path: 'backups', loadComponent: () => import('./backups') },
+      { path: 'logs', loadComponent: () => import('./logs') },
       { path: 'pack', loadComponent: () => import('./pack') },
     ],
   },

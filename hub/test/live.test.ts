@@ -15,7 +15,7 @@ const unstamped = (entries: [number, { at: number }][]) => entries.map(([, { at:
 const history: HubEvent[] = [
   { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' },
   { serverId: 'gtnh', type: 'join', player: 'Alex' },
-  { serverId: 'gtnh', type: 'say', author: 'ed', message: 'hello', source: 'web', avatar: 'https://cdn/a.png' },
+  { serverId: 'gtnh', type: 'say', author: 'ed', message: 'hello', source: 'dashboard', avatar: 'https://cdn/a.png' },
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['There are 2 players'] },
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['later'], late: true },
   { serverId: 'gtnh', type: 'death', player: 'Alex', message: 'Alex fell' },

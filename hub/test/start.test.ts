@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +20,8 @@ import type {
   ServerCard,
   ServerDetail,
   ServerHistory,
+  ServerLog,
+  ServerLogFiles,
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
@@ -750,6 +752,49 @@ test('a server without the mod has no TPS and no Backup folder', async (t) => {
   assert.deepEqual(detail.card.features, NO_MOD);
   assert.equal(detail.tps, null);
   assert.deepEqual(detail.backups, { configured: false });
+});
+
+/** A hub whose gtnh has a folder with a log, a crash report and the hub's config next to them; web has no folder. */
+async function logsHub(t: TestContext) {
+  const cfg = config(t, { minecraft: MINECRAFT, web: WEB });
+  const dir = join(dirname(cfg.dbPath), 'gtnh');
+  mkdirSync(join(dir, 'logs'), { recursive: true });
+  mkdirSync(join(dir, 'crash-reports'));
+  writeFileSync(join(dir, 'config.json'), '{"token":"secret"}');
+  writeFileSync(join(dir, 'logs', 'latest.log'), 'one\ntwo\n');
+  utimesSync(join(dir, 'logs', 'latest.log'), 3000, 3000);
+  writeFileSync(join(dir, 'crash-reports', 'crash-1.txt'), 'boom\n');
+  utimesSync(join(dir, 'crash-reports', 'crash-1.txt'), 2000, 2000);
+  symlinkSync('../config.json', join(dir, 'logs', 'evil.log'));
+  cfg.servers = [{ ...cfg.servers[0]!, dir }, { ...cfg.servers[0]!, id: 'web', name: 'Website' }];
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => UP, oauth: fakeOAuth().oauth });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  return { request: (path: string) => app.request(path, { headers: { cookie } }) };
+}
+
+test("a server's logs: its log files and crash reports newest first, each file's tail by its listed name", async (t) => {
+  const { request } = await logsHub(t);
+  assert.equal(((await (await request('/api/servers/gtnh')).json()) as ServerDetail).logs, true);
+  assert.equal(((await (await request('/api/servers/web')).json()) as ServerDetail).logs, false);
+  assert.deepEqual(await (await request('/api/servers/gtnh/logs')).json(), [
+    { name: 'latest.log', size: 8, modified: 3000 * 1000 },
+    { name: 'crash-1.txt', size: 5, modified: 2000 * 1000 },
+  ] satisfies ServerLogFiles);
+  assert.deepEqual(await (await request('/api/servers/gtnh/logs/latest.log')).json(), { lines: ['one', 'two'] } satisfies ServerLog);
+  assert.deepEqual(await (await request('/api/servers/gtnh/logs/crash-1.txt')).json(), { lines: ['boom'] } satisfies ServerLog);
+});
+
+test("a log is only one the listing names: paths, unlisted files and symlinks are 404, as are unknown or folderless servers", async (t) => {
+  const { request } = await logsHub(t);
+  for (const name of ['..%2Fconfig.json', '..%2F..%2Fhub.db', 'config.json', 'logs%2Flatest.log', 'evil.log', 'nope.log', '%2E%2E']) {
+    assert.equal((await request(`/api/servers/gtnh/logs/${name}`)).status, 404, name);
+  }
+  assert.equal((await request('/api/servers/gtnh/logs/../config.json')).status, 404);
+  for (const path of ['/api/servers/nope/logs', '/api/servers/nope/logs/latest.log', '/api/servers/web/logs', '/api/servers/web/logs/latest.log']) {
+    assert.equal((await request(path)).status, 404, path);
+  }
 });
 
 test('the audit log reads newest first, for all servers or one', async (t) => {

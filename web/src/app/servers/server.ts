@@ -19,6 +19,7 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
   { path: 'players', label: 'Players', has: () => true },
   { path: 'history', label: 'History', has: () => true },
   { path: 'backups', label: 'Backups', has: (d) => d.backups.configured },
+  { path: 'logs', label: 'Logs', has: (d) => d.logs },
   { path: 'pack', label: 'Pack', has: (d) => d.pack },
 ];
 
@@ -43,7 +44,7 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
         </div>
         <app-server-actions [card]="c" [full]="true" (changed)="refresh()" />
       </header>
-      <!-- Seven tabs don't fit a phone: the row scrolls sideways. -->
+      <!-- Eight tabs don't fit a phone: the row scrolls sideways. -->
       <nav class="-mx-4 mb-4 flex gap-4 overflow-x-auto border-b px-4 text-sm whitespace-nowrap md:mx-0 md:px-0" data-sections>
         @for (s of sections; track s.path) {
           @if (s.has(detail()!)) {

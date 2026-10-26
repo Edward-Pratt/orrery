@@ -11,6 +11,7 @@ import type {
   HistoryAnswer,
   HostSample,
   FeedEvent,
+  LogFile,
   PackOutcome,
   PackStepState,
   Period,
@@ -33,6 +34,7 @@ export type {
   InstallStep,
   LibraryAdd,
   Lifecycle,
+  LogFile,
   Notice,
   PackFinished,
   PackOutcome,
@@ -185,7 +187,23 @@ export type ServerDetail = {
   backups: BackupsAnswer;
   /** Whether the server can have a pack: a folder, a linked service and a Mod token. Only then are there pack routes. */
   pack: boolean;
+  /** Whether the server has a folder, so its logs can be read (`GET /api/servers/:id/logs`). */
+  logs: boolean;
 };
+
+/**
+ * `GET /api/servers/:id/logs`: the server folder's readable logs, newest first: the files directly in `logs/`
+ * (`*.log`, `*.log.gz`) and its crash reports (`crash-reports/*.txt`, `hs_err_pid*.log`). Symlinks and folders are
+ * left out. 404 for an unknown server or one without a folder. Not audited.
+ */
+export type ServerLogFiles = LogFile[];
+
+/**
+ * `GET /api/servers/:id/logs/:name`: the last 1000 lines of one listed file, oldest first, a `.gz` decompressed (the
+ * shape of `ServiceLogs`). The name must be one the listing holds right now: anything else (`..`, a slash, a symlink)
+ * is 404, as is an unknown server or one without a folder. 502 if the file can't be read (e.g. a broken `.gz`).
+ */
+export type ServerLog = { lines: string[] };
 
 /** `GET /api/servers/:id/players/:name`: playtime and last seen; 404 for a name never seen on the server. */
 export type PlayerAnswer = PlaytimeAnswer;

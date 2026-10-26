@@ -90,7 +90,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     { audit: (entry) => db.audit(entry) },
   );
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
-  const live = new LiveFeed(hub);
+  const live = new LiveFeed(hub, db);
 
   let deploys: Deploys | undefined;
   let packs: Packs | undefined;

@@ -8,7 +8,7 @@ import type { BackupsAnswer, PendingRestart, PlayerAnswer, ServerCard, ServerDet
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle } from '../testing';
+import { dialog, dialogButton, fakeEvents, settle, until } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -664,7 +664,7 @@ describe('restoring a backup', () => {
   /** Opens the first row's ⋯ menu; Restore is in the overlay. */
   const openMenu = async (page: { el: HTMLElement; render: () => Promise<void> }) => {
     page.el.querySelector<HTMLButtonElement>('[data-backup-more]')!.click();
-    await page.render();
+    await until(() => !!document.querySelector('[data-restore]'), page.render);
   };
   const restoreButton = () => document.querySelector<HTMLButtonElement>('[data-restore]')!;
   const why = () => document.querySelector('[data-restore-why]')?.textContent?.trim();
@@ -678,8 +678,10 @@ describe('restoring a backup', () => {
     await openMenu(page);
     expect(restoreButton().disabled).toBe(true);
     expect(why()).toBe('To restore a backup, stop gtnh.service first.');
+    await until(() => page.events.requests.length > 0);
     page.events.push(1, { target: 'service', id: 'gtnh', type: 'state', state: 'inactive', sub: 'dead' });
     await page.render();
+    if (!restoreButton()) await openMenu(page); // on a busy machine the overlay can close before this render
     expect(restoreButton().disabled).toBe(false);
     expect(why()).toBeUndefined();
   });

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import type { LiveEvent } from '@hub/api';
 import { FETCH, Live, LiveEvents, ofServer, RETRY_MS } from './events';
-import { fakeEvents, settle } from './testing';
+import { fakeEvents, settle, until } from './testing';
 
 const chat = (message: string): LiveEvent => ({ serverId: 'gtnh', type: 'chat', player: 'Steve', message, at: 1 });
 
@@ -16,13 +16,13 @@ describe('LiveEvents', () => {
     });
     const seen: Live[] = [];
     const sub = TestBed.inject(LiveEvents).all$.subscribe((e) => seen.push(e));
-    await settle();
+    await until(() => backend.requests.length === 1);
     backend.push(1, chat('replayed'));
     backend.comment();
     backend.push(2, chat('live'));
     await settle();
     backend.drop();
-    await settle();
+    await until(() => backend.requests.length === 2);
     backend.push(2, chat('live')); // a hub that sends it again: not a duplicate
     backend.push(3, chat('after the drop'));
     await settle();

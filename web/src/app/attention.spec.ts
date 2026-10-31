@@ -9,7 +9,7 @@ import { FETCH } from './events';
 import { dialogButton, fakeEvents, settle } from './testing';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, library: false, newServer: false };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, agents: false, library: false, newServer: false };
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
   name: id.toUpperCase(),
@@ -17,13 +17,14 @@ const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: null,
-  features: { chat: true, tps: true, quests: false },
+  features: { chat: true, tps: true, quests: false, console: true, update: false },
   packUpdate: null,
   ...more,
 });
@@ -72,6 +73,7 @@ const deploys = (daysAgo: number): DeploysAnswer => ({
   },
   web: { running: null, latest: null, releases: [] },
   mod: { latest: null, releases: [], servers: [] },
+  agent: { latest: null, releases: [], hosts: [] },
   checkedAt: Date.now(),
   error: null,
   newerAfterDays: 14,

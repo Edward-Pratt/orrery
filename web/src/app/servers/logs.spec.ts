@@ -15,13 +15,14 @@ const CARD: ServerCard = {
   rate: { label: 'TPS', max: 20 },
   online: false,
   hung: false,
+  paused: false,
   tps: null,
   players: [],
   uptimeDay: null,
   restart: null,
   lagging: false,
   service: null,
-  features: { chat: true, tps: true, quests: true },
+  features: { chat: true, tps: true, quests: true, console: true, update: false },
   packUpdate: null,
 };
 const GTNH: ServiceStatus = { id: 'gtnh', unit: 'gtnh.service', state: 'failed', sub: 'failed', checks: [] };

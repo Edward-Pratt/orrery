@@ -7,7 +7,7 @@ import type { Notice, ServerHub, ServerState } from '../src/servers.ts';
 const MIN = 60_000;
 
 function setup(configs: Record<string, LagConfig> = { s: { tps: 15, minutes: 2, enabled: true } }) {
-  let state: ServerState = { id: 's', name: 'S', game: 'minecraft', online: true, hung: false, tps: 20, players: [], dims: [] };
+  let state: ServerState = { id: 's', name: 'S', game: 'minecraft', online: true, hung: false, paused: false, tps: 20, players: [], dims: [] };
   const notices: Notice[] = [];
   const hub = { list: () => [state], publish: (_id: string, n: Notice) => notices.push(n) } as unknown as Pick<ServerHub, 'list' | 'publish'>;
   const db = new Db(':memory:');
@@ -58,7 +58,7 @@ test('offline or hung servers are neither sampled nor judged; lag state clears s
   sample({ tps: 10 }); // lag alert
   sample({ online: false, tps: null });
   sample({ online: true, hung: true, tps: 10 });
-  sample({ hung: false, tps: 20 }); // back: no "back to normal", the outage had its own alerts
+  sample({ hung: false, paused: false, tps: 20 }); // back: no "back to normal", the outage had its own alerts
   assert.equal(notices.length, 1);
   assert.equal(db.tpsSince('s', 0).length, 3);
 });

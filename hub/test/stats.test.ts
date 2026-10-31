@@ -15,7 +15,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = 100 * DAY;
 
-const gtnh: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, tps: 19.5, players: ['Steve'], dims: [] };
+const gtnh: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.5, players: ['Steve'], dims: [] };
 
 function setup(folders: { dir?: string; backupDir?: string } = {}) {
   const db = new Db(':memory:');

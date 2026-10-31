@@ -148,13 +148,14 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       rate: rateOf(s.game),
       online: s.online,
       hung: s.hung,
+      paused: s.paused,
       tps: hasMod(s.id) ? s.tps : null,
       players: s.players,
       uptimeDay: status.uptimeDay,
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
+      features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id), console: hasMod(s.id), update: false },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -271,6 +272,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       host: !!integrations.host,
       systemd: !!integrations.systemd,
       github: !!integrations.github,
+      agents: !!integrations.agents,
       library: !!library,
       newServer,
     } satisfies Integrations),

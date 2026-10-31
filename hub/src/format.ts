@@ -121,6 +121,8 @@ export function formatEvent(e: HubEvent): Post | null {
       return formatSummary(e.name, e.summary);
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
+    case 'lost': // its Agent left: a planned exit is not news, and a lost Agent is a host notice
+    case 'milestone': // not posted yet
     case 'quest': // the QuestAnnouncer turns it into questBatch announcements
     case 'link': // answered by Links, which announces a new link
     case 'unlink':
@@ -147,6 +149,10 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
     case 'serviceFailed':
       return `❌ Service ${e.id} failed (${e.unit})`;
+    case 'agentLost':
+      return `⚠️ Host ${e.id}: agent ${e.name} is not connected`;
+    case 'agentBack':
+      return `✅ Host ${e.id}: agent ${e.name} is connected again`;
     case 'deployStarted':
       return `🚀 Deploying ${deployed(e)}: ${e.from ?? 'unknown'} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
@@ -157,7 +163,7 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
 }
 
 /** What a deploy was of, and where: "the hub on production", "the Mod on gtnh". */
-const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod' }[e.part]} on ${e.id}`;
+const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
 
 /**
  * The alerts channel's post for an event about the host, a service or a check, naming what it is about (the channel

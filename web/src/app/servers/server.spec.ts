@@ -20,14 +20,15 @@ const CARD: ServerCard = {
   rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: ['Steve'],
   uptimeDay: 1,
   restart: null,
-  features: { chat: true, tps: true, quests: true },
+  features: { chat: true, tps: true, quests: true, console: true, update: false },
   packUpdate: null,
 };
-const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false } };
+const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false, console: false, update: false } };
 const FACTORIO: ServerCard = { ...CARD, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 59 };
 
 /** A server's detail, as the hub answers it, with nothing in it but the card. */

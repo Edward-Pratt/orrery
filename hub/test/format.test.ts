@@ -78,7 +78,7 @@ test('formatOutput always yields one valid code block under 2000 chars', () => {
 const first = (p: Post) => (p as { embeds: APIEmbed[] }).embeds[0];
 
 test('formatStatus is an embed with state, TPS, players and uptime', () => {
-  const base: ServerState = { id: 's', name: 'GTNH', game: 'minecraft', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
+  const base: ServerState = { id: 's', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
   const e = first(formatStatus(base, 1, 0.5));
   assert.equal(e.title, 'GTNH — 🟢 Online');
   assert.equal(e.color, COLORS.green);
@@ -189,7 +189,7 @@ test('formatOutput truncates long emoji output without splitting an emoji', () =
   assert.ok(out.endsWith('😀\n… (truncated)\n```'));
 });
 
-const online: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
+const online: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
 
 test('formatPresence has one segment per server', () => {
   assert.equal(formatPresence([online]), 'GTNH: 2 online · 20 TPS');
@@ -225,6 +225,7 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
     game: 'minecraft',
     online: true,
     hung: false,
+    paused: false,
     tps: 13.4,
     players: [],
     dims: [{ id: -1, name: 'Nether', ms: 72.4 }],
@@ -245,7 +246,7 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
 });
 
 test("a factorio server's rate is UPS out of 60: bands, trend and wording, and no dimensions", () => {
-  const s: ServerState = { id: 'f', name: 'Space Age', game: 'factorio', online: true, hung: false, tps: 54, players: ['Ann'], dims: [] };
+  const s: ServerState = { id: 'f', name: 'Space Age', game: 'factorio', online: true, hung: false, paused: false, tps: 54, players: ['Ann'], dims: [] };
   const e = first(formatTps(s, [{ ts: 1, tps: 60 }, { ts: 2, tps: 30 }], { avg: 45, min: 30 }, null));
   assert.equal(e.title, 'Space Age: 54.0 UPS');
   assert.equal(e.color, COLORS.green); // 54 is 0.9 of 60

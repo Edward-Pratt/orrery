@@ -10,7 +10,7 @@ import { FETCH, RETRY_MS } from '../events';
 import { dialog, dialogButton, fakeEvents, toasts } from '../testing';
 import routes from './routes';
 
-const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: false, systemd: true, github: true, library: true, newServer: true };
+const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: false, systemd: true, github: true, agents: false, library: true, newServer: true };
 const LIBRARY: LibraryState = {
   packs: [{ id: 2, name: 'GT New Horizons', version: '2.7.4', mc: '1.7.10', loader: 'forge', sha256: 'ab', size: 1, source: 'x', by: 'alex', at: 0, usedBy: [] }],
   runtimes: [

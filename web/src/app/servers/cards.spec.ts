@@ -16,13 +16,14 @@ const GTNH: ServerCard = {
   rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 19.5,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: { id: 'gtnh-svc', state: 'active' },
-  features: { chat: true, tps: true, quests: true },
+  features: { chat: true, tps: true, quests: true, console: true, update: false },
   packUpdate: null,
 };
 const SITE: ServerCard = {
@@ -32,7 +33,7 @@ const SITE: ServerCard = {
   tps: null,
   online: false,
   service: null,
-  features: { chat: false, tps: false, quests: false },
+  features: { chat: false, tps: false, quests: false, console: false, update: false },
 };
 
 @Component({ imports: [HlmToaster, Cards], template: `<hlm-toaster /><app-cards />` })

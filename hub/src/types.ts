@@ -5,10 +5,15 @@
  */
 export type Hello = { type: 'hello'; protocol: number; serverId: string; token: string; modVersion: string };
 
+/**
+ * A game connection's messages to the hub: a Mod's, or an Agent's for its Factorio server (`milestone` and
+ * `heartbeat.paused` only from an Agent; it sends no `achievement`, `quest` or `cmdLate`).
+ */
+
 export type ModMsg =
   | { type: 'started' }
   | { type: 'stopping' }
-  | { type: 'heartbeat'; tps: number; players: string[]; dims?: DimTime[] }
+  | { type: 'heartbeat'; tps: number; players: string[]; dims?: DimTime[]; paused?: boolean }
   | { type: 'chat'; player: string; message: string }
   | { type: 'join'; player: string }
   | { type: 'leave'; player: string }
@@ -19,7 +24,11 @@ export type ModMsg =
   | { type: 'quest'; player: string; quests: QuestDone[] }
   | { type: 'link'; player: string; uuid: string; code: string }
   | { type: 'unlink'; player: string }
-  | { type: 'backup'; ok: boolean; detail: string };
+  | { type: 'backup'; ok: boolean; detail: string }
+  | { type: 'milestone'; kind: MilestoneKind; text: string; player?: string; force?: string };
+
+/** What a Factorio `milestone` is: a research finished, or a force's first rocket, space platform or landing on a planet. */
+export type MilestoneKind = 'research' | 'rocket' | 'platform' | 'landing';
 
 /** A dimension's mean tick time. */
 export type DimTime = { id: number; name: string; ms: number };
@@ -31,12 +40,81 @@ export type HubMsg =
   | { type: 'reject'; reason: string }
   | { type: 'say'; author: string; message: string; source: ChatSource }
   | { type: 'cmd'; id: string; command: string }
-  | { type: 'linkResult'; player: string; ok: boolean; message: string };
+  | { type: 'linkResult'; player: string; ok: boolean; message: string }
+  /** To an Agent's game connection only: a system line in game (countdowns); a Mod gets `cmd` `say …` instead. */
+  | { type: 'notice'; message: string }
+  /** To an Agent's game connection only: make a named save, answered with `backup`. */
+  | { type: 'save' };
+
+/** The first line of an Agent connection, on the Agent port. `protocol` is the same number as a Mod's hello. */
+export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string; token: string; agentVersion: string };
+
+/**
+ * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState
+ * (`sub`), when that last changed (`since`, epoch ms) and Result (`result`, e.g. `success`, `exit-code`).
+ * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `reply` answers a
+ * request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it has any.
+ */
+export type AgentMsg =
+  | { type: 'ping' }
+  | { type: 'bye' }
+  | { type: 'hostSample'; sample: HostSample }
+  | { type: 'serviceState'; unit: string; active: string; sub: string; since: number; result: string }
+  | { type: 'saves'; saves: Save[]; free: number }
+  | { type: 'installed'; factorio: string; mods: FactorioMod[] }
+  | ({ type: 'updateStep'; id: string } & PackStepState)
+  | { type: 'updateDone'; id: string; outcome: PackFinished; from: string; to: string; backup?: string }
+  | { type: 'deployResult'; tag: string; outcome: Exclude<DeployOutcome, 'running'>; log: string }
+  | { type: 'reply'; id: string; ok: boolean; error?: string; data?: unknown };
+
+/**
+ * The hub's requests to an Agent, each answered by a `reply` with its `id` (30 s unless noted). `serviceAct` runs
+ * `systemctl <action> --no-block` on its own unit; `journal` is the last 200 lines of a unit's log file (`unit`: the
+ * server's unit or the Agent's own); `logs` lists the log files it serves and `log` is the last 1000 lines of one;
+ * `restore` copies a listed save as the newest while the unit is stopped; `update` starts a game update (the reply
+ * means accepted; its id is the update's), `updateResume` continues the running one after the hub's stop and
+ * `updateCancel` cancels it before the swap; `deploy` starts the Agent's own deploy of a release (the reply means
+ * started).
+ */
+export type AgentRequest =
+  | { type: 'serviceAct'; id: string; action: ServiceVerb }
+  | { type: 'journal'; id: string; unit: string }
+  | { type: 'logs'; id: string }
+  | { type: 'log'; id: string; name: string }
+  | { type: 'restore'; id: string; name: string }
+  | { type: 'update'; id: string; factorio: FactorioDownload; mods: FactorioModDownload[] }
+  | { type: 'updateResume'; id: string }
+  | { type: 'updateCancel'; id: string }
+  | { type: 'deploy'; id: string; tag: string };
+/** Everything the hub sends on an Agent connection: the handshake's answer, then requests. */
+export type HubAgentMsg = Extract<HubMsg, { type: 'welcome' | 'reject' }> | AgentRequest;
+/** What an `ok` reply's `data` holds, for the requests that answer with data (the others send none). */
+export type AgentReplyData = {
+  journal: { lines: string[] };
+  logs: { files: LogFile[] };
+  log: { lines: string[] };
+};
+
+/** A Factorio mod from the mod portal (or one that comes with the game, like `base`), at one version. */
+export type FactorioMod = { name: string; version: string };
+/** A Factorio release for a game update: its version, the headless download and that file's sha256. */
+export type FactorioDownload = { version: string; url: string; sha256: string };
+/** A mod for a game update: the release's download (a resolved link, no credentials) and its sha1. */
+export type FactorioModDownload = FactorioMod & { sha1: string; url: string };
+
+/**
+ * What kind of save a Factorio server's file is: `named`, one the Agent made (`orrery-<time>.zip`, pre-update ones
+ * too); `auto`, Factorio's own `_autosave*.zip`; `world`, anything else (the setup's world, a restored copy).
+ */
+export type SaveKind = 'named' | 'auto' | 'world';
+/** A save as an Agent lists it: `mtime` in epoch ms; `current` marks the file Factorio last loaded (it saves into it on every stop). */
+export type Save = { name: string; size: number; mtime: number; kind: SaveKind; current: boolean };
 
 /** Where a chat line sent into the game came from. */
 export type ChatSource = 'discord' | 'dashboard';
 
-export type Backup = { name: string; size: number; mtimeMs: number };
+/** A Backup, or a factorio server's save (only those have a `kind`, and `current` on the world Factorio last loaded). */
+export type Backup = { name: string; size: number; mtimeMs: number; kind?: SaveKind; current?: boolean };
 export type BackupStats = { count: number; total: number; free: number | null; growth: number | null };
 /** A log file or crash report in a server folder: its name (no folder), size in bytes and modified time (epoch ms). */
 export type LogFile = { name: string; size: number; modified: number };
@@ -66,16 +144,22 @@ export type ServerState = {
   game: Game;
   online: boolean;
   hung: boolean;
+  /** A factorio server paused (auto-pause with nobody on, or an admin's pause): its rate means nothing then. */
+  paused: boolean;
   tps: number | null;
   players: string[];
   /** Slowest dimensions from the latest heartbeat (empty with an older mod). */
   dims: DimTime[];
 };
 
-export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered' | 'offline';
+/**
+ * A server's lifecycle events. `lost`: its Agent left (a planned exit, or lost): silent, recorded as unknown, and
+ * its players and rate cleared.
+ */
+export type Lifecycle = 'connected' | 'started' | 'stopped' | 'crashed' | 'hung' | 'recovered' | 'offline' | 'lost';
 export type GameMsg = Extract<
   ModMsg,
-  { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' | 'quest' | 'link' | 'unlink' | 'backup' }
+  { type: 'chat' | 'join' | 'leave' | 'death' | 'achievement' | 'quest' | 'link' | 'unlink' | 'backup' | 'milestone' }
 >;
 /** How much a notice matters; frontends pick colours from it. */
 export type Severity = 'problem' | 'warning' | 'good' | 'info';
@@ -156,8 +240,9 @@ export type ServiceStatus = { id: string; unit: string; state: string | null; su
 export type ServiceVerb = 'start' | 'stop' | 'restart';
 
 /**
- * What an event that isn't about a server is about; its `id` is that thing's config id (a deploy's: its target, the
- * environment or, for a Mod, the server id; the library's: `packs`).
+ * What an event that isn't about a server is about; its `id` is that thing's config id (a Host's: the hub's own, or
+ * its Agent's; a deploy's: its target, the environment or, for a Mod, the server id, for an Agent, its id; the
+ * library's: `packs`).
  */
 export type Target = 'host' | 'service' | 'check' | 'deploy' | 'library' | 'install';
 /** Something a hub-core module wants people to know about the host, a service, a check or a deploy. */
@@ -169,14 +254,17 @@ export type TargetNotice = { severity: Severity } & (
   | { kind: 'diskLow'; mount: string; free: number; minFreeGB: number }
   | { kind: 'diskOk'; mount: string; free: number }
   | { kind: 'serviceFailed'; unit: string }
+  /** About a Host (`id`: the Agent's): its Agent went silent or closed without `bye`, then came back. */
+  | { kind: 'agentLost'; name: string }
+  | { kind: 'agentBack'; name: string }
   | { kind: 'deployStarted'; part: DeployPart; from: string | null; to: string; by: string }
   | { kind: 'deployFinished'; part: DeployPart; from: string | null; to: string; outcome: DeployOutcome }
 );
-/** What a deploy puts in place: the hub, the dashboard (`web`) or a server's Mod. */
-export type DeployPart = 'hub' | 'web' | 'mod';
+/** What a deploy puts in place: the hub, the dashboard (`web`), a server's Mod or a Host's Agent. */
+export type DeployPart = 'hub' | 'web' | 'mod' | 'agent';
 export type DeployOutcome = 'running' | 'ok' | 'failed' | 'rolled back';
 /**
- * A deploy in the history: `target` is the environment, or the server id for a Mod; `from` the release it replaced
+ * A deploy in the history: `target` is the environment, the server id for a Mod, or the Agent's id; `from` the release it replaced
  * (null: unknown); `log` the last lines of what it did (or why it failed).
  */
 export type DeployRow = {

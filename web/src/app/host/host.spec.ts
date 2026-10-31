@@ -18,7 +18,7 @@ const SAMPLE: HostSample = {
 };
 const EARLIER: HostSample = { ...SAMPLE, ts: 0, cpu: 0.5, disks: [...SAMPLE.disks, { mount: '/data', free: 1 * GB, total: 2 * GB }] };
 
-const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false, newServer: false };
+const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, agents: false, library: false, newServer: false };
 
 async function setup(sample: HostSample = SAMPLE, answer = true, on = ON, others: HostNow[] = []) {
   const events = fakeEvents();
@@ -168,6 +168,7 @@ const ANSWER: DeploysAnswer = {
   hub: { running: 'hub-v2.5.0', latest: 'hub-v2.6.0', releases: [rel('hub-v2.6.0'), rel('hub-v2.5.0'), rel('hub-v2.4.0')] },
   web: { running: 'web-v0.5.0', latest: 'web-v0.5.0', releases: [rel('web-v0.5.0'), rel('web-v0.4.1')] },
   mod: { latest: 'mod-v1.4.0', releases: [rel('mod-v1.4.0'), rel('mod-v1.3.0')], servers: [{ id: 'gtnh', name: 'GTNH', running: 'mod-v1.3.0' }] },
+  agent: { latest: null, releases: [], hosts: [] },
   checkedAt: Date.now(),
   error: null,
   newerAfterDays: 14,
@@ -178,7 +179,7 @@ const ANSWER: DeploysAnswer = {
 
 describe('host page releases', () => {
   async function releases(answer: DeploysAnswer = ANSWER) {
-    const h = await setup(SAMPLE, true, { ...ON, github: true, library: false });
+    const h = await setup(SAMPLE, true, { ...ON, github: true, agents: false, library: false });
     h.backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await h.render();
     h.backend.expectOne('/api/deploys').flush(answer);

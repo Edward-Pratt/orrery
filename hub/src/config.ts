@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { parseDaily } from './daily.ts';
 import { GAMES, rateOf, type LagConfig } from './lag.ts';
@@ -84,6 +85,19 @@ export type ServiceConfig = { id: string; unit: string };
  */
 export type HostIntegration = { id: string; mounts: string[]; memoryMaxPercent: number; memoryMinutes: number; diskMinFreeGB: number };
 
+/** When to warn about a Host an Agent reports (its mounts are the Agent's own config): as `HostIntegration`'s. */
+export type HostLimits = Omit<HostIntegration, 'id' | 'mounts'>;
+
+/**
+ * An Agent on a remote Host, by id (also its Host's id): its name, its token (at least 32 characters), the tailnet
+ * address it must connect from, the factorio server it runs (`server`; that server's `service` is then backed by
+ * this Agent), and its Host's warning limits (defaulted like `integrations.host`'s).
+ */
+export type AgentConfig = { id: string; name: string; token: string; address: string; server: string; host: HostLimits };
+
+/** The Agent port (`listen`: an IPv4 address, normally the hub's tailnet one, and a port) and the Agents allowed on it. */
+export type AgentsIntegration = { listen: { host: string; port: number }; agents: AgentConfig[] };
+
 /**
  * Where an environment's deploys go: its root (`releases/`, `current`, `config.json`, `hub.db`, `deploy.lock`,
  * `deploy-status.json`), its hub's unit, the templates of its hub and dashboard deploy units (`<template>@<tag>.service`)
@@ -125,8 +139,12 @@ export type Config = {
     host?: HostIntegration;
     systemd?: ServiceConfig[];
     github?: GithubIntegration;
+    agents?: AgentsIntegration;
   };
 };
+
+/** A Host's warning limits when its config leaves them out. */
+const HOST_LIMITS: HostLimits = { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
 
 /** The default `lagTps` per game. */
 const LAG_TPS: Record<Game, number> = { minecraft: 15, factorio: 50 };
@@ -147,6 +165,8 @@ function resolve(s: ServerEntry): ServerSettings {
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const SNOWFLAKE = /^\d{17,20}$/;
+/** An Agent's id, which is also its Host's. */
+const AGENT_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** A systemd unit name (with systemd's `\x2d`-style escapes); never an option, since it is passed to systemctl. */
 const UNIT = /^\w[\w:.@\\-]*\.(service|socket|timer|target|path|mount)$/;
 
@@ -184,11 +204,17 @@ export function validateConfig(raw: unknown): string[] {
     if (v !== undefined && (typeof v !== 'number' || !ok(v))) err(where, `"${key}" must be ${rule}`);
   };
 
-  const port = (o: Obj, where: string) => {
-    const v = o.listenPort;
+  const port = (o: Obj, where: string, key = 'listenPort') => {
+    const v = o[key];
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 65535) {
-      err(where, '"listenPort" must be a port number (1–65535)');
+      err(where, `"${key}" must be a port number (1–65535)`);
     }
+  };
+  /** A Host's warning limits, in `integrations.host` and an Agent's `host`. */
+  const hostLimits = (o: Obj, where: string) => {
+    num(o, 'memoryMaxPercent', where, (n) => n >= 1 && n <= 100, 'a number from 1 to 100');
+    num(o, 'memoryMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
+    num(o, 'diskMinFreeGB', where, (n) => n > 0, 'a positive number');
   };
   /** A map keyed by server id: reports unknown ids and returns its entries. */
   const byServer = (o: Obj, key: string, where: string, ids: Set<string> | undefined): [string, unknown][] => {
@@ -208,11 +234,11 @@ export function validateConfig(raw: unknown): string[] {
     if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err(where, `"${key}" must be an http(s) URL`);
   };
   /** An integration's list of entries, each with its own id; `each` checks the rest of an entry. Returns the ids. */
-  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void): Set<string> => {
+  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void, at = 'integrations'): Set<string> => {
     const seen = new Set<string>();
     const v = o[key];
     if (!Array.isArray(v)) {
-      err('integrations', `"${key}" must be a list`);
+      err(at, `"${key}" must be a list`);
       return seen;
     }
     for (const [i, e] of v.entries()) {
@@ -270,13 +296,19 @@ export function validateConfig(raw: unknown): string[] {
       num(s, 'backupMaxAgeHours', where, (n) => n > 0, 'a positive number');
       num(s, 'backupMinFreeGB', where, (n) => n > 0, 'a positive number');
       if (s.lagAlerts !== undefined && typeof s.lagAlerts !== 'boolean') err(where, '"lagAlerts" must be true or false');
-      // A factorio server runs on another machine, so the hub has no folder of it.
-      if (game === 'factorio' && s.dir !== undefined) err(where, '"dir" is only for minecraft servers: a factorio server has no folder on the hub\'s machine');
-      for (const key of game === 'factorio' ? ['backupDir'] : ['dir', 'backupDir']) {
-        const path = str(s, key, where, false);
-        if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
+      if (game === 'factorio') {
+        // A factorio server runs on its Agent's machine: the hub has no folder of it, and its saves are its Backups.
+        for (const key of ['dir', 'backupDir', 'keep']) {
+          if (s[key] !== undefined) err(where, `"${key}" is only for minecraft servers: a factorio server has no folder on the hub's machine`);
+        }
+        if (s.service === undefined) err(where, '"service" is required for a factorio server: its Agent starts and stops it');
+      } else {
+        for (const key of ['dir', 'backupDir']) {
+          const path = str(s, key, where, false);
+          if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
+        }
       }
-      if (s.keep !== undefined) {
+      if (s.keep !== undefined && game === 'minecraft') {
         if (!Array.isArray(s.keep)) err(where, '"keep" must be a list of paths in the server folder');
         else {
           for (const k of s.keep) {
@@ -303,12 +335,13 @@ export function validateConfig(raw: unknown): string[] {
     err('', '"integrations" must be an object');
     return errors;
   }
+  /** Every token so far, Mod and Agent: each must be unique. */
+  const seen = new Set<string>();
   const mc = integrations.minecraft;
   if (mc !== undefined && !isObj(mc)) err('integrations', '"minecraft" must be an object');
   else if (mc) {
     const where = 'integrations.minecraft';
     port(mc, where);
-    const seen = new Set<string>();
     for (const [sid, token] of byServer(mc, 'tokens', where, ids)) {
       if (games.get(sid) === 'factorio') err(`${where}.tokens`, `"${sid}" is a factorio server: only minecraft servers have a Mod token`);
       else if (typeof token !== 'string' || token.length < 16) err(`${where}.tokens`, `"${sid}" must be at least 16 characters`);
@@ -375,9 +408,7 @@ export function validateConfig(raw: unknown): string[] {
         err(where, '"mounts" must be a non-empty list of folders');
       }
     }
-    num(host, 'memoryMaxPercent', where, (n) => n >= 1 && n <= 100, 'a number from 1 to 100');
-    num(host, 'memoryMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
-    num(host, 'diskMinFreeGB', where, (n) => n > 0, 'a positive number');
+    hostLimits(host, where);
   }
   const web = integrations.web;
   if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
@@ -397,6 +428,52 @@ export function validateConfig(raw: unknown): string[] {
         err(where, `"${key}" is required (or set integrations.discord.${key})`);
       }
     }
+  }
+  const agents = integrations.agents;
+  /** Factorio server id -> the Agents that name it. */
+  const served = new Map<string, string[]>();
+  if (agents !== undefined && !isObj(agents)) err('integrations', '"agents" must be an object');
+  else if (agents) {
+    const where = 'integrations.agents';
+    const listen = agents.listen;
+    if (!isObj(listen)) err(where, '"listen" must be an object with "host" and "port"');
+    else {
+      const at = `${where}.listen`;
+      if (typeof listen.host !== 'string' || !isIPv4(listen.host)) err(at, '"host" must be an IPv4 address');
+      port(listen, at, 'port');
+      for (const [name, other] of [['minecraft', mc], ['web', web]] as const) {
+        if (isObj(other) && other.listenPort === listen.port) err(at, `"port" must differ from integrations.${name}.listenPort`);
+      }
+    }
+    const hubHost = isObj(host) ? host.id : undefined;
+    list(agents, 'agents', 'agent', (a, at) => {
+      const aid = a.id;
+      if (typeof aid === 'string' && aid !== '') {
+        if (!AGENT_ID.test(aid)) err(at, '"id" must be lower-case letters, digits and dashes, starting with a letter, at most 32 characters');
+        else if (aid === hubHost) err(at, '"id" must differ from integrations.host.id: it is also its Host\'s id');
+      }
+      str(a, 'name', at);
+      const token = a.token;
+      if (typeof token !== 'string' || token.length < 32) err(at, '"token" must be at least 32 characters');
+      else if (seen.has(token)) err(at, '"token" is the same as another token');
+      else seen.add(token);
+      const address = str(a, 'address', at);
+      if (address !== undefined && !isIPv4(address)) err(at, '"address" must be an IPv4 address');
+      const sid = str(a, 'server', at);
+      if (sid !== undefined) {
+        if (ids && !ids.has(sid)) err(at, `"server" "${sid}" is not a server id`);
+        else if (games.get(sid) !== undefined && games.get(sid) !== 'factorio') err(at, `"server" "${sid}" must be a factorio server`);
+        else served.set(sid, [...(served.get(sid) ?? []), typeof aid === 'string' ? aid : '?']);
+      }
+      if (a.host !== undefined && !isObj(a.host)) err(at, '"host" must be an object');
+      else if (a.host) hostLimits(a.host, at);
+    }, where);
+  }
+  for (const [sid, game] of games) {
+    if (game !== 'factorio') continue;
+    const by = served.get(sid) ?? [];
+    if (by.length === 0) err(`server "${sid}"`, 'a factorio server must be the "server" of an agent in integrations.agents');
+    else if (by.length > 1) err(`server "${sid}"`, `a factorio server is run by one agent only, not by ${by.map((a) => `"${a}"`).join(', ')}`);
   }
   const github = integrations.github;
   if (github !== undefined && !isObj(github)) err('integrations', '"github" must be an object');
@@ -468,7 +545,7 @@ export function loadConfig(path: string): Config {
   }
   const c = raw as Omit<Config, 'servers' | 'environment'> & { environment?: Environment; servers: ServerEntry[] };
   const integrations = { ...c.integrations };
-  const { web, discord, host, github } = integrations;
+  const { web, discord, host, github, agents } = integrations;
   if (github) {
     integrations.github = {
       ...github,
@@ -476,9 +553,12 @@ export function loadConfig(path: string): Config {
       deploys: { ...PRODUCTION_DEPLOYS, ...github.deploys },
     };
   }
-  if (host) {
-    const defaults = { mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
-    integrations.host = { ...defaults, ...(host as Partial<HostIntegration> & { id: string }) };
+  if (host) integrations.host = { mounts: ['/'], ...HOST_LIMITS, ...(host as Partial<HostIntegration> & { id: string }) };
+  if (agents) {
+    integrations.agents = {
+      ...agents,
+      agents: agents.agents.map((a) => ({ ...a, host: { ...HOST_LIMITS, ...(a.host as Partial<HostLimits> | undefined) } })),
+    };
   }
   if (web) {
     integrations.web = {

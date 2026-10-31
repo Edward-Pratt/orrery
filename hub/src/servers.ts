@@ -109,7 +109,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     for (const s of servers) {
       if (s.token !== undefined && s.token.length < 16) throw new Error(`server "${s.id}": token must be at least 16 characters`);
       this.#configs.set(s.id, s);
-      this.#states.set(s.id, { id: s.id, name: s.name, game: s.game, online: false, hung: false, tps: null, players: [], dims: [] });
+      this.#states.set(s.id, { id: s.id, name: s.name, game: s.game, online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
     }
     this.#hungMs = opts.hungMs ?? 30_000;
     this.#cmdTimeoutMs = opts.cmdTimeoutMs ?? 10_000;
@@ -273,7 +273,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       conn.pending.clear();
       if (this.#conns.get(id) !== conn) return; // replaced by a newer connection: no alert
       this.#conns.delete(id);
-      Object.assign(this.#states.get(id)!, { online: false, hung: false, tps: null, players: [], dims: [] });
+      Object.assign(this.#states.get(id)!, { online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
       if (!this.#closing) this.#emit(id, conn.stopping ? 'stopped' : 'crashed');
     });
   }

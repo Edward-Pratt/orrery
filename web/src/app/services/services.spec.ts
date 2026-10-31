@@ -10,7 +10,7 @@ import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
 import Services from './services';
 
-const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, library: false, newServer: false };
+const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, agents: false, library: false, newServer: false };
 const svc = (id: string, state: string | null, checks: string[] = []): ServiceStatus => ({ id, unit: `${id}.service`, state, sub: state, checks });
 const GRAFANA = svc('grafana', 'active', ['grafana']);
 const CADDY = svc('caddy', 'inactive');
@@ -22,13 +22,14 @@ const CARD: ServerCard = {
   rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: { id: 'mc', state: 'active' },
-  features: { chat: true, tps: true, quests: false },
+  features: { chat: true, tps: true, quests: false, console: true, update: false },
   packUpdate: null,
 };
 

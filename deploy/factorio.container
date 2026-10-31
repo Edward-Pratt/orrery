@@ -1,0 +1,43 @@
+# /etc/containers/systemd/factorio.container
+# Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.
+[Unit]
+Description=Factorio server (orrery)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=factorio
+Label=orrery.managed=true
+Image=container-registry.oracle.com/os/oraclelinux:10-slim@sha256:<digest>
+Pull=never
+Network=host
+User=<uid>
+Group=<gid>
+Environment=HOME=/srv/factorio
+Volume=/opt/factorio:/opt/factorio:ro,z
+Volume=/srv/factorio:/srv/factorio:z
+ReadOnly=true
+Tmpfs=/tmp
+NoNewPrivileges=true
+DropCapability=ALL
+LogDriver=journald
+PodmanArgs=--stop-signal=SIGINT --stop-timeout=170
+Exec=/opt/factorio/current/bin/<arch>/factorio \
+  --start-server-load-latest \
+  --config /srv/factorio/config/config.ini \
+  --server-settings /srv/factorio/config/server-settings.json \
+  --server-adminlist /srv/factorio/config/server-adminlist.json \
+  --mod-directory /srv/factorio/mods \
+  --port 34197 \
+  --rcon-bind 127.0.0.1:27015 --rcon-password ${RCON_PASSWORD} \
+  --enable-lua-udp 34198
+
+[Service]
+EnvironmentFile=/etc/orrery-factorio.env
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=200
+
+[Install]
+WantedBy=multi-user.target

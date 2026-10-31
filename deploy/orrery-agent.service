@@ -1,0 +1,40 @@
+# /etc/systemd/system/orrery-agent.service
+# Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.
+# The orrery Agent on a remote Host: it dials the hub over the tailnet and runs that Host's Factorio server
+# (factorio.service, through 60-orrery-agent.rules). Its code is /srv/orrery-agent/current, flipped by deploy-agent.sh
+# (orrery-agent-deploy@.service); its Node is the private build in /usr/local/lib/orrery/node, on no system PATH.
+[Unit]
+Description=orrery agent
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+User=factorio
+Group=factorio
+# Root-only files, read by systemd: ORRERY_AGENT_TOKEN, and RCON_PASSWORD (shared with factorio.service).
+# One file per line: systemd reads a line with two paths as one path, and fails.
+EnvironmentFile=/etc/orrery-agent.env
+EnvironmentFile=/etc/orrery-factorio.env
+ExecStart=/usr/local/lib/orrery/node/bin/node /srv/orrery-agent/current/src/index.ts
+# factorio's home, /srv/factorio, is the container's to write: nothing native reads dotfiles from there.
+Environment=HOME=/srv/orrery-agent
+Restart=always
+RestartSec=5
+# Hardening that keeps the host samples whole: /proc/stat, /proc/meminfo, /proc/loadavg and statfs on any mount stay
+# readable (no ProcSubset=, ProtectProc= or ProtectHome=yes). Writes only where the agent owns files.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/factorio /srv/factorio /srv/orrery-agent
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

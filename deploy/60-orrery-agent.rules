@@ -1,0 +1,19 @@
+// Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.
+// /etc/polkit-1/rules.d/60-orrery-agent.rules on the agent's Host. The agent's user (factorio) may start, stop and
+// restart factorio.service, restart orrery-agent.service (its own unit), and start orrery-agent-deploy@ for a
+// well-formed tag (deploy-agent.sh checks it again). Nothing else: not the friend's other units, not stopping itself.
+// Check as factorio: `systemctl start --no-block orrery-agent-deploy@agent-v0.0.0.service` is allowed, while
+// `systemctl stop orrery-agent.service` or `systemctl start orrery-agent-deploy@x.service` is refused.
+polkit.addRule(function (action, subject) {
+  // Inside the rule: every rules file shares one JavaScript scope.
+  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== 'factorio') return;
+  var unit = action.lookup('unit');
+  var verb = action.lookup('verb');
+  if (
+    (unit === 'factorio.service' && ['start', 'stop', 'restart'].indexOf(verb) >= 0) ||
+    (unit === 'orrery-agent.service' && verb === 'restart') ||
+    (verb === 'start' && /^orrery-agent-deploy@agent-v\d+\.\d+\.\d+\.service$/.test(unit))
+  ) {
+    return polkit.Result.YES;
+  }
+});

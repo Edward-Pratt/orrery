@@ -108,9 +108,9 @@ export type PartReleases = { running: string | null; latest: string | null; rele
 
 /**
  * `GET /api/deploys[?before=id]` (only with the GitHub integration): what each part runs against what GitHub has
- * published (drafts and prereleases left out), each server's Mod, when GitHub was last asked (`checkedAt`, null: not
- * yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the deploy history, newest first, with
- * whether `older` ones remain (`before` is a row's `id`). Changes come as `deployStarted`/`deployFinished` notices.
+ * published (drafts and prereleases left out), each minecraft server's Mod, when GitHub was last asked (`checkedAt`,
+ * null: not yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the deploy history, newest first,
+ * with whether `older` ones remain (`before` is a row's `id`). Changes come as `deployStarted`/`deployFinished` notices.
  */
 export type DeploysAnswer = {
   hub: PartReleases;

@@ -205,7 +205,11 @@ export class Deploys {
       mod: {
         latest: mod[0]?.tag ?? null,
         releases: mod,
-        servers: this.#d.hub.list().map((s) => ({ id: s.id, name: s.name, running: this.#running('mod', s.id) })),
+        // Only a minecraft server runs the Mod.
+        servers: this.#d.hub
+          .list()
+          .filter((s) => s.game === 'minecraft')
+          .map((s) => ({ id: s.id, name: s.name, running: this.#running('mod', s.id) })),
       },
       checkedAt: this.#checkedAt,
       error: this.#error,

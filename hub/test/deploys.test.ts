@@ -196,6 +196,17 @@ test('releases per part, newest first, without drafts, prereleases or foreign ta
   assert.deepEqual(a.history, []);
 });
 
+test('a factorio server gets no Mod row', async (t) => {
+  const w = world(t, {
+    servers: (dir) => [
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'space', name: 'Space', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched' },
+    ],
+  });
+  const s = await start(t, w);
+  assert.deepEqual((await s.get()).mod.servers, [{ id: 'gtnh', name: 'GTNH', running: null }]);
+});
+
 test('the hub runs the release `current` points at, the dashboard its stamp, a Mod its hello', async (t) => {
   const w = world(t);
   mkdirSync(join(w.root, 'releases', 'hub-v2.6.0'), { recursive: true });

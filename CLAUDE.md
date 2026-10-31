@@ -62,7 +62,6 @@ raise `MIN_PROTOCOL` only one release after a bump.
 
 ```bash
 cd hub && npm test && npm run typecheck
-cd agent && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && npm test && npm run build       # the build also type-checks against the hub's API types
 cd agent && npm test && npm run typecheck # the typecheck also covers the hub's types it imports

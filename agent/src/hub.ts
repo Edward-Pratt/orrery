@@ -102,8 +102,9 @@ class Link {
  * exponential backoff and jitter, logging once per change of state, so with no hub reachable the agent just keeps
  * trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
  *
- * The game connection is up only while the Agent connection is and RCON answers: a `hello` with the agent's token and
- * the orrery mod's version, then a heartbeat per `/orrery-status` answer. `stop` sends `bye`, then closes both.
+ * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
+ * and the orrery mod's version, then a heartbeat per `/orrery-status` answer. It closes with the Agent connection or
+ * once RCON is gone, not while RCON only stalls. `stop` sends `bye`, then closes both.
  */
 export class HubClient {
   #config: HubOptions['config'];
@@ -155,10 +156,18 @@ export class HubClient {
     else if (game.welcomed && r.ups !== null) game.send({ type: 'heartbeat', tps: r.ups, players: r.players, paused: r.paused });
   }
 
-  /** RCON stopped answering: the game connection closes. */
+  /**
+   * RCON stalled (no answer in time, or no status): no new game connection, but an open one stays, heartbeats stop,
+   * and the hub's hung detection decides (a frozen server shows as hung, not as a crash).
+   */
+  stalled(): void {
+    this.#reading = null;
+  }
+
+  /** RCON is gone (refused, or closed by the server): the game connection closes. */
   down(): void {
     this.#reading = null;
-    this.#game?.end('RCON stopped answering');
+    this.#game?.end('RCON is gone');
   }
 
   /** The unit's new state, sent now if connected, and on every connect. */

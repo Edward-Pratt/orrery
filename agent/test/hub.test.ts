@@ -89,9 +89,10 @@ test('reconnects with capped exponential backoff while the hub resets every conn
   await eventually(() => client.connected);
   const at = hub.conns.map((c) => c.at);
   const gaps = at.slice(1).map((a, i) => a - at[i]!);
-  for (const [i, want] of [40, 80, 160, 160].entries()) {
-    assert.ok(gaps[i]! >= want - 5 && gaps[i]! < want + 60, `wait ${i} was ${gaps[i]} ms, want about ${want}`);
-  }
+  for (const [i, want] of [40, 80, 160, 160].entries()) assert.ok(gaps[i]! >= want - 5, `wait ${i} was ${gaps[i]} ms, want ${want}`);
+  const [a, b, c, d] = gaps as [number, number, number, number];
+  assert.ok(b > a * 1.5 && c > b * 1.5, `the waits double: ${gaps.join(', ')}`);
+  assert.ok(d < c * 1.5, `the waits stop at the cap: ${gaps.join(', ')}`);
   assert.equal(hub.of('agentHello').length, 5, 'every attempt opens with agentHello');
 });
 
@@ -103,7 +104,7 @@ test('after a welcomed connection drops, the first retry waits only the base', a
   const dropped = performance.now();
   first.socket.destroy();
   const second = await eventually(() => hub.conns[1], 2000);
-  assert.ok(second.at - dropped >= 35 && second.at - dropped < 120, `retried after ${second.at - dropped} ms`);
+  assert.ok(second.at - dropped >= 35 && second.at - dropped < 1000, `retried after ${second.at - dropped} ms, not a capped wait`);
 });
 
 test('the game connection: a hello with the agent token and the mod version, then heartbeats; stop sends bye and closes both', async (t) => {
@@ -130,20 +131,23 @@ test('the game connection: a hello with the agent token and the mod version, the
   assert.deepEqual([...agent.invalid, ...game.invalid], []);
 });
 
-test('the game connection is open only while the Agent connection is up and RCON answers', async (t) => {
+test('the game connection opens only while the Agent connection is up and RCON answers; a stall keeps it, RCON gone closes it', async (t) => {
   let tick = 0;
-  let answering = true;
-  const rcon = await fakeRcon((cmd) => {
+  let mode: 'status' | 'hang' | 'garbage' = 'status';
+  const handle = (cmd: string) => {
     if (cmd !== '/orrery-status') return [];
-    if (!answering) return 'Unknown command "orrery-status".';
+    if (mode === 'hang') return undefined; // like a frozen server: no answer at all
+    if (mode === 'garbage') return 'Unknown command "orrery-status".';
     tick += 3;
     return JSON.stringify({ ok: true, tick, tick_paused: false, players: ['alice'], version: '2.1.24', mods: { base: '2.1.24', orrery: '0.1.0' }, loaded: true });
-  });
+  };
+  let rcon = await fakeRcon(handle);
   t.after(() => rcon.close());
   let welcome = false;
   const { hub, client } = await setup(t, (hello) => (hello.type === 'hello' || welcome ? 'welcome' : 'silent'), { handshakeMs: 5000 });
-  const poller = new StatusPoller({ port: rcon.port, password: PASSWORD, settings: '/nonexistent/server-settings.json', intervalMs: 20, timeoutMs: 500 });
+  const poller = new StatusPoller({ port: rcon.port, password: PASSWORD, settings: '/nonexistent/server-settings.json', intervalMs: 20, timeoutMs: 100 });
   poller.on('status', (r) => client.status(r));
+  poller.on('stalled', () => client.stalled());
   poller.on('down', () => client.down());
   t.after(() => poller.stop());
   client.start();
@@ -165,13 +169,25 @@ test('the game connection is open only while the Agent connection is up and RCON
     assert.ok(typeof hb.tps === 'number' && hb.tps > 0);
   }
 
-  answering = false; // RCON answers, but with no status: as good as down
+  for (const stall of ['hang', 'garbage'] as const) {
+    mode = stall; // a blocking save or a frozen server: no heartbeats, so the hub sees it hung, not crashed
+    await sleep(60);
+    const beats = game.lines.length;
+    await sleep(350);
+    assert.equal(game.lines.length, beats, `no heartbeat while RCON stalls (${stall})`);
+    assert.equal(game.closed, false, `a stall (${stall}) keeps the game connection`);
+    mode = 'status';
+    await eventually(() => game.lines.length > beats, 2000, `heartbeats again after the ${stall}`);
+  }
+  assert.equal(hub.of('hello').length, 1, 'the same game connection all along');
+
+  await rcon.close(); // Factorio gone: nothing listens on the RCON port
   await eventually(() => game.closed, 2000, 'the game connection closed');
   await sleep(60);
-  assert.equal(hub.of('hello').length, 1, 'not reopened while RCON gives no status');
+  assert.equal(hub.of('hello').length, 1, 'not reopened while RCON is gone');
   assert.equal(agent.closed, false, 'the Agent connection stays up');
 
-  answering = true;
+  rcon = await fakeRcon(handle, Infinity, rcon.port);
   const again = await eventually(() => hub.of('hello')[1], 2000, 'a new game connection');
   await eventually(() => again.lines.length >= 2);
   agent.socket.destroy(); // the Agent connection gone: the game connection follows

@@ -35,6 +35,7 @@ function run(): void {
   const host = new HostSampler(config.mounts);
   service.on('change', (s) => hub.service(s));
   status.on('status', (r) => hub.status(r));
+  status.on('stalled', () => hub.stalled());
   status.on('down', () => hub.down());
   const sample = () =>
     host.sample().then(

@@ -11,11 +11,13 @@ export type Reply = string | string[] | undefined;
  * password (else the request's id); each command answered with exactly one packet carrying its id, whatever its
  * size, every printed line ending in `\n` (an empty body if nothing was printed); a packet with an empty body never
  * answered. Commands are answered in the order they came. `writeSize` cuts every reply packet into writes of that
- * many bytes, one per event-loop turn, so the client reads it in pieces (length field included).
+ * many bytes, one per event-loop turn, so the client reads it in pieces (length field included). `port` 0 picks a
+ * free one; a given port brings a closed server back where it was.
  */
 export async function fakeRcon(
   handle: (command: string, socket: Socket) => Reply | Promise<Reply> = () => [],
   writeSize = Infinity,
+  port = 0,
 ) {
   const received: Packet[] = [];
   const sockets = new Set<Socket>();
@@ -49,7 +51,7 @@ export async function fakeRcon(
       }
     });
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
   return {
     port: (server.address() as AddressInfo).port,
     received,

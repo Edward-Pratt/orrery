@@ -20,6 +20,8 @@ const MAX_ID = 0x7fffffff;
 export type Packet = { id: number; type: number; body: Buffer };
 
 export class RconError extends Error {}
+/** The server took the connection but didn't answer in time: it may be busy (a blocking save) or frozen, not gone. */
+export class RconTimeout extends RconError {}
 
 /** One packet: int32 LE length (of the rest), id and type, then the body and two NULs. */
 export function encode(id: number, type: number, body: string | Buffer): Buffer {
@@ -112,7 +114,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
   #auth(password: string, timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const id = this.#id();
-      const timer = setTimeout(() => this.#end(new RconError(`RCON did not answer within ${timeoutMs} ms`), false), timeoutMs);
+      const timer = setTimeout(() => this.#end(new RconTimeout(`RCON did not answer within ${timeoutMs} ms`), false), timeoutMs);
       this.#current = {
         onPacket: (p) => {
           // Source servers send an empty response before the auth answer; tolerated in case Factorio does too.
@@ -141,7 +143,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
     return new Promise((resolve, reject) => {
       if (this.#ended) return reject(new RconError('RCON connection closed'));
       const id = this.#id();
-      const timer = setTimeout(() => this.#end(new RconError(`RCON command timed out after ${timeoutMs} ms`), true), timeoutMs);
+      const timer = setTimeout(() => this.#end(new RconTimeout(`RCON command timed out after ${timeoutMs} ms`), true), timeoutMs);
       this.#current = {
         onPacket: (p) => {
           if (p.id !== id || p.type !== RESPONSE) return; // not this command's reply: dropped

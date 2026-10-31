@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, decode, encode } from '../src/rcon.ts';
+import { AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, RconTimeout, decode, encode } from '../src/rcon.ts';
 import { PASSWORD, fakeRcon, type Reply } from './fake-rcon.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +57,7 @@ test('connect gives up when the server never answers', async (t) => {
   const server = createServer((s) => s.on('error', () => {}));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => server.close());
-  await assert.rejects(Rcon.connect('127.0.0.1', (server.address() as AddressInfo).port, PASSWORD, 100), /did not answer/);
+  await assert.rejects(Rcon.connect('127.0.0.1', (server.address() as AddressInfo).port, PASSWORD, 100), (err) => err instanceof RconTimeout && /did not answer/.test(err.message));
 });
 
 test('reads a 5 MB reply, one packet over many TCP reads', async (t) => {
@@ -103,11 +103,12 @@ test('a command that times out ends the connection with a close signal', async (
   const { server, rcon, closed } = await setup((cmd) => (cmd === '/hang' ? undefined : 'ok'));
   t.after(() => server.close());
   const queued = rcon.exec('/after');
-  await assert.rejects(rcon.exec('/hang', 100), /timed out/);
+  await assert.rejects(rcon.exec('/hang', 100), (err) => err instanceof RconTimeout && /timed out/.test(err.message));
   assert.equal(await queued, 'ok'); // queued before the hang, so it ran first
   await assert.rejects(rcon.exec('/next'), /closed/);
   assert.equal(closed.length, 1);
   assert.match(closed[0]!.message, /timed out/);
+  await assert.rejects(Rcon.connect('127.0.0.1', 1, PASSWORD, 1000), (err) => !(err instanceof RconTimeout)); // refused: gone, not a stall
 });
 
 test('the server closing mid-command rejects it and signals close once', async (t) => {

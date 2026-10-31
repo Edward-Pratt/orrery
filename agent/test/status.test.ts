@@ -100,22 +100,24 @@ test('auto_pause is read as a plain boolean, and only from a small regular file'
   assert.equal(await readAutoPause(await file('huge.json', `{"auto_pause":true,"pad":"${'x'.repeat(1024 * 1024)}"}`)), false);
 });
 
-test('the poller emits a status after each RCON round trip, down once when RCON goes, and comes back', async (t) => {
+test('the poller emits a status after each RCON round trip, stalled once on no status, down once when RCON goes, and comes back', async (t) => {
   let tick = 0;
   let answering = true;
   const dir = await mkdtemp(join(tmpdir(), 'orrery-settings-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const settings = join(dir, 'server-settings.json');
   await writeFile(settings, JSON.stringify({ auto_pause: true }));
-  const rcon = await fakeRcon((cmd) => {
+  const handle = () => {
     tick += 1;
     return answering ? reply({ tick, players: {} }) : 'Unknown command';
-  });
+  };
+  let rcon = await fakeRcon(handle);
   t.after(() => rcon.close());
   const poller = new StatusPoller({ port: rcon.port, password: PASSWORD, settings, intervalMs: 20, timeoutMs: 500 });
   t.after(() => poller.stop());
   const seen: (Reading | string)[] = [];
   poller.on('status', (r) => seen.push(r));
+  poller.on('stalled', (why) => seen.push(`stalled: ${why}`));
   poller.on('down', (why) => seen.push(`down: ${why}`));
   poller.start();
   await eventually(() => seen.length >= 3);
@@ -127,31 +129,43 @@ test('the poller emits a status after each RCON round trip, down once when RCON 
 
   answering = false;
   await eventually(() => seen.some((s) => typeof s === 'string'));
-  const at = seen.length;
-  await eventually(() => tick >= 20 + at, 2000);
-  assert.equal(seen.filter((s) => typeof s === 'string').length, 1, 'down once, not once per poll');
-  assert.match(seen.at(-1) as string, /no status/);
+  const from = tick;
+  await eventually(() => tick >= from + 10, 2000);
+  const notes = () => seen.filter((s) => typeof s === 'string') as string[];
+  assert.deepEqual(notes(), ['stalled: /orrery-status gave no status (is the orrery mod loaded?)'], 'once, not once per poll');
+
+  await rcon.close();
+  await eventually(() => notes().length === 2, 2000, 'down');
+  assert.match(notes()[1]!, /^down: RCON connection (closed|failed)/);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(notes().length, 2, 'down once while RCON stays gone');
 
   answering = true;
-  await eventually(() => typeof seen.at(-1) === 'object');
-  assert.equal((seen.at(-1) as Reading).ups, null, 'a fresh baseline after RCON was down');
+  rcon = await fakeRcon(handle, Infinity, rcon.port);
+  await eventually(() => typeof seen.at(-1) === 'object', 2000, 'a status again');
+  assert.equal((seen.at(-1) as Reading).ups, null, 'a fresh baseline on the new RCON connection');
 });
 
-test('a poll that times out ends the RCON connection; the next one reconnects', async (t) => {
+test('a poll that times out is a stall, not RCON gone; the next one reconnects', async (t) => {
   let hang = false;
   const rcon = await fakeRcon(() => (hang ? undefined : reply({ tick: Date.now() })));
   t.after(() => rcon.close());
   const poller = new StatusPoller({ port: rcon.port, password: PASSWORD, settings: '/nonexistent', intervalMs: 20, timeoutMs: 50 });
   t.after(() => poller.stop());
-  const downs: string[] = [];
+  const stalls: string[] = [];
   let statuses = 0;
+  let downs = 0;
   poller.on('status', () => statuses++);
-  poller.on('down', (why) => downs.push(why));
+  poller.on('stalled', (why) => stalls.push(why));
+  poller.on('down', () => downs++);
   poller.start();
   await eventually(() => statuses >= 2);
   hang = true;
-  await eventually(() => downs.length === 1, 2000);
-  assert.match(downs[0]!, /timed out|did not answer/);
+  await eventually(() => stalls.length === 1, 2000);
+  assert.match(stalls[0]!, /timed out/);
+  await new Promise((r) => setTimeout(r, 150)); // reconnects to a server that takes the connection but never answers
+  assert.equal(downs, 0);
+  assert.equal(stalls.length, 1);
   hang = false;
   const before = statuses;
   await eventually(() => statuses > before, 2000, 'answers again on a new connection');

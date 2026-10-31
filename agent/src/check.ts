@@ -6,7 +6,7 @@ import { Rcon } from './rcon.ts';
 import { parseStatus, type Status } from './status.ts';
 
 export type CheckOptions = {
-  /** How long RCON gets to answer: Factorio may still be loading the map when setup runs the check. */
+  /** How long RCON gets to answer: Factorio may still be loading the map (factorio.service allows a 300 s start). */
   rconWaitMs?: number;
   retryMs?: number;
   hubWaitMs?: number;
@@ -85,7 +85,7 @@ export async function check(load: () => Config, version: string, o: CheckOptions
     ok = false;
   }
 
-  const status = await rconStatus(config, o.rconWaitMs ?? 120_000, o.retryMs ?? 5000);
+  const status = await rconStatus(config, o.rconWaitMs ?? 300_000, o.retryMs ?? 5000);
   if (typeof status === 'string') {
     say('FAIL', `rcon: 127.0.0.1:${server.rconPort}: ${status}`);
     ok = false;

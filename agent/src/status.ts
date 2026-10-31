@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { constants, open, type FileHandle } from 'node:fs/promises';
-import { Rcon } from './rcon.ts';
+import { Rcon, RconTimeout } from './rcon.ts';
 import { LIMITS } from './wire.ts';
 
 /**
@@ -118,17 +118,22 @@ export type PollerOptions = {
   now?: () => number;
 };
 
+/** Where RCON is: answering with a status; stalled (connected, but no answer in time, or no status); or gone. */
+export type RconState = 'up' | 'stalled' | 'down';
+
 /**
  * Polls `/orrery-status` over RCON every 5 s, on one RCON connection kept open (a new one after it ends). Emits
- * `status` after each successful round trip, and only then: the heartbeat follows RCON, never a timer. Emits `down`
- * once when RCON stops answering (or answers without a status). Logs once per change between the two.
+ * `status` after each successful round trip, and only then: the heartbeat follows RCON, never a timer. A server that
+ * took the connection but doesn't answer in time (a blocking save, or frozen), or answers without a status, has
+ * `stalled`: no heartbeat, so the hub's hung detection sees it, but the game connection stays. RCON refused, reset or
+ * closed by the server means Factorio is gone: `down`. Each emits once per change; each change is logged once.
  */
-export class StatusPoller extends EventEmitter<{ status: [Reading]; down: [string] }> {
+export class StatusPoller extends EventEmitter<{ status: [Reading]; stalled: [string]; down: [string] }> {
   #o: Required<PollerOptions>;
   #rcon: Rcon | null = null;
   #prev: Previous | null = null;
   #players: string[] = [];
-  #up: boolean | null = null;
+  #state: RconState | null = null;
   #timer: NodeJS.Timeout | undefined;
   #stopped = true;
 
@@ -137,7 +142,7 @@ export class StatusPoller extends EventEmitter<{ status: [Reading]; down: [strin
     this.#o = { host: '127.0.0.1', intervalMs: 5000, timeoutMs: 4000, now: () => performance.now(), ...options };
   }
 
-  /** The players online at the latest answer; none while RCON is down. */
+  /** The players online at the latest answer; none once RCON is gone. */
   get players(): readonly string[] {
     return this.#players;
   }
@@ -164,6 +169,8 @@ export class StatusPoller extends EventEmitter<{ status: [Reading]; down: [strin
 
   async #poll(): Promise<void> {
     const o = this.#o;
+    let status: Status | null;
+    let at: number;
     try {
       if (!this.#rcon) {
         const rcon = await Rcon.connect(o.host, o.port, o.password, o.timeoutMs);
@@ -175,26 +182,29 @@ export class StatusPoller extends EventEmitter<{ status: [Reading]; down: [strin
         this.#prev = null;
       }
       const reply = await this.#rcon.exec('/orrery-status', o.timeoutMs);
-      const at = o.now();
-      const status = parseStatus(reply);
-      if (!status) throw new Error('/orrery-status gave no status (is the orrery mod loaded?)');
-      const r = reading(status, at, await readAutoPause(o.settings), this.#prev);
-      if (this.#stopped) return;
-      this.#prev = { tick: status.tick, at };
-      this.#players = r.players;
-      if (this.#up !== true) console.log('[rcon] /orrery-status answers');
-      this.#up = true;
-      this.emit('status', r);
+      at = o.now();
+      status = parseStatus(reply);
     } catch (err) {
       if (this.#stopped) return;
       this.#prev = null;
+      if (err instanceof RconTimeout) return this.#change('stalled', err.message);
       this.#players = [];
-      if (this.#up !== false) {
-        const why = (err as Error).message;
-        console.log(`[rcon] not answering: ${why}`);
-        this.#up = false;
-        this.emit('down', why);
-      }
+      return this.#change('down', (err as Error).message);
     }
+    if (!status) return this.#change('stalled', '/orrery-status gave no status (is the orrery mod loaded?)');
+    const r = reading(status, at, await readAutoPause(o.settings), this.#prev);
+    if (this.#stopped) return;
+    this.#prev = { tick: status.tick, at };
+    this.#players = r.players;
+    this.#change('up', '');
+    this.emit('status', r);
+  }
+
+  #change(state: RconState, why: string): void {
+    if (state === this.#state) return;
+    this.#state = state;
+    if (state === 'up') return console.log('[rcon] /orrery-status answers');
+    console.log(`[rcon] ${state === 'down' ? 'gone' : 'not answering'}: ${why}`);
+    this.emit(state, why);
   }
 }

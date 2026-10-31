@@ -217,6 +217,20 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     return Promise.resolve();
   }
 
+  /**
+   * Starts a Backup now. A Mod's server runs `backup start` through `runCommand` (audited as a command, resolved with
+   * its output); a factorio server's Agent gets `save` (audited as `backup`, resolved with no output) and makes a named
+   * save itself. Either way the game's `backup` event follows when it is done. Rejects if the server is offline.
+   */
+  backup(id: string, by: string): Promise<string[]> {
+    if (this.#states.get(id)?.game !== 'factorio') return this.runCommand(id, 'backup start', by);
+    const conn = this.#conns.get(id);
+    if (!conn) return Promise.reject(new Error(`${this.#states.get(id)!.name} is offline`));
+    this.audit(by, 'backup', id, 'save');
+    this.#send(conn.socket, { type: 'save' });
+    return Promise.resolve([]);
+  }
+
   /** Puts a hub-core notice about a server on the event stream. */
   publish(serverId: string, notice: Notice): void {
     this.emit('event', { ...notice, type: 'notice', serverId });

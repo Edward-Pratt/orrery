@@ -157,6 +157,13 @@ test('formatBackupStatus and formatBackupList show count and total size', () => 
   assert.equal(first(formatBackupStatus([], now, null)).description, 'No backups found.');
 });
 
+test("an Agent's save names can't format the backup posts: escaped as the newest, kept inside their code span in the list", () => {
+  const now = 1_000_000_000_000;
+  const hostile = { name: '[x](https://e.example) `y`_z.zip', size: 1024, mtimeMs: now, kind: 'world' as const, current: true };
+  assert.equal(first(formatBackupStatus([hostile], now, null)).fields![0]!.value, '\\[x](https://e.example) \\`y\\`\\_z.zip');
+  assert.equal(first(formatBackupList([hostile])).description, "`[x](https://e.example) 'y'_z.zip` 1.0 KB");
+});
+
 test('formatSummary lays out the daily stats', () => {
   const e = first(
     formatSummary('GTNH', {

@@ -1,12 +1,12 @@
 import { dirname, join } from 'node:path';
 import { Agents, type AgentsOptions } from './agents.ts';
-import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
+import { BackupWatcher } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
 import { Packs, type PacksOptions } from './packs.ts';
-import { Restores, type RunRestore } from './restore.ts';
+import { agentRestore, folderRestore, Restores, type RestoreSource, type RunRestore } from './restore.ts';
 import { Services, type Run } from './services.ts';
 import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
@@ -44,7 +44,7 @@ export type HubDeps = {
   host?: HostReaders;
   /** Runs systemctl and journalctl; needed only with the systemd integration. */
   run?: Run;
-  /** Runs the restore script; without it (or systemd) the dashboard can't restore backups. */
+  /** Runs the restore script; without it (or systemd) the dashboard can't restore a server folder's backups. */
   restore?: RunRestore;
   /** GitHub's releases; needed only with the GitHub integration (which also needs `run`). */
   github?: GitHub;
@@ -89,10 +89,6 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
   if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
   if (github && !(deps.github && deps.run)) throw new Error('integrations.github needs a GitHub reader and a systemctl runner');
-  const backupDirs: Record<string, string> = Object.fromEntries(
-    config.servers.flatMap((s) => (s.backupDir ? [[s.id, s.backupDir]] : [])),
-  );
-
   const db = new Db(config.dbPath);
   db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left open when the hub last stopped
   const touch = setInterval(() => db.touch(), 60_000);
@@ -121,16 +117,6 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     },
   });
   for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
-  const backups = new BackupWatcher(
-    hub,
-    (serverId) => listBackups(backupDirs[serverId] ?? ''),
-    (serverId) => freeBytes(backupDirs[serverId] ?? ''),
-  );
-  for (const s of config.servers) {
-    if (s.backupDir) {
-      backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB });
-    }
-  }
   const playtime = new PlaytimeTracker(hub, db);
   const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])));
   const quests = new QuestAnnouncer(hub, Object.fromEntries(config.servers.map((s) => [s.id, s.quests])));
@@ -159,16 +145,37 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     (p) => console.log(`[hub] Agent port on ${agentsCfg!.listen.host}:${p}`),
     (err) => console.error('[hub] Agent port failed, no Agent can connect:', err),
   );
+  const agentOf = new Map((agentsCfg?.agents ?? []).map((a) => [a.server, a.id]));
+  // Before anything that reads Backups: each server's Backup source (its folder, or its Agent's saves) is Stats'.
+  const stats = new Stats(hub, db, config.servers, agents);
+  const backups = new BackupWatcher(
+    hub,
+    (serverId) => stats.backupSource(serverId)?.list() ?? Promise.resolve([]),
+    (serverId) => stats.backupSource(serverId)?.free() ?? Promise.resolve(null),
+  );
+  for (const s of config.servers) {
+    if (!stats.backupSource(s.id)) continue;
+    // An Agent saves only after play, so its saves are overdue only once someone has played since the newest.
+    const played = agentOf.has(s.id) ? (since: number) => db.sessionsSince(s.id, since).length > 0 : undefined;
+    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB, played });
+  }
   services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!, agents); // checked above
   services?.start();
+  // A restore source per server: its Agent's restore, or its folder's script.
+  const restoreSources = new Map<string, RestoreSource>();
+  for (const s of config.servers) {
+    const agentId = agentOf.get(s.id);
+    if (agents && agentId !== undefined) restoreSources.set(s.id, agentRestore(agents, agentId, stats.backupSource(s.id)!.list));
+    else if (deps.restore && s.dir && s.backupDir) restoreSources.set(s.id, folderRestore(deps.restore, s.dir, s.backupDir));
+  }
   const restores =
-    services &&
-    deps.restore &&
-    new Restores(hub, services, config.servers, deps.restore, {
-      deploying: () => deploys?.busy() ?? false,
-      packing: (id) => packs?.busy(id) ?? false,
-      restored: (id) => packs?.restored(id),
-    });
+    services && restoreSources.size
+      ? new Restores(hub, services, restoreSources, {
+          deploying: () => deploys?.busy() ?? false,
+          packing: (id) => packs?.busy(id) ?? false,
+          restored: (id) => packs?.restored(id),
+        })
+      : undefined;
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   deploys =
     github &&
@@ -239,7 +246,6 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.packs,
     );
 
-  const stats = new Stats(hub, db, config.servers, agents);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time

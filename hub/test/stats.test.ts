@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import type { Agents, AgentEvents } from '../src/agents.ts';
 import { Db } from '../src/db.ts';
 import type { ServerHub, ServerState } from '../src/servers.ts';
 import { Stats } from '../src/stats.ts';
@@ -181,6 +183,39 @@ test('backups lists the folder newest first, with free space', async (t) => {
   );
   assert.equal(typeof b.free, 'number');
   assert.equal(b.growth, 100);
+});
+
+test("an Agent's server's Backups are the saves it last pushed, newest first with their kind, and its free space", async () => {
+  const db = new Db(':memory:');
+  const hub = { get: (id: string) => ({ gtnh, space })[id] } as unknown as Pick<ServerHub, 'get'>;
+  const events = new EventEmitter<AgentEvents>();
+  const agents = Object.assign(events, {
+    list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: true, version: null }],
+    request: () => Promise.reject(new Error('not asked')),
+  }) as unknown as Pick<Agents, 'list' | 'request' | 'on'>;
+  const stats = new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10 }, { id: 'space', backupMinFreeGB: 5 }], agents);
+  // Before its first push: a Backup source with nothing known yet.
+  assert.deepEqual(await stats.backups('space'), { configured: true, backups: [], free: null, growth: null, minFree: 5 * 1024 ** 3 });
+  const save = (name: string, mtime: number, size: number, kind: 'named' | 'auto' | 'world', current = false) => ({ name, size, mtime, kind, current });
+  events.emit('saves', 'vm', {
+    type: 'saves',
+    saves: [save('_autosave1.zip', NOW - HOUR, 300, 'auto'), save('world.zip', NOW - 2 * DAY, 100, 'world', true), save('orrery-x.zip', NOW, 400, 'named')],
+    free: 20 * 1024 ** 3,
+  });
+  events.emit('saves', 'other', { type: 'saves', saves: [], free: 0 }); // no such Agent: ignored
+  assert.deepEqual(await stats.backups('space'), {
+    configured: true,
+    backups: [
+      { name: 'orrery-x.zip', size: 400, mtimeMs: NOW, kind: 'named', current: false },
+      { name: '_autosave1.zip', size: 300, mtimeMs: NOW - HOUR, kind: 'auto', current: false },
+      { name: 'world.zip', size: 100, mtimeMs: NOW - 2 * DAY, kind: 'world', current: true },
+    ],
+    free: 20 * 1024 ** 3,
+    growth: 150,
+    minFree: 5 * 1024 ** 3,
+  });
+  assert.equal(stats.backupSource('gtnh'), undefined); // neither a folder nor an Agent
+  assert.deepEqual(await stats.backups('gtnh'), { configured: false });
 });
 
 test('audit reads the log newest first, all servers or one', () => {

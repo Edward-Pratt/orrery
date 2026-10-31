@@ -121,7 +121,7 @@ export type WebDeps = {
   hosts?: Hosts;
   /** Only with the systemd integration. */
   services?: Services;
-  /** Only with the systemd integration and a restore runner. */
+  /** Only with the systemd integration, and a server with a restore source: a folder and the restore script, or an Agent. */
   restores?: Restores;
   /** Only with the GitHub integration. */
   deploys?: Deploys;
@@ -570,8 +570,14 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   };
   // Output that comes later (spark's profiler link) goes on the event stream.
   app.post('/servers/:id/command', (c) => run(c, c.get('body').command));
-  // The finished/failed notice follows on the event stream, from the mod's backup event.
-  app.post('/servers/:id/backup', (c) => run(c, 'backup start'));
+  // A Mod's `backup start`, or a factorio server's save; the finished/failed notice follows on the event stream.
+  app.post('/servers/:id/backup', async (c) => {
+    try {
+      return c.json({ output: await hub.backup(c.req.param('id'), actor(c.get('user'))) } satisfies CommandOutput);
+    } catch (err) {
+      return c.text((err as Error).message, 502); // timed out, or the server went away
+    }
+  });
   app.post('/servers/:id/restart', (c) => {
     const id = c.req.param('id');
     if (restarts.pending(id)) return c.text('A restart is already scheduled: cancel it first.', 409);

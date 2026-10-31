@@ -334,7 +334,10 @@ export type TpsAnswer = { state: ServerState; lastHour: { ts: number; tps: numbe
 export type PlaytimeAnswer =
   | { found: true; player: string; totalMs: number; weekMs: number; lastSeen: { online: true } | number | null }
   | { found: false; reason: 'noInput' | 'notLinked' };
-/** A Server without a Backup folder has no Backup answers at all, rather than an empty list. */
+/**
+ * A Server with no Backup source (neither a Backup folder nor an Agent) has no Backup answers at all, rather than an
+ * empty list. A factorio server's Backups are the saves its Agent last pushed (none, and `free` null, before its first).
+ */
 export type BackupsAnswer =
   | { configured: false }
   | {

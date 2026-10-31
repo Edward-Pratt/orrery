@@ -155,6 +155,45 @@ export async function sendChat(
   }
 }
 
+/** The parts of a slash command's interaction `/backup` uses. */
+export type BackupInteraction = Pick<ChatInputCommandInteraction, 'reply' | 'deferReply' | 'editReply'> & {
+  options: Pick<ChatInputCommandInteraction['options'], 'getSubcommand'>;
+};
+
+/**
+ * `/backup` in a server's channel (its admin role already checked): `status` and `list` of the server's Backups (a
+ * factorio server's saves), or `start`, a Backup now through `ServerHub.backup` as `by`. The finished/failed notice
+ * follows in the channel, from the game's backup event.
+ */
+export async function backupCommand(
+  i: BackupInteraction,
+  hub: Pick<ServerHub, 'get' | 'backup'>,
+  stats: Pick<Stats, 'backups'>,
+  serverId: string,
+  by: string,
+): Promise<void> {
+  const b = (await stats.backups(serverId))!;
+  if (!b.configured) {
+    await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const sub = i.options.getSubcommand();
+  if (sub === 'status') {
+    await i.reply(formatBackupStatus(b.backups, Date.now(), b.free));
+  } else if (sub === 'list') {
+    await i.reply(formatBackupList(b.backups));
+  } else {
+    await i.deferReply();
+    try {
+      const output = await hub.backup(serverId, by);
+      // A Mod answers with its command's output; an Agent's save has none.
+      await i.editReply(hub.get(serverId)?.game === 'factorio' ? '💾 Saving: the notice follows here once the save is written.' : formatOutput(output));
+    } catch (err) {
+      await i.editReply(`❌ ${(err as Error).message}`);
+    }
+  }
+}
+
 export async function startDiscord(
   hub: ServerHub,
   stats: Stats,
@@ -330,25 +369,7 @@ export async function startDiscord(
       }
       await i.reply({ content: reply, flags: MessageFlags.Ephemeral });
     } else if (i.commandName === 'backup') {
-      const b = (await stats.backups(serverId))!;
-      if (!b.configured) {
-        await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-      const sub = i.options.getSubcommand();
-      if (sub === 'status') {
-        await i.reply(formatBackupStatus(b.backups, Date.now(), b.free));
-      } else if (sub === 'list') {
-        await i.reply(formatBackupList(b.backups));
-      } else {
-        await i.deferReply();
-        try {
-          // The "finished"/"failed" notice follows in the channel, from the mod's backup event.
-          await i.editReply(formatOutput(await hub.runCommand(serverId, 'backup start', audit)));
-        } catch (err) {
-          await i.editReply(`❌ ${(err as Error).message}`);
-        }
-      }
+      await backupCommand(i, hub, stats, serverId, audit);
     }
   }
 

@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import type { Agents } from './agents.ts';
 import { listBackups } from './backups.ts';
-import type { ServerSettings } from './config.ts';
 import type { ServerHub } from './servers.ts';
 import type { Services } from './services.ts';
+import type { Backup } from './types.ts';
 
 /** `deploy/restore-backup.sh`'s settings, passed in its environment. */
 export type RestoreEnv = { GTNH_DIR: string; BACKUP_DIR: string; GTNH_SERVICE: string };
@@ -26,6 +27,31 @@ export const execRestore: RunRestore = (name, env) =>
   });
 
 /**
+ * How one server's Backups are put back: `list`, the Backups it has (only a name in it is ever restored), and `run`,
+ * the restore of one of them (`unit`: the server's linked service's unit), resolving with what it printed.
+ */
+export type RestoreSource = { list: () => Promise<Backup[]>; run: (name: string, unit: string) => Promise<string> };
+
+/** A server folder's restore: `deploy/restore-backup.sh` through `run`, over its Backup folder's listing. */
+export function folderRestore(run: RunRestore, dir: string, backupDir: string): RestoreSource {
+  return { list: () => listBackups(backupDir), run: (name, unit) => run(name, { GTNH_DIR: dir, BACKUP_DIR: backupDir, GTNH_SERVICE: unit }) };
+}
+
+/**
+ * A server an Agent runs: its `restore` request (the Agent checks the name against its own listing and that its unit
+ * is stopped, then copies the save as the newest, which the next start loads), over the saves it pushed (`list`).
+ */
+export function agentRestore(agents: Pick<Agents, 'request'>, agentId: string, list: () => Promise<Backup[]>): RestoreSource {
+  return {
+    list,
+    run: async (name) => {
+      await agents.request(agentId, { type: 'restore', name });
+      return `${name} is copied as the newest save: the server loads it on its next start.`;
+    },
+  };
+}
+
+/**
  * What else a restore must not race: a hub deploy (`deploying`: its restart would kill a restore halfway) and a pack
  * update on the server (`packing`); `restored` hears of each one done.
  */
@@ -41,29 +67,23 @@ export class RestoreRefused extends Error {
 }
 
 /**
- * Puts a listed backup back over a server's world with `deploy/restore-backup.sh`, only while the server's linked
- * service is stopped, one at a time per server. Every attempt on a known server is audited. Hub core.
+ * Puts a listed backup back on a server through its `RestoreSource` (a folder's script, or its Agent), only while
+ * the server's linked service is stopped, one at a time per server. Every attempt on a known server is audited. Hub
+ * core.
  */
 export class Restores {
   #hub: Pick<ServerHub, 'get' | 'audit'>;
   #services: Pick<Services, 'ofServer'>;
-  #servers: Map<string, Pick<ServerSettings, 'dir' | 'backupDir'>>;
-  #run: RunRestore;
+  #sources: Map<string, RestoreSource>;
   #o: Required<RestoreChecks>;
   #running = new Set<string>();
 
-  constructor(
-    hub: Pick<ServerHub, 'get' | 'audit'>,
-    services: Pick<Services, 'ofServer'>,
-    servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir'>[],
-    run: RunRestore,
-    o: RestoreChecks = {},
-  ) {
+  /** `sources`: each server that can be restored, by id. */
+  constructor(hub: Pick<ServerHub, 'get' | 'audit'>, services: Pick<Services, 'ofServer'>, sources: Map<string, RestoreSource>, o: RestoreChecks = {}) {
     this.#hub = hub;
     this.#o = { deploying: () => false, packing: () => false, restored: () => {}, ...o };
     this.#services = services;
-    this.#servers = new Map(servers.map((s) => [s.id, s]));
-    this.#run = run;
+    this.#sources = sources;
   }
 
   /** Whether a restore runs on a server (`serverId` undefined: on any). */
@@ -71,20 +91,20 @@ export class Restores {
     return serverId === undefined ? this.#running.size > 0 : this.#running.has(serverId);
   }
 
-  /** Resolves with the script's output; rejects with `RestoreRefused`, or the script's error. */
+  /** Resolves with what the restore printed; rejects with `RestoreRefused`, or the script's (or the Agent's) error. */
   async restore(serverId: string, name: string, by: string): Promise<string> {
     const server = this.#hub.get(serverId);
     if (!server) throw new RestoreRefused(404, 'No such server.');
-    let env: RestoreEnv;
+    let run: () => Promise<string>;
     try {
-      env = await this.#check(serverId, server.name, name);
+      run = await this.#check(serverId, server.name, name);
     } catch (err) {
       this.#hub.audit(by, 'restore', serverId, `${name}: refused: ${(err as Error).message}`);
       throw err;
     }
     this.#running.add(serverId);
     try {
-      const output = await this.#run(name, env);
+      const output = await run();
       this.#hub.audit(by, 'restore', serverId, `${name}: done`);
       this.#o.restored(serverId);
       return output;
@@ -96,13 +116,14 @@ export class Restores {
     }
   }
 
-  async #check(serverId: string, serverName: string, name: string): Promise<RestoreEnv> {
+  /** The restore to run, once every check passed. */
+  async #check(serverId: string, serverName: string, name: string): Promise<() => Promise<string>> {
     const service = this.#services.ofServer(serverId);
     if (!service) throw new RestoreRefused(409, `${serverName} has no linked service: restore it on the host with deploy/restore-backup.sh.`);
-    const { dir, backupDir } = this.#servers.get(serverId) ?? {};
-    if (!dir || !backupDir) throw new RestoreRefused(409, `${serverName} has no server folder.`);
-    // Only a name the hub listed itself reaches the script, never one from the request as such.
-    if (!(await listBackups(backupDir)).some((b) => b.name === name)) throw new RestoreRefused(404, `No backup ${name}.`);
+    const source = this.#sources.get(serverId);
+    if (!source) throw new RestoreRefused(409, `${serverName} has no server folder.`);
+    // Only a name the hub listed itself (its folder's, or its Agent's latest saves) reaches the script or the Agent.
+    if (!(await source.list()).some((b) => b.name === name)) throw new RestoreRefused(404, `No backup ${name}.`);
     if (this.#o.packing(serverId)) throw new RestoreRefused(409, `A pack update is running on ${serverName}: restore once it is done.`);
     if (service.state !== 'inactive' && service.state !== 'failed') {
       throw new RestoreRefused(409, `${service.unit} is ${service.state ?? 'not read yet'}: stop it first.`);
@@ -110,6 +131,6 @@ export class Restores {
     // Checked after the last await, and marked running in the same turn, so two requests can't both pass.
     if (this.#running.has(serverId)) throw new RestoreRefused(409, `A restore is already running on ${serverName}.`);
     if (this.#o.deploying()) throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
-    return { GTNH_DIR: dir, BACKUP_DIR: backupDir, GTNH_SERVICE: service.unit };
+    return () => source.run(name, service.unit);
   }
 }

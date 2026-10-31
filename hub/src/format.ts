@@ -311,7 +311,7 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
     title: 'Backups',
     color: COLORS.blue,
     fields: [
-      { name: 'Newest', value: truncate(newest.name, FIELD), inline: false },
+      { name: 'Newest', value: truncate(md(newest.name), FIELD), inline: false },
       { name: 'Age', value: `${formatDuration(now - newest.mtimeMs)}`, inline: true },
       { name: 'Size', value: formatBytes(newest.size), inline: true },
       { name: 'Count', value: String(backups.length), inline: true },
@@ -324,7 +324,8 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
 
 export function formatBackupList(backups: Backup[]): Post {
   if (!backups.length) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
-  const lines = backups.slice(0, 10).map((b) => `\`${b.name}\` ${formatBytes(b.size)}`);
+  // A name (an Agent's save's comes from the game's folder) can't end its code span early.
+  const lines = backups.slice(0, 10).map((b) => `\`${b.name.replaceAll('`', "'")}\` ${formatBytes(b.size)}`);
   return embed({
     title: `Backups: ${backups.length}, ${totalSize(backups)} total`,
     description: truncate(lines.join('\n'), DESCRIPTION),

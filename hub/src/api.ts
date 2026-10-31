@@ -288,7 +288,10 @@ export type RestartRequest = { minutes: number };
  */
 export type RestoreRequest = { name: string };
 
-/** The answer to a command, to `POST /api/servers/:id/backup` and to a restore. */
+/**
+ * The answer to a command, to `POST /api/servers/:id/backup` (a Mod's `backup start` output; a factorio server's save
+ * has none) and to a restore (the script's output; an Agent's restore, one line).
+ */
 export type CommandOutput = { output: string[] };
 
 /**

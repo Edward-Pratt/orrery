@@ -7,7 +7,7 @@ import { listLogs, tailLog, type LogFile } from './logs.ts';
 import type { ServerHub } from './servers.ts';
 import { yesterday, type Summary } from './summary.ts';
 import { bucketMs, HISTORY_POINTS } from './host.ts';
-import type { AuditRow, BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
+import type { AuditRow, Backup, BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer } from './types.ts';
 export type { BackupsAnswer, HistoryAnswer, Period, PlaytimeAnswer, StatusAnswer, TpsAnswer, TpsStats } from './types.ts';
 
 const HOUR = 60 * 60_000;
@@ -19,6 +19,12 @@ const TOP_LIMIT = 10;
 
 /** Where a server's logs are read: its folder (`logs.ts`), or the files its Agent serves. */
 type LogSource = { list: () => Promise<LogFile[]>; read: (name: string) => Promise<string[] | undefined> };
+/**
+ * Where a server's Backups are: its Backup folder (`listBackups`, `freeBytes`), or for a server an Agent runs the saves
+ * it last pushed (newest first, with their kind and the current world) and the free space it reported (none known
+ * before its first push: no saves, free unknown). Never rejects.
+ */
+export type BackupSource = { list: () => Promise<Backup[]>; free: () => Promise<number | null> };
 
 /**
  * Answers frontends' stats questions for one Server as plain data; owns the time windows. Hub core: frontends
@@ -29,21 +35,39 @@ export class Stats {
   #db: Db;
   #folders: Map<string, Pick<ServerSettings, 'dir' | 'backupDir' | 'backupMinFreeGB'>>;
   #logSources = new Map<string, LogSource>();
+  #backupSources = new Map<string, BackupSource>();
 
-  /** `agents`: the Agents whose servers' logs are the files they serve (with the agents integration). */
+  /**
+   * `agents`: the Agents whose servers' logs are the files they serve and whose Backups are the saves they push (with
+   * the agents integration).
+   */
   constructor(
     hub: Pick<ServerHub, 'get'>,
     db: Db,
     servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir' | 'backupMinFreeGB'>[],
-    agents?: Pick<Agents, 'list' | 'request'>,
+    agents?: Pick<Agents, 'list' | 'request' | 'on'>,
   ) {
     this.#hub = hub;
     this.#db = db;
     this.#folders = new Map(servers.map((s) => [s.id, s]));
-    for (const { id, dir } of servers) {
+    for (const { id, dir, backupDir } of servers) {
       if (dir) this.#logSources.set(id, { list: () => listLogs(dir), read: (name) => tailLog(dir, name) });
+      if (backupDir) this.#backupSources.set(id, { list: () => listBackups(backupDir), free: () => freeBytes(backupDir) });
     }
+    // Each Agent's latest `saves`, by its server; kept in memory only, as it pushes them again on connect.
+    const saves = new Map<string, { backups: Backup[]; free: number }>();
+    const serverOf = new Map((agents?.list() ?? []).map((a) => [a.id, a.server]));
+    agents?.on('saves', (agentId, msg) => {
+      const server = serverOf.get(agentId);
+      if (server === undefined) return;
+      const backups = msg.saves.map((s) => ({ name: s.name, size: s.size, mtimeMs: s.mtime, kind: s.kind, current: s.current }));
+      saves.set(server, { backups: backups.sort((x, y) => y.mtimeMs - x.mtimeMs), free: msg.free });
+    });
     for (const a of agents?.list() ?? []) {
+      this.#backupSources.set(a.server, {
+        list: async () => [...(saves.get(a.server)?.backups ?? [])],
+        free: async () => saves.get(a.server)?.free ?? null,
+      });
       const ask = agents!; // listed only with agents
       const list = async () => (await ask.request(a.id, { type: 'logs' })).files.sort((x, y) => y.modified - x.modified);
       // Only a name the Agent lists right now is asked for (it checks again).
@@ -92,14 +116,22 @@ export class Stats {
     return this.#db.top(serverId, Math.max(0, now - PERIOD_MS[period]), now, TOP_LIMIT, now);
   }
 
-  /** Finished Backups newest first, free space on their disk, and growth per day. Never throws. */
+  /** A known server's Backups: its folder's, or its Agent's saves; undefined with neither (or unknown). */
+  backupSource(serverId: string): BackupSource | undefined {
+    return this.#hub.get(serverId) ? this.#backupSources.get(serverId) : undefined;
+  }
+
+  /**
+   * Finished Backups newest first (a factorio server's saves, each with its kind), free space on their disk, and
+   * growth per day; `configured: false` with no Backup source. Never throws.
+   */
   async backups(serverId: string): Promise<BackupsAnswer | undefined> {
     if (!this.#hub.get(serverId)) return undefined;
-    const folders = this.#folders.get(serverId);
-    const dir = folders?.backupDir;
-    if (!dir) return { configured: false };
-    const backups = await listBackups(dir);
-    return { configured: true, backups, free: await freeBytes(dir), growth: growthPerDay(backups), minFree: folders.backupMinFreeGB * GB };
+    const source = this.backupSource(serverId);
+    if (!source) return { configured: false };
+    const backups = await source.list();
+    const minFree = this.#folders.get(serverId)!.backupMinFreeGB * GB;
+    return { configured: true, backups, free: await source.free(), growth: growthPerDay(backups), minFree };
   }
 
   /** Crash logs written at or after `sinceMs` in the server folder (none without one, so none for an Agent's). Never throws. */

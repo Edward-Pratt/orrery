@@ -15,7 +15,8 @@ previous), so servers can update their mods one at a time (`docs/adr/0001`).
 
 Extra fields and unknown message types are ignored by both sides, so adding messages or optional fields
 doesn't need a version bump. Anything else does (see `CLAUDE.md`, "Changing the wire protocol"). The hub drops
-extra fields: what it parses holds only the fields listed here, nested objects included.
+extra fields: what it parses holds only the fields listed here, nested objects included (a `reply`'s `data` is
+checked against its request's shape before it is read).
 
 ## Field limits
 

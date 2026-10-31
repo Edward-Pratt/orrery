@@ -3,19 +3,25 @@ import { AUTH, AUTH_RESPONSE, EXEC, RESPONSE, decode, encode, type Packet } from
 
 export const PASSWORD = 'rcon-test-password';
 
-/** A command's reply: one body, or the bodies of several packets. Nothing (undefined): like a hung server, no more answers. */
-export type Reply = string | Buffer[] | undefined;
+/** What a command printed with `rcon.print`, one line per call. Nothing (undefined): like a hung server, no answer. */
+export type Reply = string | string[] | undefined;
 
 /**
- * A fake RCON server shaped like a Source one: an empty response before the auth answer, and commands answered in
- * the order they came, each reply sent before the next command is handled. `handle` sees every command but the
- * client's empty end marker, which is always answered with an empty reply.
+ * A fake RCON server shaped like Factorio 2.1's, as checked on a real 2.1.24 server: one auth reply, -1 for a wrong
+ * password (else the request's id); each command answered with exactly one packet carrying its id, whatever its
+ * size, every printed line ending in `\n` (an empty body if nothing was printed); a packet with an empty body never
+ * answered. Commands are answered in the order they came. `writeSize` cuts every reply packet into writes of that
+ * many bytes, one per event-loop turn, so the client reads it in pieces (length field included).
  */
-export async function fakeRcon(handle: (command: string, socket: Socket) => Reply | Promise<Reply> = () => '') {
+export async function fakeRcon(
+  handle: (command: string, socket: Socket) => Reply | Promise<Reply> = () => [],
+  writeSize = Infinity,
+) {
   const received: Packet[] = [];
   const sockets = new Set<Socket>();
   const server = createServer((socket) => {
     sockets.add(socket);
+    socket.setNoDelay(true);
     socket.on('error', () => {});
     let buf: Buffer = Buffer.alloc(0);
     let chain = Promise.resolve();
@@ -24,16 +30,20 @@ export async function fakeRcon(handle: (command: string, socket: Socket) => Repl
       buf = decoded.rest;
       for (const p of decoded.packets) {
         received.push(p);
+        if (p.body.length === 0) continue; // never answered (verified for an empty type-0 packet)
         if (p.type === AUTH) {
-          const ok = p.body.toString('utf8') === PASSWORD;
-          socket.write(Buffer.concat([encode(p.id, RESPONSE, ''), encode(ok ? p.id : -1, AUTH_RESPONSE, '')]));
+          socket.write(encode(p.body.toString('utf8') === PASSWORD ? p.id : -1, AUTH_RESPONSE, ''));
         } else if (p.type === EXEC) {
           const command = p.body.toString('utf8');
           chain = chain.then(async () => {
-            const reply = command === '' ? '' : await handle(command, socket);
+            const reply = await handle(command, socket);
             if (reply === undefined) return new Promise<void>(() => {});
-            if (socket.destroyed) return;
-            for (const body of typeof reply === 'string' ? [reply] : reply) socket.write(encode(p.id, RESPONSE, body));
+            const lines = typeof reply === 'string' ? [reply] : reply;
+            const packet = encode(p.id, RESPONSE, lines.map((line) => `${line}\n`).join(''));
+            for (let at = 0; at < packet.length && !socket.destroyed; at += writeSize) {
+              socket.write(packet.subarray(at, at + writeSize));
+              if (at + writeSize < packet.length) await new Promise((r) => setImmediate(r));
+            }
           });
         }
       }
@@ -43,8 +53,8 @@ export async function fakeRcon(handle: (command: string, socket: Socket) => Repl
   return {
     port: (server.address() as AddressInfo).port,
     received,
-    /** The commands received, end markers left out. */
-    commands: () => received.filter((p) => p.type === EXEC && p.body.length > 0).map((p) => p.body.toString('utf8')),
+    /** The commands received. */
+    commands: () => received.filter((p) => p.type === EXEC).map((p) => p.body.toString('utf8')),
     close: () => {
       for (const s of sockets) s.destroy();
       return new Promise<void>((r) => server.close(() => r()));

@@ -7,8 +7,11 @@ export const EXEC = 2;
 export const AUTH_RESPONSE = 2;
 export const AUTH = 3;
 
-/** The largest packet either side may send, length field excluded. A longer length is a broken or hostile peer. */
-export const MAX_PACKET = 4 * 1024 * 1024;
+/**
+ * The largest packet either side may send, length field excluded. Factorio sends a reply of any size as one packet
+ * (5 MB seen), so this is far above any real reply; a longer length is a broken or hostile peer.
+ */
+export const MAX_PACKET = 16 * 1024 * 1024;
 
 /** id 4 + type 4 + two NULs: the body's terminator and the empty string after it. */
 const MIN_PACKET = 10;
@@ -30,15 +33,17 @@ export function encode(id: number, type: number, body: string | Buffer): Buffer 
 }
 
 /**
- * Splits the whole packets off the front of buf; rest is an incomplete one still arriving. Throws RconError on a
- * length out of range (as soon as its 4 bytes are in, so a huge one is never waited for) or a missing terminator.
+ * Splits the whole packets off the front of buf; rest is an incomplete one still arriving (a packet may span many TCP
+ * reads). Throws RconError on a length out of range (as soon as its 4 bytes are in, so a huge one is never waited
+ * for) or a missing terminator.
  */
 export function decode(buf: Buffer): { packets: Packet[]; rest: Buffer } {
   const packets: Packet[] = [];
   let at = 0;
   while (buf.length - at >= 4) {
     const size = buf.readInt32LE(at);
-    if (size < MIN_PACKET || size > MAX_PACKET) throw new RconError(`malformed RCON packet: length ${size}`);
+    if (size > MAX_PACKET) throw new RconError(`RCON packet too large: length ${size}, over the ${MAX_PACKET} cap`);
+    if (size < MIN_PACKET) throw new RconError(`malformed RCON packet: length ${size}`);
     if (buf.length - at < 4 + size) break;
     const end = at + 4 + size;
     if (buf[end - 2] !== 0 || buf[end - 1] !== 0) throw new RconError('malformed RCON packet: no terminator');
@@ -51,11 +56,12 @@ export function decode(buf: Buffer): { packets: Packet[]; rest: Buffer } {
 type Current = { onPacket: (p: Packet) => void; fail: (err: Error) => void };
 
 /**
- * A Source RCON client (Factorio's RCON) for one connection: `Rcon.connect` opens and authenticates it, `exec` runs a
- * command and resolves with its whole reply, one command at a time (later calls wait their turn). A reply may come in
- * several packets: each command is followed by an empty one with the next id, and the reply is every response packet
- * up to that one's answer, joined before decoding (a UTF-8 character may be split between packets). That Factorio
- * answers the empty command with an empty reply, and nothing else, is a smoke-test item.
+ * A Source RCON client for Factorio's RCON, one connection: `Rcon.connect` opens and authenticates it, `exec` runs a
+ * command and resolves with its reply, one command at a time (later calls wait their turn). Factorio answers each
+ * command with exactly one response packet carrying its id, of any size, its `rcon.print` lines each ending in `\n`
+ * (an empty body if nothing was printed); the client strips one trailing `\n`. Any other packet is dropped.
+ * Factorio never answers a packet with an empty body, so none is ever sent: no end marker, and an empty command is
+ * refused.
  *
  * A command that times out ends the connection, since a server that stops answering is the caller's signal to
  * reconnect. Once authenticated, the connection ending for any reason but `close()` emits `close` once, with why;
@@ -63,7 +69,10 @@ type Current = { onPacket: (p: Packet) => void; fail: (err: Error) => void };
  */
 export class Rcon extends EventEmitter<{ close: [Error] }> {
   #socket: Socket;
-  #buf: Buffer = Buffer.alloc(0);
+  #chunks: Buffer[] = [];
+  #have = 0;
+  /** Bytes needed before decode can finish a packet: a length field, then the whole packet it announces. */
+  #need = 4;
   #nextId = 1;
   #current: Current | null = null;
   #queue: Promise<unknown> = Promise.resolve();
@@ -87,6 +96,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
 
   /** Runs a command and resolves with its whole reply. Rejects if it times out or the connection ends first. */
   exec(command: string, timeoutMs = 10_000): Promise<string> {
+    if (command === '') return Promise.reject(new RconError('RCON command is empty'));
     if (command.includes('\0')) return Promise.reject(new RconError('RCON command contains a NUL'));
     if (Buffer.byteLength(command) > MAX_PACKET - MIN_PACKET) return Promise.reject(new RconError('RCON command too long'));
     const run = this.#queue.then(() => this.#run(command, timeoutMs));
@@ -105,7 +115,8 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
       const timer = setTimeout(() => this.#end(new RconError(`RCON did not answer within ${timeoutMs} ms`), false), timeoutMs);
       this.#current = {
         onPacket: (p) => {
-          if (p.type === RESPONSE) return; // Source servers send an empty response before the auth answer
+          // Source servers send an empty response before the auth answer; tolerated in case Factorio does too.
+          if (p.type === RESPONSE) return;
           if (p.type === AUTH_RESPONSE && p.id === id) {
             clearTimeout(timer);
             this.#current = null;
@@ -130,18 +141,14 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
     return new Promise((resolve, reject) => {
       if (this.#ended) return reject(new RconError('RCON connection closed'));
       const id = this.#id();
-      const marker = this.#id();
-      const parts: Buffer[] = [];
       const timer = setTimeout(() => this.#end(new RconError(`RCON command timed out after ${timeoutMs} ms`), true), timeoutMs);
       this.#current = {
         onPacket: (p) => {
-          if (p.id === id && p.type === RESPONSE) parts.push(p.body);
-          else if (p.id === marker) {
-            clearTimeout(timer);
-            this.#current = null;
-            resolve(Buffer.concat(parts).toString('utf8'));
-          }
-          // Anything else answers an earlier request: dropped.
+          if (p.id !== id || p.type !== RESPONSE) return; // not this command's reply: dropped
+          clearTimeout(timer);
+          this.#current = null;
+          const body = p.body.at(-1) === 0x0a ? p.body.subarray(0, -1) : p.body;
+          resolve(body.toString('utf8'));
         },
         fail: (err) => {
           clearTimeout(timer);
@@ -149,7 +156,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
           reject(err);
         },
       };
-      this.#socket.write(Buffer.concat([encode(id, EXEC, command), encode(marker, EXEC, '')]));
+      this.#socket.write(encode(id, EXEC, command));
     });
   }
 
@@ -161,13 +168,19 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
   }
 
   #data(chunk: Buffer): void {
-    this.#buf = this.#buf.length ? Buffer.concat([this.#buf, chunk]) : chunk;
+    this.#chunks.push(chunk);
+    this.#have += chunk.length;
+    if (this.#have < this.#need) return; // a big reply still arriving: its chunks are joined once, when all are in
     let packets: Packet[];
+    let rest: Buffer;
     try {
-      ({ packets, rest: this.#buf } = decode(this.#buf));
+      ({ packets, rest } = decode(Buffer.concat(this.#chunks, this.#have)));
     } catch (err) {
       return this.#end(err as Error, true);
     }
+    this.#chunks = [rest];
+    this.#have = rest.length;
+    this.#need = rest.length >= 4 ? 4 + rest.readInt32LE(0) : 4; // decode has checked that length
     for (const p of packets) {
       if (this.#ended) return;
       this.#current?.onPacket(p);

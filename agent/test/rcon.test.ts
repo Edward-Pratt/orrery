@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import { createServer, type AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { EXEC, MAX_PACKET, Rcon, decode, encode } from '../src/rcon.ts';
+import { AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, decode, encode } from '../src/rcon.ts';
 import { PASSWORD, fakeRcon, type Reply } from './fake-rcon.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function setup(handle?: Parameters<typeof fakeRcon>[0]) {
-  const server = await fakeRcon(handle);
+async function setup(handle?: Parameters<typeof fakeRcon>[0], writeSize?: number) {
+  const server = await fakeRcon(handle, writeSize);
   const rcon = await Rcon.connect('127.0.0.1', server.port, PASSWORD, 1000);
   const closed: Error[] = [];
   rcon.on('close', (err) => closed.push(err));
   return { server, rcon, closed };
 }
 
-test('authenticates and returns a single-packet reply, with non-zero rising ids', async (t) => {
+test('authenticates and returns a reply, with non-zero rising ids', async (t) => {
   const { server, rcon, closed } = await setup((cmd) => (cmd === '/version' ? 'Version: 2.1.24' : 'unknown'));
   t.after(() => server.close());
   assert.equal(await rcon.exec('/version'), 'Version: 2.1.24');
@@ -24,6 +24,27 @@ test('authenticates and returns a single-packet reply, with non-zero rising ids'
   assert.ok(ids.every((id, i) => id > 0 && (i === 0 || id > ids[i - 1]!)), `ids ${ids}`);
   rcon.close();
   assert.deepEqual(closed, []); // close() is not a lost connection
+});
+
+test('strips one trailing newline: several rcon.print lines, none, or one ending in its own newline', async (t) => {
+  const replies: Record<string, Reply> = { '/lines': ['line1', 'line2', 'line3'], '/none': [], '/blank': ['a\n'] };
+  const { server, rcon } = await setup((cmd) => replies[cmd]);
+  t.after(() => server.close());
+  assert.equal(await rcon.exec('/lines'), 'line1\nline2\nline3');
+  assert.equal(await rcon.exec('/none'), '');
+  assert.equal(await rcon.exec('/blank'), 'a\n');
+  rcon.close();
+});
+
+test('never sends a packet with an empty body; an empty command is refused before sending', async (t) => {
+  const { server, rcon } = await setup(() => []);
+  t.after(() => server.close());
+  await assert.rejects(rcon.exec(''), /empty/);
+  assert.equal(await rcon.exec('/orrery-status'), '');
+  assert.equal(await rcon.exec('/orrery-say {}'), '');
+  assert.deepEqual(server.commands(), ['/orrery-status', '/orrery-say {}']);
+  assert.ok(server.received.length === 3 && server.received.every((p) => p.body.length > 0)); // the auth and two commands
+  rcon.close();
 });
 
 test('a refused password rejects connect', async (t) => {
@@ -39,16 +60,43 @@ test('connect gives up when the server never answers', async (t) => {
   await assert.rejects(Rcon.connect('127.0.0.1', (server.address() as AddressInfo).port, PASSWORD, 100), /did not answer/);
 });
 
-test('joins a reply split over many packets, a UTF-8 character cut between two', async (t) => {
-  const text = ('é'.repeat(1000) + 'x').repeat(50); // ~100 KB; 4096-byte cuts land inside the two-byte é
-  const bytes = Buffer.from(text, 'utf8');
-  const chunks: Buffer[] = [];
-  for (let at = 0; at < bytes.length; at += 4096) chunks.push(bytes.subarray(at, at + 4096));
-  const { server, rcon } = await setup(() => chunks);
+test('reads a 5 MB reply, one packet over many TCP reads', async (t) => {
+  const text = ('é'.repeat(1000) + 'x').repeat(2500); // 5,002,500 bytes
+  const { server, rcon } = await setup(() => text);
   t.after(() => server.close());
-  assert.ok(chunks.length > 20);
-  assert.equal(await rcon.exec('/big'), text);
-  assert.equal(await rcon.exec('/big'), text); // nothing of the first reply leaks into the second
+  assert.equal(await rcon.exec('/big', 5000), text);
+  assert.equal(await rcon.exec('/big', 5000), text); // nothing of the first reply leaks into the second
+  rcon.close();
+});
+
+test('reads a reply cut at every byte, length field and UTF-8 characters included', async (t) => {
+  const { server, rcon } = await setup(() => ['é1', 'ü2'], 1);
+  t.after(() => server.close());
+  assert.equal(await rcon.exec('/cut'), 'é1\nü2');
+  assert.equal(await rcon.exec('/cut'), 'é1\nü2');
+  rcon.close();
+});
+
+test('a reply over the 16 MiB cap is refused: the command rejects and the connection ends', async (t) => {
+  const { server, rcon, closed } = await setup((cmd) => (cmd === '/huge' ? 'x'.repeat(MAX_PACKET) : 'ok'));
+  t.after(() => server.close());
+  assert.equal(await rcon.exec('/small'), 'ok');
+  await assert.rejects(rcon.exec('/huge'), /too large: length \d+, over the 16777216 cap/);
+  await assert.rejects(rcon.exec('/small'), /closed/);
+  assert.equal(closed.length, 1);
+  assert.match(closed[0]!.message, /too large/);
+});
+
+test('drops packets that are not the command reply: id 0, or its id with another type', async (t) => {
+  const { server, rcon } = await setup((cmd, socket) => {
+    const id = server.received.at(-1)!.id;
+    socket.write(Buffer.concat([encode(0, RESPONSE, 'Player joined the game.\n'), encode(id, AUTH_RESPONSE, 'odd\n')]));
+    return cmd.slice(1);
+  });
+  t.after(() => server.close());
+  assert.equal(await rcon.exec('/first'), 'first');
+  assert.equal(await rcon.exec('/second'), 'second');
+  rcon.close();
 });
 
 test('a command that times out ends the connection with a close signal', async (t) => {
@@ -77,7 +125,7 @@ test('the server closing mid-command rejects it and signals close once', async (
   assert.equal(closed.length, 1);
 });
 
-test('concurrent commands run one at a time, in call order', async (t) => {
+test('concurrent commands run one at a time, in call order, each given its own reply', async (t) => {
   const log: string[] = [];
   const { server, rcon } = await setup(async (cmd) => {
     log.push(`got ${cmd}`);
@@ -113,9 +161,12 @@ test('decode checks the length cap and the terminator, and keeps a partial packe
   assert.deepEqual(decode(Buffer.concat([packet, packet.subarray(0, 5)])).rest, packet.subarray(0, 5));
   const [p] = decode(packet).packets;
   assert.deepEqual([p!.id, p!.type, p!.body.toString()], [7, EXEC, 'hi']);
+  const atCap = Buffer.alloc(4);
+  atCap.writeInt32LE(MAX_PACKET);
+  assert.deepEqual(decode(atCap), { packets: [], rest: atCap }); // the largest allowed: waited for
   const big = Buffer.alloc(4);
   big.writeInt32LE(MAX_PACKET + 1);
-  assert.throws(() => decode(big), /malformed/);
+  assert.throws(() => decode(big), /too large/);
   const unterminated = Buffer.from(packet);
   unterminated[unterminated.length - 1] = 1;
   assert.throws(() => decode(unterminated), /no terminator/);

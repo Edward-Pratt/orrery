@@ -18,7 +18,7 @@ npm run typecheck   # tsc, noEmit
 
 | File | Job |
 |---|---|
-| `src/rcon.ts` | `Rcon`: a Source RCON client for one connection. `Rcon.connect(host, port, password, timeoutMs)` authenticates (a refused password, id -1, rejects); `exec(command, timeoutMs)` resolves with the whole reply, one command in flight at a time, each followed by an empty command whose answer marks the reply's end (joined across packets before UTF-8 decoding). Ids are non-zero and rising; packets over `MAX_PACKET` (4 MiB) or malformed end the connection. A timeout ends it too; once authenticated, an end other than `close()` emits `close` once, so the caller reconnects with a new `Rcon`. `encode`/`decode` are the framing. |
+| `src/rcon.ts` | `Rcon`: a Source RCON client for Factorio's RCON, one connection. `Rcon.connect(host, port, password, timeoutMs)` authenticates (a refused password, id -1, rejects); `exec(command, timeoutMs)` resolves with the reply, one command in flight at a time. Factorio answers each command with exactly one packet of any size carrying its id, so the reply is that packet's body with one trailing `\n` stripped; packets with any other id (or type) are dropped. No packet with an empty body is ever sent (Factorio never answers one), so an empty command is refused. Ids are non-zero and rising; a packet over `MAX_PACKET` (16 MiB) or malformed ends the connection, refused as soon as its length field is in. A timeout ends it too; once authenticated, an end other than `close()` emits `close` once, so the caller reconnects with a new `Rcon`. `encode`/`decode` are the framing. |
 
 ## Trust boundaries (do not weaken)
 
@@ -27,6 +27,8 @@ npm run typecheck   # tsc, noEmit
 
 ## Tests
 
-`test/rcon.test.ts` drives a real socket with a fake RCON server (`fakeRcon` in `test/fake-rcon.ts`, Source-shaped:
-an empty response before the auth answer, commands answered in order). Keep timing-sensitive tests on small timeouts,
-not sleeps of seconds.
+`test/rcon.test.ts` drives a real socket with a fake RCON server (`fakeRcon` in `test/fake-rcon.ts`, shaped like
+Factorio 2.1 as checked on a real 2.1.24 server: one auth reply, -1 for a wrong password (else the request's id);
+one reply packet per command, every printed line ending in `\n`; a packet with an empty body never answered;
+commands answered in order; `writeSize` cuts each reply packet into small writes). Keep timing-sensitive tests on
+small timeouts, not sleeps of seconds.

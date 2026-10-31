@@ -15,23 +15,27 @@ A built-in part of the hub that connects it to one outside system (Discord, Mine
 _Avoid_: module, plugin, extension, mod
 
 **Host**:
-A machine that things the hub knows run on, identified by an `id`, with its CPU, memory and disk. The hub measures its own Host; other Hosts are reported to it (by an Agent, coming with the Factorio work).
+A machine that things the hub knows run on, identified by an `id`, with its CPU, memory and disk. The hub measures its own Host; every other Host is measured by its Agent, whose `id` is the Host's.
 _Avoid_: box, node, server (a server is a game server)
 
+**Agent**:
+A small service on another Host that dials out to the hub and runs one server there: it controls the server's service, keeps its saves, carries out its game updates and its own deploys, and measures the Host. The hub never logs in to that Host; it asks the Agent. Staging has none.
+_Avoid_: daemon, worker, client, node
+
 **Server**:
-One game server known to the hub, identified by its config `id`. Each server is of one game (`minecraft` or `factorio`), which decides what it offers, such as its rate (TPS out of 20, or UPS out of 60). What the hub can see and do for it depends on how it is connected (a Minecraft server with the mod offers the most); not every server has chat, TPS or quests. A server runs as at most one service, linked in config; the two are separate things. Stopping a linked service while players are online first shuts the server down cleanly.
+One game server known to the hub, identified by its config `id`. Each server is of one game (`minecraft` or `factorio`), which decides what it offers, such as its rate (TPS out of 20, or UPS out of 60). A factorio server is always run by one Agent. What the hub can see and do for it depends on how it is connected (a Minecraft server with the mod offers the most); not every server has chat, TPS or quests. A server runs as at most one service, linked in config; the two are separate things. Stopping a linked service while players are online first shuts the server down cleanly.
 _Avoid_: instance, world (a world is what a server runs)
 
 **Service**:
-A long-running thing on a host that the hub watches and can start or stop (a systemd unit). Only services listed in config exist to the hub. Knows nothing about games: the GTNH server runs as the service `gtnh.service`, but the service has no players.
-_Avoid_: app, process, daemon, unit (a unit is how systemd names it)
+A long-running thing on a host that the hub watches and can start or stop (a systemd unit). Only services listed in config exist to the hub. Knows nothing about games: the GTNH server runs as the service `gtnh.service`, but the service has no players. A service may run a container (`factorio.service` runs Factorio in Podman); to the hub it is still the unit. The service of an Agent's server is watched and controlled through that Agent.
+_Avoid_: app, process, daemon, unit (a unit is how systemd names it), container (a service may run one)
 
 **Check**:
 A URL the hub requests on a schedule to see whether it is up and how fast it answers. Stands on its own; may be linked to a service.
 _Avoid_: monitor, probe, ping (the hub's own liveness ping is something else)
 
 **Mod**:
-The server-side mod that connects a server to the hub. Each one is named by its target (the 1.7.10 mod) and versioned independently.
+The server-side Minecraft mod that connects a server to the hub. Each one is named by its target (the 1.7.10 mod) and versioned independently. The Factorio mod (`orrery` on the mod portal) is a separate part, never the Mod: it talks only to its server's Agent, and a game update puts it on the server.
 _Avoid_: adapter, plugin, client
 
 **Dashboard**:
@@ -39,16 +43,26 @@ The browser app for managing everything the hub knows. A separate app from the h
 _Avoid_: web UI, panel, site
 
 **Protocol version**:
-The number a mod announces when it connects. It is the only compatibility contract between the hub and a mod.
+The number a Mod or an Agent announces when it connects, the same number for both. It is the only compatibility contract between the hub and either.
+
+### Players
+
+**Link**:
+A Discord user's tie to their player names in game, made by typing a `/link` code in a game. One link per Discord user, holding a name per game; one code works in either game. Unlinking in game removes only that game's name; `/unlink` in Discord removes the whole link.
+_Avoid_: pairing, binding, connection (a connection is a socket)
 
 ### Backups
 
 **Backup**:
-A ServerUtilities zip of a server's world, named by the time it was taken. Configs and mods are not part of it.
-_Avoid_: snapshot, save
+A copy of a server's world that the hub lists and can restore. For a Minecraft server, a ServerUtilities zip of its world, named by the time it was taken (configs and mods are not part of it); for a factorio server, a Save.
+_Avoid_: snapshot, save (for a Minecraft backup)
+
+**Save**:
+A Factorio save file of a factorio server, kept on its Host and never copied off it: a named save orrery makes (on request, every 6 h if anyone played, and before every game update), one of Factorio's autosaves, or a world file. The world file Factorio last loaded is the current world.
+_Avoid_: savegame, map file, snapshot
 
 **Restore**:
-Replacing a stopped server's world with the contents of one backup.
+Putting one backup back for a stopped server. A Minecraft server's world is replaced with the backup's contents; a factorio server gets a new copy of the save, which its next start loads, so nothing is overwritten.
 _Avoid_: rollback
 
 **Pre-restore world**:
@@ -81,13 +95,17 @@ _Avoid_: import, register
 Moving a server to another version of its pack, with its extras and config edits applied again. Going back to an older pack version is a pack update too, and so is applying changed extras or config edits onto the version already installed.
 _Avoid_: upgrade, reinstall
 
+**Game update**:
+The factorio counterpart of a pack update: moving a factorio server to another Factorio version or set of portal mods. The hub picks the versions and their dependencies; the Agent carries it out (a backup, a countdown stop, the swap, a health gate, and a rollback if the gate fails). Adding a mod, or putting a new Factorio mod release on the server, is a game update too.
+_Avoid_: pack update (a pack is Minecraft's), upgrade, patch
+
 **Pack library**:
 The pack versions an Environment's hub keeps, by pack name and version, for any of its servers to install or update to. A version is removed only by hand, and only while no server runs it.
 _Avoid_: cache, store, repository
 
 **Install**:
 Putting a pack version from the library into a new server's empty folder: the first pack a server gets, as opposed to a pack update. Creating the server's systemd unit and config entry is not part of it: the host's owner does that by running the setup script, with the command the hub shows.
-_Avoid_: provision, deploy (a deploy is a release of hub, dashboard or Mod)
+_Avoid_: provision, deploy (a deploy is a release of hub, dashboard, Mod or Agent)
 
 **Pending server**:
 A server the hub has installed but that isn't in config yet, because the host's owner hasn't run the setup script for it yet. It can't start. It becomes a server when the hub finds it in config, or disappears when it is discarded, folder and all.
@@ -100,15 +118,15 @@ _Avoid_: JDK, JRE, Java version (a version is the number)
 ### Releases
 
 **Release**:
-A tagged version of one part (hub, mod or dashboard), e.g. `hub-v2.4.0`.
+A tagged version of one part (hub, Mod, dashboard, Agent or Factorio mod), e.g. `hub-v2.4.0`.
 _Avoid_: build, version (a version is the number)
 
 **Deploy**:
-Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server. Each hub deploys only its own environment. Going back to an older release is a deploy too.
+Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server, an Agent onto its Host. Each hub deploys only its own environment. Going back to an older release is a deploy too. The Factorio mod is not deployed: a game update puts it on its server.
 _Avoid_: install, rollout, push, redeploy (deploying the running release is refused)
 
 **Rollback**:
-The hub returning by itself to the release it ran before, when a deploy's new release fails to stay up.
+Returning by itself to what ran before, when a deploy's new release or an update's new version fails to come up: to the release before it, or to the files before it (for a game update, also to its pre-update save).
 _Avoid_: revert, downgrade (choosing an older release is a deploy)
 
 **Environment**:

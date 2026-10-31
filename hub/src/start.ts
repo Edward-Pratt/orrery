@@ -88,7 +88,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const touch = setInterval(() => db.touch(), 60_000);
 
   const hub = new ServerHub(
-    config.servers.map((s) => ({ id: s.id, name: s.name, token: minecraft?.tokens[s.id] })),
+    config.servers.map((s) => ({ id: s.id, name: s.name, game: s.game, token: minecraft?.tokens[s.id] })),
     { audit: (entry) => db.audit(entry) },
   );
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));

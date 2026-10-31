@@ -4,7 +4,7 @@ import { mcText, ServerHub, truncate, type AuditEntry, type HubEvent, type HubOp
 import { fakeMod, hello, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 async function setup(t: TestContext, opts: HubOptions = {}) {
-  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', token: TOKEN }], opts);
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', game: 'minecraft', token: TOKEN }], opts);
   const port = await hub.listen(0);
   const events: HubEvent[] = [];
   hub.on('event', (e) => events.push(e));
@@ -13,7 +13,7 @@ async function setup(t: TestContext, opts: HubOptions = {}) {
 }
 
 test('rejects tokens shorter than 16 characters', () => {
-  assert.throws(() => new ServerHub([{ id: 'x', name: 'X', token: 'short' }]), /at least 16/);
+  assert.throws(() => new ServerHub([{ id: 'x', name: 'X', game: 'minecraft', token: 'short' }]), /at least 16/);
 });
 
 test('accepts a valid hello and marks the server online', async (t) => {
@@ -35,7 +35,7 @@ test('rejects a bad token and closes', async (t) => {
 });
 
 test('rejects a server that has no token', async (t) => {
-  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH' }]);
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', game: 'minecraft' }]);
   const port = await hub.listen(0);
   t.after(() => hub.close());
   const mod = fakeMod(port);
@@ -205,8 +205,8 @@ test('a mod cannot claim another serverId in its messages', async (t) => {
 test('servers that do not connect within the grace period are reported offline', async (t) => {
   const hub = new ServerHub(
     [
-      { id: 'gtnh', name: 'GTNH', token: TOKEN },
-      { id: 'idle', name: 'Idle', token: TOKEN },
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', token: TOKEN },
+      { id: 'idle', name: 'Idle', game: 'minecraft', token: TOKEN },
     ],
     { graceMs: 150 },
   );
@@ -231,7 +231,7 @@ test('truncate never leaves half an emoji', () => {
 });
 
 test('close() does not wait for connections that never sent hello', async () => {
-  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', token: TOKEN }]);
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', game: 'minecraft', token: TOKEN }]);
   const port = await hub.listen(0);
   const idle = fakeMod(port);
   await sleep(50);

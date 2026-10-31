@@ -143,6 +143,7 @@ function world(t: TestContext) {
   const gtnh: ServerSettings = {
     id: 'gtnh',
     name: 'GTNH',
+    game: 'minecraft',
     dir,
     backupDir,
     backupMinFreeGB: 10,

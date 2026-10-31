@@ -19,7 +19,7 @@ A machine that things the hub knows run on, identified by an `id`, with its CPU,
 _Avoid_: box, node, server (a server is a game server)
 
 **Server**:
-One game server known to the hub, identified by its config `id`. What the hub can see and do for it depends on how it is connected (a Minecraft server with the mod offers the most); not every server has chat, TPS or quests. A server runs as at most one service, linked in config; the two are separate things. Stopping a linked service while players are online first shuts the server down cleanly.
+One game server known to the hub, identified by its config `id`. Each server is of one game (`minecraft` or `factorio`), which decides what it offers, such as its rate (TPS out of 20, or UPS out of 60). What the hub can see and do for it depends on how it is connected (a Minecraft server with the mod offers the most); not every server has chat, TPS or quests. A server runs as at most one service, linked in config; the two are separate things. Stopping a linked service while players are online first shuts the server down cleanly.
 _Avoid_: instance, world (a world is what a server runs)
 
 **Service**:

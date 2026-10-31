@@ -100,6 +100,7 @@ function world(t: TestContext, { servers, restore }: Setup = {}) {
   const gtnh: ServerSettings = {
     id: 'gtnh',
     name: 'GTNH',
+    game: 'minecraft',
     dir: serverDir,
     backupDir: join(serverDir, 'backups'),
     backupMinFreeGB: 10,
@@ -466,9 +467,9 @@ test('cancelling the countdown leaves the old jar and no part file', async (t) =
 test('Mod deploy refusals: unknown server, no folder, no Mod token, a countdown running; a failed download is 502', async (t) => {
   const w = world(t, {
     servers: (dir) => [
-      { id: 'gtnh', name: 'GTNH', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
-      { id: 'bare', name: 'Bare', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
-      { id: 'vanilla', name: 'Vanilla', dir, backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'bare', name: 'Bare', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'vanilla', name: 'Vanilla', game: 'minecraft', dir, backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
     ],
   });
   w.config.integrations.minecraft!.tokens.bare = 'another-token-0123456';

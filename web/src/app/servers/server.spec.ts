@@ -16,6 +16,8 @@ const CARD: ServerCard = {
   service: null,
   id: 'gtnh',
   name: 'GTNH',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
   tps: 20,
@@ -26,6 +28,7 @@ const CARD: ServerCard = {
   packUpdate: null,
 };
 const NO_MOD: ServerCard = { ...CARD, id: 'site', name: 'Website', tps: null, players: [], features: { chat: false, tps: false, quests: false } };
+const FACTORIO: ServerCard = { ...CARD, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 59 };
 
 /** A server's detail, as the hub answers it, with nothing in it but the card. */
 const detail = (card: ServerCard, more: Partial<ServerDetail> = {}) =>
@@ -64,7 +67,10 @@ async function setup(url: string, card = CARD, service: ServiceStatus | null = n
     (harness.fixture.debugElement.query(By.css(`[data-chart="${title}"] app-time-series`))?.componentInstance as TimeSeries | undefined)
       ?.series()
       .map((s) => [s.name, s.points]);
-  return { backend, events, el, render, chat, tabs, text, chart };
+  /** The top of the scale of the chart titled `title`. */
+  const chartMax = (title: string) =>
+    (harness.fixture.debugElement.query(By.css(`[data-chart="${title}"] app-time-series`))?.componentInstance as TimeSeries | undefined)?.max();
+  return { backend, events, el, render, chat, tabs, text, chart, chartMax };
 }
 
 describe('server page', () => {
@@ -280,6 +286,23 @@ describe('server history section', () => {
     expect(values('Players')).toEqual([0, 1, 1, 2, 1, 0]);
     expect(values('Uptime')).toEqual([NaN, 1, 0.5, 1, 0, 0]);
     backend.expectNone('/api/servers/gtnh/history?hours=24');
+  });
+
+  it("graphs a factorio server's UPS out of 60", async () => {
+    const { backend, render, chart, chartMax } = await setup('/space/history', FACTORIO);
+    backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    await render();
+    expect(chart('UPS')).toEqual([['UPS', [[1, 19.5], [2, 12]]]]);
+    expect(chartMax('UPS')).toBe(60);
+    expect(chart('TPS')).toBeUndefined();
+  });
+
+  it("shows a factorio server's last 24 h of UPS on the overview", async () => {
+    const { backend, render, chart, chartMax } = await setup('/space', FACTORIO);
+    backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    await render();
+    expect(chart('UPS')).toEqual([['UPS', [[1, 19.5], [2, 12]]]]);
+    expect(chartMax('UPS')).toBe(60);
   });
 
   it('has no TPS graph without the mod', async () => {

@@ -92,6 +92,24 @@ test('every server needs its own token when Minecraft is configured', async (t) 
   ]);
 });
 
+test('a factorio server has no folder or Mod token, and its lagTps goes up to 60 UPS', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = valid(dir);
+  c.servers.push({ id: 'space', name: 'Space Age', game: 'factorio', lagTps: 55 });
+  assert.deepEqual(validateConfig(c), []); // the token is only required of minecraft servers
+  Object.assign(c.servers[1]!, { dir, lagTps: 61 });
+  c.servers.push({ id: 'odd', name: 'Odd', game: 'terraria' });
+  c.integrations.minecraft.tokens.space = 'a-factorio-token-16';
+  c.integrations.minecraft.tokens.odd = 'a-terraria-token-16';
+  assert.deepEqual(validateConfig(c), [
+    'server "space": "lagTps" must be a number from 1 to 60',
+    'server "space": "dir" is only for minecraft servers: a factorio server has no folder on the hub\'s machine',
+    'server "odd": "game" must be minecraft or factorio',
+    'integrations.minecraft.tokens: "space" is a factorio server: only minecraft servers have a Mod token',
+  ]);
+});
+
 test('every integration is optional', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -344,6 +362,7 @@ test('loadConfig applies each per-server default once, and keeps set values', as
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const d = await load(dir, {});
+  assert.equal(d.game, 'minecraft');
   assert.deepEqual(d.lag, { tps: 15, minutes: 2, enabled: true });
   assert.equal(d.quests, 'batched');
   assert.equal(d.backupMinFreeGB, 10);
@@ -353,6 +372,11 @@ test('loadConfig applies each per-server default once, and keeps set values', as
   assert.equal(s.quests, 'off');
   assert.equal(s.backupMinFreeGB, 3);
   assert.equal(s.backupMaxAgeHours, 26);
+  const path = join(dir, 'factorio.json');
+  await writeFile(path, JSON.stringify({ dbPath: 'hub.db', servers: [{ id: 'space', name: 'Space Age', game: 'factorio' }] }));
+  const f = loadConfig(path).servers[0]!;
+  assert.equal(f.game, 'factorio');
+  assert.deepEqual(f.lag, { tps: 50, minutes: 2, enabled: true }); // a factorio server's lag line is 50 of its 60 UPS
 });
 
 test('GitHub needs a repo; its deploy targets are absolute paths and unit names, defaulted for production', async (t) => {

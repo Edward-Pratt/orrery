@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
-import type { Announcement, AuditEntry, ChatSource, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
+import type { Announcement, AuditEntry, ChatSource, Game, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
 export type {
   Announcement,
   AuditEntry,
@@ -27,8 +27,8 @@ export type {
   Tps,
 } from './types.ts';
 
-/** No token: the server can't connect (the Minecraft integration is off). */
-export type ServerConfig = { id: string; name: string; token?: string };
+/** No token: the server can't connect (the Minecraft integration is off, or it isn't a minecraft server). */
+export type ServerConfig = { id: string; name: string; game: Game; token?: string };
 
 export type HubOptions = {
   hungMs?: number;
@@ -109,7 +109,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     for (const s of servers) {
       if (s.token !== undefined && s.token.length < 16) throw new Error(`server "${s.id}": token must be at least 16 characters`);
       this.#configs.set(s.id, s);
-      this.#states.set(s.id, { id: s.id, name: s.name, online: false, hung: false, tps: null, players: [], dims: [] });
+      this.#states.set(s.id, { id: s.id, name: s.name, game: s.game, online: false, hung: false, tps: null, players: [], dims: [] });
     }
     this.#hungMs = opts.hungMs ?? 30_000;
     this.#cmdTimeoutMs = opts.cmdTimeoutMs ?? 10_000;

@@ -55,9 +55,15 @@ export type Summary = {
   backups?: BackupStats;
 };
 
+/** Which game a server runs: it decides what the server offers, its rate and its wording. */
+export type Game = 'minecraft' | 'factorio';
+/** How fast a game runs at full speed: Minecraft's ticks per second, Factorio's updates per second. */
+export type Rate = { label: 'TPS' | 'UPS'; max: 20 | 60 };
+
 export type ServerState = {
   id: string;
   name: string;
+  game: Game;
   online: boolean;
   hung: boolean;
   tps: number | null;
@@ -80,8 +86,8 @@ export type Notice = { severity: Severity } & (
   | { kind: 'restartCancelled'; by: string }
   | { kind: 'restartCancelledDown' }
   | { kind: 'restartFailed'; error: string }
-  | { kind: 'lag'; tps: number; worst: DimTime | null }
-  | { kind: 'lagRecovered'; tps: number }
+  | { kind: 'lag'; tps: number; label: Rate['label']; worst: DimTime | null }
+  | { kind: 'lagRecovered'; tps: number; label: Rate['label'] }
   | { kind: 'backupOverdue'; hours: number; newest: string }
   | { kind: 'backupsMissing' }
   | { kind: 'lowDisk'; free: number; minFreeGB: number }

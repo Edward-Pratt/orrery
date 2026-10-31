@@ -41,7 +41,7 @@ import { DeployRefused, type Deploys } from './deploys.ts';
 import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
-import type { LagMonitor } from './lag.ts';
+import { rateOf, type LagMonitor } from './lag.ts';
 import { LibraryRefused, type Library } from './library.ts';
 import type { LiveFeed } from './live.ts';
 import { PackRefused, startScripts, type Packs } from './packs.ts';
@@ -144,6 +144,8 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     return {
       id: s.id,
       name: s.name,
+      game: s.game,
+      rate: rateOf(s.game),
       online: s.online,
       hung: s.hung,
       tps: hasMod(s.id) ? s.tps : null,

@@ -13,6 +13,8 @@ const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: t
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
   name: id.toUpperCase(),
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
   tps: 20,

@@ -52,16 +52,16 @@ const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 // Admin commands are hidden (default_member_permissions "0") until the admin role is allowed under
 // Server Settings → Integrations; the adminRoleId check below still applies either way.
 export const COMMANDS = [
-  new SlashCommandBuilder().setName('status').setDescription('Server status, TPS and uptime'),
+  new SlashCommandBuilder().setName('status').setDescription('Server status, TPS/UPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
-  new SlashCommandBuilder().setName('tps').setDescription('TPS now, over the last hour and day, and the slowest dimensions'),
+  new SlashCommandBuilder().setName('tps').setDescription('TPS/UPS now, over the last hour and day, and the slowest dimensions'),
   new SlashCommandBuilder()
     .setName('playtime')
     .setDescription("A player's playtime and when they were last seen")
-    .addStringOption((o) => o.setName('player').setDescription('Minecraft name'))
+    .addStringOption((o) => o.setName('player').setDescription('In-game name'))
     .addUserOption((o) => o.setName('user').setDescription('Or a Discord member who has linked their account')),
-  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your Minecraft name'),
-  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your Minecraft name'),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your in-game name'),
+  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your in-game name'),
   new SlashCommandBuilder()
     .setName('top')
     .setDescription('Top players by playtime')
@@ -161,13 +161,12 @@ export async function startDiscord(
     post(serverId, message).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
   };
 
-  // Game chat (the player's name and skin) and dashboard lines (the admin's name and avatar, marked) go through the
-  // channel's webhook; falls back to the bot.
+  // Game chat (the player's name, and skin on a minecraft server) and dashboard lines (the admin's name and avatar,
+  // marked) go through the channel's webhook; falls back to the bot.
   async function relayChat(e: Extract<HubEvent, { type: 'chat' | 'say' }>): Promise<void> {
-    const [username, avatarURL] =
-      e.type === 'chat'
-        ? [e.player, `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64`]
-        : [`${e.author} (dashboard)`, e.avatar];
+    const skin = (player: string) =>
+      hub.get(e.serverId)?.game === 'minecraft' ? `https://mc-heads.net/avatar/${encodeURIComponent(player)}/64` : undefined;
+    const [username, avatarURL] = e.type === 'chat' ? [e.player, skin(e.player)] : [`${e.author} (dashboard)`, e.avatar];
     const hook = webhooks.get(e.serverId);
     if (hook && !refusedNames.has(username)) {
       try {

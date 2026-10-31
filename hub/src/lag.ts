@@ -1,12 +1,21 @@
 import type { Db } from './db.ts';
 import type { ServerHub } from './servers.ts';
+import type { Game, Rate } from './types.ts';
 
 export type LagConfig = { tps: number; minutes: number; enabled: boolean };
 
+export const GAMES = ['minecraft', 'factorio'] as const satisfies readonly Game[];
+const RATES: Record<Game, Rate> = { minecraft: { label: 'TPS', max: 20 }, factorio: { label: 'UPS', max: 60 } };
+
+/** A game's rate: what its speed is called and its full speed. The one place these live. */
+export function rateOf(game: Game): Rate {
+  return RATES[game];
+}
+
 const BARS = '▁▂▃▄▅▆▇█';
 
-/** One bar per value, scaled 0..max (20 TPS). */
-export function sparkline(values: number[], max = 20): string {
+/** One bar per value, scaled 0..max (the game's full speed). */
+export function sparkline(values: number[], max: number): string {
   return values.map((v) => BARS[Math.min(7, Math.max(0, Math.floor((v / max) * 8)))]).join('');
 }
 
@@ -59,11 +68,11 @@ export class LagMonitor {
         this.#low.set(s.id, low);
         if (low >= cfg.minutes && !this.#lagging.has(s.id)) {
           this.#lagging.add(s.id);
-          this.#hub.publish(s.id, { severity: 'warning', kind: 'lag', tps: s.tps, worst: worst ?? null });
+          this.#hub.publish(s.id, { severity: 'warning', kind: 'lag', tps: s.tps, label: rateOf(s.game).label, worst: worst ?? null });
         }
       } else {
         this.#low.delete(s.id);
-        if (this.#lagging.delete(s.id)) this.#hub.publish(s.id, { severity: 'good', kind: 'lagRecovered', tps: s.tps });
+        if (this.#lagging.delete(s.id)) this.#hub.publish(s.id, { severity: 'good', kind: 'lagRecovered', tps: s.tps, label: rateOf(s.game).label });
       }
     }
   }

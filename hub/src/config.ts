@@ -1,13 +1,15 @@
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { parseDaily } from './daily.ts';
-import type { LagConfig } from './lag.ts';
+import { GAMES, rateOf, type LagConfig } from './lag.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
+import type { Game } from './types.ts';
 
 /** A server entry as written in config.json. */
 type ServerEntry = {
   id: string;
   name: string;
+  game?: Game;
   dir?: string;
   dailyRestart?: string;
   dailySummary?: string;
@@ -26,6 +28,8 @@ type ServerEntry = {
 export type ServerSettings = {
   id: string;
   name: string;
+  /** Default `minecraft`. */
+  game: Game;
   dir?: string;
   /** `backupDir`, else `<dir>/backups`, else none (no Backup features). */
   backupDir?: string;
@@ -124,13 +128,18 @@ export type Config = {
   };
 };
 
+/** The default `lagTps` per game. */
+const LAG_TPS: Record<Game, number> = { minecraft: 15, factorio: 50 };
+
 function resolve(s: ServerEntry): ServerSettings {
   const { lagTps, lagMinutes, lagAlerts, ...rest } = s;
+  const game = s.game ?? 'minecraft';
   return {
     ...rest,
+    game,
     backupDir: s.backupDir ?? (s.dir ? join(s.dir, 'backups') : undefined),
     backupMinFreeGB: s.backupMinFreeGB ?? 10,
-    lag: { tps: lagTps ?? 15, minutes: lagMinutes ?? 2, enabled: lagAlerts ?? true },
+    lag: { tps: lagTps ?? LAG_TPS[game], minutes: lagMinutes ?? 2, enabled: lagAlerts ?? true },
     quests: s.quests ?? 'batched',
   };
 }
@@ -229,6 +238,7 @@ export function validateConfig(raw: unknown): string[] {
   httpUrl(raw, 'healthcheckUrl', '');
 
   let ids: Set<string> | undefined;
+  const games = new Map<string, Game>();
   if (!Array.isArray(raw.servers) || raw.servers.length === 0) {
     err('', '"servers" must be a non-empty list');
   } else {
@@ -248,12 +258,21 @@ export function validateConfig(raw: unknown): string[] {
       if (s.quests !== undefined && !QUEST_MODES.includes(s.quests as QuestMode)) {
         err(where, `"quests" must be one of ${QUEST_MODES.join(', ')}`);
       }
-      num(s, 'lagTps', where, (n) => n >= 1 && n <= 20, 'a number from 1 to 20');
+      let game: Game = 'minecraft';
+      if (s.game !== undefined) {
+        if (GAMES.includes(s.game as Game)) game = s.game as Game;
+        else err(where, `"game" must be ${GAMES.join(' or ')}`);
+      }
+      if (sid !== undefined) games.set(sid, game);
+      const { max } = rateOf(game);
+      num(s, 'lagTps', where, (n) => n >= 1 && n <= max, `a number from 1 to ${max}`);
       num(s, 'lagMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
       num(s, 'backupMaxAgeHours', where, (n) => n > 0, 'a positive number');
       num(s, 'backupMinFreeGB', where, (n) => n > 0, 'a positive number');
       if (s.lagAlerts !== undefined && typeof s.lagAlerts !== 'boolean') err(where, '"lagAlerts" must be true or false');
-      for (const key of ['dir', 'backupDir']) {
+      // A factorio server runs on another machine, so the hub has no folder of it.
+      if (game === 'factorio' && s.dir !== undefined) err(where, '"dir" is only for minecraft servers: a factorio server has no folder on the hub\'s machine');
+      for (const key of game === 'factorio' ? ['backupDir'] : ['dir', 'backupDir']) {
         const path = str(s, key, where, false);
         if (path !== undefined && !isDir(path)) err(where, `"${key}" is not an existing folder: ${path}`);
       }
@@ -291,12 +310,13 @@ export function validateConfig(raw: unknown): string[] {
     port(mc, where);
     const seen = new Set<string>();
     for (const [sid, token] of byServer(mc, 'tokens', where, ids)) {
-      if (typeof token !== 'string' || token.length < 16) err(`${where}.tokens`, `"${sid}" must be at least 16 characters`);
+      if (games.get(sid) === 'factorio') err(`${where}.tokens`, `"${sid}" is a factorio server: only minecraft servers have a Mod token`);
+      else if (typeof token !== 'string' || token.length < 16) err(`${where}.tokens`, `"${sid}" must be at least 16 characters`);
       else if (seen.has(token)) err(`${where}.tokens`, `"${sid}" is the same as another server's`);
       else seen.add(token);
     }
     if (isObj(mc.tokens)) {
-      for (const sid of ids ?? []) if (!Object.hasOwn(mc.tokens, sid)) err(`${where}.tokens`, `server "${sid}" has no token`);
+      for (const sid of ids ?? []) if (games.get(sid) === 'minecraft' && !Object.hasOwn(mc.tokens, sid)) err(`${where}.tokens`, `server "${sid}" has no token`);
     }
   }
   const discord = integrations.discord;

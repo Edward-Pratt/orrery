@@ -78,7 +78,7 @@ test('formatOutput always yields one valid code block under 2000 chars', () => {
 const first = (p: Post) => (p as { embeds: APIEmbed[] }).embeds[0];
 
 test('formatStatus is an embed with state, TPS, players and uptime', () => {
-  const base: ServerState = { id: 's', name: 'GTNH', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
+  const base: ServerState = { id: 's', name: 'GTNH', game: 'minecraft', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
   const e = first(formatStatus(base, 1, 0.5));
   assert.equal(e.title, 'GTNH — 🟢 Online');
   assert.equal(e.color, COLORS.green);
@@ -189,7 +189,7 @@ test('formatOutput truncates long emoji output without splitting an emoji', () =
   assert.ok(out.endsWith('😀\n… (truncated)\n```'));
 });
 
-const online: ServerState = { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
+const online: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
 
 test('formatPresence has one segment per server', () => {
   assert.equal(formatPresence([online]), 'GTNH: 2 online · 20 TPS');
@@ -222,6 +222,7 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
   const s: ServerState = {
     id: 's',
     name: 'GTNH',
+    game: 'minecraft',
     online: true,
     hung: false,
     tps: 13.4,
@@ -241,6 +242,33 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
     ],
   );
   assert.equal(first(formatTps({ ...s, online: false, tps: null }, [], null, null)).title, 'GTNH: offline');
+});
+
+test("a factorio server's rate is UPS out of 60: bands, trend and wording, and no dimensions", () => {
+  const s: ServerState = { id: 'f', name: 'Space Age', game: 'factorio', online: true, hung: false, tps: 54, players: ['Ann'], dims: [] };
+  const e = first(formatTps(s, [{ ts: 1, tps: 60 }, { ts: 2, tps: 30 }], { avg: 45, min: 30 }, null));
+  assert.equal(e.title, 'Space Age: 54.0 UPS');
+  assert.equal(e.color, COLORS.green); // 54 is 0.9 of 60
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Last hour', '45.0 (min 30.0)'],
+      ['Last 24 h', 'n/a'],
+      ['Trend (1 sample/min)', '█▅'],
+    ],
+  );
+  assert.equal(first(formatTps({ ...s, tps: 40 }, [], null, null)).color, COLORS.orange); // 20 TPS would be green on Minecraft's scale
+  assert.equal(first(formatTps({ ...s, tps: 35 }, [], null, null)).color, COLORS.red);
+  assert.deepEqual(first(formatStatus(s, null, null)).fields![0], { name: 'UPS', value: '54.0', inline: true });
+  assert.equal(formatPresence([s, online]), 'Space Age: 1 online · 54 UPS | GTNH: 2 online · 20 TPS');
+  assert.equal(formatTopic(s), '🟢 Online · 54 UPS · 1 player: Ann');
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'f' });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 41.5, label: 'UPS', worst: null }), {
+    embeds: [{ title: '🐢 Lag: 41.5 UPS; slowest: unknown', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 59.9, label: 'UPS' }), {
+    embeds: [{ title: '✅ UPS back to normal (59.9)', color: COLORS.green }],
+  });
 });
 
 test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and latest', () => {
@@ -311,13 +339,13 @@ test("formatEvent posts lag and backup notices with today's wording and severity
   const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
   const nether = { id: -1, name: 'Nether', ms: 72.4 };
   const GB = 1024 ** 3;
-  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether }), {
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, label: 'TPS', worst: nether }), {
     embeds: [{ title: '🐢 Lag: 12.3 TPS; slowest: Nether (DIM -1) 72 ms/tick', color: COLORS.orange }],
   });
-  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, worst: null }), {
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, label: 'TPS', worst: null }), {
     embeds: [{ title: '🐢 Lag: 9.0 TPS; slowest: unknown', color: COLORS.orange }],
   });
-  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9 }), {
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9, label: 'TPS' }), {
     embeds: [{ title: '✅ TPS back to normal (19.9)', color: COLORS.green }],
   });
   assert.deepEqual(post({ severity: 'warning', kind: 'backupOverdue', hours: 30, newest: 'a.zip' }), {

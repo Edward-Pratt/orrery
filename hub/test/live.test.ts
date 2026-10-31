@@ -9,7 +9,7 @@ import { ServerHub } from '../src/servers.ts';
 import type { HubEvent } from '../src/types.ts';
 
 /** A hub that never listens: events are emitted by hand. A "restart" is a new hub and feed on the same `Db`. */
-const hubOf = (...ids: string[]) => new ServerHub(ids.map((id) => ({ id, name: id })));
+const hubOf = (...ids: string[]) => new ServerHub(ids.map((id) => ({ id, name: id, game: 'minecraft' as const })));
 const unstamped = (entries: [number, { at: number }][]) => entries.map(([, { at: _, ...e }]) => e);
 
 const history: HubEvent[] = [

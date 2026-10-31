@@ -8,7 +8,10 @@ import { ServerActions } from './actions';
 import { PlayerName } from './player';
 import ServerPage from './server';
 
-/** A server's Overview: who's online, the last 24 h of TPS and players (linking to History), and a pending restart. */
+/**
+ * A server's Overview: who's online, the last 24 h of its rate (TPS or UPS) and players (linking to History), and a
+ * pending restart.
+ */
 @Component({
   selector: 'app-server-overview',
   imports: [RouterLink, TimeSeries, ServerActions, PlayerName],
@@ -49,8 +52,9 @@ export default class Overview {
   protected readonly graphs = computed(() => {
     const h = this.#history();
     if (!h) return [];
+    const { label, max } = this.server.card()!.rate;
     return [
-      ...(h.tps ? [{ title: 'TPS', format: (v: number) => v.toFixed(1), max: 20, step: false, series: [{ name: 'TPS', points: h.tps.map((p): [number, number] => [p.ts, p.tps]) }] }] : []),
+      ...(h.tps ? [{ title: label, format: (v: number) => v.toFixed(1), max, step: false, series: [{ name: label, points: h.tps.map((p): [number, number] => [p.ts, p.tps]) }] }] : []),
       { title: 'Players', format: String, max: undefined, step: true, series: [{ name: 'Players', points: h.players.map((p): [number, number] => [p.ts, p.count]) }] },
     ];
   });

@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { DeploysAnswer, HostSample, Integrations, Release } from '@hub/api';
+import type { DeploysAnswer, HostNow, HostSample, Integrations, Release } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { dialog, dialogButton, fakeEvents, settle } from '../testing';
@@ -20,7 +20,7 @@ const EARLIER: HostSample = { ...SAMPLE, ts: 0, cpu: 0.5, disks: [...SAMPLE.disk
 
 const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false, newServer: false };
 
-async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
+async function setup(sample: HostSample = SAMPLE, answer = true, on = ON, others: HostNow[] = []) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [
@@ -35,7 +35,10 @@ async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
   const render = async () => (await settle(), await fixture.whenStable());
   await render();
   backend.expectOne('/api/integrations').flush(on);
-  if (answer) backend.expectOne('/api/host').flush({ id: 'oracle', sample });
+  if (answer) {
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample }, ...others]);
+    await render(); // its graphs are asked for once the host is known
+  }
   const el = fixture.nativeElement as HTMLElement;
   const tiles = () => [...el.querySelectorAll('[data-tile]')].map((t) => `${t.getAttribute('data-tile')}:${t.getAttribute('data-state')}`);
   const text = (sel: string) => el.querySelector(sel)?.textContent?.trim();
@@ -51,7 +54,7 @@ async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
 describe('host page', () => {
   it('shows a tile for CPU, load, memory and each disk, then updates them from each live sample', async () => {
     const { events, backend, render, text, tiles } = await setup({ ...SAMPLE, disks: [...SAMPLE.disks, { mount: '/data', free: 30 * GB, total: 100 * GB }] });
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(text('h1')).toBe('Host oracle');
     expect(tiles()).toEqual(['cpu:ok', 'load:ok', 'memory:ok', 'disk:/:ok', 'disk:/data:ok']);
@@ -72,7 +75,7 @@ describe('host page', () => {
   it('warns amber, then red, past a threshold; a disk when under 20%, then 10%, free', async () => {
     const low = { ...SAMPLE, cpu: 0.97, disks: [{ mount: '/', free: 15 * GB, total: 100 * GB }, { mount: '/data', free: 5 * GB, total: 100 * GB }, { mount: '/big', free: 90 * GB, total: 100 * GB }] };
     const { backend, render, tiles } = await setup(low);
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(tiles()).toEqual(['cpu:down', 'load:ok', 'memory:ok', 'disk:/:warn', 'disk:/data:down', 'disk:/big:ok']);
   });
@@ -80,15 +83,15 @@ describe('host page', () => {
   it('shows skeleton tiles until the first answer', async () => {
     const { el, backend, render } = await setup(SAMPLE, false);
     expect(el.querySelector('[data-skeleton]')).not.toBeNull();
-    backend.expectOne('/api/host').flush({ id: 'oracle', sample: SAMPLE });
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample: SAMPLE }]);
     await render();
     expect(el.querySelector('[data-skeleton]')).toBeNull();
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
   });
 
   it('graphs the last 24 hours, then the chosen period, a series per mount', async () => {
     const { backend, render, chart, period } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([EARLIER, SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([EARLIER, SAMPLE]);
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[0, 0.5], [1, 0.25]]]]);
     expect(chart('Load')).toEqual([['1 min', [[0, 0.5], [1, 0.5]]]]);
@@ -101,23 +104,60 @@ describe('host page', () => {
     // A slow long period is dropped when a shorter one is chosen before it answers.
     period('90 d');
     await render();
-    const slow = backend.expectOne('/api/host/samples?hours=2160');
+    const slow = backend.expectOne('/api/hosts/oracle/samples?hours=2160');
     period('1 h');
     await render();
     expect(slow.cancelled).toBe(true);
-    backend.expectOne('/api/host/samples?hours=1').flush([SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=1').flush([SAMPLE]);
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[1, 0.25]]]]);
   });
 
   it('appends each live sample to the graph without fetching again', async () => {
     const { events, backend, render, chart } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([EARLIER, SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([EARLIER, SAMPLE]);
     await render();
     events.push(1, { target: 'host', id: 'oracle', type: 'sample', sample: SAMPLE }); // the replay's latest: already drawn
     events.push(2, { target: 'host', id: 'oracle', type: 'sample', sample: { ...SAMPLE, ts: 2, cpu: 1 } });
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[0, 0.5], [1, 0.25], [2, 1]]]]);
+    backend.verify();
+  });
+
+  it('shows no host picker with one host', async () => {
+    const { el, backend, render } = await setup();
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
+    await render();
+    expect(el.querySelector('[data-hosts]')).toBeNull();
+  });
+
+  it("picks a host when there is more than one: the hub's own first, then another's tiles and graphs", async () => {
+    const VM: HostNow = { id: 'vm', sample: { ...SAMPLE, cpu: 0.75, disks: [{ mount: '/srv', free: 5 * GB, total: 100 * GB }] } };
+    const { el, events, backend, render, text, tiles, chart, period } = await setup(SAMPLE, true, ON, [VM]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([SAMPLE]);
+    await render();
+    expect([...el.querySelectorAll('[data-host]')].map((b) => b.textContent?.trim())).toEqual(['oracle', 'vm']);
+    expect(text('h1')).toBe('Host oracle');
+    expect(text('[data-value=cpu]')).toBe('25%');
+
+    // Another host's live sample changes nothing shown.
+    events.push(1, { target: 'host', id: 'vm', type: 'sample', sample: { ...VM.sample!, ts: 2, cpu: 0.5 } });
+    await render();
+    expect(text('[data-value=cpu]')).toBe('25%');
+    expect(chart('CPU')).toEqual([['CPU', [[1, 0.25]]]]);
+
+    el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
+    await render();
+    expect(text('h1')).toBe('Host vm');
+    expect(text('[data-value=cpu]')).toBe('50%'); // its newest, from the stream
+    expect(tiles()).toEqual(['cpu:ok', 'load:ok', 'memory:ok', 'disk:/srv:down']);
+    expect(chart('CPU')).toEqual([['CPU', []]]); // none of oracle's while vm's load
+    backend.expectOne('/api/hosts/vm/samples?hours=24').flush([VM.sample!]);
+    await render();
+    expect(chart('CPU')).toEqual([['CPU', [[1, 0.75]]]]);
+    period('1 h');
+    await render();
+    backend.expectOne('/api/hosts/vm/samples?hours=1').flush([]);
     backend.verify();
   });
 });
@@ -139,7 +179,7 @@ const ANSWER: DeploysAnswer = {
 describe('host page releases', () => {
   async function releases(answer: DeploysAnswer = ANSWER) {
     const h = await setup(SAMPLE, true, { ...ON, github: true, library: false });
-    h.backend.expectOne('/api/host/samples?hours=24').flush([]);
+    h.backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await h.render();
     h.backend.expectOne('/api/deploys').flush(answer);
     await h.render();
@@ -253,7 +293,7 @@ describe('host page releases', () => {
 
   it('has no section with the GitHub integration off', async () => {
     const { el, backend, render } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(el.querySelector('[data-releases]')).toBeNull();
     backend.verify();

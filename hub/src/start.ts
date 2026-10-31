@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
-import { HostMonitor, type HostReaders } from './host.ts';
+import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
 import { Packs, type PacksOptions } from './packs.ts';
 import { Restores, type RunRestore } from './restore.ts';
@@ -66,6 +66,8 @@ export type HubHandle = {
   web?: { port: number; app: WebApi };
   /** Every hub event, numbered, with recent ones buffered for replay. */
   live: LiveFeed;
+  /** Every Host the hub knows: the hub's own with the host integration, and any other added to it. */
+  hosts: Hosts;
   /** Stops everything in order; resolves once the socket and database are closed. */
   close: () => Promise<void>;
 };
@@ -124,8 +126,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   const checks = checkList && new Checks(hub, checkList, deps.get);
   checks?.start();
-  const host = hostCfg && new HostMonitor(hub, db, hostCfg, deps.host!); // checked above
-  host?.start();
+  const hosts = new Hosts(hub, db);
+  const host = hostCfg && hosts.add(hostCfg);
+  host?.start(deps.host!); // checked above
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
   const restores =
@@ -217,7 +220,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg && hosts, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -225,6 +228,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   return {
     port,
     live,
+    hosts,
     web: app && http && { port: http.port, app },
     close: () => {
       restarts.stop();

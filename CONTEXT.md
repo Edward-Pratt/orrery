@@ -15,7 +15,7 @@ A built-in part of the hub that connects it to one outside system (Discord, Mine
 _Avoid_: module, plugin, extension, mod
 
 **Host**:
-A machine that things the hub knows run on, identified by an `id`, with its CPU, memory and disk. The hub only measures the host it runs on itself.
+A machine that things the hub knows run on, identified by an `id`, with its CPU, memory and disk. The hub measures its own Host; other Hosts are reported to it (by an Agent, coming with the Factorio work).
 _Avoid_: box, node, server (a server is a game server)
 
 **Server**:

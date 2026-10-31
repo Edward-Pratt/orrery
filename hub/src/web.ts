@@ -38,7 +38,7 @@ import type {
 } from './api.ts';
 import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
-import type { HostMonitor } from './host.ts';
+import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
 import type { LagMonitor } from './lag.ts';
@@ -118,7 +118,7 @@ export type WebDeps = {
   /** Only with the checks integration. */
   checks?: Checks;
   /** Only with the host integration. */
-  host?: HostMonitor;
+  hosts?: Hosts;
   /** Only with the systemd integration. */
   services?: Services;
   /** Only with the systemd integration and a restore runner. */
@@ -136,7 +136,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
@@ -323,13 +323,21 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       });
     }
   }
-  const hostId = integrations.host?.id;
-  if (host && hostId) {
-    app.get('/host', (c) => c.json({ id: hostId, sample: host.latest() } satisfies HostNow));
-    app.get('/host/samples', (c) => {
+  const host = integrations.host && hosts?.get(integrations.host.id);
+  if (hosts && host) {
+    const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
+    const history = (h: HostMonitor, c: Context) => {
       const hours = hoursOf(c);
-      return hours ? c.json(host.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+      return hours ? c.json(h.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+    };
+    app.get('/hosts', (c) => c.json(hosts.list().map(now) satisfies HostNow[]));
+    app.get('/hosts/:id/samples', (c) => {
+      const h = hosts.get(c.req.param('id'));
+      return h ? history(h, c) : c.notFound();
     });
+    // ponytail: the hub's own host, for a dashboard older than `/hosts`; drop a release after.
+    app.get('/host', (c) => c.json(now(host)));
+    app.get('/host/samples', (c) => history(host, c));
   }
   if (newServer) {
     // Before `/servers/:id`: "pending" isn't a server id.

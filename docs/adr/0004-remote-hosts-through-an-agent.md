@@ -10,7 +10,7 @@ the hub and carries out the hub's requests.
   its own bound to the hub's tailnet address. The Mod port (25580) and the web API stay on loopback, so "the hub binds
   127.0.0.1" still holds for Minecraft, and the remote Host opens no port for the hub.
 - **The network is the friend's Tailscale tailnet.** The hub host joins it as `tag:orrery-hub` (`--accept-dns=false`,
-  Tailscale SSH off), and the friend's policy lets `tag:factorio` reach it on tcp:25584 only. He administers that
+  Tailscale SSH off), and the friend's policy lets `tag:factorio` reach `tag:orrery-hub` on tcp:25584 only. He administers that
   policy, so the guard the owner controls is the hub host's firewalld zone `tailnet`: `tailscale0`, the default
   reject target, no open ports and one rich rule admitting only the remote Host's tailnet IP on 25584/tcp. Tailscale
   adds netfilter rules of its own, so a port scan from the remote Host has to prove the zone holds.

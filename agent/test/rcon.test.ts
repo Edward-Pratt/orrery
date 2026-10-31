@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, RconTimeout, decode, encode } from '../src/rcon.ts';
+import { AUTH, AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, RconSession, RconTimeout, decode, encode } from '../src/rcon.ts';
 import { PASSWORD, fakeRcon, type Reply } from './fake-rcon.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -180,4 +180,33 @@ test('refuses a command with a NUL before sending anything', async (t) => {
   assert.equal(await rcon.exec('/ok'), '');
   assert.deepEqual(server.commands(), ['/ok']);
   rcon.close();
+});
+
+test('RconSession: one kept connection, commands in order; a timeout or a closed server, then a new connection', async (t) => {
+  let hang = false;
+  let server = await fakeRcon((cmd) => (hang ? undefined : `ran ${cmd}`));
+  const port = server.port;
+  const session = new RconSession(port, PASSWORD, 200);
+  t.after(async () => {
+    session.close();
+    await server.close();
+  });
+  const auths = () => server.received.filter((p) => p.type === AUTH).length;
+  assert.deepEqual(await Promise.all(['/a', '/b', '/c'].map((c) => session.exec(c))), ['ran /a', 'ran /b', 'ran /c']);
+  assert.deepEqual(server.commands(), ['/a', '/b', '/c']);
+  assert.equal(auths(), 1, 'one connection for all three');
+
+  hang = true; // a server that took the command but never answers
+  await assert.rejects(session.exec('/d'), RconTimeout);
+  hang = false;
+  assert.equal(await session.exec('/e'), 'ran /e');
+  assert.equal(auths(), 2, 'a new connection after the timeout');
+
+  await server.close();
+  await assert.rejects(session.exec('/f'), /RCON/);
+  server = await fakeRcon((cmd) => `back ${cmd}`, Infinity, port);
+  assert.equal(await session.exec('/g'), 'back /g', 'the next command connects again');
+
+  session.close();
+  await assert.rejects(session.exec('/h'), /closed/);
 });

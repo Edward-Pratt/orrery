@@ -70,5 +70,6 @@ test('requests are checked against their documented fields and limits, and copie
   assert.deepEqual(readAgentLine('nope'), { msg: null, id: null, why: 'not JSON' });
   assert.deepEqual(readAgentLine('{"type":"welcome"}'), { msg: { type: 'welcome' } });
   assert.deepEqual(readGameLine('{"type":"reject","reason":"no agent connection"}'), { msg: { type: 'reject', reason: 'no agent connection' } });
-  assert.deepEqual(readGameLine('{"type":"say","author":"a","message":"m"}'), { msg: null, id: null, why: 'unknown type' });
+  assert.deepEqual(readGameLine('{"type":"say","author":"a","message":"m"}'), { msg: { type: 'say', author: 'a', message: 'm', source: 'discord' } });
+  assert.deepEqual(readGameLine('{"type":"save"}'), { msg: null, id: null, why: 'unknown type' }); // not handled until M5
 });

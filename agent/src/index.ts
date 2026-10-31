@@ -5,8 +5,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { check } from './check.ts';
 import { AGENT_ROOT, CONFIG_PATH, loadConfig, type Config } from './config.ts';
+import { GameEvents, toGame } from './events.ts';
 import { HostSampler } from './host.ts';
 import { HubClient } from './hub.ts';
+import { RconSession } from './rcon.ts';
 import { ServiceWatch } from './service.ts';
 import { StatusPoller } from './status.ts';
 
@@ -20,21 +22,41 @@ function agentVersion(): string {
 const load = (): Config =>
   loadConfig(process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH, process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
 
-/** Runs until SIGTERM or SIGINT. With no hub reachable it keeps running: RCON, the unit and host samples go on, and the hub client retries. */
+/**
+ * Runs until SIGTERM or SIGINT. With no hub reachable it keeps running: RCON, the unit, game events and host samples
+ * go on, and the hub client retries. The mod's commands (`/orrery-hello`, and the hub's say, notice and linkResult)
+ * run on an RCON connection of their own, apart from the status poll's.
+ */
 function run(): void {
   const config = load();
   const version = agentVersion();
   console.log(`[agent] ${version}: agent ${config.id}, server ${config.server.id}`);
-  const hub = new HubClient({ config, version });
+  const commands = new RconSession(config.server.rconPort, config.rconPassword);
+  const run = (command: string) => commands.exec(command);
+  const hub = new HubClient({ config, version, toGame: (msg) => void toGame(run, msg) });
   const service = new ServiceWatch(config.server.unit);
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,
     settings: join(config.server.data, 'config', 'server-settings.json'),
   });
+  const events = new GameEvents({
+    port: config.server.agentUdpPort,
+    factorioPort: config.server.factorioUdpPort,
+    log: join(config.server.data, 'factorio-current.log'),
+    players: () => status.players,
+    run,
+  });
   const host = new HostSampler(config.mounts);
-  service.on('change', (s) => hub.service(s));
-  status.on('status', (r) => hub.status(r));
+  service.on('change', (s) => {
+    hub.service(s);
+    events.service(s);
+  });
+  status.on('status', (r) => {
+    hub.status(r);
+    events.rconUp();
+  });
+  events.on('event', (e) => hub.event(e));
   status.on('stalled', () => hub.stalled());
   status.on('down', () => hub.down());
   const sample = () =>
@@ -47,6 +69,7 @@ function run(): void {
   hub.start();
   service.start();
   status.start();
+  events.start();
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -56,6 +79,8 @@ function run(): void {
     clearInterval(sampling);
     status.stop();
     service.stop();
+    events.stop();
+    commands.close();
     void hub.stop().then(() => process.exit(0));
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -108,6 +108,7 @@ const str =
   (max: number = LIMITS.text, min = 0): Check =>
   (v) =>
     typeof v === 'string' && v.length >= min && v.length <= max ? v : BAD;
+const bool: Check = (v) => (typeof v === 'boolean' ? v : BAD);
 const oneOf =
   (...values: string[]): Check =>
   (v) =>
@@ -160,11 +161,17 @@ const AGENT: Schemas<HubAgentMsg> = {
   deploy: { id, tag: str() },
 };
 
-/** What the agent handles on the game connection so far: the handshake's answer. The rest of `HubMsg` reads as unknown. */
-export type GameIn = Extract<HubMsg, { type: 'welcome' | 'reject' }>;
+/** The hub's messages on the game connection that the agent carries out in game, as the mod's RCON commands. */
+export type ToGame = Extract<HubMsg, { type: 'say' | 'notice' | 'linkResult' }>;
+/** What the agent handles on the game connection so far: the handshake's answer, then `ToGame`. `cmd` and `save` read as unknown. */
+export type GameIn = Extract<HubMsg, { type: 'welcome' | 'reject' }> | ToGame;
 const GAME: Schemas<GameIn> = {
   welcome: {},
   reject: { reason: str(LIMITS.detail) },
+  // docs/protocol.md lets `source` be left out (older hubs); the mod prints anything but `dashboard` as Discord.
+  say: { author: str(), message: str(LIMITS.message), source: (v) => (v === undefined ? 'discord' : oneOf('discord', 'dashboard')(v)) },
+  notice: { message: str(LIMITS.message) },
+  linkResult: { player: str(LIMITS.player, 1), ok: bool, message: str(LIMITS.message) },
 };
 
 /** A line from the hub: the message, or why it isn't one (`id`: the request's, if it had a usable one, to answer). */

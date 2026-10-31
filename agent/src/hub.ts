@@ -3,9 +3,10 @@ import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { AgentMsg, AgentRequest, HostSample } from '../../hub/src/types.ts';
 import type { Config } from './config.ts';
+import type { GameEvent } from './events.ts';
 import type { UnitState } from './service.ts';
 import type { Reading } from './status.ts';
-import { LIMITS, LineReader, PROTOCOL_VERSION, encode, readAgentLine, readGameLine, type OutMsg, type Request } from './wire.ts';
+import { LIMITS, LineReader, PROTOCOL_VERSION, encode, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
 
 /** What answers a request: resolves with its reply's `data` (undefined: none); a throw is the reply's `error`. */
 export type Handlers = { [T in AgentRequest['type']]?: (req: Request<T>) => Promise<unknown> };
@@ -16,6 +17,8 @@ export type HubOptions = {
   version: string;
   /** The requests this agent carries out; any other is answered `ok: false`. */
   handlers?: Handlers;
+  /** Carries out the hub's `say`, `notice` and `linkResult` from the game connection in game. */
+  toGame?: (msg: ToGame) => void;
   pingMs?: number;
   /** For the TCP connect and the hub's answer to a hello. */
   handshakeMs?: number;
@@ -103,13 +106,15 @@ class Link {
  * trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
  *
  * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
- * and the orrery mod's version, then a heartbeat per `/orrery-status` answer. It closes with the Agent connection or
- * once RCON is gone, not while RCON only stalls. `stop` sends `bye`, then closes both.
+ * and the orrery mod's version, then a heartbeat per `/orrery-status` answer, and the mod's game events. The hub's
+ * `say`, `notice` and `linkResult` on it go to `toGame`. It closes with the Agent connection or once RCON is gone, not
+ * while RCON only stalls. `stop` sends `bye`, then closes both.
  */
 export class HubClient {
   #config: HubOptions['config'];
   #version: string;
   #handlers: Handlers;
+  #toGame: (msg: ToGame) => void;
   #pingMs: number;
   #handshakeMs: number;
   #backoffMs: number;
@@ -131,6 +136,7 @@ export class HubClient {
     this.#config = o.config;
     this.#version = o.version;
     this.#handlers = o.handlers ?? {};
+    this.#toGame = o.toGame ?? (() => {});
     this.#pingMs = o.pingMs ?? 10_000;
     this.#handshakeMs = o.handshakeMs ?? 10_000;
     this.#backoffMs = o.backoffMs ?? 1000;
@@ -174,6 +180,11 @@ export class HubClient {
   service(state: UnitState): void {
     this.#service = state;
     if (this.connected) this.#agent!.send({ type: 'serviceState', ...state });
+  }
+
+  /** A game event, sent on the game connection while it is up; dropped otherwise, as a Mod drops them while disconnected. */
+  event(msg: GameEvent): void {
+    if (this.#game?.welcomed && !this.#stopping) this.#game.send(msg);
   }
 
   /** A host sample, sent only while connected (never queued). */
@@ -299,7 +310,8 @@ export class HubClient {
       this.#gameLogged = 'up';
       return;
     }
-    if (r.msg === null) console.log(`[game] ignored a line from the hub: ${r.why}`);
+    if (r.msg === null) return console.log(`[game] ignored a line from the hub: ${r.why}`);
+    if (r.msg.type !== 'welcome' && r.msg.type !== 'reject') this.#toGame(r.msg);
   }
 
   #gameClosed(link: Link, why: string): void {

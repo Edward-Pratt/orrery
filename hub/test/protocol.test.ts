@@ -182,6 +182,7 @@ function withField(msg: object, path: (string | number)[], value: unknown): stri
 
 test('every field has a limit, on both ports: at it parses, over it the message is invalid', () => {
   const x = (n: number) => 'x'.repeat(n);
+  // A command's `output` and a `backup`'s `detail` are cut instead (the next test).
   const game: [object, (string | number)[], number][] = [
     [hello, ['serverId'], LIMITS.text],
     [hello, ['token'], LIMITS.text],
@@ -195,13 +196,10 @@ test('every field has a limit, on both ports: at it parses, over it the message 
     [{ type: 'heartbeat', tps: 20, players: ['a'] }, ['players', 0], LIMITS.player],
     [{ type: 'heartbeat', tps: 20, players: [], dims: [{ id: 0, name: 'a', ms: 1 }] }, ['dims', 0, 'name'], LIMITS.text],
     [{ type: 'cmdResult', id: '1', output: ['a'] }, ['id'], LIMITS.text],
-    [{ type: 'cmdResult', id: '1', output: ['a'] }, ['output', 0], LIMITS.line],
-    [{ type: 'cmdLate', id: '1', output: ['a'] }, ['output', 0], LIMITS.line],
     [{ type: 'quest', player: 'a', quests: [{ name: 'q', main: true }] }, ['quests', 0, 'name'], LIMITS.text],
     [{ type: 'link', player: 'a', uuid: '', code: 'ABC234' }, ['uuid'], LIMITS.text],
     [{ type: 'link', player: 'a', uuid: '', code: 'ABC234' }, ['code'], LIMITS.text],
     [{ type: 'unlink', player: 'a' }, ['player'], LIMITS.player],
-    [{ type: 'backup', ok: true, detail: 'd' }, ['detail'], LIMITS.detail],
     [{ type: 'milestone', kind: 'research', text: 't', player: 'p', force: 'f' }, ['text'], LIMITS.message],
     [{ type: 'milestone', kind: 'research', text: 't', player: 'p', force: 'f' }, ['player'], LIMITS.player],
     [{ type: 'milestone', kind: 'research', text: 't', player: 'p', force: 'f' }, ['force'], LIMITS.player],
@@ -236,8 +234,6 @@ test('every field has a limit, on both ports: at it parses, over it the message 
   const lists: [typeof parseModLine | typeof parseAgentLine, object, (string | number)[], unknown, number][] = [
     [parseModLine, { type: 'heartbeat', tps: 20, players: [] }, ['players'], 'p', LIMITS.players],
     [parseModLine, { type: 'heartbeat', tps: 20, players: [] }, ['dims'], { id: 0, name: 'd', ms: 1 }, 5],
-    [parseModLine, { type: 'cmdResult', id: '1', output: [] }, ['output'], 'l', LIMITS.output],
-    [parseModLine, { type: 'cmdLate', id: '1', output: [] }, ['output'], 'l', LIMITS.output],
     [parseModLine, { type: 'quest', player: 'a', quests: [] }, ['quests'], { name: 'q', main: false }, 50],
     [parseAgentLine, AGENT_MSGS.hostSample, ['sample', 'load'], 1, 3],
     [parseAgentLine, AGENT_MSGS.hostSample, ['sample', 'disks'], { mount: '/', free: 1, total: 2 }, LIMITS.disks],
@@ -253,6 +249,27 @@ test('every field has a limit, on both ports: at it parses, over it the message 
   const data = (n: number) => JSON.stringify({ type: 'reply', id: '1', ok: true, data: x(n - 2) }); // the quotes count
   assert.ok(parseAgentLine(data(LIMITS.replyData)));
   assert.equal(parseAgentLine(data(LIMITS.replyData + 1)), null);
+});
+
+test("a command's output and a backup's detail are cut to their limits, not refused: Mods already deployed send more", () => {
+  const long = 'y'.repeat(5000);
+  const lines = Array.from({ length: 2000 }, (_, i) => (i === 3 ? long : `line ${i}`));
+  // A game connection's lines, a Mod's or an Agent's, all go through parseModLine.
+  for (const type of ['cmdResult', 'cmdLate']) {
+    const msg = parseModLine(JSON.stringify({ type, id: '1', output: lines })) as { output: string[] } | null;
+    assert.ok(msg, type);
+    assert.equal(msg.output.length, LIMITS.output);
+    assert.equal(msg.output[3], long.slice(0, LIMITS.line));
+    assert.equal(msg.output[LIMITS.output - 1], `line ${LIMITS.output - 1}`);
+  }
+  assert.deepEqual(parseModLine(JSON.stringify({ type: 'backup', ok: false, detail: 'z'.repeat(3000) })), {
+    type: 'backup',
+    ok: false,
+    detail: 'z'.repeat(LIMITS.detail),
+  });
+  // Still typed: a non-string line, or a detail that isn't a string, refuses the message.
+  assert.equal(parseModLine(JSON.stringify({ type: 'cmdResult', id: '1', output: ['a', 1] })), null);
+  assert.equal(parseModLine(JSON.stringify({ type: 'backup', ok: true, detail: 1 })), null);
 });
 
 test("a reply's data is checked against its request, and copied", () => {

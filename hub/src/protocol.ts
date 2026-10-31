@@ -25,8 +25,10 @@ export const MIN_PROTOCOL = 1;
 
 /**
  * Field limits, the same on the Mod port and the Agent port: string lengths in characters (UTF-16 code units),
- * lists in entries. A message with a field over its limit is invalid as a whole. `text` is every string with no
- * limit of its own (ids, tokens, versions, unit names, tags, file names).
+ * lists in entries. A message with a field over its limit is invalid as a whole, but for a command's `output` and a
+ * `backup`'s `detail`, which are cut to their limits: Mods already deployed send up to 2000 lines of any length, and
+ * an exception's text as is. `text` is every string with no limit of its own (ids, tokens, versions, unit names,
+ * tags, file names).
  */
 export const LIMITS = {
   /** A player name; a Factorio force's too. */
@@ -52,6 +54,8 @@ export const LIMITS = {
   disks: 32,
   logFiles: 32,
   text: 256,
+  /** Bytes in one line on the Agent port, before and after the handshake: a longer line destroys the socket. */
+  lineBytes: 64 * 1024,
 } as const;
 
 /** A failed check. */
@@ -70,6 +74,11 @@ const str =
     typeof v === 'string' && v.length >= min && v.length <= max ? v : BAD;
 const num: Check = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : BAD);
 const bool: Check = (v) => (typeof v === 'boolean' ? v : BAD);
+/** A string cut to `max` characters, for the fields older Mods send without a limit. */
+const clipped =
+  (max: number): Check =>
+  (v) =>
+    typeof v === 'string' ? v.slice(0, max) : BAD;
 const oneOf =
   (...values: string[]): Check =>
   (v) =>
@@ -90,6 +99,11 @@ const list =
     }
     return out;
   };
+/** As `list`, but entries past `max` are dropped instead of refusing the list. */
+const clippedList =
+  (item: Check, max: number): Check =>
+  (v) =>
+    Array.isArray(v) ? list(item, max)(v.slice(0, max)) : BAD;
 /** A new object holding only `fields`, each checked; optional ones left out stay out. */
 function pick(fields: Record<string, Check>, v: Record<string, unknown>): Record<string, unknown> | typeof BAD {
   const out: Record<string, unknown> = {};
@@ -111,7 +125,7 @@ const json =
     v === undefined || JSON.stringify(v).length <= max ? v : BAD;
 
 const player = str(LIMITS.player);
-const output = list(str(LIMITS.line), LIMITS.output);
+const output = clippedList(clipped(LIMITS.line), LIMITS.output);
 const lines = object({ lines: list(str(LIMITS.line), LIMITS.logLines) });
 const hello = { protocol: num, serverId: str(), token: str(), modVersion: str() };
 
@@ -136,7 +150,7 @@ const GAME: Schemas<Hello | ModMsg> = {
   quest: { player, quests: list(object({ name: str(LIMITS.text, 1), main: bool }), 50, 1) },
   link: { player, uuid: str(), code: str() },
   unlink: { player },
-  backup: { ok: bool, detail: str(LIMITS.detail) },
+  backup: { ok: bool, detail: clipped(LIMITS.detail) },
   milestone: {
     kind: oneOf('research', 'rocket', 'platform', 'landing'),
     text: str(LIMITS.message),

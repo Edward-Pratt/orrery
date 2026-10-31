@@ -3,6 +3,7 @@ import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { parseDaily } from './daily.ts';
 import { GAMES, rateOf, type LagConfig } from './lag.ts';
+import { LIMITS } from './protocol.ts';
 import { QUEST_MODES, type QuestMode } from './quests.ts';
 import type { Game } from './types.ts';
 
@@ -89,7 +90,7 @@ export type HostIntegration = { id: string; mounts: string[]; memoryMaxPercent: 
 export type HostLimits = Omit<HostIntegration, 'id' | 'mounts'>;
 
 /**
- * An Agent on a remote Host, by id (also its Host's id): its name, its token (at least 32 characters), the tailnet
+ * An Agent on a remote Host, by id (also its Host's id): its name, its token (32 to 256 characters), the tailnet
  * address it must connect from, the factorio server it runs (`server`; that server's `service` is then backed by
  * this Agent), and its Host's warning limits (defaulted like `integrations.host`'s).
  */
@@ -275,6 +276,8 @@ export function validateConfig(raw: unknown): string[] {
         continue;
       }
       const sid = str(s, 'id', `servers[${i}]`);
+      // The wire's cap: a longer id never gets past a hello.
+      if (sid !== undefined && sid.length > LIMITS.text) err(`servers[${i}]`, `"id" must be at most ${LIMITS.text} characters`);
       const where = sid === undefined ? `servers[${i}]` : `server "${sid}"`;
       str(s, 'name', where);
       for (const key of ['dailyRestart', 'dailySummary']) {
@@ -344,7 +347,7 @@ export function validateConfig(raw: unknown): string[] {
     port(mc, where);
     for (const [sid, token] of byServer(mc, 'tokens', where, ids)) {
       if (games.get(sid) === 'factorio') err(`${where}.tokens`, `"${sid}" is a factorio server: only minecraft servers have a Mod token`);
-      else if (typeof token !== 'string' || token.length < 16) err(`${where}.tokens`, `"${sid}" must be at least 16 characters`);
+      else if (typeof token !== 'string' || token.length < 16 || token.length > LIMITS.text) err(`${where}.tokens`, `"${sid}" must be 16 to ${LIMITS.text} characters`);
       else if (seen.has(token)) err(`${where}.tokens`, `"${sid}" is the same as another server's`);
       else seen.add(token);
     }
@@ -454,7 +457,7 @@ export function validateConfig(raw: unknown): string[] {
       }
       str(a, 'name', at);
       const token = a.token;
-      if (typeof token !== 'string' || token.length < 32) err(at, '"token" must be at least 32 characters');
+      if (typeof token !== 'string' || token.length < 32 || token.length > LIMITS.text) err(at, `"token" must be 32 to ${LIMITS.text} characters`);
       else if (seen.has(token)) err(at, '"token" is the same as another token');
       else seen.add(token);
       const address = str(a, 'address', at);

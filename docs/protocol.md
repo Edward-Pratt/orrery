@@ -22,15 +22,17 @@ checked against its request's shape before it is read).
 
 The hub enforces these on the Mod port and the Agent port alike (`LIMITS` in `hub/src/protocol.ts`). A message with
 a field over its limit is invalid as a whole: before the handshake that closes the connection, after it the line is
-ignored. Lengths count characters (UTF-16 code units).
+ignored. Two fields are cut to their limits instead: `output[]` (its first 500 lines, each cut to 1 KiB) and a
+`backup`'s `detail`, since Mods already deployed send up to 2000 lines of any length, and an exception's text as is.
+Lengths count characters (UTF-16 code units).
 
 | field | limit |
 |---|---|
 | player names (`player`, `players[]`, a milestone's `force`) | 64 characters |
 | chat and death `message`, a milestone's `text` | 1 KiB (1024 characters) |
 | `players[]` | 200 entries |
-| `output[]` (`cmdResult`, `cmdLate`) | 500 lines of 1 KiB |
-| `detail` (`backup`, `updateStep`), a `reply`'s `error` | 2 KiB |
+| `output[]` (`cmdResult`, `cmdLate`) | 500 lines of 1 KiB (cut) |
+| `detail` (`backup`, cut; `updateStep`), a `reply`'s `error` | 2 KiB |
 | `deployResult.log` | 16 KiB |
 | `reply.data` | 256 KiB as serialised JSON |
 | `lines[]` of a `log` or `journal` reply | 1000 lines of 1 KiB |
@@ -40,6 +42,7 @@ ignored. Lengths count characters (UTF-16 code units).
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
+| one line on the Agent port (`LIMITS.lineBytes`), before and after the handshake | 64 KiB |
 
 ## Handshake
 
@@ -50,7 +53,7 @@ First message from mod:
 ```
 
 Hub replies `{"type":"welcome"}` or `{"type":"reject","reason":"..."}` then
-closes. Tokens are per server (hub config), at least 16 characters, compared
+closes. Tokens are per server (hub config), 16 to 256 characters, compared
 in constant time. A second connection for an already-connected `serverId`
 replaces the old one; the old connection's close is then ignored (no alert).
 
@@ -126,7 +129,8 @@ An Agent is a small service on another Host that runs one Factorio server there 
 hub's Agent port, `integrations.agents.listen` (for example the hub's tailnet address, port 25584), never the Mod
 port. The same transport and handshake rules apply, with these on top: the peer's address must be the Agent's
 configured `address`, checked before any byte is read (else the socket is destroyed silently, for either first
-line); a line over 64 KiB, or 10 s over the rate limit, closes the connection; every field has its limit (above).
+line); a line over its cap (see "Field limits"), or 10 s over the rate limit, closes the connection; every field has
+its limit (above).
 
 An Agent opens two connections:
 
@@ -143,11 +147,11 @@ The first line on the Agent port is one of:
 
 | first line | accepted when | reply |
 |---|---|---|
-| `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (at least 32 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
+| `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
 | `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up. `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
 
 ```json
-{"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<at least 32 characters>","agentVersion":"agent-v1.0.0"}
+{"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}
 ```
 
 ### Agent → hub

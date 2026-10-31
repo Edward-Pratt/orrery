@@ -65,7 +65,7 @@ test('validateConfig reports every problem at once, with where it is', async (t)
     'server "gtnh": duplicate id',
     'integrations.minecraft: "listenPort" must be a port number (1–65535)',
     'integrations.minecraft.tokens: "ghost" is not a server id',
-    'integrations.minecraft.tokens: "gtnh" must be at least 16 characters',
+    'integrations.minecraft.tokens: "gtnh" must be 16 to 256 characters',
     'integrations.discord: "guildId" must be a Discord ID (17–20 digits)',
     'integrations.discord.channels: "nope" is not a server id',
     'integrations.discord.channels: "nope" must be a Discord ID (17–20 digits)',
@@ -162,7 +162,7 @@ test("an agent names a factorio server, comes from an IPv4 address and has a lon
   assert.deepEqual(validateConfig({ ...c, integrations: { ...c.integrations, host: { id: 'oracle' } } }), [
     'agent "Bad_Id": "id" must be lower-case letters, digits and dashes, starting with a letter, at most 32 characters',
     'agent "Bad_Id": "name" must be a non-empty string',
-    'agent "Bad_Id": "token" must be at least 32 characters',
+    'agent "Bad_Id": "token" must be 32 to 256 characters',
     'agent "Bad_Id": "address" must be an IPv4 address',
     'agent "Bad_Id": "server" "gtnh" must be a factorio server',
     'agent "oracle": "id" must differ from integrations.host.id: it is also its Host\'s id',
@@ -172,7 +172,7 @@ test("an agent names a factorio server, comes from an IPv4 address and has a lon
     'agent "oracle": "memoryMaxPercent" must be a number from 1 to 100',
     'agent "oracle": "memoryMinutes" must be a whole number of at least 1',
     'agent "oracle": "diskMinFreeGB" must be a positive number',
-    'agent "factorio-vm": "token" must be at least 32 characters',
+    'agent "factorio-vm": "token" must be 32 to 256 characters',
     'agent "factorio-vm": "host" must be an object',
     'agent "factorio-vm": duplicate id',
     'agent "a-very-long-agent-id-of-33-chars0": "id" must be lower-case letters, digits and dashes, starting with a letter, at most 32 characters',
@@ -182,6 +182,25 @@ test("an agent names a factorio server, comes from an IPv4 address and has a lon
   const mod = withFactorio(dir);
   mod.integrations.minecraft.tokens.gtnh = AGENT_TOKEN;
   assert.deepEqual(validateConfig(mod), ['agent "factorio-vm": "token" is the same as another token']);
+});
+
+test("tokens and server ids fit the wire's 256-character cap, so a hello can carry them", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...none } = valid(dir);
+  const id = (sid: string) => validateConfig({ ...none, servers: [{ ...none.servers[0], id: sid }] });
+  assert.deepEqual(id('x'.repeat(256)), []);
+  assert.deepEqual(id('x'.repeat(257)), ['servers[0]: "id" must be at most 256 characters']);
+  const mod = valid(dir);
+  mod.integrations.minecraft.tokens.gtnh = 'm'.repeat(256);
+  assert.deepEqual(validateConfig(mod), []);
+  mod.integrations.minecraft.tokens.gtnh = 'm'.repeat(257);
+  assert.deepEqual(validateConfig(mod), ['integrations.minecraft.tokens: "gtnh" must be 16 to 256 characters']);
+  const agent = withFactorio(dir);
+  agent.integrations.agents.agents[0]!.token = 'a'.repeat(256);
+  assert.deepEqual(validateConfig(agent), []);
+  agent.integrations.agents.agents[0]!.token = 'a'.repeat(257);
+  assert.deepEqual(validateConfig(agent), ['agent "factorio-vm": "token" must be 32 to 256 characters']);
 });
 
 test('the agents integration listens on an IPv4 address and a port of its own', async (t) => {

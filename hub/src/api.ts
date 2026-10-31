@@ -116,15 +116,16 @@ export type PartReleases = { running: string | null; latest: string | null; rele
 /**
  * `GET /api/deploys[?before=id]` (only with the GitHub integration): what each part runs against what GitHub has
  * published (drafts and prereleases left out), each minecraft server's Mod, each Agent (`agent.hosts`, by its id and
- * name; none without the agents integration), when GitHub was last asked (`checkedAt`, null: not yet) and why that
- * failed (`error`), `newerAfterDays`, and a batch (50) of the deploy history, newest first, with whether `older` ones
- * remain (`before` is a row's `id`). Changes come as `deployStarted`/`deployFinished` notices.
+ * name, with the factorio `server` it runs, from `agents[].server`; none without the agents integration), when GitHub
+ * was last asked (`checkedAt`, null: not yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the
+ * deploy history, newest first, with whether `older` ones remain (`before` is a row's `id`). Changes come as
+ * `deployStarted`/`deployFinished` notices.
  */
 export type DeploysAnswer = {
   hub: PartReleases;
   web: PartReleases;
   mod: { latest: string | null; releases: Release[]; servers: { id: string; name: string; running: string | null }[] };
-  agent: { latest: string | null; releases: Release[]; hosts: { id: string; name: string; running: string | null }[] };
+  agent: { latest: string | null; releases: Release[]; hosts: { id: string; name: string; server: string; running: string | null }[] };
   checkedAt: number | null;
   error: string | null;
   newerAfterDays: number;

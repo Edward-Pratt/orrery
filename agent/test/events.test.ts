@@ -347,7 +347,7 @@ test('the game connection: say, notice and linkResult run as the mod’s command
   const dir = await mkdtemp(join(tmpdir(), 'orrery-events-'));
   const server = { id: 'factorio', unit: 'factorio.service', install: '/opt/factorio', data: dir, rconPort: rcon.port, factorioUdpPort: 34198, agentUdpPort: 34199 };
   const client = new HubClient({
-    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server, token: 'agent-token-'.padEnd(40, 'x'), root: dir },
+    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server, token: 'agent-token-'.padEnd(40, 'x'), root: dir, state: join(dir, 'state') },
     version: 'agent-v1.2.3',
     toGame: (msg) => void toGame(run, msg),
   });
@@ -410,5 +410,14 @@ test('the game connection’s say, notice and linkResult are checked against the
   assert.deepEqual(read({ type: 'linkResult', player: 'Bob', ok: false, message: 'no' }), { type: 'linkResult', player: 'Bob', ok: false, message: 'no' });
   assert.equal(read({ type: 'linkResult', player: 'Bob', ok: 'yes', message: 'no' }), null);
   assert.equal(read({ type: 'linkResult', player: 'x'.repeat(65), ok: true, message: 'no' }), null);
-  assert.equal(read({ type: 'cmd', id: '1', command: '/players' }), null, 'cmd is not handled yet');
+});
+
+test('the game connection’s cmd and save are checked too: a console command is one line of 1 to 256 characters', () => {
+  const read = (msg: object) => readGameLine(JSON.stringify(msg));
+  assert.deepEqual(read({ type: 'cmd', id: '1', command: '/players', extra: 1 }), { msg: { type: 'cmd', id: '1', command: '/players' } });
+  assert.deepEqual(read({ type: 'cmd', id: '2', command: 'x'.repeat(256) }).msg, { type: 'cmd', id: '2', command: 'x'.repeat(256) });
+  for (const command of ['x'.repeat(257), '', '/c a\nb', '/players\u007f', 7]) {
+    assert.deepEqual(read({ type: 'cmd', id: '3', command }), { msg: null, id: '3', why: 'invalid cmd' }, JSON.stringify(command));
+  }
+  assert.deepEqual(read({ type: 'save', name: 'ignored' }), { msg: { type: 'save' } });
 });

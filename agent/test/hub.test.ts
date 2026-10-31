@@ -14,13 +14,13 @@ import { PASSWORD, fakeRcon } from './fake-rcon.ts';
 const TOKEN = 'agent-token-'.padEnd(40, 'x');
 const VERSION = 'agent-v1.2.3';
 const READING: Reading = { ups: null, players: [], paused: true, modVersion: '0.1.0' };
+const SERVER = { id: 'factorio', unit: 'factorio.service', install: '/opt/factorio', data: '/srv/factorio', rconPort: 1, factorioUdpPort: 34198, agentUdpPort: 34199 };
 
 async function setup(t: TestContext, answer?: (hello: Record<string, unknown>, conn: HubConn) => Answer, options: Partial<HubOptions> = {}) {
   const hub = await fakeHub(answer);
   const root = await mkdtemp(join(tmpdir(), 'orrery-agent-'));
-  const server = { id: 'factorio', unit: 'factorio.service', install: '/opt/factorio', data: '/srv/factorio', rconPort: 1, factorioUdpPort: 34198, agentUdpPort: 34199 };
   const client = new HubClient({
-    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server, token: TOKEN, root },
+    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: SERVER, token: TOKEN, root, state: join(root, 'state') },
     version: VERSION,
     backoffMs: 20,
     maxBackoffMs: 100,
@@ -131,7 +131,7 @@ test('the game connection: a hello with the agent token and the mod version, the
   assert.deepEqual([...agent.invalid, ...game.invalid], []);
 });
 
-test('the game connection opens only while the Agent connection is up and RCON answers; a stall keeps it, RCON gone closes it', async (t) => {
+test('the game connection opens only while the Agent connection is up and RCON answers; a stall keeps it; with no unit state known, RCON gone closes it', async (t) => {
   let tick = 0;
   let mode: 'status' | 'hang' | 'garbage' = 'status';
   const handle = (cmd: string) => {
@@ -259,4 +259,118 @@ test('a reject is retried with backoff and logged once', async (t) => {
   await eventually(() => hub.conns.length >= 4, 2000);
   assert.equal(client.connected, false);
   assert.equal(logged.filter((l) => l.includes('rejected: bad token')).length, 1, logged.join('\n'));
+});
+
+const T0 = 1_793_475_900_000;
+const unit = (since: number, active = 'active') => ({ unit: 'factorio.service', active, sub: active === 'active' ? 'running' : 'dead', since, result: 'success' });
+
+test('started once per run of the unit, after the game hello; not again for a run already announced, even by an earlier agent', async (t) => {
+  const { hub, client, root } = await setup(t);
+  client.start();
+  await eventually(() => client.connected);
+  client.status(READING); // RCON answers before the unit's first reading: started waits for it
+  const game = await eventually(() => hub.of('hello')[0]);
+  await sleep(30);
+  assert.deepEqual(sent(game, 'started'), []);
+  client.service(unit(T0));
+  await eventually(() => sent(game, 'started').length === 1, 2000, 'started');
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'state', 'started.json'), 'utf8')), { since: T0 });
+
+  game.socket.destroy(); // the hub dropped the game connection: the next one is the same run
+  await eventually(() => game.closed);
+  await sleep(20);
+  client.status(READING);
+  const again = await eventually(() => hub.of('hello')[1], 2000, 'a new game connection');
+  await sleep(50);
+  assert.deepEqual(sent(again, 'started'), [], 'the same run: no second started');
+  await client.stop();
+
+  // A new agent (a deploy, a restart) on the same run: nothing; on the next run: started.
+  const next = new HubClient({
+    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: SERVER, token: TOKEN, root, state: join(root, 'state') },
+    version: VERSION,
+  });
+  t.after(() => next.stop());
+  next.service(unit(T0));
+  next.start();
+  await eventually(() => next.connected);
+  next.status(READING);
+  const third = await eventually(() => hub.of('hello')[2], 2000, 'the new agent’s game connection');
+  await sleep(50);
+  assert.deepEqual(sent(third, 'started'), [], 'announced by the agent before');
+  next.service(unit(T0 + 5000)); // restarted between two readings
+  await eventually(() => third.closed, 2000, 'the old run’s game connection closed');
+  assert.deepEqual(sent(third, 'stopping').length, 1);
+  next.status(READING);
+  const fourth = await eventually(() => hub.of('hello')[3], 2000, 'the next run’s game connection');
+  await eventually(() => sent(fourth, 'started').length === 1, 2000, 'started for the next run');
+  assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
+});
+
+test('a console cmd on the game connection runs through command and is answered by cmdResult; one the agent won’t run is answered too', async (t) => {
+  const ran: string[] = [];
+  const command = async (c: string) => {
+    ran.push(c);
+    if (c === '/slow') throw new Error('RCON command timed out after 4000 ms');
+    return ['Online players (1):', '  alice (online)'];
+  };
+  const { hub, client } = await setup(t, undefined, { command });
+  client.start();
+  await eventually(() => client.connected);
+  client.status(READING);
+  const game = await eventually(() => hub.of('hello')[0]);
+  game.send({ type: 'cmd', id: 'c1', command: '/players' });
+  game.send({ type: 'cmd', id: 'c2', command: '/slow' });
+  game.send({ type: 'cmd', id: 'c3', command: 'x'.repeat(LIMITS.text + 1) });
+  game.send({ type: 'cmd', id: 'c4', command: '/c game.print(1)\n/c game.print(2)' });
+  await eventually(() => sent(game, 'cmdResult').length === 4, 2000, 'four results');
+  const out = Object.fromEntries(sent(game, 'cmdResult').map((r) => [r.id, r.output as string[]]));
+  assert.deepEqual(out.c1, ['Online players (1):', '  alice (online)']);
+  assert.deepEqual(out.c2, ['the command did not run: RCON command timed out after 4000 ms']);
+  assert.match(out.c3![0]!, /^refused/);
+  assert.match(out.c4![0]!, /^refused/, 'one line only');
+  assert.deepEqual(ran, ['/players', '/slow'], 'only valid commands reach RCON');
+  assert.deepEqual(game.invalid, []);
+});
+
+test('the saves list goes on the Agent connection on each connect and change; the game connection’s save goes to save, and backup back on it', async (t) => {
+  let saves = 0;
+  const { hub, client } = await setup(t, undefined, { save: () => saves++ });
+  const list = { saves: [{ name: 'world.zip', size: 10, mtime: T0, kind: 'world' as const, current: true }], free: 1e9 };
+  client.saves(list); // before any connection: kept for it
+  client.start();
+  const agent = await eventually(() => hub.of('agentHello')[0]);
+  await eventually(() => sent(agent, 'saves').length === 1, 2000, 'saves on connect');
+  assert.deepEqual(sent(agent, 'saves')[0], { type: 'saves', ...list });
+  client.saves({ ...list, free: 5e8 });
+  await eventually(() => sent(agent, 'saves').length === 2, 2000, 'saves on change');
+
+  client.status(READING);
+  const game = await eventually(() => hub.of('hello')[0]);
+  game.send({ type: 'save' });
+  await eventually(() => saves === 1, 2000, 'save called');
+  client.backup({ ok: true, detail: 'Saved orrery-20261031T120000Z.zip (1.0 MB)' });
+  await eventually(() => sent(game, 'backup').length === 1, 2000, 'backup');
+  assert.deepEqual(sent(game, 'backup')[0], { type: 'backup', ok: true, detail: 'Saved orrery-20261031T120000Z.zip (1.0 MB)' });
+
+  agent.socket.destroy(); // a new Agent connection gets the latest list again
+  const second = await eventually(() => hub.of('agentHello')[1], 2000, 'reconnected');
+  await eventually(() => sent(second, 'saves').length === 1, 2000, 'saves on the new connection');
+  assert.equal(sent(second, 'saves')[0]!.free, 5e8);
+  assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
+});
+
+test('no game connection while the unit is known and not active: RCON may still answer a Factorio that is shutting down', async (t) => {
+  const { hub, client } = await setup(t);
+  client.start();
+  await eventually(() => client.connected);
+  client.service(unit(T0, 'deactivating'));
+  client.status(READING);
+  await sleep(50);
+  assert.equal(hub.of('hello').length, 0);
+  client.service(unit(T0 + 1000, 'inactive'));
+  client.service(unit(T0 + 5000));
+  client.status(READING);
+  const game = await eventually(() => hub.of('hello')[0], 2000, 'a game connection for the new run');
+  await eventually(() => sent(game, 'started').length === 1);
 });

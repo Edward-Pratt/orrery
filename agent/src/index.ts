@@ -8,9 +8,12 @@ import { AGENT_ROOT, CONFIG_PATH, loadConfig, type Config } from './config.ts';
 import { GameEvents, toGame } from './events.ts';
 import { HostSampler } from './host.ts';
 import { HubClient } from './hub.ts';
+import { AGENT_LOG, AgentLog, Logs, logTo } from './logs.ts';
 import { RconSession } from './rcon.ts';
+import { Saves } from './saves.ts';
 import { ServiceWatch } from './service.ts';
 import { StatusPoller } from './status.ts';
+import { outputLines } from './wire.ts';
 
 /** This release as the hub and deploys name it: `agent-v` and package.json's version (0.0.0 outside a release). */
 function agentVersion(): string {
@@ -23,18 +26,36 @@ const load = (): Config =>
   loadConfig(process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH, process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
 
 /**
- * Runs until SIGTERM or SIGINT. With no hub reachable it keeps running: RCON, the unit, game events and host samples
- * go on, and the hub client retries. The mod's commands (`/orrery-hello`, and the hub's say, notice and linkResult)
- * run on an RCON connection of their own, apart from the status poll's.
+ * Runs until SIGTERM or SIGINT. With no hub reachable it keeps running: RCON, the unit, game events, saves and host
+ * samples go on, and the hub client retries. Every RCON command (`/orrery-hello`, `/orrery-save`, the hub's say,
+ * notice, linkResult and console commands) runs on an RCON connection of its own, apart from the status poll's.
+ * Everything logged also goes to `<root>/agent.log`, URL query strings stripped.
  */
 function run(): void {
   const config = load();
+  logTo(new AgentLog(join(config.root, AGENT_LOG)));
   const version = agentVersion();
   console.log(`[agent] ${version}: agent ${config.id}, server ${config.server.id}`);
+  const data = config.server.data;
   const commands = new RconSession(config.server.rconPort, config.rconPassword);
   const run = (command: string) => commands.exec(command);
-  const hub = new HubClient({ config, version, toGame: (msg) => void toGame(run, msg) });
   const service = new ServiceWatch(config.server.unit);
+  const logs = new Logs({ data, root: config.root, unit: config.server.unit });
+  const saves = new Saves({ dir: join(data, 'saves'), log: join(data, 'factorio-current.log'), run, unit: () => service.read() });
+  const hub = new HubClient({
+    config,
+    version,
+    toGame: (msg) => void toGame(run, msg),
+    command: async (command) => outputLines(await run(command)),
+    save: () => void saves.save(),
+    handlers: {
+      serviceAct: ({ action }) => service.act(action),
+      logs: () => logs.list(),
+      log: ({ name }) => logs.log(name),
+      journal: ({ unit }) => logs.journal(unit),
+      restore: ({ name }) => saves.restore(name),
+    },
+  });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,
@@ -52,10 +73,14 @@ function run(): void {
     hub.service(s);
     events.service(s);
   });
+  service.on('stopping', () => hub.stopping());
   status.on('status', (r) => {
     hub.status(r);
     events.rconUp();
+    saves.played(r.players.length > 0);
   });
+  saves.on('saves', (m) => hub.saves(m));
+  saves.on('backup', (b) => hub.backup(b));
   events.on('event', (e) => hub.event(e));
   status.on('stalled', () => hub.stalled());
   status.on('down', () => hub.down());
@@ -70,6 +95,7 @@ function run(): void {
   service.start();
   status.start();
   events.start();
+  saves.start();
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -80,6 +106,7 @@ function run(): void {
     status.stop();
     service.stop();
     events.stop();
+    saves.stop();
     commands.close();
     void hub.stop().then(() => process.exit(0));
   };

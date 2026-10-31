@@ -22,6 +22,8 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
   const data = join(dir, 'factorio');
   await mkdir(root);
   await mkdir(join(data, 'config'), { recursive: true });
+  await mkdir(join(data, 'saves'));
+  await writeFile(join(data, 'saves', 'world.zip'), 'map');
   await mkdir(join(dir, 'bin'));
   await writeFile(join(data, 'config', 'server-settings.json'), JSON.stringify({ auto_pause: true }));
   const config = {
@@ -50,7 +52,7 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
 const status = () =>
   JSON.stringify({ ok: true, tick: Date.now(), tick_paused: false, players: {}, version: '2.1.24', mods: { base: '2.1.24', orrery: '0.1.0' }, loaded: true });
 
-test('the agent connects both ways, and on SIGTERM sends bye, closes both connections and exits 0', async (t) => {
+test('the agent connects both ways, pushes its saves, carries out serviceAct with stopping first; on SIGTERM sends bye, closes both connections and exits 0', async (t) => {
   const rcon = await fakeRcon(status);
   const hub = await fakeHub();
   t.after(async () => {
@@ -70,6 +72,17 @@ test('the agent connects both ways, and on SIGTERM sends bye, closes both connec
   assert.equal(game.lines[0]!.modVersion, '0.1.0');
   await eventually(() => agent.lines.some((m) => m.type === 'serviceState'), 5000, 'serviceState');
   assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^show --timestamp=unix --property=ActiveState,SubState,Result,StateChangeTimestamp -- factorio.service$/m);
+  const saves = await eventually(() => agent.lines.find((m) => m.type === 'saves'), 5000, 'saves');
+  assert.deepEqual((saves.saves as { name: string; kind: string }[]).map((s) => [s.name, s.kind]), [['world.zip', 'world']]);
+  await eventually(() => game.lines.some((m) => m.type === 'started'), 5000, 'started');
+
+  agent.send({ type: 'serviceAct', id: 'r1', action: 'restart' });
+  await eventually(() => agent.lines.find((m) => m.type === 'reply' && m.id === 'r1'), 5000, 'the reply');
+  assert.deepEqual(agent.lines.find((m) => m.id === 'r1'), { type: 'reply', id: 'r1', ok: true });
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^restart --no-block -- factorio.service$/m, 'the fake systemctl on PATH');
+  await eventually(() => game.closed, 5000, 'the game connection closed after stopping');
+  assert.equal(game.lines.at(-1)!.type, 'stopping');
+  assert.match(await readFile(join(root, 'agent.log'), 'utf8'), /Z \[agent\] agent-v0\.0\.0: agent factorio-vm/);
 
   child.kill('SIGTERM');
   const [code] = await once(child, 'exit');

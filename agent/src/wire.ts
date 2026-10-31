@@ -163,11 +163,15 @@ const AGENT: Schemas<HubAgentMsg> = {
 
 /** The hub's messages on the game connection that the agent carries out in game, as the mod's RCON commands. */
 export type ToGame = Extract<HubMsg, { type: 'say' | 'notice' | 'linkResult' }>;
-/** What the agent handles on the game connection so far: the handshake's answer, then `ToGame`. `cmd` and `save` read as unknown. */
-export type GameIn = Extract<HubMsg, { type: 'welcome' | 'reject' }> | ToGame;
+/** What the hub sends on the game connection: the handshake's answer, `ToGame`, a console `cmd` and `save`. */
+export type GameIn = Extract<HubMsg, { type: 'welcome' | 'reject' | 'cmd' | 'save' }> | ToGame;
+/** A console command: one line (the hub strips control characters, so one here is not the hub's), 1 to 256 characters. */
+const command: Check = (v) => (typeof v === 'string' && !/[\u0000-\u001f\u007f]/.test(v) ? str(LIMITS.text, 1)(v) : BAD);
 const GAME: Schemas<GameIn> = {
   welcome: {},
   reject: { reason: str(LIMITS.detail) },
+  cmd: { id, command },
+  save: {},
   // docs/protocol.md lets `source` be left out (older hubs); the mod prints anything but `dashboard` as Discord.
   say: { author: str(), message: str(LIMITS.message), source: (v) => (v === undefined ? 'discord' : oneOf('discord', 'dashboard')(v)) },
   notice: { message: str(LIMITS.message) },
@@ -200,3 +204,35 @@ export const readGameLine = (line: string): Read<GameIn> => read(line, GAME);
 
 /** The requests, for handler tables. */
 export type Request<T extends AgentRequest['type']> = Extract<AgentRequest, { type: T }>;
+
+// ---- Text cut to the hub's limits before it is sent.
+
+/** `text` cut to `max` characters (UTF-16 code units), never leaving half a surrogate pair. */
+export function cut(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const c = text.slice(0, max);
+  return /[\uD800-\uDBFF]$/.test(c) ? c.slice(0, -1) : c;
+}
+
+/**
+ * An RCON reply as a `cmdResult`'s `output`: its lines (none for an empty reply), the first 500, each cut to 1 KiB,
+ * as the hub would keep them anyway; so `encode` never has to drop any but in a reply of wide characters.
+ */
+export function outputLines(reply: string): string[] {
+  if (reply === '') return [];
+  return reply.split('\n', LIMITS.output).map((l) => cut(l.endsWith('\r') ? l.slice(0, -1) : l, LIMITS.line));
+}
+
+/**
+ * Lines for a `log` or `journal` reply's `data`: the last `max` (at most 1000), each cut to 1 KiB, and the oldest
+ * dropped until `{ lines }` serialised fits the hub's 256 KiB for a reply's `data` (the hub refuses the whole reply
+ * otherwise; `encode`'s own trim only keeps the line under 1 MiB).
+ */
+export function replyLines(lines: string[], max: number = LIMITS.logLines): string[] {
+  const kept = lines.slice(-Math.min(max, LIMITS.logLines)).map((l) => cut(l, LIMITS.line));
+  let total = JSON.stringify({ lines: [] }).length;
+  let from = kept.length;
+  // Newest first: each line's JSON and its comma (one more than JSON has).
+  while (from > 0 && total + JSON.stringify(kept[from - 1]).length + 1 <= LIMITS.replyData) total += JSON.stringify(kept[--from]).length + 1;
+  return kept.slice(from);
+}

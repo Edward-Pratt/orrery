@@ -3,9 +3,31 @@
 # Release layout: /home/opc/orrery holds releases/hub-vX.Y.Z/, current -> releases/hub-vX.Y.Z (flipped by
 # deploy-hub.sh through orrery-deploy@.service), config.json and hub.db (its dbPath absolute), so every release
 # shares the same data.
+#
+# With integrations.agents, the hub host is on the remote Host's tailnet, and its Agent port is open to that Host's
+# tailnet IP only. Once, by hand:
+#   1. Join the tailnet as tag:orrery-hub, with the one-off auth key tagged tag:orrery-hub that the tailnet's admin
+#      sends; never --ssh (Tailscale SSH stays off on the hub host):
+#        curl -fsSL https://tailscale.com/install.sh | sh
+#        sudo systemctl enable --now tailscaled
+#        sudo tailscale up --auth-key=<key> --hostname=orrery-hub --accept-dns=false
+#      `tailscale ip -4` is the hub's tailnet IP (integrations.agents' listen host).
+#   2. Put tailscale0 in its own firewalld zone, tailnet: the default target (rejects), no open ports, and one rich
+#      rule letting in only the Agent's Host (VM_TAILNET_IP, the 100.x.y.z of its `tailscale ip -4`) on 25584/tcp:
+#        sudo firewall-cmd --permanent --new-zone=tailnet
+#        sudo firewall-cmd --permanent --zone=tailnet --add-interface=tailscale0
+#        sudo firewall-cmd --permanent --zone=tailnet \
+#          --add-rich-rule='rule family=ipv4 source address=VM_TAILNET_IP port port=25584 protocol=tcp accept'
+#        sudo firewall-cmd --reload
+#        sudo firewall-cmd --zone=tailnet --list-all   # interfaces: tailscale0, ports: (none), services: (none), one rich rule
+#      If 25584/tcp was ever opened to the whole zone, close it:
+#        sudo firewall-cmd --permanent --zone=tailnet --remove-port=25584/tcp && sudo firewall-cmd --reload
+#      Tailscale installs netfilter rules of its own, so prove the zone holds: from the VM, with the tailnet policy
+#      opened for a moment, every port the hub host listens on (`ss -tlnH`, `ss -ulnH`) but 25584 must be refused.
 [Unit]
 Description=orrery hub
-After=network-online.target
+# tailscaled: the Agent port binds the tailnet IP, which exists only once Tailscale is up.
+After=network-online.target tailscaled.service
 Wants=network-online.target
 
 [Service]
@@ -15,6 +37,11 @@ User=opc
 # DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web, GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
+# FACTORIO_USERNAME=... and FACTORIO_TOKEN=... (the owner's factorio.com account, for mod downloads), root-only and
+# read by this unit alone: the deploy units load /etc/orrery.env, and their npm ci must never see the account.
+#   sudo install -m 600 -o root -g root /dev/null /etc/orrery-factorio-account.env && sudoedit /etc/orrery-factorio-account.env
+# The leading - : a hub without the Factorio server starts without the file.
+EnvironmentFile=-/etc/orrery-factorio-account.env
 # Needs Node 24+ (tested on 24.21 and 26.9). If installed via nvm, use the full path from `which node`.
 ExecStart=/usr/bin/node /home/opc/orrery/current/hub/src/index.ts /home/opc/orrery/config.json
 Restart=on-failure

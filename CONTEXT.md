@@ -1,6 +1,6 @@
 # orrery
 
-A hub for everything its owner runs or ships (game servers first): it holds all state, and integrations plug it into the outside world (Discord, Minecraft servers via a thin mod, hosts). The dashboard is its browser frontend. Personal productivity (notes, tasks, finances) is out of scope.
+A hub for everything its owner runs or ships (game servers first): it holds all state, and integrations plug it into the outside world (Discord, Minecraft servers via a thin mod, Agents on other hosts, this host). The dashboard is its browser frontend. Personal productivity (notes, tasks, finances) is out of scope.
 
 ## Language
 
@@ -11,7 +11,7 @@ The owner of all state. Integrations plug into it; the dashboard only talks to i
 _Avoid_: bot (for the whole system), backend, platform, core
 
 **Integration**:
-A built-in part of the hub that connects it to one outside system (Discord, Minecraft servers, the host). Each is switched on and configured in the hub's config; none is required.
+A built-in part of the hub that connects it to one outside system (Discord, Minecraft servers, Agents, the host). Each is switched on and configured in the hub's config; none is required.
 _Avoid_: module, plugin, extension, mod
 
 **Host**:
@@ -19,7 +19,7 @@ A machine that things the hub knows run on, identified by an `id`, with its CPU,
 _Avoid_: box, node, server (a server is a game server)
 
 **Agent**:
-A small service on another Host that dials out to the hub and runs one server there: it controls the server's service, keeps its saves, carries out its game updates and its own deploys, and measures the Host. The hub never logs in to that Host; it asks the Agent. Staging has none.
+A small service on another Host that dials out to the hub and runs one server there: it controls the server's service, keeps its saves and measures the Host (game updates and its own deploys come in release 2). The hub never logs in to that Host; it asks the Agent. Staging has none.
 _Avoid_: daemon, worker, client, node
 
 **Server**:
@@ -35,7 +35,7 @@ A URL the hub requests on a schedule to see whether it is up and how fast it ans
 _Avoid_: monitor, probe, ping (the hub's own liveness ping is something else)
 
 **Mod**:
-The server-side Minecraft mod that connects a server to the hub. Each one is named by its target (the 1.7.10 mod) and versioned independently. The Factorio mod (`orrery` on the mod portal) is a separate part, never the Mod: it talks only to its server's Agent, and its releases reach the server through game updates.
+The server-side Minecraft mod that connects a server to the hub. Each one is named by its target (the 1.7.10 mod) and versioned independently. The Factorio mod (`orrery` on the mod portal) is a separate part, never the Mod: it talks only to its server's Agent, and its releases reach the server by hand until game updates exist (release 2).
 _Avoid_: adapter, plugin, client
 
 **Dashboard**:
@@ -58,7 +58,7 @@ A copy of a server's world that the hub lists and can restore. For a Minecraft s
 _Avoid_: snapshot, save (for a Minecraft backup)
 
 **Save**:
-A Factorio save file of a factorio server, kept on its Host and never copied off it: a named save orrery makes (on request, every 6 h if anyone played, and before every game update), one of Factorio's autosaves, or a world file. The file Factorio last loaded is the current world.
+A Factorio save file of a factorio server, kept on its Host and never copied off it: a named save orrery makes (on request, and every 6 h if anyone played since the last), one of Factorio's autosaves, or a world file. The file Factorio last loaded is the current world.
 _Avoid_: savegame, map file, snapshot
 
 **Restore**:
@@ -95,7 +95,7 @@ _Avoid_: import, register
 Moving a server to another version of its pack, with its extras and config edits applied again. Going back to an older pack version is a pack update too, and so is applying changed extras or config edits onto the version already installed.
 _Avoid_: upgrade, reinstall
 
-**Game update**:
+**Game update** (release 2; in release 1 the Factorio version changes by re-running the setup with `--factorio`, and mods are added by hand):
 The factorio counterpart of a pack update: moving a factorio server to another Factorio version or set of portal mods. The hub picks the versions and their dependencies; the Agent carries it out (a backup, a countdown stop, the swap, a health gate, and a rollback if the gate fails). Adding a mod, or putting a new Factorio mod release on the server, is a game update too.
 _Avoid_: pack update (a pack is Minecraft's), upgrade, patch
 
@@ -122,11 +122,11 @@ A tagged version of one part (hub, Mod, dashboard, Agent or Factorio mod), e.g. 
 _Avoid_: build, version (a version is the number)
 
 **Deploy**:
-Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server, an Agent onto its Host. Each hub deploys only its own environment. Going back to an older release is a deploy too. The Factorio mod is not deployed: its releases reach its server through game updates.
+Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server, an Agent onto its Host (release 2; in release 1 the Host's owner re-runs the setup at the new Agent release). Each hub deploys only its own environment. Going back to an older release is a deploy too. The Factorio mod is not deployed: its releases reach its server by hand, and from release 2 through game updates.
 _Avoid_: install, rollout, push, redeploy (deploying the running release is refused)
 
 **Rollback**:
-Returning by itself to what ran before, when a deploy's new release or an update's new version fails to come up: to the release before it, or to the files before it (for a game update, also to its pre-update save).
+Returning by itself to what ran before, when a deploy's new release or an update's new version fails to come up: to the release before it, or to the files before it (for a game update, release 2, also to its pre-update save).
 _Avoid_: revert, downgrade (choosing an older release is a deploy)
 
 **Environment**:

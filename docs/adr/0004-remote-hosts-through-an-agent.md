@@ -2,9 +2,10 @@
 
 The Factorio server runs on a friend's Oracle Linux 9 aarch64 VM, which also runs his own software and which the
 owner never logs in to. The hub stays the owner of all state, on the owner's host (ADR 0002). Everything local to the
-remote Host (RCON, the Factorio mod's events, `factorio.service`, saves, host samples, game and mod updates, its own
-deploys) belongs to an **Agent**: a small Node/TypeScript service (`agent/`) that runs natively there, dials out to
-the hub and carries out the hub's requests.
+remote Host (RCON, the Factorio mod's events, `factorio.service`, saves, host samples) belongs to an **Agent**: a small
+Node/TypeScript service (`agent/`) that runs natively there, dials out to the hub and carries out the hub's requests.
+Game updates and the Agent's own deploys will too (release 2, `docs/ROADMAP.md`); until then the friend re-runs the
+setup at a new `agent-v` tag, or with `--factorio` for another Factorio version, and mods are put in by hand.
 
 - **The Agent dials out**, like the Mod, to the hub's Agent port (25584, `integrations.agents.listen`), a listener of
   its own bound to the hub's tailnet address. The Mod port (25580) and the web API stay on loopback, so "the hub binds
@@ -36,9 +37,12 @@ The Agent port is hostile input. Anything the tailnet policy lets through can re
 person's machine, and the hub also runs the GTNH bridge, the Discord bot and the dashboard: one bad line must never
 take it down. So, on top of the address check (details in `docs/protocol.md`, "Field limits" and "Agent connection"):
 
-- **A line cap.** One line is at most 1 MiB (`LIMITS.lineBytes`), before and after the handshake; a longer line
-  destroys the socket before more of it is kept. The owner set it on 2026-10-31, replacing the design's 64 KiB. The
-  Agent trims every line it sends to fit.
+- **A line cap of 1 MiB.** One line is at most 1,048,576 bytes (`LIMITS.lineBytes`, its newline not counted), before
+  and after the handshake; a longer line destroys the socket before more of it is kept. The design said 64 KiB, but
+  its own field limits allow longer legal lines (a command's output is up to 500 lines of 1 KiB, a reply's data 256 KiB
+  as JSON), so 64 KiB would have refused them. Claude set 1 MiB on 2026-10-31 while the owner was away: one constant
+  to change. The Agent keeps every line it sends within it, dropping a command output's or a reply's oldest lines
+  first and never cutting JSON.
 - **Field limits.** Every field of every message has a maximum, on the Mod port and the Agent port alike.
 - **Schema-only parsing.** The hub keeps only the fields a message's schema lists; unknown fields never reach events.
 - **A rate limit per connection.** Over it, lines are dropped and logged once; 10 s over it closes the connection.
@@ -55,6 +59,7 @@ purpose.
   own lets the bind address and firewalld apply to Agents alone, and leaves the Forge mod and `PROTOCOL_VERSION` as
   they are.
 - **A Tailscale TCP forward to loopback**: rejected. It hides the peer address, which the hub checks.
+- **A line cap of 64 KiB**: rejected. Legal messages under the field limits are longer.
 - **A protocol version of the Agent's own**: rejected. Its game connection is the Mod's protocol, and its additions
   are all additive.
 - **One multiplexed connection, with `up` and `down` messages for the game**: rejected. It would refactor

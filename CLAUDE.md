@@ -8,7 +8,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `agent/` — Node/TypeScript service on a remote Host that dials out to the hub and runs that Host's Factorio server. See `agent/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `factorio/` — the Factorio mod `orrery`, control-only Lua, published on the mod portal. See `factorio/CLAUDE.md`.
-- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config), the `Caddyfile` (TLS for the dashboard and Grafana;
+- `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config, and the services an Agent backs, which the hub never runs systemctl on: its Agent does, on its own Host), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
   there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
   tested by `test-restore-backup.sh`) and the deploys, which the hub starts per tag through polkit:
@@ -35,15 +35,18 @@ Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `m
 ## Architecture rules
 
 - The hub owns all state. **Integrations** are built in and switched on by their section under `integrations` in
-  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `discord`, `web`, `checks`, `host`, `systemd` and `github`. Packs need no section of their own: a
+  `config.json`; none is required (`docs/adr/0002`, `CONTEXT.md`). Today: `minecraft`, `agents`, `discord`, `web`, `checks`, `host`, `systemd` and `github`. Packs need no section of their own: a
   server with a `dir`, a linked service (`systemd`) and a Mod token (`minecraft`) has one. The hub's host needs `unzip`
   for them (and for `restore-backup.sh`), and `tar` for the library's Java runtimes.
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
+- **Agents integration** = the Agent port (`integrations.agents.listen`, the hub's tailnet address) and an Agent per
+  remote Host, each running one factorio server. Agents dial **out** to it; `Agents` (`hub/src/agents.ts`) checks the
+  peer address before reading a byte and hands each Agent's game connection to `ServerHub`. Off: no Agent port.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
   API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
   (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
-  (`Hosts`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`); they
+  (`Hosts`, `Agents`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same

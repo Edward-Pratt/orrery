@@ -42,7 +42,7 @@ Lengths count characters (UTF-16 code units).
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
-| one line on the Agent port (`LIMITS.lineBytes`), before and after the handshake | 64 KiB |
+| one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
 ## Handshake
 
@@ -93,7 +93,7 @@ a hub outage never replays stale chat into Discord.
 | type | fields | effect |
 |---|---|---|
 | `say` | `author`, `message`, `source` (optional: `discord` or `dashboard`, where the line was typed) | broadcast `[Dashboard] <author> message` (gold) for `dashboard`, else `[Discord] <author> message` (blue), in MC chat. `source` was added without a protocol bump: an older mod ignores it and prints `[Discord]` |
-| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult` |
+| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept |
 | `linkResult` | `player`, `ok` (boolean), `message` | answer to `link`/`unlink`, shown to that player |
 | `notice` | `message` | Factorio only (the Agent's game connection): a system line in game, such as a countdown. A Mod gets `cmd` `say …` instead |
 | `save` | — | Factorio only: the Agent makes a named save (`orrery-<time>`), then sends `backup` |
@@ -110,7 +110,7 @@ A `cmdResult` with an unknown or late `id` is ignored.
 | `stopping` then disconnect | clean stop | "🛑 Server stopped" |
 | disconnect without `stopping` | crash / killed | "💥 Server went down unexpectedly" |
 | no heartbeat for 30 s, after at least one heartbeat on this connection and before `stopping` | hung | "⚠️ Server not responding"; next heartbeat posts "✅ Server responding again" |
-| not connected 60 s after hub start | offline (recorded as `down` for uptime) | — |
+| not connected 60 s after hub start | offline (recorded as `down` for uptime); a factorio server whose Agent isn't connected stays `unknown` | — |
 | a factorio server's Agent sends `bye`, or is lost (see "Agent connection") | `lost`: its game connection is dropped, players and rate cleared (recorded as `unknown`) | — (a lost Agent is one host notice instead) |
 
 Hung detection is armed by the first heartbeat (not by `started`) so it also
@@ -148,7 +148,7 @@ The first line on the Agent port is one of:
 | first line | accepted when | reply |
 |---|---|---|
 | `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
-| `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up. `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
+| `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up (else `reject` with `its agent is not connected`). `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
 
 ```json
 {"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}

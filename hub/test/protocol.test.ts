@@ -288,3 +288,10 @@ test("a reply's data is checked against its request, and copied", () => {
   assert.equal(parseReplyData('logs', { files: [{ ...file, size: '10' }] }), null);
   assert.equal(parseReplyData('logs', ['factorio-current.log']), null);
 });
+
+test("a reply's data too deeply nested to serialise is refused, not thrown", (t) => {
+  t.mock.method(JSON, 'stringify', () => {
+    throw new RangeError('Maximum call stack size exceeded'); // what an older V8 does on deep nesting
+  });
+  assert.equal(parseAgentLine('{"type":"reply","id":"x","ok":true,"data":[[[1]]]}'), null);
+});

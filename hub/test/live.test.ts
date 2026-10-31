@@ -19,6 +19,7 @@ const history: HubEvent[] = [
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['There are 2 players'] },
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['later'], late: true },
   { serverId: 'gtnh', type: 'death', player: 'Alex', message: 'Alex fell' },
+  { serverId: 'gtnh', type: 'milestone', kind: 'landing', text: 'Vulcanus', player: 'Alex', force: 'blue' },
   { serverId: 'gtnh', type: 'leave', player: 'Alex' },
 ];
 
@@ -91,4 +92,20 @@ test('maintain keeps the newest 500 stored feed events of each server', async (t
   assert.equal(kept.length, 500);
   assert.deepEqual([kept[0], kept.at(-1)], [202, 1200]);
   assert.deepEqual(db.feed('other', 1000).map(([id]) => id), [3, 5, 7]);
+});
+
+test("a server's latest TPS is dropped when it stops, crashes or its Agent leaves", () => {
+  const db = new Db(':memory:');
+  const hub = hubOf('a', 'b', 'c');
+  const live = new LiveFeed(hub, db);
+  for (const [serverId, down] of [['a', 'stopped'], ['b', 'crashed'], ['c', 'lost']] as const) {
+    hub.emit('event', { serverId, type: 'tps', tps: 50 });
+    hub.emit('event', { serverId, type: down });
+  }
+  assert.deepEqual(unstamped(live.since()), [
+    { serverId: 'a', type: 'stopped' },
+    { serverId: 'b', type: 'crashed' },
+    { serverId: 'c', type: 'lost' },
+  ]);
+  db.close();
 });

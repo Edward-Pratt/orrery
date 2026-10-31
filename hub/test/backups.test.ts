@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { backupStats, BackupWatcher, freeBytes, growthPerDay, listBackups, type Backup } from '../src/backups.ts';
+import { Db } from '../src/db.ts';
 import type { HubEvent, Notice, ServerHub } from '../src/servers.ts';
 
 const MIN = 60_000;
@@ -89,6 +90,54 @@ test('the watchdog says so when there are no backups at all', async (t) => {
   t.mock.timers.tick(10 * MIN);
   await flush();
   assert.deepEqual(notices, [{ severity: 'warning', kind: 'backupsMissing', serverId: 'gtnh' }]);
+});
+
+/** An Agent's server: its watchdog asks the database whether anyone played since its newest save, as the hub's does. */
+function agentSetup(t: TestContext) {
+  const w = setup(t);
+  const db = new Db(':memory:');
+  t.after(() => db.close());
+  w.watcher.watchdog('space', { maxAgeHours: 12, minFreeGB: 10, played: (since) => db.sessionsSince('space', since).length > 0 });
+  const tick = async (minutes: number) => {
+    for (let m = 0; m < minutes; m += 10) {
+      t.mock.timers.tick(10 * MIN);
+      await flush();
+    }
+  };
+  return { ...w, db, tick };
+}
+
+test("an Agent's server with nobody playing stays quiet after 24 h, its newest save that old", async (t) => {
+  const { notices, set, db, tick } = agentSetup(t);
+  const saved = Date.now();
+  set([{ name: 'orrery-2026-10-31T06-00-00Z.zip', size: 1, mtimeMs: saved, kind: 'named', current: false }]);
+  db.openSession('space', 'Ann', saved - 2 * 60 * MIN); // played before the save, and left before it
+  db.closeSession('space', 'Ann', saved - 60 * MIN);
+  await tick(24 * 60);
+  assert.deepEqual(notices, []);
+});
+
+test("an Agent's server whose saves are stale after someone played warns once, and re-arms after a new save", async (t) => {
+  const { notices, set, db, tick } = agentSetup(t);
+  const saved = Date.now();
+  set([{ name: 'orrery-a.zip', size: 1, mtimeMs: saved, kind: 'named', current: false }]);
+  await tick(10 * 60);
+  db.openSession('space', 'Ann', Date.now()); // 10 h after the save: from now on one is due
+  await tick(3 * 60);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'backupOverdue', hours: 12, newest: 'orrery-a.zip', serverId: 'space' }]);
+  db.closeSession('space', 'Ann', Date.now());
+  set([{ name: 'orrery-b.zip', size: 1, mtimeMs: Date.now(), kind: 'named', current: false }]); // saved after the play
+  await tick(24 * 60); // nobody since: quiet again, however old
+  db.openSession('space', 'Bo', Date.now());
+  await tick(10);
+  assert.deepEqual(notices.slice(1), [{ severity: 'warning', kind: 'backupOverdue', hours: 24, newest: 'orrery-b.zip', serverId: 'space' }]);
+});
+
+test("an Agent's server with no save known yet is not said to have none", async (t) => {
+  const { notices, db, tick } = agentSetup(t);
+  db.openSession('space', 'Ann', Date.now() - 60 * MIN);
+  await tick(60);
+  assert.deepEqual(notices, []);
 });
 
 test('growthPerDay compares the newest backup with the oldest, if a day or more apart', () => {

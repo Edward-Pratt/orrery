@@ -6,6 +6,7 @@ import { fakeMod, hello, online, sleep, TOKEN, until } from './fake-mod.ts';
 async function setup(t: TestContext, opts: HubOptions = {}) {
   const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', game: 'minecraft', token: TOKEN }], opts);
   const port = await hub.listen(0);
+  hub.start();
   const events: HubEvent[] = [];
   hub.on('event', (e) => events.push(e));
   t.after(() => hub.close());
@@ -214,12 +215,30 @@ test('servers that do not connect within the grace period are reported offline',
   hub.on('event', (e) => events.push(e));
   t.after(() => hub.close());
   const port = await hub.listen(0);
+  hub.start();
   await online(port);
   await sleep(300);
   assert.deepEqual(events, [
     { serverId: 'gtnh', type: 'connected' },
     { serverId: 'idle', type: 'offline' },
   ]);
+});
+
+test("a factorio server is offline after the grace period only while its Agent is connected, else unknown", async (t) => {
+  const hub = new ServerHub(
+    [
+      { id: 'space', name: 'Space Age', game: 'factorio' },
+      { id: 'moon', name: 'Moon', game: 'factorio' },
+    ],
+    { graceMs: 150 },
+  );
+  const events: HubEvent[] = [];
+  hub.on('event', (e) => events.push(e));
+  t.after(() => hub.close());
+  hub.start(); // no Mod port needed
+  hub.agentUp('space'); // its Agent is up, its game is not
+  await sleep(300);
+  assert.deepEqual(events, [{ serverId: 'space', type: 'offline' }]);
 });
 
 test('truncate never leaves half an emoji', () => {

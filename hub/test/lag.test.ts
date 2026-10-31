@@ -63,6 +63,18 @@ test('offline or hung servers are neither sampled nor judged; lag state clears s
   assert.equal(db.tpsSince('s', 0).length, 3);
 });
 
+test('a paused server is neither sampled nor judged, and keeps its lag state for when it runs again', () => {
+  const { db, notices, sample } = setup({ s: { tps: 50, minutes: 2, enabled: true } });
+  sample({ game: 'factorio', tps: 40 });
+  sample({ tps: 40 }); // lag alert
+  sample({ paused: true, tps: 2 });
+  sample({ paused: true, tps: 2 });
+  assert.equal(db.tpsSince('s', 0).length, 2); // no rows while paused
+  assert.equal(notices.length, 1);
+  sample({ paused: false, tps: 60 }); // running again: its recovery is news
+  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 60, label: 'UPS' }]);
+});
+
 test('thresholds are per server and can be switched off', () => {
   const strict = setup({ s: { tps: 18, minutes: 1, enabled: true } });
   strict.sample({ tps: 17 });

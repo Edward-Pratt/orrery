@@ -280,3 +280,38 @@ test('a web session from before avatars reads as avatar null', async (t) => {
   db.addWebSession('t', '6', 'sam', 'abc', 9999999999999);
   assert.equal(db.webSession('t')?.avatar, 'abc');
 });
+
+test("Factorio links have their own table: an older hub after a Rollback reads and writes `links` as before", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'orrery-db-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'hub.db');
+  const db = new Db(path);
+  db.link('d1', 'Steve', 'u1', 1);
+  db.linkFactorio('d1', 'engineer', 2);
+  db.linkFactorio('d2', 'pilot', 3); // a Factorio link only
+
+  // What an older hub runs: its schema statements, then its link reads and writes.
+  const old = new DatabaseSync(path);
+  t.after(() => old.close());
+  old.exec(`
+    CREATE TABLE IF NOT EXISTS links (discord_id TEXT PRIMARY KEY, player TEXT NOT NULL, uuid TEXT NOT NULL, linked_at INTEGER NOT NULL);
+    CREATE UNIQUE INDEX IF NOT EXISTS links_player ON links (player COLLATE NOCASE);
+  `);
+  const columns = (old.prepare('PRAGMA table_info(links)').all() as { name: string }[]).map((c) => c.name);
+  assert.deepEqual(columns, ['discord_id', 'player', 'uuid', 'linked_at']);
+  const indexes = (old.prepare('PRAGMA index_list(links)').all() as { name: string }[]).map((i) => i.name).sort();
+  assert.deepEqual(indexes, ['links_player', 'sqlite_autoindex_links_1']);
+  const byDiscord = old.prepare('SELECT player, uuid FROM links WHERE discord_id = ?');
+  assert.deepEqual({ ...byDiscord.get('d1') }, { player: 'Steve', uuid: 'u1' });
+  assert.equal(byDiscord.get('d2'), undefined);
+  old.prepare('DELETE FROM links WHERE discord_id = ? OR player = ? COLLATE NOCASE').run('d2', 'Alex');
+  old.prepare('INSERT INTO links (discord_id, player, uuid, linked_at) VALUES (?, ?, ?, ?)').run('d2', 'Alex', 'u2', 4);
+  old.prepare('DELETE FROM links WHERE discord_id = ?').run('d1'); // its /unlink: Minecraft only
+
+  // Back on this hub: the Factorio links were left alone, the older hub's writes read as usual.
+  const again = new Db(path);
+  assert.deepEqual(again.factorioLinkByDiscord('d1'), { name: 'engineer' });
+  assert.deepEqual(again.factorioLinkByDiscord('d2'), { name: 'pilot' });
+  assert.equal(again.linkByDiscord('d1'), null);
+  assert.deepEqual(again.linkByDiscord('d2'), { player: 'Alex', uuid: 'u2' });
+});

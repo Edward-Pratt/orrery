@@ -88,10 +88,10 @@ export type Integrations = {
 };
 
 /**
- * `GET /api/hosts` (only with the host integration): every Host, the hub's own first, then each Agent's (`id`: the
- * Agent's), each with its id and latest sample, null until the first (for the hub's own, a minute after the hub
- * starts). Each new sample is also a `sample` event on the stream, with the host's id. `GET /api/host` is the hub's
- * own alone (kept for one release).
+ * `GET /api/hosts` (with the host or agents integration): every Host, the hub's own first, then each Agent's (`id`:
+ * the Agent's), each with its id and latest sample, null until the first (for the hub's own, a minute after the hub
+ * starts; for an Agent's, its first `hostSample`). Each new sample is also a `sample` event on the stream, with the
+ * host's id. `GET /api/host` is the hub's own alone, only with the host integration (kept for one release).
  */
 export type HostNow = { id: string; sample: HostSample | null };
 
@@ -149,15 +149,19 @@ export type DeploysAnswer = {
 export type DeployRequest = { part: DeployPart; tag: string; server?: string; host?: string };
 export type DeployAnswer = { id: number };
 
-/** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
+/**
+ * `GET /api/services/:id/logs`: its last 200 journal lines, oldest first (a service an Agent runs: the last 200 lines
+ * of its log file, from the Agent). 404 for an unlisted id, 502 if journalctl fails or the Agent can't answer.
+ */
 export type ServiceLogs = { lines: string[] };
 
 /**
  * The answer to `POST /api/services/:id/start`, `/stop` and `/restart` (no body; audited as the admin). The action
  * doesn't wait for systemd: the new state follows as `state` events. Stopping or restarting a service whose linked
  * server has players online first counts down in game (the server card's `restart`, cancelled like a restart): `at`
- * is when it will run, null if it ran at once. 404 for an unlisted id, 409 if a countdown is already running on the
- * server, 502 if systemctl fails.
+ * is when it will run, null if it ran at once. A service an Agent runs is acted on by that Agent (`serviceAct`). 404
+ * for an unlisted id, 409 if a countdown is already running on the server, 502 if systemctl fails or the Agent can't
+ * answer.
  */
 export type ServiceActionAnswer = { at: number | null };
 
@@ -215,21 +219,24 @@ export type ServerDetail = {
   backups: BackupsAnswer;
   /** Whether the server can have a pack: a folder, a linked service and a Mod token. Only then are there pack routes. */
   pack: boolean;
-  /** Whether the server has a folder, so its logs can be read (`GET /api/servers/:id/logs`). */
+  /** Whether the server's logs can be read (`GET /api/servers/:id/logs`): it has a folder, or an Agent runs it. */
   logs: boolean;
 };
 
 /**
  * `GET /api/servers/:id/logs`: the server folder's readable logs, newest first: the files directly in `logs/`
  * (`*.log`, `*.log.gz`) and its crash reports (`crash-reports/*.txt`, `hs_err_pid*.log`). Symlinks and folders are
- * left out. 404 for an unknown server or one without a folder. Not audited.
+ * left out. A server an Agent runs: the files the Agent serves (`factorio-current.log`, `factorio-previous.log`,
+ * `agent.log`), newest first, and no crash reports; 502 if the Agent can't answer. 404 for an unknown server or one
+ * with neither a folder nor an Agent. Not audited.
  */
 export type ServerLogFiles = LogFile[];
 
 /**
  * `GET /api/servers/:id/logs/:name`: the last 1000 lines of one listed file, oldest first, a `.gz` decompressed (the
  * shape of `ServiceLogs`). The name must be one the listing holds right now: anything else (`..`, a slash, a symlink)
- * is 404, as is an unknown server or one without a folder. 502 if the file can't be read (e.g. a broken `.gz`).
+ * is 404, as is an unknown server or one with neither a folder nor an Agent. 502 if the file can't be read (e.g. a
+ * broken `.gz`) or the Agent can't answer.
  */
 export type ServerLog = { lines: string[] };
 
@@ -281,7 +288,10 @@ export type RestartRequest = { minutes: number };
  */
 export type RestoreRequest = { name: string };
 
-/** The answer to a command, to `POST /api/servers/:id/backup` and to a restore. */
+/**
+ * The answer to a command, to `POST /api/servers/:id/backup` (a Mod's `backup start` output; a factorio server's save
+ * has none) and to a restore (the script's output; an Agent's restore, one line).
+ */
 export type CommandOutput = { output: string[] };
 
 /**

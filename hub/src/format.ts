@@ -1,8 +1,19 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
-import { rateOf, sparkline } from './lag.ts';
+import { GAMES, rateOf, sparkline } from './lag.ts';
 import { countdownText } from './restarts.ts';
-import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity, type TargetEvent } from './servers.ts';
+import {
+  stripCodes,
+  truncate,
+  type Announcement,
+  type GameMsg,
+  type HubEvent,
+  type Notice,
+  type ServerState,
+  type Severity,
+  type TargetEvent,
+} from './servers.ts';
+import type { Game } from './types.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
 
@@ -11,7 +22,8 @@ export type Post = { content: string } | { embeds: APIEmbed[] };
 
 export const COLORS = { green: 0x2ecc71, grey: 0x95a5a6, red: 0xe74c3c, orange: 0xe67e22, blue: 0x3498db } as const;
 
-// Discord embed limits.
+// Discord limits: a message's content, an embed's parts.
+const CONTENT = 2000;
 const TITLE = 256;
 const FIELD = 1024;
 const DESCRIPTION = 4096;
@@ -27,6 +39,41 @@ function title(s: string): string {
 }
 
 const embed = (e: APIEmbed): Post => ({ embeds: [e] });
+/** A plain-text post, cut to Discord's 2000 characters after escaping (escaping can double a 1 KiB message). */
+const plain = (s: string): Post => ({ content: truncate(s, CONTENT) });
+
+/** A chat line as the relay webhook posts it (the name is the webhook's own): escaped, then cut to Discord's 2000. */
+export function chatContent(message: string): string {
+  return truncate(md(message), CONTENT);
+}
+
+/** The most of a milestone's text a post shows (the subject only: a research, a planet, a platform's name). */
+const MILESTONE_TEXT = 200;
+
+/** A milestone's line: the mod sends its subject (`text`), the player for a landing, and a force other than `player`. */
+function milestoneText(m: Extract<GameMsg, { type: 'milestone' }>): string {
+  const what = md(truncate(m.text, MILESTONE_TEXT));
+  const force = m.force ? ` (${md(m.force)})` : '';
+  switch (m.kind) {
+    case 'research':
+      return `🔬 Research finished: **${what}**${force}`;
+    case 'rocket': // the planet it left, empty if unknown
+      return `🚀 First rocket launched${what ? ` from **${what}**` : ''}${force}`;
+    case 'platform':
+      return `🛰️ First space platform in orbit: **${what}**${force}`;
+    case 'landing':
+      return `🪐 First landing on **${what}**${m.player ? ` by **${md(m.player)}**` : ''}${force}`;
+  }
+}
+
+/** What `/link` answers: how to type the code in each game that has a server. */
+export function formatLinkHint(code: string, games: Game[]): string {
+  const how: Record<Game, string> = {
+    minecraft: `In Minecraft, type \`/discord link ${code}\`.`,
+    factorio: `In Factorio, type \`/orrery-link ${code}\`.`,
+  };
+  return [...GAMES.filter((g) => games.includes(g)).map((g) => how[g]), 'Within 10 minutes.'].join(' ');
+}
 
 const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
 
@@ -47,6 +94,8 @@ function noticeText(n: Notice): string | null {
     case 'restartFailed':
       return `❌ Restart failed: ${n.error}`;
     case 'lag': {
+      // Only Minecraft has dimensions to name (Factorio's rate is UPS); an older Mod sends none.
+      if (n.label === 'UPS') return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}`;
       const where = n.worst ? `${n.worst.name} (DIM ${n.worst.id}) ${Math.round(n.worst.ms)} ms/tick` : 'unknown';
       return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}; slowest: ${where}`;
     }
@@ -88,17 +137,19 @@ function noticeText(n: Notice): string | null {
 export function formatEvent(e: HubEvent): Post | null {
   switch (e.type) {
     case 'chat':
-      return { content: `**${md(e.player)}**: ${md(e.message)}` };
+      return plain(`**${md(e.player)}**: ${md(e.message)}`);
     case 'say': // chat sent into the game: Discord's own came from its channel
-      return e.source === 'dashboard' ? { content: `**${md(e.author)}** (dashboard): ${md(e.message)}` } : null;
+      return e.source === 'dashboard' ? plain(`**${md(e.author)}** (dashboard): ${md(e.message)}`) : null;
     case 'join':
-      return { content: `➡️ **${md(e.player)}** joined` };
+      return plain(`➡️ **${md(e.player)}** joined`);
     case 'leave':
-      return { content: `⬅️ **${md(e.player)}** left` };
+      return plain(`⬅️ **${md(e.player)}** left`);
     case 'death':
-      return { content: `💀 ${md(e.message)}` };
+      return plain(`💀 ${md(e.message)}`);
     case 'achievement':
-      return { content: `🏆 **${md(e.player)}** earned **${md(e.achievement)}**` };
+      return plain(`🏆 **${md(e.player)}** earned **${md(e.achievement)}**`);
+    case 'milestone':
+      return plain(milestoneText(e));
     case 'started':
       return embed({ title: '✅ Server started', color: COLORS.green });
     case 'stopped':
@@ -122,7 +173,6 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
     case 'lost': // its Agent left: a planned exit is not news, and a lost Agent is a host notice
-    case 'milestone': // not posted yet
     case 'quest': // the QuestAnnouncer turns it into questBatch announcements
     case 'link': // answered by Links, which announces a new link
     case 'unlink':
@@ -261,7 +311,7 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
     title: 'Backups',
     color: COLORS.blue,
     fields: [
-      { name: 'Newest', value: truncate(newest.name, FIELD), inline: false },
+      { name: 'Newest', value: truncate(md(newest.name), FIELD), inline: false },
       { name: 'Age', value: `${formatDuration(now - newest.mtimeMs)}`, inline: true },
       { name: 'Size', value: formatBytes(newest.size), inline: true },
       { name: 'Count', value: String(backups.length), inline: true },
@@ -274,7 +324,8 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
 
 export function formatBackupList(backups: Backup[]): Post {
   if (!backups.length) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
-  const lines = backups.slice(0, 10).map((b) => `\`${b.name}\` ${formatBytes(b.size)}`);
+  // A name (an Agent's save's comes from the game's folder) can't end its code span early.
+  const lines = backups.slice(0, 10).map((b) => `\`${b.name.replaceAll('`', "'")}\` ${formatBytes(b.size)}`);
   return embed({
     title: `Backups: ${backups.length}, ${totalSize(backups)} total`,
     description: truncate(lines.join('\n'), DESCRIPTION),

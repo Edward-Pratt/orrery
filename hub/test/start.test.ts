@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
+import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test, type TestContext } from 'node:test';
@@ -29,16 +30,18 @@ import type {
 } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
-import { postTargets } from '../src/discord.ts';
-import { formatTargetEvent, type Post } from '../src/format.ts';
+import { backupCommand, postTargets, type BackupInteraction } from '../src/discord.ts';
+import { formatEvent, formatTargetEvent, type Post } from '../src/format.ts';
+import type { Links } from '../src/links.ts';
 import type { RestoreEnv, RunRestore } from '../src/restore.ts';
 import type { Run } from '../src/services.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
 import type { HubEvent, ServerHub } from '../src/servers.ts';
 import { HISTORY_POINTS } from '../src/host.ts';
 import { startHub } from '../src/start.ts';
+import type { Stats } from '../src/stats.ts';
 import type { OAuth, WebApi } from '../src/web.ts';
-import { online, sleep, TOKEN, until } from './fake-mod.ts';
+import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
@@ -668,16 +671,16 @@ test('server cards while offline: features only for the server with the mod', as
   ]);
 });
 
-test("a factorio server's card has its game and the UPS rate, and no Mod features", async (t) => {
-  const cfg = config(t, { web: WEB });
-  cfg.servers = [{ ...cfg.servers[0]!, id: 'space', name: 'Space Age', game: 'factorio', lag: { tps: 50, minutes: 2, enabled: true } }];
+test("a factorio server's card has its game and the UPS rate, the game connection's chat, rate and console, and game updates", async (t) => {
+  const cfg = agentConfig(t, { web: WEB });
   const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const [card] = await cardsOf(app, await loginCookie(app));
+  const card = (await cardsOf(app, await loginCookie(app))).find((c) => c.id === 'space');
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: NO_MOD },
+    // Over its Agent's game connection; game updates only through an Agent. Quests are the Mod's alone.
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: true } },
   );
 });
 
@@ -1789,4 +1792,515 @@ test("each check result is streamed, and a replay holds only a check's latest", 
     replay.events.map((e) => ('kind' in e.data ? e.data.kind : e.data.type)),
     ['checkDown', 'checked', 'checkUp'], // a result, then what it changed
   );
+});
+
+const AGENT_TOKEN = 'agent-token-0123456789abcdef-0123456789';
+const VM_LIMITS = { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
+const AGENTS = {
+  listen: { host: '127.0.0.1', port: 0 },
+  agents: [{ id: 'vm', name: 'Factorio VM', token: AGENT_TOKEN, address: '127.0.0.1', server: 'space', host: VM_LIMITS }],
+};
+
+/** A config with `integrations` plus the agents one, and factorio server `space` run by Agent `vm`. */
+function agentConfig(t: TestContext, integrations: Config['integrations']): Config {
+  const cfg = config(t, { agents: AGENTS, ...integrations });
+  cfg.servers.push({ id: 'space', name: 'Space Age', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched' });
+  return cfg;
+}
+
+/** An Agent (`agentHello`) and its game connection (`hello`) on the Agent port, both welcomed. */
+async function agentOnline(port: number) {
+  const agent = fakeMod(port);
+  agent.send({ type: 'agentHello', protocol: 1, agentId: 'vm', token: AGENT_TOKEN, agentVersion: 'agent-v1.0.0' });
+  assert.deepEqual(await agent.next(), { type: 'welcome' });
+  const game = fakeMod(port);
+  game.send({ type: 'hello', protocol: 1, serverId: 'space', token: AGENT_TOKEN, modVersion: '0.1.0' });
+  assert.deepEqual(await game.next(), { type: 'welcome' });
+  return { agent, game };
+}
+
+test("with agents but no Minecraft integration, an Agent's server is watched for hangs", async (t) => {
+  const cfg = agentConfig(t, {});
+  delete cfg.healthcheckUrl;
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: () => assert.fail('nothing to request'), hub: { hungMs: 200 } });
+  t.after(() => handle.close());
+  assert.equal(handle.port, undefined); // no Mod port
+  const { agent, game } = await agentOnline(await handle.agentPort!);
+  game.send({ type: 'heartbeat', tps: 60, players: ['Ann'] });
+  const pings = setInterval(() => agent.send({ type: 'ping' }), 50);
+  t.after(() => clearInterval(pings));
+  const types = () => handle.live.since().flatMap(([, e]) => ('serverId' in e && e.serverId === 'space' ? [e.type] : []));
+  await until(() => types().includes('hung'));
+  assert.deepEqual(types(), ['connected', 'tps', 'hung']);
+});
+
+test("an Agent's bye records its server lost, as unknown, and posts nothing; a lost Agent posts one host notice", async (t) => {
+  const cfg = agentConfig(t, { discord: { ...DISCORD, channels: { ...DISCORD.channels, space: '9'.repeat(18) }, alertsChannel: '4'.repeat(18) } });
+  delete cfg.healthcheckUrl;
+  const posted: [string, Post][] = [];
+  const handle = await startHub(cfg, {
+    startFrontend: async (hub, _s, _r, _l, discord) => {
+      // What the Discord frontend posts: server events in their channel, the rest in the alerts channel.
+      hub.on('event', (e) => {
+        const post = formatEvent(e);
+        if (post) posted.push([discord.channels[e.serverId]!, post]);
+      });
+      postTargets(hub, discord, async (channelId, message) => void posted.push([channelId, message]));
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('nothing to request'),
+  });
+  const port = await handle.agentPort!;
+  const first = await agentOnline(port);
+  first.agent.send({ type: 'bye' });
+  await first.game.closed;
+  const second = await agentOnline(port);
+  second.agent.socket.destroy(); // lost
+  await second.game.closed;
+  await until(() => posted.length === 1);
+  await agentOnline(port); // back
+  await until(() => posted.length === 2);
+  await handle.close();
+  assert.deepEqual(posted, [
+    ['4'.repeat(18), formatTargetEvent({ target: 'host', id: 'vm', type: 'notice', severity: 'warning', kind: 'agentLost', name: 'Factorio VM' })!],
+    ['4'.repeat(18), formatTargetEvent({ target: 'host', id: 'vm', type: 'notice', severity: 'good', kind: 'agentBack', name: 'Factorio VM' })!],
+  ]);
+  const db = new DatabaseSync(cfg.dbPath);
+  t.after(() => db.close());
+  const rows = db.prepare("SELECT state, reason FROM events WHERE server_id = 'space' AND reason NOT LIKE 'hub %' ORDER BY ts, rowid").all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { state: 'up', reason: 'connected' },
+    { state: 'unknown', reason: 'lost' },
+    { state: 'up', reason: 'connected' },
+    { state: 'unknown', reason: 'lost' },
+    { state: 'up', reason: 'connected' },
+  ]);
+});
+
+test("with agents but no host integration, each Agent's Host is served with its own samples, and /api/host is not", async (t) => {
+  const cfg = agentConfig(t, { web: WEB });
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async <T>(path: string) => {
+    const res = await app.request(path, { headers: { cookie } });
+    assert.equal(res.status, 200, path);
+    return res.json() as Promise<T>;
+  };
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: null }]);
+  const { agent } = await agentOnline(await handle.agentPort!);
+  const sample: HostSample = { ts: Date.now(), cpu: 0.5, load: [1, 1, 1], memory: { used: 2, total: 8 }, disks: [{ mount: '/', free: 50 * 1024 ** 3, total: 100 * 1024 ** 3 }] };
+  agent.send({ type: 'hostSample', sample });
+  await until(() => handle.hosts.get('vm')!.latest() !== null);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample }]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [sample]);
+  assert.equal((await app.request('/api/host', { headers: { cookie } })).status, 404);
+  assert.equal((await app.request('/api/hosts/oracle/samples', { headers: { cookie } })).status, 404);
+});
+
+test('the hub starts while the Agent port waits for its address, and closes without it', async (t) => {
+  const errors = t.mock.method(console, 'error', () => {});
+  const cfg = agentConfig(t, {});
+  cfg.integrations.agents = { ...AGENTS, listen: { host: '192.0.2.1', port: 0 } }; // TEST-NET-1: never this machine's
+  delete cfg.healthcheckUrl;
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: () => assert.fail('nothing to request'), agents: { bindRetryMs: 20 } });
+  assert.equal(await Promise.race([handle.agentPort!, sleep(100).then(() => 'waiting')]), 'waiting');
+  await handle.close();
+  assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] 192.0.2.1 is not on this machine yet: trying again every 0.02 s']);
+});
+
+test("a link is redeemed in each game, chat from the dashboard names the admin by the server's game, and /unlink clears both", async (t) => {
+  const cfg = agentConfig(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
+  delete cfg.healthcheckUrl;
+  let links: Links | undefined;
+  const handle = await startHub(cfg, {
+    startFrontend: async (_h, _s, _r, l) => {
+      links = l;
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('nothing to request'),
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const mod = await online(handle.port!);
+  const { game } = await agentOnline(await handle.agentPort!);
+
+  mod.send({ type: 'link', player: 'Steve', uuid: 'u1', code: links!.issue(ADMIN.id, 'alex') });
+  assert.deepEqual(await mod.next(), { type: 'linkResult', player: 'Steve', ok: true, message: 'Linked to alex on Discord.' });
+  game.send({ type: 'link', player: 'engineer', uuid: '', code: links!.issue(ADMIN.id, 'alex') });
+  assert.deepEqual(await game.next(), { type: 'linkResult', player: 'engineer', ok: true, message: 'Linked to alex on Discord.' });
+
+  const chat = async (server: string, conn: { next: () => Promise<unknown> }) => {
+    assert.equal((await post(app, cookie, `/api/servers/${server}/chat`, { message: 'hi' })).status, 204);
+    return ((await conn.next()) as { author: string }).author;
+  };
+  assert.equal(await chat('gtnh', mod), 'Steve');
+  assert.equal(await chat('space', game), 'engineer');
+
+  assert.equal(links!.unlinkDiscord(ADMIN.id), true); // Discord's /unlink
+  assert.equal(await chat('gtnh', mod), 'alex');
+  assert.equal(await chat('space', game), 'alex');
+});
+
+const FACTORIO_UNIT = { id: 'factorio', unit: 'factorio.service' };
+
+/** A connection's messages as they arrive, apart from `next()`, so a test can see what has (not) come yet. */
+function recorded(conn: ReturnType<typeof fakeMod>) {
+  const got: unknown[] = [];
+  createInterface({ input: conn.socket }).on('line', (line) => got.push(JSON.parse(line)));
+  return got;
+}
+
+/** Lets loopback sockets deliver what was just written, without timers (setTimeout may be mocked). */
+async function flush() {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+}
+
+/** Waits for `cond` without timers (setTimeout may be mocked). */
+async function eventually(cond: () => Promise<boolean>) {
+  for (let i = 0; i < 500; i++) {
+    if (await cond()) return;
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.fail('condition not met');
+}
+
+/**
+ * A web hub with systemd (the local units and `factorio`, the service of `space`, which Agent `vm` backs) and Discord
+ * (to hand out its ServerHub, Stats and RestartScheduler), with the Agent and its game connection up and `players`
+ * online. No restore script: only the Agent can restore.
+ */
+async function agentServicesHub(t: TestContext, players: string[]) {
+  const cfg = agentConfig(t, { web: WEB, systemd: [...UNITS, FACTORIO_UNIT], discord: DISCORD });
+  delete cfg.healthcheckUrl;
+  cfg.servers.find((s) => s.id === 'space')!.service = 'factorio';
+  const systemd = fakeSystemd();
+  let frontend: { hub: ServerHub; stats: Stats; restarts: RestartScheduler } | undefined;
+  const handle = await startHub(cfg, {
+    startFrontend: async (hub, stats, restarts) => {
+      frontend = { hub, stats, restarts };
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('nothing to request'),
+    oauth: fakeOAuth().oauth,
+    run: systemd.run,
+  });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async <T>(path: string) => (await app.request(path, { headers: { cookie } })).json() as Promise<T>;
+  const { agent, game } = await agentOnline(await handle.agentPort!);
+  const agentGot = recorded(agent);
+  const gameGot = recorded(game);
+  game.send({ type: 'heartbeat', tps: 60, players });
+  await until(() => handle.live.since().some(([, e]) => 'serverId' in e && e.serverId === 'space' && e.type === 'tps'));
+  /** Answers the Agent's next request (ok, with `data` if given) and returns it. */
+  const answer = async (data?: object) => {
+    const req = (await agent.next()) as { id: string; type: string };
+    agent.send({ type: 'reply', id: req.id, ok: true, ...(data && { data }) });
+    return req;
+  };
+  // An Agent's unit is never this machine's: the hub's systemctl and journalctl never see it.
+  t.after(() => assert.ok(!systemd.units().includes('factorio.service'), systemd.units().join(' ')));
+  return { app, cookie, get, agent, game, agentGot, gameGot, answer, ...frontend!, live: handle.live };
+}
+
+/** What a request to the Agent asked for, without its fresh id. */
+const asked = (req: unknown) => {
+  const { id, ...rest } = req as { id: string };
+  assert.match(id, /^[0-9a-f-]{36}$/);
+  return rest;
+};
+
+test("an Agent's service: its pushed state is served and streamed, and start, stop and restart are its serviceAct, audited", async (t) => {
+  const { app, cookie, get, agent, answer, live } = await agentServicesHub(t, []);
+  const states: TargetEvent[] = [];
+  live.on('event', (_, fed) => {
+    const e = unstamped(fed);
+    if ('target' in e && e.target === 'service' && e.id === 'factorio') states.push(e);
+  });
+  const service = async () => (await get<ServiceStatus[]>('/api/services')).find((s) => s.id === 'factorio');
+  assert.deepEqual(await service(), { id: 'factorio', unit: 'factorio.service', state: null, sub: null, checks: [] });
+  agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1, result: 'success' });
+  await until(() => states.length === 1);
+  assert.deepEqual(await service(), { id: 'factorio', unit: 'factorio.service', state: 'active', sub: 'running', checks: [] });
+  assert.deepEqual((await get<ServerCard[]>('/api/servers')).find((c) => c.id === 'space')!.service, { id: 'factorio', state: 'active' });
+  agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1, result: 'success' }); // no change
+  agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'failed', sub: 'failed', since: 2, result: 'exit-code' });
+  await until(() => states.length === 3);
+  assert.deepEqual(states, [
+    { target: 'service', id: 'factorio', type: 'state', state: 'active', sub: 'running' },
+    { target: 'service', id: 'factorio', type: 'state', state: 'failed', sub: 'failed' },
+    { target: 'service', id: 'factorio', type: 'notice', severity: 'problem', kind: 'serviceFailed', unit: 'factorio.service' },
+  ]);
+
+  // Nobody online: each acts at once.
+  for (const action of ['start', 'stop', 'restart']) {
+    const pending = post(app, cookie, `/api/services/factorio/${action}`);
+    assert.deepEqual(asked(await answer()), { type: 'serviceAct', action });
+    const res = await pending;
+    assert.equal(res.status, 200, action);
+    assert.deepEqual(await res.json(), { at: null } satisfies ServiceActionAnswer);
+  }
+  assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
+    { actor: ACTOR, action: 'service restart', target: 'factorio', details: 'factorio.service' },
+    { actor: ACTOR, action: 'service stop', target: 'factorio', details: 'factorio.service' },
+    { actor: ACTOR, action: 'service start', target: 'factorio', details: 'factorio.service' },
+  ]);
+
+  const refused = post(app, cookie, '/api/services/factorio/start');
+  const req = (await agent.next()) as { id: string };
+  agent.send({ type: 'reply', id: req.id, ok: false, error: 'Access denied' });
+  const res = await refused;
+  assert.equal(res.status, 502);
+  assert.equal(await res.text(), 'systemctl failed: Access denied');
+});
+
+test("an Agent's service logs are its journal request for the configured unit; 502 when the Agent can't answer", async (t) => {
+  const { app, cookie, agent, answer } = await agentServicesHub(t, []);
+  const logs = app.request('/api/services/factorio/logs', { headers: { cookie } });
+  assert.deepEqual(asked(await answer({ lines: ['0.000 Factorio 2.1.24', '1.000 Loading map'] })), { type: 'journal', unit: 'factorio.service' });
+  const res = await logs;
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { lines: ['0.000 Factorio 2.1.24', '1.000 Loading map'] } satisfies ServiceLogs);
+  agent.send({ type: 'bye' });
+  await agent.closed;
+  const gone = await app.request('/api/services/factorio/logs', { headers: { cookie } });
+  assert.equal(gone.status, 502);
+  assert.equal(await gone.text(), 'journalctl failed: agent vm is not connected');
+});
+
+test("stopping an Agent's service with a player online counts down in game through notices, then sends its serviceAct stop", async (t) => {
+  const { app, cookie, get, game, agentGot, gameGot, answer } = await agentServicesHub(t, ['Ann']);
+  t.mock.timers.enable({ apis: ['setTimeout'] }); // after the Agent connected: its silence timer stays real
+  try {
+    const res = await post(app, cookie, '/api/services/factorio/stop');
+    assert.equal(res.status, 200);
+    const { at } = (await res.json()) as ServiceActionAnswer;
+    assert.ok(at! > Date.now());
+    assert.deepEqual((await get<ServerCard[]>('/api/servers')).find((c) => c.id === 'space')!.restart, { at, by: 'alex', stop: true });
+    t.mock.timers.tick(0);
+    assert.deepEqual(await game.next(), { type: 'notice', message: 'Server stopping in 5 minutes' });
+    await flush();
+    assert.deepEqual(agentGot, []); // nothing until the countdown ends
+    t.mock.timers.tick(5 * 60_000);
+    assert.deepEqual(
+      [await game.next(), await game.next(), await game.next()],
+      ['1 minute', '30 seconds', '10 seconds'].map((left) => ({ type: 'notice', message: `Server stopping in ${left}` })),
+    );
+    await eventually(async () => agentGot.length === 1);
+    assert.deepEqual(asked(await answer()), { type: 'serviceAct', action: 'stop' });
+    await flush();
+    assert.equal(agentGot.length, 1);
+    assert.ok(!gameGot.some((m) => (m as { type: string }).type === 'cmd')); // never the game's own stop
+    assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
+      { actor: ACTOR, action: 'service stop', target: 'factorio', details: 'factorio.service, after a 5 min countdown' },
+    ]);
+  } finally {
+    t.mock.timers.reset(); // before the hub closes: closing waits on real timers
+  }
+});
+
+test('a daily restart of a factorio server with a player online is one countdown, then one restart of its service, never a stop', async (t) => {
+  const { get, game, agentGot, gameGot, answer, restarts } = await agentServicesHub(t, ['Ann']);
+  t.mock.timers.enable({ apis: ['setTimeout'] }); // after the Agent connected: its silence timer stays real
+  try {
+    // Due in 11 to 12 minutes: its 10-minute countdown starts within the next 2.
+    const due = new Date(Date.now() + 12 * 60_000);
+    restarts.daily('space', `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`);
+    t.mock.timers.tick(2 * 60_000);
+    t.mock.timers.tick(0);
+    assert.deepEqual(await game.next(), { type: 'notice', message: 'Server restarting in 10 minutes' });
+    t.mock.timers.tick(10 * 60_000);
+    const countdown = ['5 minutes', '1 minute', '30 seconds', '10 seconds'].map((left) => ({ type: 'notice', message: `Server restarting in ${left}` }));
+    assert.deepEqual([await game.next(), await game.next(), await game.next(), await game.next()], countdown);
+    await eventually(async () => agentGot.length === 1); // at once, not after a second countdown
+    assert.deepEqual(asked(await answer()), { type: 'serviceAct', action: 'restart' });
+    const hubAudit = async () => (await get<AuditLog>('/api/audit')).entries.filter((e) => e.actor === 'hub:daily').map(({ ts: _, id: __, ...e }) => e);
+    await eventually(async () => (await hubAudit()).length === 2); // the reply is in, before time moves on
+    // Nothing more: no second countdown (the player is still online), no other request, no stop in game.
+    t.mock.timers.tick(15 * 60_000);
+    await flush();
+    assert.deepEqual(agentGot.map(asked), [{ type: 'serviceAct', action: 'restart' }]);
+    assert.deepEqual(gameGot, [{ type: 'notice', message: 'Server restarting in 10 minutes' }, ...countdown]);
+    assert.equal((await get<ServerCard[]>('/api/servers')).find((c) => c.id === 'space')!.restart, null);
+    assert.deepEqual(await hubAudit(), [
+      { actor: 'hub:daily', action: 'service restart', target: 'factorio', details: 'factorio.service' },
+      { actor: 'hub:daily', action: 'restart', target: 'space', details: 'in 10 min' },
+    ]);
+  } finally {
+    t.mock.timers.reset(); // before the hub closes: closing waits on real timers
+  }
+});
+
+test("a factorio server's console command keeps its leading slash; control characters are still taken out", async (t) => {
+  const { app, cookie, game } = await agentServicesHub(t, []);
+  const pending = post(app, cookie, '/api/servers/space/command', { command: ' /players\u0007online ' });
+  const cmd = (await game.next()) as { id: string; command: string };
+  assert.equal(cmd.command, '/players online');
+  game.send({ type: 'cmdResult', id: cmd.id, output: ['Online players (1):', '  Ann (online)'] });
+  assert.deepEqual(await (await pending).json(), { output: ['Online players (1):', '  Ann (online)'] } satisfies CommandOutput);
+});
+
+test("a factorio server's logs are the files its Agent serves, newest first; a log is read only by a name it lists", async (t) => {
+  const { app, cookie, get, agent, agentGot, answer } = await agentServicesHub(t, []);
+  const request = (path: string) => app.request(path, { headers: { cookie } });
+  assert.equal((await get<ServerDetail>('/api/servers/space')).logs, true);
+  const files = [
+    { name: 'agent.log', size: 10, modified: 2 },
+    { name: 'factorio-current.log', size: 30, modified: 3 },
+    { name: 'factorio-previous.log', size: 20, modified: 1 },
+  ];
+  const listing = request('/api/servers/space/logs');
+  assert.deepEqual(asked(await answer({ files })), { type: 'logs' });
+  assert.deepEqual(await (await listing).json(), [files[1], files[0], files[2]] satisfies ServerLogFiles);
+
+  const tail = request('/api/servers/space/logs/factorio-current.log');
+  assert.deepEqual(asked(await answer({ files })), { type: 'logs' });
+  assert.deepEqual(asked(await answer({ lines: ['0.000 Factorio 2.1.24'] })), { type: 'log', name: 'factorio-current.log' });
+  assert.deepEqual(await (await tail).json(), { lines: ['0.000 Factorio 2.1.24'] } satisfies ServerLog);
+
+  for (const name of ['..%2F..%2Fetc%2Fpasswd', 'server-settings.json']) {
+    const unlisted = request(`/api/servers/space/logs/${name}`);
+    assert.deepEqual(asked(await answer({ files })), { type: 'logs' });
+    assert.equal((await unlisted).status, 404, name);
+  }
+  await flush();
+  assert.equal(agentGot.filter((r) => (r as { type: string }).type === 'log').length, 1); // never asked for an unlisted name
+
+  agent.send({ type: 'bye' });
+  await agent.closed;
+  const gone = await request('/api/servers/space/logs');
+  assert.equal(gone.status, 502);
+  assert.equal(await gone.text(), 'Listing the logs failed: agent vm is not connected');
+  assert.equal((await request('/api/servers/space/logs/agent.log')).status, 502);
+});
+
+const SAVE = 'orrery-2026-10-31T06-00-00Z.zip';
+const HOUR = 60 * 60_000;
+/** An Agent's `saves` push: `SAVE`, made `ageMs` ago, and the current world. */
+const savesPush = (ageMs: number) => ({
+  type: 'saves',
+  saves: [
+    { name: 'world.zip', size: 100, mtime: Date.now() - 48 * HOUR, kind: 'world', current: true },
+    { name: SAVE, size: 200, mtime: Date.now() - ageMs, kind: 'named', current: false },
+  ],
+  free: 50 * GB,
+});
+
+test("the restore route exists with only an Agent's restore source: a listed save, its unit stopped, through the Agent", async (t) => {
+  const { app, cookie, get, agent, agentGot, answer } = await agentServicesHub(t, []);
+  const restoreOf = (name: unknown, server = 'space') => post(app, cookie, `/api/servers/${server}/restore`, { name });
+  const restoreAudit = async () => webAudit(await get<AuditLog>('/api/audit')).filter((e) => e.action === 'restore');
+  const none = await restoreOf(SAVE); // nothing pushed yet: no save is listed
+  assert.equal(none.status, 404);
+  assert.equal(await none.text(), `No backup ${SAVE}.`);
+  agent.send(savesPush(HOUR));
+  agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1, result: 'success' });
+  await eventually(async () => (await get<ServerDetail>('/api/servers/space')).service?.state === 'active');
+  const detail = await get<ServerDetail>('/api/servers/space');
+  assert.deepEqual(detail.backups.configured && detail.backups.backups.map((b) => [b.name, b.kind, b.current]), [
+    [SAVE, 'named', false],
+    ['world.zip', 'world', true],
+  ]);
+  const running = await restoreOf(SAVE);
+  assert.equal(running.status, 409);
+  assert.equal(await running.text(), 'factorio.service is active: stop it first.');
+  agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'inactive', sub: 'dead', since: 2, result: 'success' });
+  await eventually(async () => (await get<ServerDetail>('/api/servers/space')).service?.state === 'inactive');
+  for (const name of ['../world.zip', 'orrery-other.zip', 'latest', '']) assert.equal((await restoreOf(name)).status, 404, name);
+  assert.equal((await restoreOf(['world.zip'])).status, 400);
+
+  const pending = restoreOf(SAVE);
+  assert.deepEqual(asked(await answer()), { type: 'restore', name: SAVE });
+  const res = await pending;
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { output: [`${SAVE} is copied as the newest save: the server loads it on its next start.`] } satisfies CommandOutput);
+  const refused = restoreOf('world.zip');
+  const req = (await agent.next()) as { id: string };
+  agent.send({ type: 'reply', id: req.id, ok: false, error: 'factorio.service is not stopped' });
+  const failed = await refused;
+  assert.equal(failed.status, 502);
+  assert.equal(await failed.text(), 'The restore failed: factorio.service is not stopped');
+  // Only the two names that passed every check ever reached the Agent.
+  assert.deepEqual(
+    agentGot.flatMap((m) => ((m as { type: string }).type === 'restore' ? [(m as { name: string }).name] : [])),
+    [SAVE, 'world.zip'],
+  );
+  assert.deepEqual((await restoreAudit()).reverse(), [
+    { actor: ACTOR, action: 'restore', target: 'space', details: `${SAVE}: refused: No backup ${SAVE}.` },
+    { actor: ACTOR, action: 'restore', target: 'space', details: `${SAVE}: refused: factorio.service is active: stop it first.` },
+    ...['../world.zip', 'orrery-other.zip', 'latest', ''].map((name) => ({ actor: ACTOR, action: 'restore', target: 'space', details: `${name}: refused: No backup ${name}.` })),
+    { actor: ACTOR, action: 'restore', target: 'space', details: `${SAVE}: done` },
+    { actor: ACTOR, action: 'restore', target: 'space', details: 'world.zip: failed: factorio.service is not stopped' },
+  ]);
+  const gtnh = await restoreOf(SAVE, 'gtnh'); // a server with neither a folder nor an Agent
+  assert.equal(gtnh.status, 409);
+});
+
+test("Discord /backup start on a factorio server sends its Agent save, audited; the save's backup event is the finished notice", async (t) => {
+  const { hub, stats, agent, game, gameGot, get, app, cookie, live } = await agentServicesHub(t, []);
+  const replies: unknown[] = [];
+  const interaction = (sub: string) =>
+    ({
+      options: { getSubcommand: () => sub },
+      reply: async (r: unknown) => void replies.push(r),
+      deferReply: async () => {},
+      editReply: async (r: unknown) => void replies.push(r),
+    }) as unknown as BackupInteraction;
+  await backupCommand(interaction('start'), hub, stats, 'space', 'discord:alice (7)');
+  await eventually(async () => gameGot.length === 1);
+  assert.deepEqual(gameGot, [{ type: 'save' }]);
+  assert.deepEqual(replies, ['💾 Saving: the notice follows here once the save is written.']);
+  const backupAudit = async () => (await get<AuditLog>('/api/audit')).entries.filter((e) => e.action === 'backup').map(({ ts: _, id: __, ...e }) => e);
+  assert.deepEqual(await backupAudit(), [{ actor: 'discord:alice (7)', action: 'backup', target: 'space', details: 'save' }]);
+
+  const notices = () => live.since().flatMap(([, e]) => ('serverId' in e && e.type === 'notice' ? [unstamped(e)] : []));
+  game.send({ type: 'backup', ok: true, detail: `${SAVE}, 12.0 MB` });
+  await until(() => notices().length === 1);
+  assert.deepEqual(notices(), [{ serverId: 'space', type: 'notice', severity: 'good', kind: 'backupFinished', detail: `${SAVE}, 12.0 MB` }]);
+
+  // The dashboard's Start backup is the same intent.
+  const res = await post(app, cookie, '/api/servers/space/backup');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { output: [] } satisfies CommandOutput);
+  await eventually(async () => gameGot.length === 2);
+  assert.deepEqual(gameGot[1], { type: 'save' });
+  assert.deepEqual((await backupAudit())[0], { actor: ACTOR, action: 'backup', target: 'space', details: 'save' });
+
+  // status and list are the Agent's saves.
+  agent.send(savesPush(HOUR));
+  await eventually(async () => (await stats.backups('space'))?.configured === true && (await stats.backupSource('space')!.list()).length === 2);
+  replies.length = 0;
+  await backupCommand(interaction('list'), hub, stats, 'space', 'discord:alice (7)');
+  assert.equal((replies[0] as unknown as { embeds: { description: string }[] }).embeds[0]!.description, `\`${SAVE}\` 200 B\n\`world.zip\` 100 B`);
+});
+
+test("an Agent's server's watchdog: saves 13 h old are fine while nobody plays, and overdue once someone has", async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const cfg = agentConfig(t, {});
+  delete cfg.healthcheckUrl;
+  cfg.servers.find((s) => s.id === 'space')!.backupMaxAgeHours = 12;
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: () => assert.fail('nothing to request') });
+  t.after(() => handle.close());
+  const { agent, game } = await agentOnline(await handle.agentPort!);
+  const events = () => handle.live.since().map(([, e]) => unstamped(e));
+  agent.send(savesPush(13 * HOUR));
+  agent.send({ type: 'hostSample', sample: vmSample(1 * GB) }); // after the saves on the same connection: they are in
+  await until(() => events().some((e) => 'target' in e && e.type === 'sample'));
+  const notices = () => events().filter((e) => 'serverId' in e && e.serverId === 'space' && e.type === 'notice');
+  const tick = async (ms: number) => {
+    t.mock.timers.tick(ms);
+    await flush();
+  };
+  await tick(10 * 60_000);
+  assert.deepEqual(notices(), []); // nobody has played since the newest save: none is due
+  game.send({ type: 'heartbeat', tps: 60, players: ['Ann'] });
+  await until(() => events().some((e) => 'serverId' in e && e.type === 'tps'));
+  await tick(10_000); // the session opens
+  await tick(10 * 60_000);
+  assert.deepEqual(notices(), [{ serverId: 'space', type: 'notice', severity: 'warning', kind: 'backupOverdue', hours: 13, newest: SAVE }]);
 });

@@ -21,7 +21,9 @@ file is the contract between the mod and the agent.
   `CLAUDE.md` is left out of it; everything else in this folder ships, so keep test files and notes elsewhere.
   `bash .github/test-release.sh` tests the script.
 - Cut a release with `.github/release.sh factorio <major|minor|patch>`; `release.yml` attaches the zip to the
-  GitHub release. Uploading it to the portal is still done by hand.
+  GitHub release, then `.github/factorio-publish.sh` puts it on the mod portal as `orrery` with the
+  `FACTORIO_API_KEY` repo secret (the first `factorio-v*` tag claims the name). A failed upload leaves the GitHub
+  release in place: fix forward with the next patch.
 - Every player who joins a server with the mod must download that exact version from the portal, so release
   rarely: batch changes rather than shipping each one.
 

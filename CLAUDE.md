@@ -23,9 +23,12 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `add-server.sh` (run as root from its root-owned copy in `/usr/local/lib/orrery`) finishes a Pending server: its
   `config.json` entry, token and service link (checked as the hub user, `config.json.bak` kept), `<id>.service` and
   `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
-- `docs/protocol.md` — the wire protocol (living, authoritative). Specs and tickets are GitHub issues
-  (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
-- `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
+- `docs/protocol.md` — the wire protocol (living, authoritative).
+- `docs/notes/` — designs and build plans, one Markdown file per piece of work, in whatever shape fits it (no
+  `/to-spec` or `/to-tickets`, no GitHub-issue specs). Releases up to Packs v2 were specced as GitHub issues, which
+  stay as history; `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
+- `docs/ROADMAP.md` — planned releases, linking each to its notes (older ones to their spec issue); update it when a
+  release ships or scope moves.
 
 Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `mod/`.
 
@@ -76,7 +79,7 @@ bash .github/test-release.sh              # the release script against a throwaw
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
-smoke test in the release's tickets — say so rather than claiming it works.
+smoke test in the release's notes (older releases: their tickets) — say so rather than claiming it works.
 
 ## Releases
 
@@ -102,16 +105,9 @@ place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and
 `GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
 the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
 
-## Agent skills
+## Issues and domain docs
 
-### Issue tracker
-
-Issues live in GitHub Issues on `Edward-Pratt/orrery` (via `gh`). See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+- Bugs and loose tasks are GitHub issues on `Edward-Pratt/orrery` (via `gh`). Designs are not: they go in `docs/notes/`.
+- `CONTEXT.md` is the glossary: name things with its terms, and avoid the words it lists under _Avoid_.
+- `docs/adr/` holds the decisions. When a change contradicts an ADR, say so explicitly and update or supersede it,
+  rather than silently overriding it.

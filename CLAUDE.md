@@ -1,7 +1,7 @@
 # orrery
 
 A hub for everything its owner runs or ships (game servers first); today a Discord bridge for GT: New Horizons
-(MC 1.7.10) servers. Two independent projects in one repo:
+(MC 1.7.10) servers, and a Factorio 2.1 server run through an Agent. Independent parts in one repo:
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
@@ -23,6 +23,12 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `add-server.sh` (run as root from its root-owned copy in `/usr/local/lib/orrery`) finishes a Pending server: its
   `config.json` entry, token and service link (checked as the hub user, `config.json.bak` kept), `<id>.service` and
   `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
+  `setup-agent-host.sh` sets up an Agent's Host (the friend runs it as root, and again at each new `agent-v` tag): Factorio in
+  a rootful Podman Quadlet (`factorio.container`), the Agent as `orrery-agent.service` from the newest `agent-v*`
+  release, the newest `factorio-v*` release's mod when `mods/` has none, and `60-orrery-agent.rules`; tested by
+  `test-setup-agent-host.sh`. `deploy-agent.sh` and `orrery-agent-deploy@.service` ship with it (an agent release next
+  to the running one, rolled back if it won't connect; tested by `test-deploy-agent.sh`), but nothing starts them
+  until agent deploys exist (release 2).
 - `docs/protocol.md` — the wire protocol (living, authoritative).
 - `docs/notes/` — designs and build plans, one Markdown file per piece of work, in whatever shape fits it (no
   `/to-spec` or `/to-tickets`, no GitHub-issue specs). Releases up to Packs v2 were specced as GitHub issues, which
@@ -52,15 +58,21 @@ Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `m
   for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same
   frontend rule as Discord, plus its own session rows in `Db`. Off: no HTTP port and no `DISCORD_CLIENT_SECRET` needed.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
-- The mod has no business logic and no Discord knowledge.
+- The mod has no business logic and no Discord knowledge. The Factorio mod is the same, and talks only to its
+  server's Agent (events out over local UDP, commands in over RCON), never to the hub.
 
 ## Changing the wire protocol
 
-Protocol lives in three places that must change together:
+Protocol lives in four places that must change together:
 1. `hub/src/protocol.ts` (`SCHEMAS` validation; the message types are in `hub/src/types.ts`),
-2. the mod (`HubClient.java` hello, `GameEvents.java` messages),
-3. `docs/protocol.md`.
-Bump `PROTOCOL_VERSION` (and the mod's hello `protocol`) for any incompatible change.
+2. the mod (`HubClient.java` hello, `GameEvents.java` messages) and the Agent (`agent/src`: it imports the hub's types
+   with `import type` only, and `wire.ts` keeps copies of `PROTOCOL_VERSION` and `LIMITS` that `agent/test/wire.test.ts`
+   checks against `protocol.ts`),
+3. for game-connection messages the Factorio mod produces, `factorio/control.lua` and its UDP table in
+   `factorio/CLAUDE.md` (the Agent turns those datagrams into the messages),
+4. `docs/protocol.md`.
+Bump `PROTOCOL_VERSION` (and the mod's hello `protocol`, and the Agent's copy) for any incompatible change.
+`agentHello.protocol` is the same `PROTOCOL_VERSION`, accepted in the same range (`docs/adr/0004`).
 The hub accepts `MIN_PROTOCOL..PROTOCOL_VERSION` (`protocol.ts`). Policy: keep the previous version supported, so
 raise `MIN_PROTOCOL` only one release after a bump.
 
@@ -102,11 +114,42 @@ place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and
 `hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
 `install-web.sh` and `add-server.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
 
+When a change ships in several parts, release them in this order, each in place before the next: hub, dashboard, agent,
+Factorio mod. The Factorio server ships in two releases (the owner's decision of 2026-10-31; `docs/ROADMAP.md`).
+**Release 1**: the Agent connection, status with UPS and paused, the VM as a second Host, chat, events, milestones and
+linking, the console and logs, start, stop and restart with countdowns, and saves as Backups with restore. **Release 2**:
+game updates and agent deploys from the dashboard. So in release 1 nothing is deployed to the Agent's Host from the
+dashboard: the dashboard has no Game tab and no Agent rows under Releases (`FLOOR` already holds `agent-v1.0.0`), the
+friend re-runs `setup-agent-host.sh` as root at the new `agent-v` tag (it updates the agent, its units and its polkit
+file; `--factorio <version>` changes the Factorio version), and mods, a new `orrery` release included, are put in
+`/srv/factorio/mods` by hand. The mod must reach the portal in release 1, as players download it when they join, so
+`FACTORIO_API_KEY` is needed then. The setup stops without a `factorio-v*` release to install unless `mods/` already
+holds the `orrery` mod.
+
+By hand for the Factorio server, once, in this order:
+1. Cut and deploy `hub-vX.Y.0` **with the old `config.json`**; confirm the deploy is `ok`.
+2. On the hub host: join the friend's tailnet as `tag:orrery-hub` and put `tailscale0` in the firewalld zone `tailnet`
+   (the header of `deploy/orrery-hub.service` has the commands); install the changed `orrery-hub.service` (it waits for
+   `tailscaled.service` and reads `/etc/orrery-factorio-account.env` if there is one); add `integrations.agents`, the
+   `factorio` server and its Discord channel to `config.json`; `systemctl daemon-reload`; restart the hub. Rolling
+   the hub back below this release needs those config sections removed first, as the older hub doesn't know them.
+3. Cut and deploy `web-vX.Y.0`; cut `agent-v1.0.0` and `factorio-v1.0.0` (the setup installs both; the mod
+   reaches the portal from the second). The friend runs `deploy/setup-agent-host.sh` from the agent tag (its header
+   has the options; `--no-hub` while the hub doesn't listen yet), and again from each later `agent-v` tag.
+
 ## Secrets
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`, `DISCORD_CLIENT_SECRET`) are git-ignored. Never commit them.
 `GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
 the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
+`FACTORIO_USERNAME` and `FACTORIO_TOKEN` (the owner's factorio.com account, for the mod portal downloads of game updates,
+release 2; nothing reads them in release 1) live in the root-only `/etc/orrery-factorio-account.env`, read by `orrery-hub.service`
+alone: the deploy units load `/etc/orrery.env`, and their `npm ci` must never see the account. Never commit them or put them in
+`config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
+`release.yml`'s portal step.
+On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's
+`config.json`; read by `orrery-agent.service`) and `/etc/orrery-factorio.env` (`RCON_PASSWORD`; read by the Agent's unit and the
+container). The friend's machine holds them; the owner never sees them.
 
 ## Issues and domain docs
 

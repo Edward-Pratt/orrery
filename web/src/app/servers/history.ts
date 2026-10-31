@@ -24,7 +24,7 @@ const LEVEL: Record<UptimeState, number> = { up: 1, hung: 0.5, down: 0, unknown:
 const stateOf = (level: number) => (level === 1 ? 'up' : level === 0.5 ? 'hung' : level === 0 ? 'down' : '');
 const tpsOf = (tps: number) => tps.toFixed(1);
 
-/** A server's History section: TPS, player and uptime graphs over a chosen period, extended by live events. */
+/** A server's History section: rate (TPS or UPS), player and uptime graphs over a chosen period, extended by live events. */
 @Component({
   selector: 'app-server-history',
   imports: [HlmSkeleton, PeriodPicker, TimeSeries],
@@ -78,8 +78,9 @@ export default class History {
     }
     if (uptime.length) uptime.push([Date.now(), last(uptime)]); // the last state lasts until now
     const line = (name: string, points: Point[]): Series[] => [{ name, points }];
+    const { label, max } = this.#server.card()!.rate;
     return [
-      ...(h.tps ? [{ title: 'TPS', format: tpsOf, max: 20, step: false, series: line('TPS', tps) }] : []),
+      ...(h.tps ? [{ title: label, format: tpsOf, max, step: false, series: line(label, tps) }] : []),
       { title: 'Players', format: String, max: undefined, step: true, series: line('Players', players) },
       { title: 'Uptime', format: stateOf, max: 1, step: true, series: line('Uptime', uptime) },
     ];

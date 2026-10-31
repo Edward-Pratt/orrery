@@ -51,7 +51,7 @@ function config(t: TestContext, integrations: Config['integrations']): Config {
     dbPath: join(dir, 'hub.db'),
     healthcheckUrl: 'https://example.invalid/ping',
     servers: [
-      { id: 'gtnh', name: 'GTNH', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
     ],
     integrations,
   };
@@ -389,7 +389,7 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   const cfg: Config = {
     ...base,
     environment: 'staging',
-    servers: [{ id: 'demo', name: 'Demo', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' }],
+    servers: [{ id: 'demo', name: 'Demo', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' }],
   };
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
@@ -663,9 +663,22 @@ test('server cards while offline: features only for the server with the mod', as
   const { get } = await apiHub(t);
   const offline = { online: false, hung: false, tps: null, players: [], uptimeDay: null, restart: null, lagging: false, service: null };
   assert.deepEqual(await get<ServerCard[]>('/api/servers'), [
-    { id: 'gtnh', name: 'GTNH', ...offline, features: MOD, packUpdate: null },
-    { id: 'web', name: 'Website', ...offline, features: NO_MOD, packUpdate: null },
+    { id: 'gtnh', name: 'GTNH', game: 'minecraft', rate: { label: 'TPS', max: 20 }, ...offline, features: MOD, packUpdate: null },
+    { id: 'web', name: 'Website', game: 'minecraft', rate: { label: 'TPS', max: 20 }, ...offline, features: NO_MOD, packUpdate: null },
   ]);
+});
+
+test("a factorio server's card has its game and the UPS rate, and no Mod features", async (t) => {
+  const cfg = config(t, { web: WEB });
+  cfg.servers = [{ ...cfg.servers[0]!, id: 'space', name: 'Space Age', game: 'factorio', lag: { tps: 50, minutes: 2, enabled: true } }];
+  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const [card] = await cardsOf(app, await loginCookie(app));
+  assert.deepEqual(
+    { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: NO_MOD },
+  );
 });
 
 test('a connected server card shows TPS, players, uptime and a pending restart', async (t) => {
@@ -676,7 +689,7 @@ test('a connected server card shows TPS, players, uptime and a pending restart',
   restarts.schedule('gtnh', 10, 'discord:alice (1)', 'alice');
   const [card] = await get<ServerCard[]>('/api/servers');
   const { uptimeDay, restart, ...rest } = card!;
-  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.5, players: ['Steve'], lagging: false, service: null, features: MOD, packUpdate: null });
+  assert.deepEqual(rest, { id: 'gtnh', name: 'GTNH', game: 'minecraft', rate: { label: 'TPS', max: 20 }, online: true, hung: false, tps: 19.5, players: ['Steve'], lagging: false, service: null, features: MOD, packUpdate: null });
   assert.equal(uptimeDay, 1);
   assert.equal(restart?.by, 'alice');
   assert.ok(restart!.at > Date.now());
@@ -721,7 +734,7 @@ test('one server: status, TPS, top players per period and backups', async (t) =>
   const { get, hub, port } = await apiHub(t);
   const offline = await get<ServerDetail>('/api/servers/gtnh');
   assert.equal(offline.card.online, false);
-  assert.deepEqual(offline.status, { state: { id: 'gtnh', name: 'GTNH', online: false, hung: false, tps: null, players: [], dims: [] }, uptimeDay: null, uptimeWeek: null });
+  assert.deepEqual(offline.status, { state: { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: false, hung: false, tps: null, players: [], dims: [] }, uptimeDay: null, uptimeWeek: null });
   assert.deepEqual(offline.tps, { state: offline.status.state, lastHour: [], hour: null, day: null });
   assert.deepEqual(offline.top, { day: [], week: [], all: [] });
   assert.ok(offline.backups.configured);

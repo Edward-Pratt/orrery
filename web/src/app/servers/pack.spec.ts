@@ -12,6 +12,8 @@ import routes from './routes';
 const CARD: ServerCard = {
   id: 'gtnh',
   name: 'GTNH',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
   tps: 20,

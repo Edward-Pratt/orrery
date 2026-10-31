@@ -11,11 +11,13 @@ import type {
   HistoryAnswer,
   HostSample,
   FeedEvent,
+  Game,
   LogFile,
   PackOutcome,
   PackStepState,
   Period,
   PlaytimeAnswer,
+  Rate,
   ServiceStatus,
   StatusAnswer,
   TpsAnswer,
@@ -28,6 +30,7 @@ export type {
   DeployOutcome,
   DeployPart,
   DeployRow,
+  Game,
   HistoryAnswer,
   HostSample,
   HubEvent,
@@ -42,6 +45,7 @@ export type {
   PackStepState,
   Period,
   PlaytimeAnswer,
+  Rate,
   Release,
   ServerState,
   ServiceStatus,
@@ -152,11 +156,13 @@ export type PendingRestart = { at: number; by: string; stop: boolean };
  * is in a lag alert (the rule and `lagTps`/`lagMinutes` thresholds of Discord's lag notice; refetch on the `lag` and
  * `lagRecovered` notices). `service` is the systemd service it runs as: its id and active state (null until the hub
  * has read it); the whole field is null with no linked service or with systemd off (refetch on that service's
- * `state` events).
+ * `state` events). `rate` is its game's: what `tps` is called and its full speed (TPS 20 or UPS 60).
  */
 export type ServerCard = {
   id: string;
   name: string;
+  game: Game;
+  rate: Rate;
   online: boolean;
   hung: boolean;
   tps: number | null;

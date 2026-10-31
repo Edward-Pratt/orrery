@@ -7,7 +7,7 @@ import type { Notice, ServerHub, ServerState } from '../src/servers.ts';
 const MIN = 60_000;
 
 function setup(configs: Record<string, LagConfig> = { s: { tps: 15, minutes: 2, enabled: true } }) {
-  let state: ServerState = { id: 's', name: 'S', online: true, hung: false, tps: 20, players: [], dims: [] };
+  let state: ServerState = { id: 's', name: 'S', game: 'minecraft', online: true, hung: false, tps: 20, players: [], dims: [] };
   const notices: Notice[] = [];
   const hub = { list: () => [state], publish: (_id: string, n: Notice) => notices.push(n) } as unknown as Pick<ServerHub, 'list' | 'publish'>;
   const db = new Db(':memory:');
@@ -28,10 +28,20 @@ test('alerts after TPS stays low for the configured minutes, then once on recove
   assert.deepEqual(notices, []); // one low minute isn't lag yet
   sample({ tps: 12.3, dims: nether });
   sample({ tps: 11, dims: nether }); // still lagging: no repeat
-  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether[0] }]);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lag', tps: 12.3, label: 'TPS', worst: nether[0] }]);
   sample({ tps: 19.9 });
   sample({ tps: 20 });
-  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 19.9 }]);
+  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 19.9, label: 'TPS' }]);
+});
+
+test("a factorio server's lag notices are in UPS", () => {
+  const { notices, sample } = setup({ s: { tps: 50, minutes: 1, enabled: true } });
+  sample({ game: 'factorio', tps: 42 });
+  sample({ tps: 60 });
+  assert.deepEqual(notices, [
+    { severity: 'warning', kind: 'lag', tps: 42, label: 'UPS', worst: null },
+    { severity: 'good', kind: 'lagRecovered', tps: 60, label: 'UPS' },
+  ]);
 });
 
 test('a single normal sample resets the count', () => {
@@ -64,5 +74,5 @@ test('thresholds are per server and can be switched off', () => {
 });
 
 test('sparkline scales 0–20 TPS onto eight bars', () => {
-  assert.equal(sparkline([0, 5, 10, 15, 20, 25, -1]), '▁▃▅▇██▁');
+  assert.equal(sparkline([0, 5, 10, 15, 20, 25, -1], 20), '▁▃▅▇██▁');
 });

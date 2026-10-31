@@ -1,6 +1,6 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
-import { sparkline } from './lag.ts';
+import { rateOf, sparkline } from './lag.ts';
 import { countdownText } from './restarts.ts';
 import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity, type TargetEvent } from './servers.ts';
 import type { Summary } from './summary.ts';
@@ -48,10 +48,10 @@ function noticeText(n: Notice): string | null {
       return `❌ Restart failed: ${n.error}`;
     case 'lag': {
       const where = n.worst ? `${n.worst.name} (DIM ${n.worst.id}) ${Math.round(n.worst.ms)} ms/tick` : 'unknown';
-      return `🐢 Lag: ${n.tps.toFixed(1)} TPS; slowest: ${where}`;
+      return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}; slowest: ${where}`;
     }
     case 'lagRecovered':
-      return `✅ TPS back to normal (${n.tps.toFixed(1)})`;
+      return `✅ ${n.label} back to normal (${n.tps.toFixed(1)})`;
     case 'backupOverdue':
       return `⚠️ No new backup for ${n.hours} h (newest: ${n.newest})`;
     case 'backupsMissing':
@@ -185,7 +185,7 @@ export function formatStatus(s: ServerState, day: number | null, week: number | 
   const fields = [
     ...(s.online
       ? [
-          { name: 'TPS', value: s.tps === null ? 'n/a' : s.tps.toFixed(1), inline: true },
+          { name: rateOf(s.game).label, value: s.tps === null ? 'n/a' : s.tps.toFixed(1), inline: true },
           { name: 'Players', value: String(s.players.length), inline: true },
         ]
       : []),
@@ -303,19 +303,21 @@ export function formatTps(
   day: { avg: number; min: number } | null,
 ): Post {
   if (!s.online || s.tps === null) return embed({ title: title(`${s.name}: offline`), color: COLORS.red });
-  const color = s.tps >= 18 ? COLORS.green : s.tps >= 12 ? COLORS.orange : COLORS.red;
+  const { label, max } = rateOf(s.game);
+  // Bands as a share of full speed: 18 and 12 TPS of Minecraft's 20.
+  const color = s.tps >= 0.9 * max ? COLORS.green : s.tps >= 0.6 * max ? COLORS.orange : COLORS.red;
   const stat = (x: { avg: number; min: number } | null, withMin: boolean) =>
     x === null ? 'n/a' : withMin ? `${x.avg.toFixed(1)} (min ${x.min.toFixed(1)})` : x.avg.toFixed(1);
   const fields = [
     { name: 'Last hour', value: stat(hour, true), inline: true },
     { name: 'Last 24 h', value: stat(day, false), inline: true },
   ];
-  if (lastHour.length) fields.push({ name: 'Trend (1 sample/min)', value: sparkline(lastHour.slice(-60).map((x) => x.tps)), inline: false });
+  if (lastHour.length) fields.push({ name: 'Trend (1 sample/min)', value: sparkline(lastHour.slice(-60).map((x) => x.tps), max), inline: false });
   if (s.dims.length) {
     const dims = s.dims.map((d) => `${md(d.name)} (DIM ${d.id}): ${Math.round(d.ms)} ms/tick`).join('\n');
     fields.push({ name: 'Slowest dimensions', value: truncate(dims, FIELD), inline: false });
   }
-  return embed({ title: title(`${s.name}: ${s.tps.toFixed(1)} TPS`), color, fields });
+  return embed({ title: title(`${s.name}: ${s.tps.toFixed(1)} ${label}`), color, fields });
 }
 
 /** A quest post: the quests completed at once, or a batched roll-up (`count` > quests shown). */
@@ -332,21 +334,21 @@ export function formatLinked(player: string, discordId: string): Post {
   return { content: `🔗 **${md(player)}** linked to <@${discordId}>` };
 }
 
-/** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS". */
+/** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS" (UPS for a factorio server). */
 export function formatPresence(states: ServerState[]): string {
   const part = (s: ServerState) => {
     if (!s.online) return `${stripCodes(s.name)}: offline`;
     if (s.hung) return `${stripCodes(s.name)}: not responding`;
-    return `${stripCodes(s.name)}: ${s.players.length} online${s.tps === null ? '' : ` · ${Math.round(s.tps)} TPS`}`;
+    return `${stripCodes(s.name)}: ${s.players.length} online${s.tps === null ? '' : ` · ${Math.round(s.tps)} ${rateOf(s.game).label}`}`;
   };
   return truncate(states.map(part).join(' | '), 128);
 }
 
-/** A channel topic for one server. TPS is rounded so the text (and the rate-limited edit) changes less often. */
+/** A channel topic for one server. Its rate is rounded so the text (and the rate-limited edit) changes less often. */
 export function formatTopic(s: ServerState): string {
   if (!s.online) return '🔴 Offline';
   if (s.hung) return '🟠 Not responding';
-  const tps = s.tps === null ? '' : ` · ${Math.round(s.tps)} TPS`;
+  const tps = s.tps === null ? '' : ` · ${Math.round(s.tps)} ${rateOf(s.game).label}`;
   const n = s.players.length;
   const who = n ? `: ${s.players.join(', ')}` : '';
   return truncate(`🟢 Online${tps} · ${n} player${n === 1 ? '' : 's'}${who}`, 1024);

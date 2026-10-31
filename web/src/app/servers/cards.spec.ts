@@ -12,6 +12,8 @@ import Cards from './cards';
 const GTNH: ServerCard = {
   id: 'gtnh',
   name: 'GTNH',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
   tps: 19.5,
@@ -95,6 +97,13 @@ describe('server rows', () => {
     const { text } = await setup();
     expect(text('gtnh', 'tps')).toBe('19.5');
     expect(text('site', 'tps')).toBeUndefined();
+  });
+
+  it("labels a factorio server's rate UPS", async () => {
+    const { el, text } = await setup([GTNH, { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 58.24 }]);
+    expect(el.querySelector('[data-server=gtnh] dt')?.textContent).toBe('TPS');
+    expect(el.querySelector('[data-server=space] dt')?.textContent).toBe('UPS');
+    expect(text('space', 'tps')).toBe('58.2');
   });
 
   it('offers the actions its state allows', async () => {
@@ -192,7 +201,7 @@ describe('server rows', () => {
     events.push(2, { serverId: 'gtnh', type: 'join', player: 'Steve' });
     await refetch([{ ...GTNH, players: ['Steve'] }, SITE]);
     expect(text('gtnh', 'players')).toBe('1');
-    events.push(3, { serverId: 'gtnh', type: 'notice', severity: 'warning', kind: 'lag', tps: 10, worst: null });
+    events.push(3, { serverId: 'gtnh', type: 'notice', severity: 'warning', kind: 'lag', tps: 10, label: 'TPS', worst: null });
     await refetch([{ ...GTNH, lagging: true }, SITE]);
     expect(text('gtnh', 'state')).toBe('Lagging');
     events.push(4, { target: 'service', id: 'gtnh-svc', type: 'state', state: 'inactive', sub: 'dead' });

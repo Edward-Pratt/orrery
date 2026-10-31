@@ -18,6 +18,8 @@ const check = (id: string, over: Partial<CheckStatus> = {}): CheckStatus => ({ i
 const CARD: ServerCard = {
   id: 'creative',
   name: 'Creative',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
   tps: 20,

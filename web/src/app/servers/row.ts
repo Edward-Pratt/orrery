@@ -26,7 +26,7 @@ import { ServerActions } from './actions';
       </div>
       <dl class="flex flex-wrap gap-x-4 text-sm text-muted-foreground sm:flex-1">
         @if (c.features.tps) {
-          <div class="flex gap-1"><dt>TPS</dt><dd data-tps class="text-foreground">{{ c.tps === null ? '–' : (c.tps | number: '1.1-1') }}</dd></div>
+          <div class="flex gap-1"><dt>{{ c.rate.label }}</dt><dd data-tps class="text-foreground">{{ c.tps === null ? '–' : (c.tps | number: '1.1-1') }}</dd></div>
         }
         <div class="flex gap-1"><dt>Players</dt><dd data-players class="text-foreground" [attr.title]="c.players.join(', ')">{{ c.players.length }}</dd></div>
         <div class="flex gap-1"><dt>Uptime 24 h</dt><dd data-uptime class="text-foreground">{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd></div>

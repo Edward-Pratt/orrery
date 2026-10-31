@@ -34,17 +34,18 @@ function load(key: string): Remembered | null {
 }
 
 /**
- * A server's Console section (only with the mod): commands and their output. Everything shown comes from the stream,
- * which has each command's output (the hub puts it there just before answering), later output (spark's link), and
- * commands run from Discord; the POST's answer only reports errors. ↑/↓ in the box step through the commands this browser
- * ran here, and saved commands are chips above it; both live in `localStorage` (`orrery.console.<id>`), or, when storage
- * is blocked, the history in memory only and no ☆.
+ * A server's Console section (only with the console feature: the mod, or a factorio server's Agent): commands and
+ * their output. Everything shown comes from the stream, which has each command's output (the hub puts it there just
+ * before answering), later output (spark's link), and commands run from Discord; the POST's answer only reports
+ * errors. ↑/↓ in the box step through the commands this browser ran here, and saved commands are chips above it; both
+ * live in `localStorage` (`orrery.console.<id>`), or, when storage is blocked, the history in memory only and no ☆.
+ * A factorio command keeps its leading `/` (`/players`).
  */
 @Component({
   selector: 'app-server-console',
   imports: [HlmButton, StickBottom],
   template: `
-    @if (server.card()!.features.chat) {
+    @if (server.card()!.features.console) {
       <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
         <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-console>
           @for (e of entries(); track $index) {
@@ -76,7 +77,7 @@ function load(key: string): Remembered | null {
           <input
             #command
             class="flex-1 rounded-md border px-3 py-1.5 font-mono text-sm"
-            placeholder="A console command, e.g. list"
+            [placeholder]="server.card()!.game === 'factorio' ? 'A console command, e.g. /players' : 'A console command, e.g. list'"
             aria-label="Command"
             (keydown.arrowup)="$event.preventDefault(); step(command, -1)"
             (keydown.arrowdown)="$event.preventDefault(); step(command, 1)"

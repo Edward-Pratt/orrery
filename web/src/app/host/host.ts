@@ -57,7 +57,9 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
       </div>
       <p class="mt-3 text-xs text-muted-foreground">Sampled at {{ sample()!.ts | date: 'HH:mm' }}; updates every minute.</p>
     } @else if (loaded()) {
-      <p class="text-muted-foreground">No sample yet: the first comes a minute after the hub starts.</p>
+      <p class="text-muted-foreground" data-no-sample>
+        {{ own() ? 'No sample yet: the first comes a minute after the hub starts.' : 'No sample yet: its Agent sends one each minute once it is connected.' }}
+      </p>
     } @else {
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-skeleton>
         @for (i of [1, 2, 3, 4]; track i) {
@@ -88,6 +90,8 @@ export default class Host {
   /** The host shown: the hub's own until another is chosen. */
   readonly id = signal('');
   readonly sample = computed(() => this.hosts().find((h) => h.id === this.id())?.sample ?? null);
+  /** Whether the host shown is the hub's own (listed first; the others are Agents'). */
+  protected readonly own = computed(() => (this.hosts()[0]?.id ?? '') === this.id());
   /** The first answer is in (a skeleton shows until then). */
   readonly loaded = signal(false);
   /** A tile each for CPU, load, memory and every disk, from the latest sample. */

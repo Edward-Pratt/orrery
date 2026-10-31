@@ -47,6 +47,8 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
             }
             Restart
           </button>
+        }
+        @if (c.features.console) {
           <a hlmBtn variant="outline" size="sm" [routerLink]="['/servers', c.id, 'console']" data-action="console" aria-label="Console">
             <ng-icon name="lucideTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
           </a>

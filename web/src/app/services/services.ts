@@ -199,7 +199,8 @@ export default class Services {
         .subscribe((v) => into.set(v));
     if (on.systemd) fetching(this.#refetchServices, '/api/services', this.#services);
     else this.#services.set([]);
-    if (on.minecraft) fetching(this.refetchCards, '/api/servers', this.#cards);
+    // Servers come and go with a game connection: a Mod's (minecraft) or an Agent's (agents).
+    if (on.minecraft || on.agents) fetching(this.refetchCards, '/api/servers', this.#cards);
     else this.#cards.set([]);
     if (on.checks) {
       this.#http

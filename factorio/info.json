@@ -1,0 +1,9 @@
+{
+  "name": "orrery",
+  "version": "0.0.0",
+  "title": "orrery",
+  "author": "Edward Pratt",
+  "factorio_version": "2.1",
+  "dependencies": ["base >= 2.1"],
+  "description": "Connects a Factorio server to orrery."
+}

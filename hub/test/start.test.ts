@@ -680,7 +680,7 @@ test("a factorio server's card has its game and the UPS rate, the game connectio
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
     // Over its Agent's game connection; game updates only through an Agent. Quests are the Mod's alone.
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: true } },
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: false } },
   );
 });
 

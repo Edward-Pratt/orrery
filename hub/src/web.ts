@@ -159,7 +159,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: agentServed(s.id) },
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: false }, // game updates (the Game tab) arrive with M6, in release 2
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };

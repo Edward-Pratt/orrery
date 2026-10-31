@@ -1,8 +1,8 @@
 # Roadmap
 
-Living document. Each release gets a spec as a GitHub issue (`/to-spec`), broken into ticket issues
-(`/to-tickets`), before it's built; its section here links the spec issue. v1–v1.3 specs and plans are in
-`docs/archive/`. **Size:** S = an evening or less, M = a day or two, L = several days.
+Living document. Each release gets design notes in `docs/notes/`, with its build plan, before it's built; its
+section here links them. Releases up to Packs v2 were specced as GitHub issues, linked from their sections. v1–v1.3
+specs and plans are in `docs/archive/`. **Size:** S = an evening or less, M = a day or two, L = several days.
 **Where:** *hub* = hub-only update; *mod* = new mod jar; *protocol* = hub and mod both change (protocol bump).
 
 ## Done

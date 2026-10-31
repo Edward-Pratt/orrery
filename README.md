@@ -202,7 +202,7 @@ cd mod && ./gradlew spotlessApply build   # build runs the JUnit tests
 ```
 
 The wire protocol is in `docs/protocol.md`, the project's vocabulary in `CONTEXT.md`, and decisions in
-`docs/adr/`. Specs and tickets are GitHub issues. What's planned next is in `docs/ROADMAP.md`.
+`docs/adr/`. Designs and build plans are notes in `docs/notes/`. What's planned next is in `docs/ROADMAP.md`.
 
 ## What's next
 

@@ -57,4 +57,4 @@ MCP stable-12 mappings. Some methods have no readable name and must be called by
 ## Tests
 
 `HubClientTest` plays the hub over a real `ServerSocket`. `SayLineTest` shows Minecraft's plain classes (chat components) load fine in JUnit. `GameEvents`/`Orrery` can only be verified by
-the manual smoke test on a real GTNH server (see the release's tickets; the v1 list is in `docs/archive/plans/`).
+the manual smoke test on a real GTNH server (see the release's notes in `docs/notes/`, or its tickets for older releases; the v1 list is in `docs/archive/plans/`).

@@ -1210,7 +1210,7 @@ async function hostHub(t: TestContext) {
     assert.equal(res.status, 200, path);
     return res.json() as Promise<T>;
   };
-  return { use, next, notices, events, get, app, cookie, dbPath: cfg.dbPath };
+  return { use, next, notices, events, get, app, cookie, dbPath: cfg.dbPath, hosts: handle.hosts };
 }
 
 test('a host sample is stored, served as the latest and in the history, and streamed', async (t) => {
@@ -1325,6 +1325,61 @@ test("a stream's replay holds only the host's latest sample", async (t) => {
   assert.deepEqual(replay.events.map((e) => ('kind' in e.data ? e.data.kind : e.data.type)), ['diskLow', 'sample']);
 });
 
+/** Another Host, `vm` (mount `/`, memory warning at 50% for 1 sample, disk at 10 GB), its samples reported to the hub. */
+const VM = { id: 'vm', mounts: ['/'], memoryMaxPercent: 50, memoryMinutes: 1, diskMinFreeGB: 10 };
+const vmSample = (memUsed: number, free = 50 * GB): HostSample => ({
+  ts: Date.now(),
+  cpu: 0.5,
+  load: [1, 1, 1],
+  memory: { used: memUsed, total: 16 * GB },
+  disks: [{ mount: '/', free, total: 100 * GB }],
+});
+
+test("every host is listed, the hub's own first, and serves its own samples; /api/host stays the hub's own", async (t) => {
+  const { use, next, get, app, cookie, hosts } = await hostHub(t);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: null }]);
+  const vm = hosts.add(VM);
+  assert.throws(() => hosts.add({ ...VM, id: 'oracle' }), /already known/);
+  const reported = vmSample(4 * GB);
+  vm.record(reported);
+  use({ busy: 30, idle: 70 });
+  await next();
+  const own = (await get<HostNow>('/api/host')).sample!;
+  assert.equal(own.cpu, 0.3);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: own }, { id: 'vm', sample: reported }]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [reported]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/oracle/samples?hours=1'), [own]);
+  assert.deepEqual(await get<HostSample[]>('/api/host/samples?hours=1'), [own]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples'), [reported]); // 24 hours by default
+  assert.equal((await app.request('/api/hosts/nope/samples', { headers: { cookie } })).status, 404);
+  assert.equal((await app.request('/api/hosts/vm/samples?hours=0', { headers: { cookie } })).status, 400);
+});
+
+test("another host's samples warn and recover by its own limits, apart from the hub's own, and replay its latest", async (t) => {
+  const { use, next, events, app, cookie, hosts } = await hostHub(t);
+  const vm = hosts.add(VM);
+  const notices = () => events.flatMap((e) => (e.type === 'notice' ? [`${e.id}:${e.kind}`] : []));
+  use({ memUsed: 12 * GB }); // 75%: high for vm's limit, not for oracle's
+  vm.record(vmSample(12 * GB, 5 * GB));
+  await next();
+  await next();
+  assert.deepEqual(notices(), ['vm:memoryHigh', 'vm:diskLow']);
+  vm.record(vmSample(4 * GB));
+  assert.deepEqual(notices(), ['vm:memoryHigh', 'vm:diskLow', 'vm:memoryOk', 'vm:diskOk']);
+  assert.deepEqual(
+    events.filter((e) => e.type === 'sample').map((e) => e.id),
+    ['vm', 'oracle', 'oracle', 'vm'],
+  );
+
+  const replay = await openStream(app, cookie);
+  t.after(() => replay.close());
+  await until(() => replay.events.filter((e) => e.data.type === 'sample').length === 2);
+  assert.deepEqual(
+    replay.events.flatMap((e) => (e.data.type === 'sample' && 'target' in e.data ? [e.data.id] : [])).sort(),
+    ['oracle', 'vm'],
+  );
+});
+
 test('without the host integration nothing is sampled and there is no host API', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const cfg = config(t, { web: WEB });
@@ -1338,6 +1393,7 @@ test('without the host integration nothing is sampled and there is no host API',
   t.mock.timers.tick(60 * 60_000);
   const cookie = await loginCookie(handle.web!.app);
   assert.equal((await handle.web!.app.request('/api/host', { headers: { cookie } })).status, 404);
+  assert.equal((await handle.web!.app.request('/api/hosts', { headers: { cookie } })).status, 404);
 });
 
 const UNITS = [

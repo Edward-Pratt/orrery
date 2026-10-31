@@ -419,7 +419,7 @@ config factorio "$srv/mods/mod-list.json" << 'EOF'
 }
 EOF
 
-# ---- 10. The orrery mod, when mods/ has none: from now on Game updates change it.
+# ---- 10. The orrery mod, when mods/ has none; later versions go in by hand until Game updates exist (release 2).
 releases=$(fetch_text "https://api.github.com/repos/$REPO/releases?per_page=100")
 newest() { # <part>: the newest <part>-vX.Y.Z release on GitHub (by version, drafts left out)
   "$node" -e '
@@ -444,7 +444,7 @@ asset_sha() { # <tag> <name>: the sha256 GitHub lists for that release asset
     process.stdout.write(d.slice(7));' "$1" "$2" <<< "$releases"
 }
 if compgen -G "$srv/mods/orrery_*.zip" > /dev/null; then
-  echo "kept the orrery mod in /srv/factorio/mods (Game updates change it)"
+  echo "kept the orrery mod in /srv/factorio/mods (update it by hand until Game updates exist)"
 else
   ftag=$(newest factorio) || die "GitHub has no factorio-v release of the orrery mod yet"
   [[ $ftag =~ ^factorio-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a factorio-vX.Y.Z tag: $ftag"

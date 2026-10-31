@@ -6,7 +6,7 @@ import { Db } from '../src/db.ts';
 import { Hosts } from '../src/host.ts';
 import { LIMITS } from '../src/protocol.ts';
 import { ServerHub, type HubEvent, type HubOptions, type TargetEvent } from '../src/servers.ts';
-import { fakeMod, sleep, TOKEN, until } from './fake-mod.ts';
+import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 const AGENT_TOKEN = 'agent-token-0123456789abcdef-0123456789';
 const LIMITS_VM = { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
@@ -390,4 +390,21 @@ test('a line whose handling throws ends only its own connection; a deeply nested
   assert.equal(errors.mock.calls.filter((c) => /a line failed, closing/.test(String(c.arguments[0]))).length, 1);
   await agentUp(port); // the hub is still up
   assert.equal(agents.get('vm')?.connected, true);
+});
+
+test("broadcast: a Mod's server runs say as an audited command, an Agent's factorio server gets a notice", async (t) => {
+  const { hub, port } = await setup(t);
+  const mod = await online(await hub.listen(0));
+  const sent = hub.broadcast('gtnh', 'Server restarting in 5 minutes', 'hub:restart');
+  const cmd = (await mod.next()) as { type: string; id: string; command: string };
+  assert.deepEqual([cmd.type, cmd.command], ['cmd', 'say Server restarting in 5 minutes']);
+  mod.send({ type: 'cmdResult', id: cmd.id, output: [] });
+  await sent;
+
+  await assert.rejects(hub.broadcast('space', 'Server stopping in 1 minute', 'hub:restart'), /Space Age is offline/);
+  await agentUp(port);
+  const game = await gameUp(port);
+  await hub.broadcast('space', 'Server stopping\nin 1 minute', 'hub:restart');
+  assert.deepEqual(await game.next(), { type: 'notice', message: 'Server stopping in 1 minute' });
+  await assert.rejects(hub.broadcast('space', ' \u0000 ', 'hub:restart'), /empty notice/);
 });

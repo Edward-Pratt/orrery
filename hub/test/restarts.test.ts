@@ -22,22 +22,25 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const log: string[] = []; // "actor|action|target|details", from hub.audit
   const notices: Notice[] = []; // published on the hub's event stream
   const state = { online: true, stopError: null as Error | null, paused: null as string | null };
+  const runCommand = async (id: string, command: string, by: string) => {
+    commands.push(command);
+    audit.push(`${command}|${by}`);
+    log.push(`${by}|command|${id}|${command}`); // ServerHub audits every command it sends
+    if (command === 'stop' && state.stopError) throw state.stopError;
+    return [];
+  };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     get: (id: string) => (state.online ? ({ id, online: true } as ServerState) : undefined),
-    runCommand: async (id: string, command: string, by: string) => {
-      commands.push(command);
-      audit.push(`${command}|${by}`);
-      log.push(`${by}|command|${id}|${command}`); // ServerHub audits every command it sends
-      if (command === 'stop' && state.stopError) throw state.stopError;
-      return [];
-    },
+    runCommand,
+    // What ServerHub.broadcast does on a Mod's server.
+    broadcast: async (id: string, text: string, by: string) => void (await runCommand(id, `say ${text}`, by)),
     audit: (actor: string, action: string, target: string, details = '') => void log.push(`${actor}|${action}|${target}|${details}`),
     publish: (serverId: string, notice: Notice) => {
       notices.push(notice);
       events.emit('event', { ...notice, type: 'notice', serverId });
     },
-  } as unknown as Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
+  } as unknown as Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'publish' | 'audit'>;
   const restarts = new RestartScheduler(hub, { paused: () => state.paused });
   t.after(() => restarts.stop());
   return { restarts, events, commands, audit, log, notices, state };

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Message } from 'discord.js';
-import { channelFor, COMMANDS, shouldRelay } from '../src/discord.ts';
+import type { Message, Webhook } from 'discord.js';
+import { channelFor, COMMANDS, sendChat, shouldRelay } from '../src/discord.ts';
 import type { TargetEvent } from '../src/servers.ts';
 
 const msg = (over: { bot?: boolean; webhookId?: string | null; system?: boolean }) =>
@@ -44,4 +44,44 @@ test('notices about the host, services and checks go only to the alerts channel,
   assert.equal(channelFor(check, { ...cfg, alertsChannel: '4'.repeat(18) }), '4'.repeat(18));
   assert.equal(channelFor({ serverId: 'gtnh', type: 'started' }, { ...cfg, alertsChannel: '4'.repeat(18) }), '3'.repeat(18));
   assert.equal(channelFor({ serverId: 'toString', type: 'started' }, cfg), undefined);
+});
+
+/** A Discord API error as discord.js throws it: Invalid Form Body, with the field Discord refused. */
+const formError = (field: string, code: string, message: string) =>
+  Object.assign(new Error(`Invalid Form Body\n${field}[${code}]: ${message}`), {
+    code: 50035,
+    rawError: { code: 50035, message: 'Invalid Form Body', errors: { [field]: { _errors: [{ code, message }] } } },
+  });
+
+/** A relay webhook that answers as Discord does: content over 2000 characters, or a name with "discord", is refused. */
+function fakeWebhook() {
+  const sent: { username: string; content: string }[] = [];
+  const hook = {
+    send: async (m: { username: string; content: string }) => {
+      if (m.content.length > 2000) throw formError('content', 'BASE_TYPE_MAX_LENGTH', 'Must be 2000 or fewer in length.');
+      if (/discord/i.test(m.username)) throw formError('username', 'USERNAME_INVALID_CONTAINS', 'Username cannot contain "discord"');
+      sent.push({ username: m.username, content: m.content });
+    },
+  } as unknown as Webhook;
+  return { hook, sent };
+}
+
+test('a 3000-character chat message posts through the webhook cut to 2000, and its name stays allowed', async () => {
+  const { hook, sent } = fakeWebhook();
+  const refused = new Set<string>();
+  await sendChat(hook, refused, 'Steve', undefined, 'a'.repeat(3000));
+  assert.deepEqual(sent, [{ username: 'Steve', content: 'a'.repeat(2000) }]);
+  assert.deepEqual([...refused], []);
+});
+
+test("only Discord's error about the username adds the name to refusedNames", async () => {
+  const refused = new Set<string>();
+  const { hook } = fakeWebhook();
+  await assert.rejects(sendChat(hook, refused, 'discordfan', undefined, 'hi'), /Username cannot contain/);
+  assert.deepEqual([...refused], ['discordfan']);
+  const tooLong = { send: async () => Promise.reject(formError('content', 'BASE_TYPE_MAX_LENGTH', 'Must be 2000 or fewer in length.')) } as unknown as Webhook;
+  await assert.rejects(sendChat(tooLong, refused, 'Steve', undefined, 'hi'), /2000 or fewer/);
+  const gone = { send: async () => Promise.reject(Object.assign(new Error('Unknown Webhook'), { code: 10015 })) } as unknown as Webhook;
+  await assert.rejects(sendChat(gone, refused, 'Alex', undefined, 'hi'), /Unknown Webhook/);
+  assert.deepEqual([...refused], ['discordfan']);
 });

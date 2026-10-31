@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { APIEmbed } from 'discord.js';
 import {
+  chatContent,
   COLORS,
   formatBackupList,
   formatBackupStatus,
@@ -9,6 +10,7 @@ import {
   formatTargetEvent,
   formatLastSeen,
   formatLinked,
+  formatLinkHint,
   formatNotice,
   formatOutput,
   formatPlayers,
@@ -455,4 +457,38 @@ test('deploy notices reach Discord worded and coloured by outcome', () => {
     '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
     0xe74c3c,
   ]);
+});
+
+test('chat and other plain posts are cut to 2000 characters after escaping, never splitting an emoji', () => {
+  const pipes = '|'.repeat(1024); // a full 1 KiB message that escaping doubles
+  const chat = formatEvent({ serverId: 's', type: 'chat', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(chat.content.length, 2000);
+  assert.ok(chat.content.startsWith('**Steve**: \\|\\|'));
+  const death = formatEvent({ serverId: 's', type: 'death', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(death.content.length, 2000);
+  assert.equal(chatContent('a'.repeat(3000)).length, 2000);
+  assert.equal(chatContent('**hi**'), '\\*\\*hi\\*\\*');
+  assert.equal(chatContent(`${'a'.repeat(1999)}😀`), 'a'.repeat(1999));
+});
+
+test("a milestone is posted per kind, escaped, its text capped at 200 and its force named only when it isn't the default", () => {
+  const milestone = (m: { kind: 'research' | 'rocket' | 'platform' | 'landing'; text: string; player?: string; force?: string }) =>
+    formatEvent({ serverId: 's', type: 'milestone', ...m });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Mining productivity 12' }), { content: '🔬 Research finished: **Mining productivity 12**' });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Logistics_2', force: 'team_red' }), { content: '🔬 Research finished: **Logistics\\_2** (team\\_red)' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: 'Nauvis' }), { content: '🚀 First rocket launched from **Nauvis**' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: '' }), { content: '🚀 First rocket launched' });
+  assert.deepEqual(milestone({ kind: 'platform', text: '# [Home](http://x)' }), { content: '🛰️ First space platform in orbit: **\\# \\[Home](http://x)**' });
+  assert.deepEqual(milestone({ kind: 'landing', text: 'Vulcanus', player: 'x_y', force: 'blue' }), { content: '🪐 First landing on **Vulcanus** by **x\\_y** (blue)' });
+  const long = milestone({ kind: 'research', text: 'a'.repeat(1024) }) as { content: string };
+  assert.equal(long.content, `🔬 Research finished: **${'a'.repeat(200)}**`);
+});
+
+test('the /link hint names each game that has a server, in a fixed order', () => {
+  assert.equal(formatLinkHint('ABC234', ['minecraft']), 'In Minecraft, type `/discord link ABC234`. Within 10 minutes.');
+  assert.equal(formatLinkHint('ABC234', ['factorio']), 'In Factorio, type `/orrery-link ABC234`. Within 10 minutes.');
+  assert.equal(
+    formatLinkHint('ABC234', ['factorio', 'minecraft']),
+    'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. Within 10 minutes.',
+  );
 });

@@ -19,6 +19,7 @@ const history: HubEvent[] = [
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['There are 2 players'] },
   { serverId: 'gtnh', type: 'console', command: 'list', by: 'web:ed', output: ['later'], late: true },
   { serverId: 'gtnh', type: 'death', player: 'Alex', message: 'Alex fell' },
+  { serverId: 'gtnh', type: 'milestone', kind: 'landing', text: 'Vulcanus', player: 'Alex', force: 'blue' },
   { serverId: 'gtnh', type: 'leave', player: 'Alex' },
 ];
 

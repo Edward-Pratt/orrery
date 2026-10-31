@@ -87,6 +87,8 @@ export class Db {
         unit TEXT NOT NULL, game_port INTEGER NOT NULL, runtime TEXT, by TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS feed (id INTEGER PRIMARY KEY, server_id TEXT NOT NULL, at INTEGER NOT NULL, event TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS feed_server_id ON feed (server_id, id);
+      CREATE TABLE IF NOT EXISTS factorio_links (discord_id TEXT PRIMARY KEY, name TEXT NOT NULL, linked_at INTEGER NOT NULL);
+      CREATE UNIQUE INDEX IF NOT EXISTS factorio_links_name ON factorio_links (name COLLATE NOCASE);
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -263,19 +265,36 @@ export class Db {
     return row.avg === null || row.min === null ? null : { avg: row.avg, min: row.min };
   }
 
-  /** Links a Discord account to a Minecraft player, replacing any earlier link of either. */
+  /** Links a Discord account to a Minecraft player, replacing any earlier Minecraft link of either. */
   link(discordId: string, player: string, uuid: string, ts: number): void {
     this.#write('unlink old', 'DELETE FROM links WHERE discord_id = ? OR player = ? COLLATE NOCASE', discordId, player);
     this.#write('link', 'INSERT INTO links (discord_id, player, uuid, linked_at) VALUES (?, ?, ?, ?)', discordId, player, uuid, ts);
   }
 
-  /** True if a link was removed. */
-  unlinkDiscord(discordId: string): boolean {
-    return this.#delete('DELETE FROM links WHERE discord_id = ?', discordId);
+  /**
+   * Links a Discord account to a Factorio name, replacing any earlier Factorio link of either. Its own table, so the
+   * `links` table an older hub reads stays as it was (its `uuid` is required, and Factorio has none).
+   */
+  linkFactorio(discordId: string, name: string, ts: number): void {
+    this.#write('unlink old', 'DELETE FROM factorio_links WHERE discord_id = ? OR name = ? COLLATE NOCASE', discordId, name);
+    this.#write('link', 'INSERT INTO factorio_links (discord_id, name, linked_at) VALUES (?, ?, ?)', discordId, name, ts);
   }
 
+  /** Removes a Discord account's links in every game. True if one was removed. */
+  unlinkDiscord(discordId: string): boolean {
+    const minecraft = this.#delete('DELETE FROM links WHERE discord_id = ?', discordId);
+    const factorio = this.#delete('DELETE FROM factorio_links WHERE discord_id = ?', discordId);
+    return minecraft || factorio;
+  }
+
+  /** Removes a Minecraft player's link (never a Factorio one of the same name). */
   unlinkPlayer(player: string): boolean {
     return this.#delete('DELETE FROM links WHERE player = ? COLLATE NOCASE', player);
+  }
+
+  /** Removes a Factorio name's link (never a Minecraft one of the same name). */
+  unlinkFactorioPlayer(name: string): boolean {
+    return this.#delete('DELETE FROM factorio_links WHERE name = ? COLLATE NOCASE', name);
   }
 
   #delete(sql: string, param: string): boolean {
@@ -299,6 +318,18 @@ export class Db {
       | { discord_id: string; player: string }
       | undefined;
     return row ? { discordId: row.discord_id, player: row.player } : null;
+  }
+
+  factorioLinkByDiscord(discordId: string): { name: string } | null {
+    const row = this.#db.prepare('SELECT name FROM factorio_links WHERE discord_id = ?').get(discordId) as { name: string } | undefined;
+    return row ? { name: row.name } : null;
+  }
+
+  factorioLinkByName(name: string): { discordId: string; name: string } | null {
+    const row = this.#db.prepare('SELECT discord_id, name FROM factorio_links WHERE name = ? COLLATE NOCASE').get(name) as
+      | { discord_id: string; name: string }
+      | undefined;
+    return row ? { discordId: row.discord_id, name: row.name } : null;
   }
 
   /** A host's sample, kept as JSON. */

@@ -12,9 +12,11 @@ import {
 } from 'discord.js';
 import { basename } from 'node:path';
 import {
+  chatContent,
   formatBackupList,
   formatBackupStatus,
   formatEvent,
+  formatLinkHint,
   formatNotice,
   formatOutput,
   formatPlayers,
@@ -25,7 +27,6 @@ import {
   formatTop,
   formatTopic,
   formatTps,
-  md,
   topicDue,
   type Post,
   type TopicEdit,
@@ -45,7 +46,7 @@ const CRASH_LOG_WINDOW_MS = 10 * 60_000;
 // Discord API error codes.
 const UNKNOWN_WEBHOOK = 10015;
 const MISSING_PERMISSIONS = 50013;
-const INVALID_FORM_BODY = 50035; // e.g. a webhook username containing "discord"
+const INVALID_FORM_BODY = 50035; // a field Discord won't take: a webhook username containing "discord", content too long
 
 const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 
@@ -79,7 +80,7 @@ export const COMMANDS = [
     .setName('cmd')
     .setDescription('Run a server console command (admin role only)')
     .setDefaultMemberPermissions(0)
-    .addStringOption((o) => o.setName('command').setDescription('Command, without the leading /').setRequired(true)),
+    .addStringOption((o) => o.setName('command').setDescription('The command, as typed in the server console').setRequired(true)),
   new SlashCommandBuilder()
     .setName('restart')
     .setDescription('Restart the server with an in-game countdown (admin role only)')
@@ -95,7 +96,7 @@ export const COMMANDS = [
     .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the scheduled restart')),
   new SlashCommandBuilder()
     .setName('backup')
-    .setDescription('ServerUtilities backups (admin role only)')
+    .setDescription('Backups (admin role only)')
     .setDefaultMemberPermissions(0)
     .addSubcommand((s) => s.setName('start').setDescription('Start a backup now and report when it finishes'))
     .addSubcommand((s) => s.setName('status').setDescription('Newest backup, count and total size'))
@@ -127,6 +128,32 @@ export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId
 }
 
 const errorCode = (err: unknown) => (err as { code?: number }).code;
+
+/** Whether Discord refused a webhook send for its username (one containing "discord", say), not for anything else. */
+export function usernameRefused(err: unknown): boolean {
+  const errors = (err as { rawError?: { errors?: unknown } }).rawError?.errors;
+  return errorCode(err) === INVALID_FORM_BODY && typeof errors === 'object' && errors !== null && Object.hasOwn(errors, 'username');
+}
+
+/**
+ * Posts a chat line through a channel's relay webhook under `username`, escaped and cut to Discord's 2000 characters.
+ * Throws what Discord answered; a name it refused is remembered in `refusedNames`, so it isn't tried again, while any
+ * other error (the content, a deleted webhook) leaves the name alone.
+ */
+export async function sendChat(
+  hook: Pick<Webhook, 'send'>,
+  refusedNames: Set<string>,
+  username: string,
+  avatarURL: string | undefined,
+  message: string,
+): Promise<void> {
+  try {
+    await hook.send({ username, avatarURL, content: chatContent(message), allowedMentions: { parse: [] } });
+  } catch (err) {
+    if (usernameRefused(err)) refusedNames.add(username);
+    throw err;
+  }
+}
 
 export async function startDiscord(
   hub: ServerHub,
@@ -170,17 +197,11 @@ export async function startDiscord(
     const hook = webhooks.get(e.serverId);
     if (hook && !refusedNames.has(username)) {
       try {
-        await hook.send({
-          username,
-          avatarURL,
-          content: md(e.message),
-          allowedMentions: { parse: [] },
-        });
+        await sendChat(hook, refusedNames, username, avatarURL, e.message);
         return;
       } catch (err) {
-        // A deleted webhook is forgotten; a refused name is remembered, so neither is retried per message.
+        // A deleted webhook is forgotten (and a refused name remembered, by sendChat), so neither is retried per message.
         if (errorCode(err) === UNKNOWN_WEBHOOK) webhooks.delete(e.serverId);
-        if (errorCode(err) === INVALID_FORM_BODY) refusedNames.add(username);
         console.warn(`[discord] webhook send failed, posting as the bot: ${(err as Error).message}`);
       }
     }
@@ -219,8 +240,8 @@ export async function startDiscord(
     const serverId = serverByChannel.get(m.channelId);
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
-    // Linked people appear in game under their Minecraft name.
-    hub.say(serverId, stats.linkedPlayer(m.author.id) ?? m.member?.displayName ?? m.author.username, text, 'discord');
+    // Linked people appear in game under their name in that server's game.
+    hub.say(serverId, stats.linkedPlayer(serverId, m.author.id) ?? m.member?.displayName ?? m.author.username, text, 'discord');
   });
 
   client.on(Events.InteractionCreate, (i) => {
@@ -252,7 +273,8 @@ export async function startDiscord(
     }
     if (i.commandName === 'link') {
       const code = links.issue(i.user.id, i.user.username);
-      await i.reply({ content: `In game, type \`/discord link ${code}\` within 10 minutes.`, flags: MessageFlags.Ephemeral });
+      const games = [...new Set(hub.list().map((s) => s.game))];
+      await i.reply({ content: formatLinkHint(code, games), flags: MessageFlags.Ephemeral });
       return;
     }
     if (i.commandName === 'unlink') {
@@ -264,7 +286,7 @@ export async function startDiscord(
       const user = i.options.getUser('user');
       const p = stats.playtime(serverId, user ? { discordId: user.id } : { player: i.options.getString('player') ?? undefined }, now)!;
       if (!p.found) {
-        const content = user ? `${user.username} hasn't linked a Minecraft account (use /link).` : 'Give a player name or a Discord user.';
+        const content = user ? `${user.username} hasn't linked an in-game name here (use /link).` : 'Give a player name or a Discord user.';
         await i.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }

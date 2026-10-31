@@ -3,14 +3,14 @@ import { FEED_KEPT, type Db } from './db.ts';
 import type { FeedEvent, LiveEvent, ServerHub } from './servers.ts';
 
 /** A server's events kept in `Db` too, so its Chat and Console panes survive a hub restart. */
-const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'say', 'console']);
+const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'milestone', 'say', 'console']);
 
 /**
  * Numbers every hub event, stamps it with the time it arrived (`at`), and keeps the last `perTarget` of each server's (and each host's, service's and check's)
  * in memory, so a live stream can replay them and resume after a given id. TPS events, host samples and check results stay
  * out of that buffer (they would push chat and notices out): only the latest of each is kept, a server's TPS until it goes
  * down (or its Agent leaves), a server's latest `packUpdateStep` until its update finishes, and a library add's latest progress until it
- * finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `say`) and console entries are also stored in `Db`,
+ * finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also stored in `Db`,
  * and seed its buffer when the hub starts (only for servers still in the config), so they survive a restart with their
  * ids and `at`; nothing else does. Ids start at the clock or above the highest stored one, whichever is later, so a
  * client's id from before a restart stays older than new ones.

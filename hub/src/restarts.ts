@@ -1,7 +1,7 @@
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
-type Hub = Pick<ServerHub, 'runCommand' | 'on' | 'get' | 'publish' | 'audit'>;
+type Hub = Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'publish' | 'audit'>;
 type Pending = { at: number; by: string; byName: string; stop: boolean; fire?: () => Promise<void>; timers: NodeJS.Timeout[] };
 /**
  * A stop countdown (`stop`), and what it runs at the end instead of the `stop` command (`fire`). A countdown with its
@@ -74,7 +74,7 @@ export class RestartScheduler {
     if (!this.#clear(serverId)) return false;
     this.#hub.audit(by, 'restart cancel', serverId);
     this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelled', by: byName });
-    this.#say(serverId, `say ${words(stop).cancelled}`);
+    this.#say(serverId, words(stop).cancelled);
     return true;
   }
 
@@ -114,10 +114,11 @@ export class RestartScheduler {
     return true;
   }
 
-  #say(serverId: string, command: string): void {
+  /** A countdown's line in game (`ServerHub.broadcast`). */
+  #say(serverId: string, text: string): void {
     this.#hub
-      .runCommand(serverId, command, 'hub:restart')
-      .catch((err: Error) => console.error(`[restart] "${command}" on ${serverId} failed: ${err.message}`));
+      .broadcast(serverId, text, 'hub:restart')
+      .catch((err: Error) => console.error(`[restart] "${text}" on ${serverId} failed: ${err.message}`));
   }
 
   /** Marks a notice as about a stop; restart notices stay as they were. */
@@ -126,7 +127,7 @@ export class RestartScheduler {
   }
 
   #warn(serverId: string, msLeft: number): void {
-    this.#say(serverId, `say Server ${words(this.#pending.get(serverId)?.stop).going} in ${countdownText(msLeft)}`);
+    this.#say(serverId, `Server ${words(this.#pending.get(serverId)?.stop).going} in ${countdownText(msLeft)}`);
   }
 
   #fire(serverId: string): void {

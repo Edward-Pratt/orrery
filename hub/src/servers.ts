@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
-import { MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
+import { LIMITS, MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from './protocol.ts';
 import type { Announcement, AuditEntry, ChatSource, Game, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from './types.ts';
 export type {
   Announcement,
@@ -200,6 +200,21 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.#send(conn.socket, msg);
     this.emit('event', { ...msg, ...(avatar && { avatar }), serverId: id });
     return true;
+  }
+
+  /**
+   * A line from the hub itself to everyone in game, such as a countdown's. A Mod's server runs `say <text>`, a console
+   * command audited as `by` and put on the stream like any; a factorio server's Agent gets a `notice` and builds the
+   * game's command itself. Rejects if the server is offline or the text is empty after cleaning.
+   */
+  broadcast(id: string, text: string, by: string): Promise<void> {
+    if (this.#states.get(id)?.game !== 'factorio') return this.runCommand(id, `say ${text}`, by).then(() => {});
+    const conn = this.#conns.get(id);
+    const message = mcText(text, LIMITS.message);
+    if (!conn) return Promise.reject(new Error(`${this.#states.get(id)!.name} is offline`));
+    if (!message) return Promise.reject(new Error('empty notice'));
+    this.#send(conn.socket, { type: 'notice', message });
+    return Promise.resolve();
   }
 
   /** Puts a hub-core notice about a server on the event stream. */

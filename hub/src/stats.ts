@@ -50,10 +50,10 @@ export class Stats {
     };
   }
 
-  /** A player's playtime (all time, last 7 days) and last seen, by Minecraft name or a linked Discord user. */
+  /** A player's playtime (all time, last 7 days) and last seen, by in-game name or a linked Discord user. */
   playtime(serverId: string, who: { player?: string; discordId?: string }, now = Date.now()): PlaytimeAnswer | undefined {
     if (!this.#hub.get(serverId)) return undefined;
-    const player = who.discordId !== undefined ? this.linkedPlayer(who.discordId) : who.player;
+    const player = who.discordId !== undefined ? this.linkedPlayer(serverId, who.discordId) : who.player;
     if (!player) return { found: false, reason: who.discordId !== undefined ? 'notLinked' : 'noInput' };
     return {
       found: true,
@@ -167,8 +167,10 @@ export class Stats {
     return { entries: rows.slice(0, limit), older: rows.length > limit };
   }
 
-  /** The Minecraft name linked to a Discord user, if any. */
-  linkedPlayer(discordId: string): string | undefined {
-    return this.#db.linkByDiscord(discordId)?.player;
+  /** The name a Discord user linked in the server's game (its Minecraft or its Factorio name), if any. */
+  linkedPlayer(serverId: string, discordId: string): string | undefined {
+    const game = this.#hub.get(serverId)?.game;
+    if (game === 'factorio') return this.#db.factorioLinkByDiscord(discordId)?.name;
+    return game === 'minecraft' ? this.#db.linkByDiscord(discordId)?.player : undefined;
   }
 }

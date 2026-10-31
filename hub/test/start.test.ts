@@ -31,6 +31,7 @@ import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import { postTargets } from '../src/discord.ts';
 import { formatEvent, formatTargetEvent, type Post } from '../src/format.ts';
+import type { Links } from '../src/links.ts';
 import type { RestoreEnv, RunRestore } from '../src/restore.ts';
 import type { Run } from '../src/services.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
@@ -668,7 +669,7 @@ test('server cards while offline: features only for the server with the mod', as
   ]);
 });
 
-test("a factorio server's card has its game and the UPS rate, and of the Mod's features only the rate", async (t) => {
+test("a factorio server's card has its game and the UPS rate, and of the Mod's features chat and the rate", async (t) => {
   const cfg = config(t, { web: WEB });
   cfg.servers = [{ ...cfg.servers[0]!, id: 'space', name: 'Space Age', game: 'factorio', lag: { tps: 50, minutes: 2, enabled: true } }];
   const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
@@ -677,7 +678,7 @@ test("a factorio server's card has its game and the UPS rate, and of the Mod's f
   const [card] = await cardsOf(app, await loginCookie(app));
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { ...NO_MOD, tps: true } }, // from its Agent's heartbeats
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { ...NO_MOD, chat: true, tps: true } }, // over its Agent's game connection
   );
 });
 
@@ -1905,4 +1906,39 @@ test('the hub starts while the Agent port waits for its address, and closes with
   assert.equal(await Promise.race([handle.agentPort!, sleep(100).then(() => 'waiting')]), 'waiting');
   await handle.close();
   assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] 192.0.2.1 is not on this machine yet: trying again every 0.02 s']);
+});
+
+test("a link is redeemed in each game, chat from the dashboard names the admin by the server's game, and /unlink clears both", async (t) => {
+  const cfg = agentConfig(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
+  delete cfg.healthcheckUrl;
+  let links: Links | undefined;
+  const handle = await startHub(cfg, {
+    startFrontend: async (_h, _s, _r, l) => {
+      links = l;
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('nothing to request'),
+    oauth: fakeOAuth().oauth,
+  });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const mod = await online(handle.port!);
+  const { game } = await agentOnline(await handle.agentPort!);
+
+  mod.send({ type: 'link', player: 'Steve', uuid: 'u1', code: links!.issue(ADMIN.id, 'alex') });
+  assert.deepEqual(await mod.next(), { type: 'linkResult', player: 'Steve', ok: true, message: 'Linked to alex on Discord.' });
+  game.send({ type: 'link', player: 'engineer', uuid: '', code: links!.issue(ADMIN.id, 'alex') });
+  assert.deepEqual(await game.next(), { type: 'linkResult', player: 'engineer', ok: true, message: 'Linked to alex on Discord.' });
+
+  const chat = async (server: string, conn: { next: () => Promise<unknown> }) => {
+    assert.equal((await post(app, cookie, `/api/servers/${server}/chat`, { message: 'hi' })).status, 204);
+    return ((await conn.next()) as { author: string }).author;
+  };
+  assert.equal(await chat('gtnh', mod), 'Steve');
+  assert.equal(await chat('space', game), 'engineer');
+
+  assert.equal(links!.unlinkDiscord(ADMIN.id), true); // Discord's /unlink
+  assert.equal(await chat('gtnh', mod), 'alex');
+  assert.equal(await chat('space', game), 'alex');
 });

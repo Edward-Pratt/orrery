@@ -16,10 +16,11 @@ const DAY = 24 * HOUR;
 const NOW = 100 * DAY;
 
 const gtnh: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.5, players: ['Steve'], dims: [] };
+const space: ServerState = { ...gtnh, id: 'space', name: 'Space Age', game: 'factorio', tps: 60, players: ['engineer'] };
 
 function setup(folders: { dir?: string; backupDir?: string } = {}) {
   const db = new Db(':memory:');
-  const hub = { get: (id: string) => (id === 'gtnh' ? gtnh : undefined) } as unknown as Pick<ServerHub, 'get'>;
+  const hub = { get: (id: string) => ({ gtnh, space })[id] } as unknown as Pick<ServerHub, 'get'>;
   return { db, stats: new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10, ...folders }]) };
 }
 
@@ -112,8 +113,28 @@ test('playtime by Discord user uses the linked name, and says when there is none
   });
   assert.deepEqual(stats.playtime('gtnh', { discordId: '999' }, NOW), { found: false, reason: 'notLinked' });
   assert.deepEqual(stats.playtime('gtnh', {}, NOW), { found: false, reason: 'noInput' });
-  assert.equal(stats.linkedPlayer('123'), 'Steve');
-  assert.equal(stats.linkedPlayer('999'), undefined);
+  assert.equal(stats.linkedPlayer('gtnh', '123'), 'Steve');
+  assert.equal(stats.linkedPlayer('gtnh', '999'), undefined);
+});
+
+test("a linked Discord user's name is the one in the server's game, for chat and /playtime alike", () => {
+  const { db, stats } = setup();
+  db.link('123', 'Steve', 'uuid', NOW);
+  db.linkFactorio('123', 'engineer', NOW);
+  db.linkFactorio('456', 'pilot', NOW); // a Factorio link only
+  db.openSession('space', 'engineer', NOW - HOUR);
+  assert.equal(stats.linkedPlayer('gtnh', '123'), 'Steve');
+  assert.equal(stats.linkedPlayer('space', '123'), 'engineer');
+  assert.equal(stats.linkedPlayer('gtnh', '456'), undefined);
+  assert.equal(stats.linkedPlayer('space', '456'), 'pilot');
+  assert.equal(stats.linkedPlayer('nope', '123'), undefined);
+  assert.deepEqual(stats.playtime('space', { discordId: '123' }, NOW), {
+    found: true,
+    player: 'engineer',
+    totalMs: HOUR,
+    weekMs: HOUR,
+    lastSeen: { online: true },
+  });
 });
 
 test('top covers the last 24 hours, the last 7 days or all time', () => {

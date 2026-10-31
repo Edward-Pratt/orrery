@@ -1,3 +1,4 @@
+import type { Agents } from './agents.ts';
 import { backupStats, freeBytes, growthPerDay, listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';
 import { findCrashLogs } from './crashlogs.ts';
@@ -16,6 +17,9 @@ const GB = 1024 ** 3;
 const PERIOD_MS: Record<Period, number> = { day: DAY, week: 7 * DAY, all: Infinity };
 const TOP_LIMIT = 10;
 
+/** Where a server's logs are read: its folder (`logs.ts`), or the files its Agent serves. */
+type LogSource = { list: () => Promise<LogFile[]>; read: (name: string) => Promise<string[] | undefined> };
+
 /**
  * Answers frontends' stats questions for one Server as plain data; owns the time windows. Hub core: frontends
  * (Discord now, the web dashboard later) format the answers. Undefined for an unknown Server.
@@ -24,11 +28,29 @@ export class Stats {
   #hub: Pick<ServerHub, 'get'>;
   #db: Db;
   #folders: Map<string, Pick<ServerSettings, 'dir' | 'backupDir' | 'backupMinFreeGB'>>;
+  #logSources = new Map<string, LogSource>();
 
-  constructor(hub: Pick<ServerHub, 'get'>, db: Db, servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir' | 'backupMinFreeGB'>[]) {
+  /** `agents`: the Agents whose servers' logs are the files they serve (with the agents integration). */
+  constructor(
+    hub: Pick<ServerHub, 'get'>,
+    db: Db,
+    servers: Pick<ServerSettings, 'id' | 'dir' | 'backupDir' | 'backupMinFreeGB'>[],
+    agents?: Pick<Agents, 'list' | 'request'>,
+  ) {
     this.#hub = hub;
     this.#db = db;
     this.#folders = new Map(servers.map((s) => [s.id, s]));
+    for (const { id, dir } of servers) {
+      if (dir) this.#logSources.set(id, { list: () => listLogs(dir), read: (name) => tailLog(dir, name) });
+    }
+    for (const a of agents?.list() ?? []) {
+      const ask = agents!; // listed only with agents
+      const list = async () => (await ask.request(a.id, { type: 'logs' })).files.sort((x, y) => y.modified - x.modified);
+      // Only a name the Agent lists right now is asked for (it checks again).
+      const read = async (name: string) =>
+        (await list()).some((f) => f.name === name) ? (await ask.request(a.id, { type: 'log', name })).lines : undefined;
+      this.#logSources.set(a.server, { list, read });
+    }
   }
 
   /** Live state and uptime over the last 24 h and 7 d (null where nothing is known). */
@@ -80,31 +102,35 @@ export class Stats {
     return { configured: true, backups, free: await freeBytes(dir), growth: growthPerDay(backups), minFree: folders.backupMinFreeGB * GB };
   }
 
-  /** Crash logs written at or after `sinceMs` in the server folder (none without one). Never throws. */
+  /** Crash logs written at or after `sinceMs` in the server folder (none without one, so none for an Agent's). Never throws. */
   crashLogs(serverId: string, sinceMs: number): Promise<string[]> {
     const dir = this.#folders.get(serverId)?.dir;
     return dir ? findCrashLogs(dir, sinceMs) : Promise.resolve([]);
   }
 
-  /** Whether a known server has a folder, so its logs can be read. */
+  /** Whether a known server's logs can be read: it has a folder, or an Agent runs it. */
   hasLogs(serverId: string): boolean {
-    return this.#logDir(serverId) !== undefined;
+    return this.#logSource(serverId) !== undefined;
   }
 
-  #logDir(serverId: string): string | undefined {
-    return this.#hub.get(serverId) ? this.#folders.get(serverId)?.dir || undefined : undefined;
+  #logSource(serverId: string): LogSource | undefined {
+    return this.#hub.get(serverId) ? this.#logSources.get(serverId) : undefined;
   }
 
-  /** The server folder's logs and crash reports, newest first; undefined unknown or without a folder. Never throws. */
+  /**
+   * The server's logs, newest first: its folder's logs and crash reports (never throws), or the files its Agent serves
+   * (rejects if the Agent can't answer). Undefined unknown or with neither.
+   */
   async logs(serverId: string): Promise<LogFile[] | undefined> {
-    const dir = this.#logDir(serverId);
-    return dir ? listLogs(dir) : undefined;
+    return this.#logSource(serverId)?.list();
   }
 
-  /** The last lines of one listed log (see `tailLog`); undefined unknown, without a folder or not listed. */
+  /**
+   * The last lines of one listed log (see `tailLog`, or the Agent's `log`); undefined unknown, with neither a folder
+   * nor an Agent, or not listed. Rejects if the file can't be read or the Agent can't answer.
+   */
   async log(serverId: string, name: string): Promise<string[] | undefined> {
-    const dir = this.#logDir(serverId);
-    return dir ? tailLog(dir, name) : undefined;
+    return this.#logSource(serverId)?.read(name);
   }
 
   /** Stats for the day before `at` (the summary's scheduled time, not Date.now()); Backups only with a folder. */

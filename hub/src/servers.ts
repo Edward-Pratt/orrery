@@ -246,13 +246,16 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   /**
-   * Runs a console command. `by` names who asked, for the audit log. `onLate` gets output that arrives after
-   * the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also goes on the event stream.
+   * Runs a console command, control characters taken out; a Mod's without a leading `/`, a factorio server's as typed
+   * (`/players`: Factorio's console takes plain text as chat). `by` names who asked, for the audit log. `onLate` gets
+   * output that arrives after the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also
+   * goes on the event stream.
    */
   runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
     const conn = this.#conns.get(id);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
-    const cmd = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().replace(/^\//, '');
+    const typed = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+    const cmd = this.#states.get(id)!.game === 'factorio' ? typed : typed.replace(/^\//, '');
     if (!cmd) return Promise.reject(new Error('empty command'));
     this.audit(by, 'command', id, cmd);
     const cmdId = randomUUID();

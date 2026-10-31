@@ -21,7 +21,8 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const audit: string[] = []; // "command|by"
   const log: string[] = []; // "actor|action|target|details", from hub.audit
   const notices: Notice[] = []; // published on the hub's event stream
-  const state = { online: true, stopError: null as Error | null, paused: null as string | null };
+  const state = { online: true, stopError: null as Error | null, paused: null as string | null, game: 'minecraft', restartError: null as Error | null };
+  const restarted: string[] = []; // "serverId|by", the `restart` a factorio server's countdown ends in
   const runCommand = async (id: string, command: string, by: string) => {
     commands.push(command);
     audit.push(`${command}|${by}`);
@@ -31,7 +32,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   };
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
-    get: (id: string) => (state.online ? ({ id, online: true } as ServerState) : undefined),
+    get: (id: string) => (state.online ? ({ id, online: true, game: state.game } as ServerState) : undefined),
     runCommand,
     // What ServerHub.broadcast does on a Mod's server.
     broadcast: async (id: string, text: string, by: string) => void (await runCommand(id, `say ${text}`, by)),
@@ -41,9 +42,13 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
       events.emit('event', { ...notice, type: 'notice', serverId });
     },
   } as unknown as Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'publish' | 'audit'>;
-  const restarts = new RestartScheduler(hub, { paused: () => state.paused });
+  const restart = async (id: string, by: string) => {
+    restarted.push(`${id}|${by}`);
+    if (state.restartError) throw state.restartError;
+  };
+  const restarts = new RestartScheduler(hub, { paused: () => state.paused, restart });
   t.after(() => restarts.stop());
-  return { restarts, events, commands, audit, log, notices, state };
+  return { restarts, events, commands, audit, log, notices, state, restarted };
 }
 
 test('a 10 minute restart warns at 10m, 5m, 1m, 30s and 10s, then stops', (t) => {
@@ -273,4 +278,41 @@ test('cancelling a stop countdown says the stop is cancelled', (t) => {
   t.mock.timers.tick(0);
   assert.deepEqual(commands.at(-1), 'say Stop cancelled');
   assert.equal(restarts.pending('gtnh'), undefined);
+});
+
+test("a factorio server's countdown ends in its restart, never the stop command", async (t) => {
+  const { restarts, commands, notices, state, restarted } = setup(t);
+  state.game = 'factorio';
+  restarts.schedule('space', 1, 'discord:alice (1)', 'alice');
+  t.mock.timers.tick(MIN);
+  assert.deepEqual(commands, ['say Server restarting in 1 minute', 'say Server restarting in 30 seconds', 'say Server restarting in 10 seconds']);
+  assert.deepEqual(restarted, ['space|discord:alice (1)']);
+  assert.deepEqual(notices, [scheduled(1, 'alice'), NOW]);
+  state.restartError = new Error('agent vm is not connected');
+  restarts.schedule('space', 0, 'alice');
+  t.mock.timers.tick(0);
+  await flush();
+  assert.deepEqual(notices.at(-1), failed('agent vm is not connected'));
+  assert.ok(!commands.includes('stop'));
+});
+
+test("a factorio server's daily restart is one countdown, then one restart, never the stop command", (t) => {
+  // 24 Sep 2026 05:00 BST.
+  const { restarts, commands, notices, state, restarted } = setup(t, Date.UTC(2026, 8, 24, 4, 0));
+  state.game = 'factorio';
+  restarts.daily('space', '06:00');
+  t.mock.timers.tick(50 * MIN); // 05:50 BST
+  t.mock.timers.tick(10 * MIN); // 06:00 BST
+  assert.deepEqual(commands, [
+    'say Server restarting in 10 minutes',
+    'say Server restarting in 5 minutes',
+    'say Server restarting in 1 minute',
+    'say Server restarting in 30 seconds',
+    'say Server restarting in 10 seconds',
+  ]);
+  assert.deepEqual(restarted, ['space|hub:daily']);
+  assert.deepEqual(notices, [scheduled(10, 'daily'), NOW]);
+  t.mock.timers.tick(60 * MIN);
+  assert.equal(commands.length, 5);
+  assert.equal(restarted.length, 1);
 });

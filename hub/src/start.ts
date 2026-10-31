@@ -107,8 +107,19 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   let deploys: Deploys | undefined;
   let packs: Packs | undefined;
   let library: Library | undefined;
-  // A daily countdown during a pack update would clash with its Stop; the update restarts the server anyway.
-  const restarts = new RestartScheduler(hub, { paused: (id) => (packs?.busy(id) ? 'a pack update is running' : null) });
+  let services: Services | undefined;
+  const serviceOf = new Map(config.servers.flatMap((s) => (s.service ? [[s.id, s.service]] : [])));
+  const restarts = new RestartScheduler(hub, {
+    // A daily countdown during a pack update would clash with its Stop; the update restarts the server anyway.
+    paused: (id) => (packs?.busy(id) ? 'a pack update is running' : null),
+    // A factorio server's countdown ends in its service's restart (config gives it one, and systemd), looked up late:
+    // Services is built after RestartScheduler, which it counts down with.
+    restart: async (id, by) => {
+      const service = serviceOf.get(id);
+      if (!services || service === undefined) throw new Error(`${id} has no service to restart`);
+      await services.now(service, 'restart', by);
+    },
+  });
   for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
   const backups = new BackupWatcher(
     hub,
@@ -148,7 +159,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     (p) => console.log(`[hub] Agent port on ${agentsCfg!.listen.host}:${p}`),
     (err) => console.error('[hub] Agent port failed, no Agent can connect:', err),
   );
-  const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
+  services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!, agents); // checked above
   services?.start();
   const restores =
     services &&
@@ -228,7 +239,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.packs,
     );
 
-  const stats = new Stats(hub, db, config.servers);
+  const stats = new Stats(hub, db, config.servers, agents);
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time

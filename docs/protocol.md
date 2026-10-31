@@ -93,7 +93,7 @@ a hub outage never replays stale chat into Discord.
 | type | fields | effect |
 |---|---|---|
 | `say` | `author`, `message`, `source` (optional: `discord` or `dashboard`, where the line was typed) | broadcast `[Dashboard] <author> message` (gold) for `dashboard`, else `[Discord] <author> message` (blue), in MC chat. `source` was added without a protocol bump: an older mod ignores it and prints `[Discord]` |
-| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult` |
+| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept |
 | `linkResult` | `player`, `ok` (boolean), `message` | answer to `link`/`unlink`, shown to that player |
 | `notice` | `message` | Factorio only (the Agent's game connection): a system line in game, such as a countdown. A Mod gets `cmd` `say …` instead |
 | `save` | — | Factorio only: the Agent makes a named save (`orrery-<time>`), then sends `backup` |

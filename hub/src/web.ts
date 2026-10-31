@@ -139,9 +139,10 @@ export type WebDeps = {
 export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
-  // Chat and a rate (from heartbeats) come over a game connection: the Mod's, or for a factorio server its Agent's
-  // (its console comes later).
-  const connects = (id: string) => hasMod(id) || hub.get(id)?.game === 'factorio';
+  // A factorio server is run by an Agent (its `server`); only those have game updates.
+  const agentServed = (id: string) => Boolean(integrations.agents?.agents.some((a) => a.server === id));
+  // Chat, a rate (from heartbeats) and the console come over a game connection: the Mod's, or an Agent's.
+  const connects = (id: string) => hasMod(id) || agentServed(id);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
     const linked = services?.ofServer(s.id);
     return {
@@ -158,7 +159,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: hasMod(s.id), update: false },
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: agentServed(s.id) },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -373,8 +374,12 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   });
   // Reads, so not audited. A file is only ever one of the listing's names, never a path from the request.
   app.get('/servers/:id/logs', async (c) => {
-    const files = await stats.logs(c.req.param('id'));
-    return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+    try {
+      const files = await stats.logs(c.req.param('id'));
+      return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+    } catch (err) {
+      return c.text(`Listing the logs failed: ${(err as Error).message}`, 502); // an Agent's, which can't answer
+    }
   });
   app.get('/servers/:id/logs/:name', async (c) => {
     const name = c.req.param('name');

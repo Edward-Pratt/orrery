@@ -54,4 +54,10 @@ jobs:
           files=()
           if [[ -d dist ]]; then files=(dist/*); fi
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md "${files[@]}"
-      # The Factorio mod's upload to the mod portal goes here.
+      # The zip is CI's (factorio-zip.sh wrote the tag's version into its info.json), already on the GitHub release.
+      # A failed upload leaves that release in place: fix forward with the next patch.
+      - name: Put the Factorio mod on the mod portal
+        if: startsWith(github.ref_name, 'factorio-v')
+        env:
+          FACTORIO_API_KEY: ${{ secrets.FACTORIO_API_KEY }} # "ModPortal: Publish Mods" and "ModPortal: Upload Mods"
+        run: bash .github/factorio-publish.sh "dist/orrery_${GITHUB_REF_NAME#factorio-v}.zip"

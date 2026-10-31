@@ -72,7 +72,7 @@ bash deploy/test-add-server.sh            # with fake systemctl, runuser and SEL
 bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more
 bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh and factorio-zip.sh (needs zip, unzip and jq)
+bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
@@ -89,7 +89,8 @@ Never delete or move a tag; fix a failed release forward with the next patch.
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests
 as `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
-(`.github/factorio-zip.sh`, tested by `test-release.sh`; uploading it to the mod portal is still by hand). Deploy from the dashboard's Host page
+(`.github/factorio-zip.sh`), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
+`FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
 `hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,

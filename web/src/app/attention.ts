@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import type { CheckStatus, DeploysAnswer, ServerCard, ServiceStatus } from '@hub/api';
+import type { CheckStatus, DeploysAnswer, Game, ServerCard, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { catchError, debounceTime, EMPTY, filter, of, skip, startWith, Subject, switchMap, take } from 'rxjs';
 import { Feedback } from './feedback';
@@ -15,6 +15,15 @@ import { BackupProgress } from './servers/backup-progress';
 import { changesCard } from './servers/changes';
 import { ServiceControl } from './services/actions';
 import { restartLeft } from './units';
+
+/**
+ * Why a server whose service runs is offline: a Minecraft server's Mod isn't connected; a factorio server's Agent
+ * isn't (it went silent or left), or RCON doesn't answer it (the card can't tell which).
+ */
+const NOT_CONNECTED: Record<Game, string> = {
+  minecraft: 'the mod is not connected',
+  factorio: "but its Agent is not connected or RCON doesn't answer",
+};
 
 /** One thing that needs a human now: what it is about (`page` is the sidebar entry it counts on), and the fix, if any. */
 export type AttentionItem = {
@@ -54,19 +63,20 @@ export class Attention {
     const items: AttentionItem[] = [];
     for (const c of cards) {
       const state = c.service?.state;
-      // Offline on purpose (its service inactive, or on its way) is not a problem; failed, or up without the mod, is.
+      // Offline on purpose (its service inactive, or on its way) is not a problem; failed, or up without the mod (a
+      // factorio server: without its game connection, which its Agent opens only while connected and RCON answers), is.
       if (!c.online && (!c.service || state === 'failed' || state === 'active')) {
         const restart = state === 'active';
         items.push({
           key: `offline:${c.id}`,
           page: 'servers',
           target: c.name,
-          message: !c.service ? 'is offline' : restart ? 'is offline: its service runs, the mod is not connected' : 'is offline: its service failed',
+          message: !c.service ? 'is offline' : restart ? `is offline: its service runs, ${NOT_CONNECTED[c.game]}` : 'is offline: its service failed',
           action: c.service ? { label: restart ? 'Restart' : 'Start', run: () => void this.#control.act(restart ? 'restart' : 'start', c.service!.id, c.name) } : undefined,
         });
       }
       const doing = this.#progress.running()[c.id];
-      if (doing) items.push({ key: `${doing}:${c.id}`, page: 'servers', target: c.name, message: doing === 'backup' ? 'is backing up' : 'is being restored' });
+      if (doing) items.push({ key: `${doing}:${c.id}`, page: 'servers', target: c.name, message: doing === 'restore' ? 'is being restored' : c.game === 'factorio' ? 'is saving' : 'is backing up' });
       if (c.online && c.lagging) items.push({ key: `lagging:${c.id}`, page: 'servers', target: c.name, message: 'is lagging' });
       const rolledBack = c.packUpdate?.rolledBack;
       if (rolledBack) {

@@ -9,8 +9,8 @@ import { PlayerName } from './player';
 import ServerPage from './server';
 
 /**
- * A server's Overview: who's online, the last 24 h of its rate (TPS or UPS) and players (linking to History), and a
- * pending restart.
+ * A server's Overview: who's online, the last 24 h of its rate (TPS or UPS, "Paused" beside it while a factorio server
+ * is paused) and players (linking to History), and a pending restart.
  */
 @Component({
   selector: 'app-server-overview',
@@ -38,7 +38,12 @@ import ServerPage from './server';
       <div class="grid gap-4 sm:grid-cols-2">
         @for (g of graphs(); track g.title) {
           <section class="rounded-lg border p-3" [attr.data-chart]="g.title">
-            <h2 class="text-sm font-semibold">{{ g.title }} <span class="font-normal text-muted-foreground">24 h</span></h2>
+            <h2 class="text-sm font-semibold">
+              {{ g.title }} <span class="font-normal text-muted-foreground">24 h</span>
+              @if (g.paused) {
+                <span class="font-normal text-muted-foreground" data-paused> · Paused</span>
+              }
+            </h2>
             <app-time-series [series]="g.series" [format]="g.format" [max]="g.max" [step]="g.step" />
           </section>
         }
@@ -52,10 +57,11 @@ export default class Overview {
   protected readonly graphs = computed(() => {
     const h = this.#history();
     if (!h) return [];
-    const { label, max } = this.server.card()!.rate;
+    const { rate, paused } = this.server.card()!;
+    const { label, max } = rate;
     return [
-      ...(h.tps ? [{ title: label, format: (v: number) => v.toFixed(1), max, step: false, series: [{ name: label, points: h.tps.map((p): [number, number] => [p.ts, p.tps]) }] }] : []),
-      { title: 'Players', format: String, max: undefined, step: true, series: [{ name: 'Players', points: h.players.map((p): [number, number] => [p.ts, p.count]) }] },
+      ...(h.tps ? [{ title: label, format: (v: number) => v.toFixed(1), max, step: false, paused, series: [{ name: label, points: h.tps.map((p): [number, number] => [p.ts, p.tps]) }] }] : []),
+      { title: 'Players', format: String, max: undefined, step: true, paused: false, series: [{ name: 'Players', points: h.players.map((p): [number, number] => [p.ts, p.count]) }] },
     ];
   });
 

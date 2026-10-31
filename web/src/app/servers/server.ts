@@ -11,14 +11,17 @@ import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
 import { BackupProgress } from './backup-progress';
 
-/** The server page's tabs (child routes), each shown only when the server has what it needs. */
-const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean }[] = [
+/**
+ * The server page's tabs (child routes), each shown only when the server has what it needs, labelled `factorio` on a
+ * factorio server when that is set (its Backups are its saves).
+ */
+const SECTIONS: { path: string; label: string; factorio?: string; has: (d: ServerDetail) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
-  { path: 'console', label: 'Console', has: (d) => d.card.features.chat },
+  { path: 'console', label: 'Console', has: (d) => d.card.features.console },
   { path: 'chat', label: 'Chat', has: (d) => d.card.features.chat },
   { path: 'players', label: 'Players', has: () => true },
   { path: 'history', label: 'History', has: () => true },
-  { path: 'backups', label: 'Backups', has: (d) => d.backups.configured },
+  { path: 'backups', label: 'Backups', factorio: 'Saves', has: (d) => d.backups.configured },
   { path: 'logs', label: 'Logs', has: (d) => d.logs },
   { path: 'pack', label: 'Pack', has: (d) => d.pack },
 ];
@@ -48,7 +51,7 @@ const SECTIONS: { path: string; label: string; has: (d: ServerDetail) => boolean
       <nav class="-mx-4 mb-4 flex gap-4 overflow-x-auto border-b px-4 text-sm whitespace-nowrap md:mx-0 md:px-0" data-sections>
         @for (s of sections; track s.path) {
           @if (s.has(detail()!)) {
-            <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px shrink-0 pb-2 hover:underline">{{ s.label }}</a>
+            <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px shrink-0 pb-2 hover:underline">{{ (c.game === 'factorio' && s.factorio) || s.label }}</a>
           }
         }
       </nav>

@@ -102,6 +102,27 @@ describe('the attention strip', () => {
     expect(el.querySelector('[data-attention]')).not.toBeNull();
   });
 
+  it("says a factorio server whose service runs is offline because its Agent isn't connected or RCON doesn't answer", async () => {
+    const factorio = { game: 'factorio', rate: { label: 'UPS', max: 60 } } as const;
+    const { lines } = await open([
+      card('space', { ...factorio, online: false, service: { id: 'factorio', state: 'active' } }),
+      card('moon', { ...factorio, online: false, service: { id: 'moon', state: 'inactive' } }),
+    ]);
+    expect(lines()).toEqual(["SPACE is offline: its service runs, but its Agent is not connected or RCON doesn't answer Restart"]);
+  });
+
+  it("fetches the cards again when a server's Agent left (lost), clearing its item once it is back", async () => {
+    const lost = card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 }, online: false, service: { id: 'factorio', state: 'active' } });
+    const { events, lines, refetch } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    expect(lines()).toEqual([]);
+    events.push(1, { serverId: 'space', type: 'lost' });
+    await refetch([lost]);
+    expect(lines()).toHaveLength(1);
+    events.push(2, { serverId: 'space', type: 'connected' });
+    await refetch([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    expect(lines()).toEqual([]);
+  });
+
   it('shows a server with no linked service whenever it is offline', async () => {
     const { lines } = await open([card('site', { online: false })]);
     expect(lines()).toEqual(['SITE is offline']);
@@ -215,5 +236,12 @@ describe('the attention strip', () => {
     events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'good', kind: 'backupFinished', detail: 'done' });
     await render();
     expect(lines()).toEqual([]);
+  });
+
+  it("says a factorio server is saving while a save started here runs", async () => {
+    const { lines, render } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    TestBed.inject(BackupProgress).begin('space', 'backup');
+    await render();
+    expect(lines()).toEqual(['SPACE is saving']);
   });
 });

@@ -3,9 +3,10 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
-import type { Backup, CommandOutput, RestoreRequest } from '@hub/api';
+import type { Backup, CommandOutput, Game, RestoreRequest, SaveKind } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideEllipsis } from '@ng-icons/lucide';
+import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
@@ -14,15 +15,52 @@ import { formatBytes } from '../units';
 import { BackupProgress } from './backup-progress';
 import ServerPage from './server';
 
+/** How the section names a server's Backups: a factorio server's are its saves. */
+const MINECRAFT = {
+  count: 'Backups',
+  start: 'Start backup',
+  running: 'Backing up…',
+  progress: 'Backup running: this updates when it finishes.',
+  offline: 'a backup needs it running',
+  empty: 'No backups yet',
+  emptyDetail: 'Backups the server makes, and ones started here, are listed with their size.',
+  finished: 'Finished',
+  one: 'backup',
+  failed: 'Starting the backup',
+};
+const WORDS: Record<Game, typeof MINECRAFT> = {
+  minecraft: MINECRAFT,
+  factorio: {
+    count: 'Saves',
+    start: 'Save now',
+    running: 'Saving…',
+    progress: 'Saving: this updates when it finishes.',
+    offline: 'a save needs it running',
+    empty: 'No saves yet',
+    emptyDetail: "Factorio's autosaves, the saves its Agent makes, and ones made here are listed with their size.",
+    finished: 'Saved',
+    one: 'save',
+    failed: 'Making the save',
+  },
+};
+/** A factorio save's kind as a mark, with what it means on hover. */
+const KINDS: Record<SaveKind, { label: string; title: string }> = {
+  named: { label: 'Named', title: 'Made by the Agent: every 6 hours after play, before an update, or on request' },
+  auto: { label: 'Autosave', title: "Factorio's own autosave" },
+  world: { label: 'World', title: "Another world file: the setup's world, an import or a restored copy" },
+};
+
 /**
- * A server's Backups section (only with a backup folder), as Discord's `/backup status` and `/backup start`, and
- * restoring one while the linked service is stopped (after typing the server's name). The list is the server's
- * detail, fetched again by the page on each backup notice, so a finished backup shows up; progress comes from the
- * live feed (`BackupProgress`), not the requests' reply text.
+ * A server's Backups section (only with a backup folder; a factorio server's saves, named "Saves" there), as
+ * Discord's `/backup status` and `/backup start`, and restoring one while the linked service is stopped (after typing
+ * the server's name). A factorio save is marked with its kind, and "Current world" on the file Factorio last loaded;
+ * restoring one copies it as the newest save, which the next start loads. The list is the server's detail, fetched
+ * again by the page on each backup notice, so a finished backup shows up; progress comes from the live feed
+ * (`BackupProgress`), not the requests' reply text.
  */
 @Component({
   selector: 'app-server-backups',
-  imports: [DatePipe, NgIcon, HlmButton, HlmDropdownMenuImports, HlmSpinner],
+  imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSpinner],
   viewProviders: [provideIcons({ lucideEllipsis })],
   template: `
     @if (backups(); as b) {
@@ -43,12 +81,12 @@ import ServerPage from './server';
             @if (progress() === 'backup') {
               <hlm-spinner />
             }
-            {{ progress() === 'backup' ? 'Backing up…' : 'Start backup' }}
+            {{ progress() === 'backup' ? words().running : words().start }}
           </button>
           @if (progress() === 'restore') {
-            <span class="text-sm text-muted-foreground" data-progress>Restoring {{ restoring() ?? 'a backup' }}…</span>
+            <span class="text-sm text-muted-foreground" data-progress>Restoring {{ restoring() ?? 'a ' + words().one }}…</span>
           } @else if (progress() === 'backup') {
-            <span class="text-sm text-muted-foreground" data-progress>Backup running: this updates when it finishes.</span>
+            <span class="text-sm text-muted-foreground" data-progress>{{ words().progress }}</span>
           } @else if (!online()) {
             <span class="text-sm text-muted-foreground">{{ offline() }}</span>
           }
@@ -65,12 +103,20 @@ import ServerPage from './server';
         @if (b.backups.length) {
           <table class="w-full text-left text-sm">
             <thead class="text-muted-foreground">
-              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">Finished</th><th class="pr-4 font-normal">Size</th><th class="sr-only">Actions</th></tr>
+              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">{{ words().finished }}</th><th class="pr-4 font-normal">Size</th><th class="sr-only">Actions</th></tr>
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
                 <tr class="border-t" [class.bg-amber-500/10]="backup.name === preselected()" data-backup>
-                  <td class="py-1 pr-4 font-mono">{{ backup.name }}</td>
+                  <td class="py-1 pr-4">
+                    <span class="font-mono">{{ backup.name }}</span>
+                    @if (backup.kind; as kind) {
+                      <span hlmBadge variant="outline" class="ms-2" [title]="kinds[kind].title" data-kind>{{ kinds[kind].label }}</span>
+                    }
+                    @if (backup.current) {
+                      <span hlmBadge variant="secondary" class="ms-1" title="The world Factorio last loaded: it saves into it on every stop" data-current>Current world</span>
+                    }
+                  </td>
                   <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
                   <td class="pr-4">{{ bytes(backup.size) }}</td>
                   <td class="py-1 text-right">
@@ -92,9 +138,9 @@ import ServerPage from './server';
           </table>
         } @else {
           <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
-            <p class="font-medium">No backups yet</p>
-            <p class="mb-3 text-sm text-muted-foreground">Backups the server makes, and ones started here, are listed with their size.</p>
-            <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>Start backup</button>
+            <p class="font-medium">{{ words().empty }}</p>
+            <p class="mb-3 text-sm text-muted-foreground">{{ words().emptyDetail }}</p>
+            <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
           </div>
         }
       </section>
@@ -109,6 +155,8 @@ export default class Backups {
   readonly #feedback = inject(Feedback);
   readonly #progress = inject(BackupProgress);
   protected readonly bytes = formatBytes;
+  protected readonly kinds = KINDS;
+  protected readonly words = computed(() => WORDS[this.#server.card()!.game]);
   protected readonly backups = computed(() => {
     const b = this.#server.detail()!.backups;
     return b.configured ? b : null;
@@ -118,14 +166,14 @@ export default class Backups {
     const total = b.backups.reduce((sum: number, x: Backup) => sum + x.size, 0);
     const low = b.free !== null && b.free < b.minFree;
     return [
-      { key: 'count', label: 'Backups', value: String(b.backups.length), detail: '', warn: false },
+      { key: 'count', label: this.words().count, value: String(b.backups.length), detail: '', warn: false },
       { key: 'total', label: 'Total size', value: formatBytes(total), detail: '', warn: false },
       { key: 'free', label: 'Free', value: b.free === null ? 'unknown' : formatBytes(b.free), detail: low ? `under the ${formatBytes(b.minFree)} minimum` : '', warn: low },
       { key: 'growth', label: 'Growth', value: b.growth === null ? 'unknown' : `${b.growth < 0 ? '−' : '+'}${formatBytes(Math.abs(b.growth))}/day`, detail: '', warn: false },
     ];
   });
   protected readonly online = computed(() => this.#server.card()!.online);
-  protected readonly offline = computed(() => `${this.#server.card()!.name} is offline: a backup needs it running.`);
+  protected readonly offline = computed(() => `${this.#server.card()!.name} is offline: ${this.words().offline}.`);
   protected readonly serverName = computed(() => this.#server.card()!.name);
   /** What is running on this server, from the live feed. */
   protected readonly progress = computed(() => this.#progress.running()[this.#server.id]);
@@ -134,7 +182,7 @@ export default class Backups {
     if (this.#server.card()!.packUpdate?.running) return `A pack update is running on ${this.serverName()}: restore once it is done.`;
     const service = this.#server.service();
     if (!service) return `${this.serverName()} has no linked service: restore it on the host with deploy/restore-backup.sh.`;
-    return service.state === 'inactive' || service.state === 'failed' ? null : `To restore a backup, stop ${service.unit} first.`;
+    return service.state === 'inactive' || service.state === 'failed' ? null : `To restore a ${this.words().one}, stop ${service.unit} first.`;
   });
   /** The backup being restored. */
   readonly restoring = signal<string | null>(null);
@@ -146,12 +194,16 @@ export default class Backups {
   readonly #query = toSignal(inject(ActivatedRoute).queryParamMap);
 
   async restore(name: string): Promise<void> {
+    const server = this.serverName();
     const ok = await this.#feedback.confirm({
       title: `Restore ${name}?`,
       verb: `Restore ${name}`,
-      description: `This puts the backup back as ${this.serverName()}'s world. The current world isn't deleted: it's kept next to it as a pre-restore copy (World.pre-restore-<time>), to remove by hand later. Start the server again afterwards.`,
+      description:
+        this.#server.card()!.game === 'factorio'
+          ? `This copies the save as the newest one (restored-<time>-${name}), which ${server} loads when it next starts. Nothing is overwritten: every other save stays as it is. Start the server again afterwards.`
+          : `This puts the backup back as ${server}'s world. The current world isn't deleted: it's kept next to it as a pre-restore copy (World.pre-restore-<time>), to remove by hand later. Start the server again afterwards.`,
       destructive: true,
-      typeName: this.serverName(),
+      typeName: server,
     });
     if (!ok) return;
     const id = this.#server.id;
@@ -179,7 +231,7 @@ export default class Backups {
     this.#http.post<CommandOutput>(`/api/servers/${encodeURIComponent(id)}/backup`, {}).subscribe({
       error: (err: HttpErrorResponse) => {
         this.#progress.end(id);
-        this.#feedback.failed('Starting the backup', err);
+        this.#feedback.failed(this.words().failed, err);
       },
     });
   }

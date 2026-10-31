@@ -114,6 +114,17 @@ describe('server page', () => {
     expect(linked.text(linked.el.querySelector('[data-service-line]'))).toBe('runs as gtnh.service, inactive');
   });
 
+  it('shows the Console tab only with the console feature', async () => {
+    expect((await setup('/space', FACTORIO)).tabs()).toEqual(['Overview', 'Console', 'Chat', 'Players', 'History']);
+    TestBed.resetTestingModule();
+    expect((await setup('/gtnh', { ...CARD, features: { ...CARD.features, console: false } })).tabs()).toEqual(['Overview', 'Chat', 'Players', 'History']);
+  });
+
+  it("names a factorio server's Backups tab Saves", async () => {
+    const saves: BackupsAnswer = { configured: true, backups: [], free: null, growth: null, minFree: 0 };
+    expect((await setup('/space', FACTORIO, null, { backups: saves })).tabs()).toEqual(['Overview', 'Console', 'Chat', 'Players', 'History', 'Saves']);
+  });
+
   it('shows the Backups tab only when the server has a backup folder', async () => {
     expect((await setup('/gtnh', CARD, null, { backups: { configured: true, backups: [], free: null, growth: 0, minFree: 0 } })).tabs()).toContain('Backups');
     TestBed.resetTestingModule();
@@ -191,6 +202,27 @@ describe('server chat section', () => {
     events.push(6, { serverId: 'gtnh', type: 'death', player: 'Steve', message: 'Steve fell' });
     await render();
     expect(chat()).toEqual(['Steve joined', 'Steve: hi', 'alex Discord: hello from Discord', 'Steve fell']);
+  });
+
+  it("shows a factorio server's milestones, with the player and a force other than the default", async () => {
+    const { el, events, render, chat } = await setup('/space/chat', FACTORIO);
+    events.push(1, { serverId: 'space', type: 'milestone', kind: 'research', text: 'Mining productivity 12' });
+    events.push(2, { serverId: 'space', type: 'milestone', kind: 'rocket', text: 'Nauvis' });
+    events.push(3, { serverId: 'space', type: 'milestone', kind: 'rocket', text: '', force: 'red' });
+    events.push(4, { serverId: 'space', type: 'milestone', kind: 'platform', text: 'Platform 1' });
+    events.push(5, { serverId: 'space', type: 'milestone', kind: 'landing', text: 'Vulcanus', player: 'alice' });
+    events.push(6, { serverId: 'space', type: 'milestone', kind: 'landing', text: 'Fulgora', player: 'bob', force: 'red' });
+    await render();
+    expect(chat()).toEqual([
+      'Research finished: Mining productivity 12',
+      'First rocket launched from Nauvis',
+      'First rocket launched (force red)',
+      'First space platform in orbit: Platform 1',
+      'First landing on Vulcanus by alice',
+      'First landing on Fulgora by bob (force red)',
+    ]);
+    // A player's name opens their card, as in any other line.
+    expect([...el.querySelectorAll('[data-milestone] button')].map((b) => b.textContent)).toEqual(['alice', 'bob']);
   });
 
   it('tags each sent line with where it came from, and leaves game chat untagged', async () => {
@@ -304,6 +336,38 @@ describe('server history section', () => {
     await render();
     expect(chart('UPS')).toEqual([['UPS', [[1, 19.5], [2, 12]]]]);
     expect(chartMax('UPS')).toBe(60);
+  });
+
+  it("leaves uptime a gap and clears the players once a server's Agent left (lost)", async () => {
+    const { backend, events, render, chart } = await setup('/space/history', FACTORIO);
+    backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    events.push(11, { serverId: 'space', type: 'join', player: 'alice' });
+    events.push(12, { serverId: 'space', type: 'lost' });
+    await render();
+    const values = (title: string) => (chart(title)![0]![1] as [number, number][]).map((p) => p[1]);
+    expect(values('Players')).toEqual([0, 1, 1, 2, 0]);
+    expect(values('Uptime')).toEqual([NaN, 1, 0.5, NaN, NaN]); // unknown, as the hub records it, until now
+  });
+
+  it("shows Paused beside a paused factorio server's UPS, in History and on the overview", async () => {
+    const paused = { ...FACTORIO, paused: true };
+    const history = await setup('/space/history', paused);
+    history.backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    await history.render();
+    expect(history.text(history.el.querySelector('[data-chart=UPS] h2'))).toBe('UPS Paused');
+    expect(history.el.querySelectorAll('[data-paused]')).toHaveLength(1);
+    TestBed.resetTestingModule();
+
+    const overview = await setup('/space', paused);
+    overview.backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    await overview.render();
+    expect(overview.text(overview.el.querySelector('[data-chart=UPS] h2'))).toBe('UPS 24 h · Paused');
+    TestBed.resetTestingModule();
+
+    const running = await setup('/space', FACTORIO);
+    running.backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);
+    await running.render();
+    expect(running.text(running.el.querySelector('[data-chart=UPS] h2'))).toBe('UPS 24 h');
   });
 
   it('has no TPS graph without the mod', async () => {
@@ -440,6 +504,14 @@ describe('server console section', () => {
       await ran(s, 'list');
       expect(key(s.el, 'ArrowUp')).toBe('list');
     });
+  });
+
+  it("runs a factorio server's command as typed, its leading / included", async () => {
+    const { backend, el, tabs } = await setup('/space/console', FACTORIO);
+    expect(tabs()).toContain('Console');
+    expect(el.querySelector<HTMLInputElement>('[data-console-form] input')!.placeholder).toBe('A console command, e.g. /players');
+    submit(el, '/players');
+    expect(backend.expectOne('/api/servers/space/command').request.body).toEqual({ command: '/players' });
   });
 
   it('has no Console section for a server without the mod', async () => {
@@ -759,5 +831,89 @@ describe('restoring a backup', () => {
     backend.expectOne('/api/servers/gtnh/restore').flush('The restore failed: restore-backup: unzip failed', { status: 502, statusText: 'Bad Gateway' });
     await render();
     expect(failed).toHaveBeenCalledWith('Restoring 2026-09-27-06-00-00.zip', expect.objectContaining({ error: 'The restore failed: restore-backup: unzip failed' }));
+  });
+});
+
+describe("a factorio server's saves", () => {
+  const GB = 1024 ** 3;
+  const SAVES: BackupsAnswer = {
+    configured: true,
+    backups: [
+      { name: 'orrery-2026-10-31T12-00-00Z.zip', size: GB, mtimeMs: new Date(2026, 9, 31, 12, 0).getTime(), kind: 'named', current: false },
+      { name: '_autosave3.zip', size: GB, mtimeMs: new Date(2026, 9, 31, 11, 50).getTime(), kind: 'auto', current: false },
+      { name: 'world.zip', size: 2 * GB, mtimeMs: new Date(2026, 9, 30, 8, 0).getTime(), kind: 'world', current: true },
+    ],
+    free: 40 * GB,
+    growth: null,
+    minFree: 10 * GB,
+  };
+  const FACTORIO_SVC: ServiceStatus = { id: 'factorio', unit: 'factorio.service', state: 'active', sub: 'running', checks: [] };
+  const marks = (el: HTMLElement) =>
+    [...el.querySelectorAll('[data-backup]')].map((r) => [r.querySelector('[data-kind]')?.textContent?.trim() ?? null, !!r.querySelector('[data-current]')]);
+  const openMenu = async (page: { el: HTMLElement; render: () => Promise<void> }) => {
+    page.el.querySelector<HTMLButtonElement>('[data-backup-more]')!.click();
+    await until(() => !!document.querySelector('[data-restore]'), page.render);
+  };
+  const type = (input: HTMLInputElement, value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+  };
+
+  it('says Saves and Save now, and marks each with its kind, and the world Factorio last loaded as the current world', async () => {
+    const { el, text } = await setup('/space/backups', FACTORIO, FACTORIO_SVC, { backups: SAVES });
+    expect(text(el.querySelector('[data-tile=count] h2'))).toBe('Saves');
+    expect(text(el.querySelector('[data-backup-start]'))).toBe('Save now');
+    expect([...el.querySelectorAll('thead th')].map((th) => th.textContent?.trim()).slice(0, 3)).toEqual(['Name', 'Saved', 'Size']);
+    expect(marks(el)).toEqual([['Named', false], ['Autosave', false], ['World', true]]);
+    expect(text(el.querySelector('[data-current]'))).toBe('Current world');
+    expect(el.querySelector('[data-kind]')!.getAttribute('title')).toContain('Made by the Agent');
+  });
+
+  it('has no marks on a Minecraft backup', async () => {
+    const { el } = await setup('/gtnh/backups', CARD, null, { backups: { ...SAVES, backups: [{ name: '2026-09-27-06-00-00.zip', size: GB, mtimeMs: 0 }] } });
+    expect(marks(el)).toEqual([[null, false]]);
+    expect(el.querySelector('[data-backup-start]')?.textContent?.trim()).toBe('Start backup');
+  });
+
+  it('saves without asking, "Saving…" until the finished notice, and explains offline in save words', async () => {
+    const { backend, events, el, render, text } = await setup('/space/backups', FACTORIO, FACTORIO_SVC, { backups: SAVES });
+    el.querySelector<HTMLButtonElement>('[data-backup-start]')!.click();
+    expect(dialog()).toBeNull();
+    backend.expectOne('/api/servers/space/backup').flush({ output: [] });
+    await render();
+    expect(text(el.querySelector('[data-backup-start]'))).toBe('Saving…');
+    expect(text(el.querySelector('[data-progress]'))).toBe('Saving: this updates when it finishes.');
+    events.push(1, { serverId: 'space', type: 'notice', severity: 'good', kind: 'backupFinished', detail: 'orrery-2026-10-31T12-30-00Z.zip' });
+    await render();
+    expect(el.querySelector('[data-progress]')).toBeNull();
+    TestBed.resetTestingModule();
+
+    const offline = await setup('/space/backups', { ...FACTORIO, online: false }, FACTORIO_SVC, { backups: { ...SAVES, backups: [] } });
+    expect(offline.el.textContent).toContain('Space Age is offline: a save needs it running.');
+    expect(offline.text(offline.el.querySelector('[data-empty] p'))).toBe('No saves yet');
+  });
+
+  it('restores a save only with its service stopped, copying it as the newest one, which the next start loads', async () => {
+    const running = await setup('/space/backups', { ...FACTORIO, online: false }, FACTORIO_SVC, { backups: SAVES });
+    await openMenu(running);
+    expect(document.querySelector('[data-restore-why]')?.textContent?.trim()).toBe('To restore a save, stop factorio.service first.');
+    TestBed.resetTestingModule();
+    document.querySelectorAll('.cdk-overlay-container > *').forEach((n) => n.remove());
+
+    const page = await setup('/space/backups', { ...FACTORIO, online: false }, { ...FACTORIO_SVC, state: 'inactive', sub: 'dead' }, { backups: SAVES });
+    await openMenu(page);
+    document.querySelector<HTMLButtonElement>('[data-restore]')!.click();
+    await page.render();
+    expect(dialog()?.textContent).toContain('copies the save as the newest one (restored-<time>-orrery-2026-10-31T12-00-00Z.zip)');
+    expect(dialog()?.textContent).toContain('Nothing is overwritten');
+    type(document.querySelector<HTMLInputElement>('[data-confirm-typed]')!, 'Space Age');
+    await page.render();
+    dialogButton('ok').click();
+    await page.render();
+    const req = page.backend.expectOne('/api/servers/space/restore');
+    expect(req.request.body).toEqual({ name: 'orrery-2026-10-31T12-00-00Z.zip' });
+    req.flush({ output: [] });
+    await page.render();
+    expect(page.el.querySelector('[data-progress]')).toBeNull();
   });
 });

@@ -162,6 +162,30 @@ describe('host page', () => {
   });
 });
 
+describe('host page without a sample yet', () => {
+  it("says the hub's own first sample comes a minute after the hub starts, an Agent's once it is connected", async () => {
+    const events = fakeEvents();
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    });
+    const fixture = TestBed.createComponent(Host);
+    const backend = TestBed.inject(HttpTestingController);
+    const render = async () => (await settle(), await fixture.whenStable());
+    await render();
+    backend.expectOne('/api/integrations').flush(ON);
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample: null }, { id: 'vm', sample: null }]);
+    await render();
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
+    await render();
+    const el = fixture.nativeElement as HTMLElement;
+    const said = () => el.querySelector('[data-no-sample]')?.textContent?.trim();
+    expect(said()).toBe('No sample yet: the first comes a minute after the hub starts.');
+    el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
+    await render();
+    expect(said()).toBe('No sample yet: its Agent sends one each minute once it is connected.');
+  });
+});
+
 const DAY = 24 * 60 * 60_000;
 const rel = (tag: string, daysAgo = 1): Release => ({ tag, publishedAt: Date.now() - daysAgo * DAY, assets: [] });
 const ANSWER: DeploysAnswer = {

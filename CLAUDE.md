@@ -5,6 +5,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 
 - `hub/` — Node/TypeScript Discord bot and the "brain". See `hub/CLAUDE.md`.
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
+- `agent/` — Node/TypeScript service on a remote Host that dials out to the hub and runs that Host's Factorio server. See `agent/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
@@ -25,7 +26,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   (`/to-spec`, `/to-tickets`); `docs/archive/` holds the v1–v1.3 specs and plans (deprecated, history only).
 - `docs/ROADMAP.md` — planned releases, linking each to its spec issue; update it when a release ships or scope moves.
 
-Nothing builds at the root: run npm in `hub/` and `web/`, Gradle in `mod/`.
+Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `mod/`.
 
 ## Architecture rules
 
@@ -60,6 +61,7 @@ raise `MIN_PROTOCOL` only one release after a bump.
 
 ```bash
 cd hub && npm test && npm run typecheck
+cd agent && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && npm test && npm run build       # the build also type-checks against the hub's API types
 bash deploy/test-restore-backup.sh        # needs zip and unzip

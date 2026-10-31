@@ -6,9 +6,10 @@ set -euo pipefail
 hub=false mod=false web=false deploy=false agent=false factorio=false
 
 if [[ ${REF_TYPE:-} == tag ]]; then
-  # A release tag runs only its own part; no release ships deploy/.
+  # A release tag runs only its own part. An agent tag also runs deploy/'s tests: the agent Host's setup script and
+  # the deploy/ files it installs are fetched at that tag.
   case ${REF_NAME%%-v*} in
-    hub) hub=true ;; mod) mod=true ;; web) web=true ;; agent) agent=true ;; factorio) factorio=true ;;
+    hub) hub=true ;; mod) mod=true ;; web) web=true ;; agent) agent=true deploy=true ;; factorio) factorio=true ;;
   esac
 elif [[ ${1:-} == unknown ]]; then
   hub=true mod=true web=true deploy=true agent=true factorio=true

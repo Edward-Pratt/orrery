@@ -23,6 +23,8 @@ check '0 1 0 0 0 0' mod/build.gradle branch main
 check '0 0 1 0 0 0' web/src/app/app.ts branch main
 check '0 0 0 1 0 0' deploy/install-web.sh branch main
 check '0 0 0 1 0 0' deploy/test-add-server.sh branch main
+check '0 0 0 1 0 0' $'deploy/setup-agent-host.sh\ndeploy/test-setup-agent-host.sh\ndeploy/factorio.container' branch main
+check '0 0 0 1 0 0' $'deploy/deploy-agent.sh\ndeploy/test-deploy-agent.sh\ndeploy/orrery-hub.service' branch main
 check '1 0 1 0 1 0' hub/src/api.ts branch main
 check '1 0 1 0 1 0' hub/src/types.ts branch main
 check '1 0 0 0 0 0' hub/package.json branch main
@@ -35,7 +37,7 @@ check '1 1 1 1 1 1' docs/x.md branch main unknown
 check '1 0 0 0 0 0' $'mod/x\nweb/y\ndeploy/z' tag hub-v1.2.3
 check '0 1 0 0 0 0' .github/workflows/ci.yml tag mod-v1.2.3
 check '0 0 1 0 0 0' '' tag web-v0.3.1
-check '0 0 0 0 1 0' hub/src/types.ts tag agent-v1.0.0
+check '0 0 0 1 1 0' hub/src/types.ts tag agent-v1.0.0
 check '0 0 0 0 0 1' agent/src/main.ts tag factorio-v1.0.0
 check '0 0 0 0 0 0' deploy/install-web.sh tag deploy-v1.0.0
 check '0 0 1 0 0 0' hub/src/servers.ts tag web-v0.3.1 unknown

@@ -69,8 +69,10 @@ bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
+bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more
+bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh and factorio-zip.sh (needs zip, unzip and jq)
+bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
@@ -83,11 +85,12 @@ Hub, mod, dashboard, agent and Factorio mod are versioned separately (`docs/adr/
 Cut one with `.github/release.sh <hub|mod|web|agent|factorio> <major|minor|patch>`
 from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N (`--yes` skips) and pushes only that tag.
 Never delete or move a tag; fix a failed release forward with the next patch.
-`.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`), then creates the GitHub release. Its notes are
+`.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`; an agent tag also runs the deploy tests, as the agent Host's setup ships at that tag), then creates the GitHub release. Its notes are
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests
 as `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
-(`.github/factorio-zip.sh`, tested by `test-release.sh`; uploading it to the mod portal is still by hand). Deploy from the dashboard's Host page
+(`.github/factorio-zip.sh`), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
+`FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
 `hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,

@@ -124,6 +124,8 @@ echo junk > "$T/build/readme"; rm "$T/build/index.html"; tar -czf "$F/web.tar.gz
 check 'a failed web install writes failed and keeps the build' '! web web-v1.0.2 && status web-v1.0.2 web-v1.0.1 failed &&
   [[ $(cat "$W.release") == web-v1.0.1 && $(cat "$W/index.html") == v1 ]]'
 
+check 'only the hub unit loads the Factorio account file: no deploy unit does' \
+  '[[ $(grep -l orrery-factorio-account.env "$HERE"/*.service) == "$HERE/orrery-hub.service" ]]'
 check 'the token never appears in a log or a status file' '[[ -s $T/all ]] && ! grep -qF "$GITHUB_TOKEN" "$R/deploy-status.json" "$T/all" &&
   ! grep -qF "$(printf "x-access-token:%s" "$GITHUB_TOKEN" | base64 -w0)" "$R/deploy-status.json" "$T/all"'
 exit $fail

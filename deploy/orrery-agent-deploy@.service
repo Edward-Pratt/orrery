@@ -1,0 +1,25 @@
+# /etc/systemd/system/orrery-agent-deploy@.service
+# Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.
+# Deploys one agent release: `systemctl start --no-block orrery-agent-deploy@agent-vX.Y.Z.service`, started by the
+# agent through polkit (60-orrery-agent.rules) when the hub sends `deploy`. It runs the root-owned copy of
+# deploy-agent.sh as factorio, so neither a release nor the agent can change the script that rolls it back.
+# %i, never %I: the instance is the tag exactly as escaped, and deploy-agent.sh validates it again.
+# No PartOf=/BindsTo=: restarting the agent must not stop its own deploy. No OnFailure=: the status file is the record.
+[Unit]
+Description=Deploy orrery agent %i
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+User=factorio
+Group=factorio
+# The private Node first, for deploy-agent.sh; nothing else of it is on any PATH.
+Environment=PATH=/usr/local/lib/orrery/node/bin:/usr/local/bin:/usr/bin:/bin
+# factorio's home, /srv/factorio, is the container's to write: no .curlrc or other dotfile from there.
+Environment=HOME=/srv/orrery-agent
+ExecStart=/bin/bash /usr/local/lib/orrery/deploy-agent.sh %i
+# It writes only the agent's own tree (releases, current, deploy-status.json) and a private /tmp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/orrery-agent
+PrivateTmp=true

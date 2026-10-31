@@ -70,6 +70,7 @@ bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
 bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more
+bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
 bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh and factorio-zip.sh (needs zip, unzip and jq)
 ```

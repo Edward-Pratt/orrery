@@ -151,4 +151,5 @@ jobs:
       - run: bash deploy/test-deploy.sh
       - run: bash deploy/test-add-server.sh
       - run: bash deploy/test-setup-agent-host.sh
+      - run: bash deploy/test-deploy-agent.sh
       - run: bash .github/test-release.sh

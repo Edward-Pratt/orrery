@@ -171,7 +171,7 @@ EOF
 cat > "$T/bin/curl" << 'EOF'
 #!/usr/bin/env bash
 # Serves $F/x/<host/path> (one test's override), else $X/<host/path>; 404 when $F/gone/<host/path> exists. The
-# release's deploy/ files come from this folder (deploy-agent.sh from a stub while it doesn't exist yet).
+# release's deploy/ files come from this folder.
 [[ $1 == -q ]] || { echo 'fake curl: want -q first (no .curlrc)' >&2; exit 2; }
 out='' url=''
 while (($#)); do
@@ -188,10 +188,7 @@ path=${url#https://}
 path=${path%%\?*}
 [[ $path != */ ]] || path+=index
 src=$X/$path
-if [[ $path == raw.githubusercontent.com/Edward-Pratt/orrery/*/deploy/* ]]; then
-  src=$HERE/${path##*/}
-  [[ -f $src ]] || src=$X/stub-${path##*/}
-fi
+[[ $path != raw.githubusercontent.com/Edward-Pratt/orrery/*/deploy/* ]] || src=$HERE/${path##*/}
 [[ ! -f $F/x/$path ]] || src=$F/x/$path
 [[ -f $src && ! -e $F/gone/$path ]] || { echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; }
 if [[ -n $out ]]; then cat "$src" > "$out"; else cat "$src"; fi
@@ -278,9 +275,7 @@ EOF
 }
 api "$(sha "$X/$MOD_ZIP")" > "$X/$API"
 RAW=raw.githubusercontent.com/Edward-Pratt/orrery/agent-v0.10.0/deploy
-printf '#!/usr/bin/env bash\n# Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.\n# A stub until deploy/deploy-agent.sh exists.\n' > "$X/stub-deploy-agent.sh"
 DEPLOY_AGENT=$HERE/deploy-agent.sh
-[[ -f $DEPLOY_AGENT ]] || DEPLOY_AGENT=$X/stub-deploy-agent.sh
 
 # The setup script under test, with the pinned Node sha256 swapped for the fixture's (the only line that differs).
 sed "s/^NODE_SHA256=.*/NODE_SHA256=$(sha "$X/$NODE_TGZ")/" "$HERE/setup-agent-host.sh" > "$S"

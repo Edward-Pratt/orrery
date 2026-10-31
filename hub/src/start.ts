@@ -1,4 +1,5 @@
 import { dirname, join } from 'node:path';
+import { Agents, type AgentsOptions } from './agents.ts';
 import { BackupWatcher, freeBytes, listBackups } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
@@ -17,7 +18,7 @@ import { LiveFeed } from './live.ts';
 import { PlaytimeTracker } from './playtime.ts';
 import { QuestAnnouncer } from './quests.ts';
 import { RestartScheduler } from './restarts.ts';
-import { ServerHub } from './servers.ts';
+import { ServerHub, type HubOptions } from './servers.ts';
 import { Stats } from './stats.ts';
 import { scheduleSummaries } from './summary.ts';
 import { Uploads } from './uploads.ts';
@@ -57,11 +58,20 @@ export type HubDeps = {
   packs?: PacksOptions;
   /** How long an upload is kept after its last chunk (default an hour), for tests. */
   uploadIdleMs?: number;
+  /** Shorter liveness timings of the game connections, for tests. */
+  hub?: Omit<HubOptions, 'audit'>;
+  /** Shorter Agent port timings, for tests. */
+  agents?: AgentsOptions;
 };
 
 export type HubHandle = {
   /** The mod port; undefined when the Minecraft integration is off. */
   port: number | undefined;
+  /**
+   * The Agent port once it listens (it may wait for its address: the hub doesn't); undefined when the agents
+   * integration is off.
+   */
+  agentPort?: Promise<number>;
   /** The HTTP API and its port; undefined when the web integration is off. */
   web?: { port: number; app: WebApi };
   /** Every hub event, numbered, with recent ones buffered for replay. */
@@ -74,7 +84,7 @@ export type HubHandle = {
 
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
-  const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd, github } = config.integrations;
+  const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd, github, agents: agentsCfg } = config.integrations;
   if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
   if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
@@ -89,7 +99,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   const hub = new ServerHub(
     config.servers.map((s) => ({ id: s.id, name: s.name, game: s.game, token: minecraft?.tokens[s.id] })),
-    { audit: (entry) => db.audit(entry) },
+    { ...deps.hub, audit: (entry) => db.audit(entry) },
   );
   hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
   const live = new LiveFeed(hub, db);
@@ -120,6 +130,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   const port = minecraft ? await hub.listen(minecraft.listenPort) : undefined;
   console.log(port === undefined ? '[hub] Minecraft integration off: no mod port' : `[hub] listening on 127.0.0.1:${port}`);
+  hub.start(); // hung detection and the grace period, for Agents' game connections too
   playtime.start();
   lag.start();
   quests.start();
@@ -129,6 +140,14 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const hosts = new Hosts(hub, db);
   const host = hostCfg && hosts.add(hostCfg);
   host?.start(deps.host!); // checked above
+  // Each Agent's Host: sampled by the Agent, with its own limits.
+  for (const a of agentsCfg?.agents ?? []) hosts.add({ id: a.id, mounts: [], ...a.host });
+  const agents = agentsCfg && new Agents(hub, hosts, agentsCfg, deps.agents);
+  const agentPort = agents?.start();
+  agentPort?.then(
+    (p) => console.log(`[hub] Agent port on ${agentsCfg!.listen.host}:${p}`),
+    (err) => console.error('[hub] Agent port failed, no Agent can connect:', err),
+  );
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!); // checked above
   services?.start();
   const restores =
@@ -220,13 +239,14 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg && hosts, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 
   return {
     port,
+    agentPort,
     live,
     hosts,
     web: app && http && { port: http.port, app },
@@ -248,7 +268,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       upkeep();
       stopPing();
       frontend?.stop();
-      return Promise.all([hub.close(), http?.close()]).then(() => {}).finally(() => {
+      return Promise.all([hub.close(), agents?.close(), http?.close()]).then(() => {}).finally(() => {
         clearInterval(touch);
         db.close();
       });

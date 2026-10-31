@@ -117,7 +117,7 @@ export type WebDeps = {
   lag: LagMonitor;
   /** Only with the checks integration. */
   checks?: Checks;
-  /** Only with the host integration. */
+  /** Only with the host or agents integration: the hub's own Host and each Agent's. */
   hosts?: Hosts;
   /** Only with the systemd integration. */
   services?: Services;
@@ -139,6 +139,8 @@ export type WebDeps = {
 export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
+  // A rate comes from heartbeats: the Mod's, or for a factorio server its Agent's (its chat and console come later).
+  const hasRate = (id: string) => hasMod(id) || hub.get(id)?.game === 'factorio';
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
     const linked = services?.ofServer(s.id);
     return {
@@ -149,13 +151,13 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       online: s.online,
       hung: s.hung,
       paused: s.paused,
-      tps: hasMod(s.id) ? s.tps : null,
+      tps: hasRate(s.id) ? s.tps : null,
       players: s.players,
       uptimeDay: status.uptimeDay,
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id), console: hasMod(s.id), update: false },
+      features: { chat: hasMod(s.id), tps: hasRate(s.id), quests: hasMod(s.id), console: hasMod(s.id), update: false },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -327,18 +329,20 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       });
     }
   }
-  const host = integrations.host && hosts?.get(integrations.host.id);
-  if (hosts && host) {
-    const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
-    const history = (h: HostMonitor, c: Context) => {
-      const hours = hoursOf(c);
-      return hours ? c.json(h.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
-    };
+  const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
+  const history = (h: HostMonitor, c: Context) => {
+    const hours = hoursOf(c);
+    return hours ? c.json(h.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+  };
+  if (hosts?.list().length) {
     app.get('/hosts', (c) => c.json(hosts.list().map(now) satisfies HostNow[]));
     app.get('/hosts/:id/samples', (c) => {
       const h = hosts.get(c.req.param('id'));
       return h ? history(h, c) : c.notFound();
     });
+  }
+  const host = integrations.host && hosts?.get(integrations.host.id);
+  if (host) {
     // ponytail: the hub's own host, for a dashboard older than `/hosts`; drop a release after.
     app.get('/host', (c) => c.json(now(host)));
     app.get('/host/samples', (c) => history(host, c));
@@ -359,7 +363,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       card: card(state, status),
       service: services?.ofServer(id) ?? null,
       status,
-      tps: hasMod(id) ? stats.tps(id)! : null,
+      tps: hasRate(id) ? stats.tps(id)! : null,
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
       pack: packs?.has(id) ?? false,
@@ -386,7 +390,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const hours = hoursOf(c);
     if (!hours) return c.text(BAD_HOURS, 400);
     const asOf = live.lastId; // read first: an event after it may or may not be in the history, so it is replayed
-    return c.json({ ...stats.history(id, hours, hasMod(id))!, asOf } satisfies ServerHistory);
+    return c.json({ ...stats.history(id, hours, hasRate(id))!, asOf } satisfies ServerHistory);
   });
   app.get('/servers/:id/players/:name', (c) => {
     const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });

@@ -30,7 +30,7 @@ import type {
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import { postTargets } from '../src/discord.ts';
-import { formatTargetEvent, type Post } from '../src/format.ts';
+import { formatEvent, formatTargetEvent, type Post } from '../src/format.ts';
 import type { RestoreEnv, RunRestore } from '../src/restore.ts';
 import type { Run } from '../src/services.ts';
 import type { RestartScheduler } from '../src/restarts.ts';
@@ -38,7 +38,7 @@ import type { HubEvent, ServerHub } from '../src/servers.ts';
 import { HISTORY_POINTS } from '../src/host.ts';
 import { startHub } from '../src/start.ts';
 import type { OAuth, WebApi } from '../src/web.ts';
-import { online, sleep, TOKEN, until } from './fake-mod.ts';
+import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
@@ -668,7 +668,7 @@ test('server cards while offline: features only for the server with the mod', as
   ]);
 });
 
-test("a factorio server's card has its game and the UPS rate, and no Mod features", async (t) => {
+test("a factorio server's card has its game and the UPS rate, and of the Mod's features only the rate", async (t) => {
   const cfg = config(t, { web: WEB });
   cfg.servers = [{ ...cfg.servers[0]!, id: 'space', name: 'Space Age', game: 'factorio', lag: { tps: 50, minutes: 2, enabled: true } }];
   const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
@@ -677,7 +677,7 @@ test("a factorio server's card has its game and the UPS rate, and no Mod feature
   const [card] = await cardsOf(app, await loginCookie(app));
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: NO_MOD },
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { ...NO_MOD, tps: true } }, // from its Agent's heartbeats
   );
 });
 
@@ -1789,4 +1789,120 @@ test("each check result is streamed, and a replay holds only a check's latest", 
     replay.events.map((e) => ('kind' in e.data ? e.data.kind : e.data.type)),
     ['checkDown', 'checked', 'checkUp'], // a result, then what it changed
   );
+});
+
+const AGENT_TOKEN = 'agent-token-0123456789abcdef-0123456789';
+const VM_LIMITS = { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
+const AGENTS = {
+  listen: { host: '127.0.0.1', port: 0 },
+  agents: [{ id: 'vm', name: 'Factorio VM', token: AGENT_TOKEN, address: '127.0.0.1', server: 'space', host: VM_LIMITS }],
+};
+
+/** A config with `integrations` plus the agents one, and factorio server `space` run by Agent `vm`. */
+function agentConfig(t: TestContext, integrations: Config['integrations']): Config {
+  const cfg = config(t, { agents: AGENTS, ...integrations });
+  cfg.servers.push({ id: 'space', name: 'Space Age', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched' });
+  return cfg;
+}
+
+/** An Agent (`agentHello`) and its game connection (`hello`) on the Agent port, both welcomed. */
+async function agentOnline(port: number) {
+  const agent = fakeMod(port);
+  agent.send({ type: 'agentHello', protocol: 1, agentId: 'vm', token: AGENT_TOKEN, agentVersion: 'agent-v1.0.0' });
+  assert.deepEqual(await agent.next(), { type: 'welcome' });
+  const game = fakeMod(port);
+  game.send({ type: 'hello', protocol: 1, serverId: 'space', token: AGENT_TOKEN, modVersion: '0.1.0' });
+  assert.deepEqual(await game.next(), { type: 'welcome' });
+  return { agent, game };
+}
+
+test("with agents but no Minecraft integration, an Agent's server is watched for hangs", async (t) => {
+  const cfg = agentConfig(t, {});
+  delete cfg.healthcheckUrl;
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: () => assert.fail('nothing to request'), hub: { hungMs: 200 } });
+  t.after(() => handle.close());
+  assert.equal(handle.port, undefined); // no Mod port
+  const { agent, game } = await agentOnline(await handle.agentPort!);
+  game.send({ type: 'heartbeat', tps: 60, players: ['Ann'] });
+  const pings = setInterval(() => agent.send({ type: 'ping' }), 50);
+  t.after(() => clearInterval(pings));
+  const types = () => handle.live.since().flatMap(([, e]) => ('serverId' in e && e.serverId === 'space' ? [e.type] : []));
+  await until(() => types().includes('hung'));
+  assert.deepEqual(types(), ['connected', 'tps', 'hung']);
+});
+
+test("an Agent's bye records its server lost, as unknown, and posts nothing; a lost Agent posts one host notice", async (t) => {
+  const cfg = agentConfig(t, { discord: { ...DISCORD, channels: { ...DISCORD.channels, space: '9'.repeat(18) }, alertsChannel: '4'.repeat(18) } });
+  delete cfg.healthcheckUrl;
+  const posted: [string, Post][] = [];
+  const handle = await startHub(cfg, {
+    startFrontend: async (hub, _s, _r, _l, discord) => {
+      // What the Discord frontend posts: server events in their channel, the rest in the alerts channel.
+      hub.on('event', (e) => {
+        const post = formatEvent(e);
+        if (post) posted.push([discord.channels[e.serverId]!, post]);
+      });
+      postTargets(hub, discord, async (channelId, message) => void posted.push([channelId, message]));
+      return { stop: () => {} };
+    },
+    get: () => assert.fail('nothing to request'),
+  });
+  const port = await handle.agentPort!;
+  const first = await agentOnline(port);
+  first.agent.send({ type: 'bye' });
+  await first.game.closed;
+  const second = await agentOnline(port);
+  second.agent.socket.destroy(); // lost
+  await second.game.closed;
+  await until(() => posted.length === 1);
+  await agentOnline(port); // back
+  await until(() => posted.length === 2);
+  await handle.close();
+  assert.deepEqual(posted, [
+    ['4'.repeat(18), formatTargetEvent({ target: 'host', id: 'vm', type: 'notice', severity: 'warning', kind: 'agentLost', name: 'Factorio VM' })!],
+    ['4'.repeat(18), formatTargetEvent({ target: 'host', id: 'vm', type: 'notice', severity: 'good', kind: 'agentBack', name: 'Factorio VM' })!],
+  ]);
+  const db = new DatabaseSync(cfg.dbPath);
+  t.after(() => db.close());
+  const rows = db.prepare("SELECT state, reason FROM events WHERE server_id = 'space' AND reason NOT LIKE 'hub %' ORDER BY ts, rowid").all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { state: 'up', reason: 'connected' },
+    { state: 'unknown', reason: 'lost' },
+    { state: 'up', reason: 'connected' },
+    { state: 'unknown', reason: 'lost' },
+    { state: 'up', reason: 'connected' },
+  ]);
+});
+
+test("with agents but no host integration, each Agent's Host is served with its own samples, and /api/host is not", async (t) => {
+  const cfg = agentConfig(t, { web: WEB });
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cookie = await loginCookie(app);
+  const get = async <T>(path: string) => {
+    const res = await app.request(path, { headers: { cookie } });
+    assert.equal(res.status, 200, path);
+    return res.json() as Promise<T>;
+  };
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: null }]);
+  const { agent } = await agentOnline(await handle.agentPort!);
+  const sample: HostSample = { ts: Date.now(), cpu: 0.5, load: [1, 1, 1], memory: { used: 2, total: 8 }, disks: [{ mount: '/', free: 50 * 1024 ** 3, total: 100 * 1024 ** 3 }] };
+  agent.send({ type: 'hostSample', sample });
+  await until(() => handle.hosts.get('vm')!.latest() !== null);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample }]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [sample]);
+  assert.equal((await app.request('/api/host', { headers: { cookie } })).status, 404);
+  assert.equal((await app.request('/api/hosts/oracle/samples', { headers: { cookie } })).status, 404);
+});
+
+test('the hub starts while the Agent port waits for its address, and closes without it', async (t) => {
+  const errors = t.mock.method(console, 'error', () => {});
+  const cfg = agentConfig(t, {});
+  cfg.integrations.agents = { ...AGENTS, listen: { host: '192.0.2.1', port: 0 } }; // TEST-NET-1: never this machine's
+  delete cfg.healthcheckUrl;
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: () => assert.fail('nothing to request'), agents: { bindRetryMs: 20 } });
+  assert.equal(await Promise.race([handle.agentPort!, sleep(100).then(() => 'waiting')]), 'waiting');
+  await handle.close();
+  assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] 192.0.2.1 is not on this machine yet: trying again every 0.02 s']);
 });

@@ -54,8 +54,11 @@ export const LIMITS = {
   disks: 32,
   logFiles: 32,
   text: 256,
-  /** Bytes in one line on the Agent port, before and after the handshake: a longer line destroys the socket. */
-  lineBytes: 64 * 1024,
+  /**
+   * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line
+   * destroys the socket. The Agent keeps every line it sends at or under it.
+   */
+  lineBytes: 1024 * 1024,
 } as const;
 
 /** A failed check. */

@@ -26,6 +26,7 @@ const LIFECYCLE_STATES = new Map<string, State>([
   ['crashed', 'down'],
   ['hung', 'down'],
   ['offline', 'down'],
+  ['lost', 'unknown'], // its Agent left: nobody knows what the server does meanwhile
 ] satisfies [Lifecycle, State][]);
 
 /** Fraction of known (up + down) time in [from, to] that the server was up; null if none was known. */

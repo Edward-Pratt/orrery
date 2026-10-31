@@ -54,7 +54,7 @@ const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 export const COMMANDS = [
   new SlashCommandBuilder().setName('status').setDescription('Server status, TPS/UPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
-  new SlashCommandBuilder().setName('tps').setDescription('TPS/UPS now, over the last hour and day, and the slowest dimensions'),
+  new SlashCommandBuilder().setName('tps').setDescription("TPS/UPS now, over the last hour and day, and a Minecraft server's slowest dimensions"),
   new SlashCommandBuilder()
     .setName('playtime')
     .setDescription("A player's playtime and when they were last seen")

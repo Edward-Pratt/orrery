@@ -42,7 +42,7 @@ Lengths count characters (UTF-16 code units).
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
-| one line on the Agent port (`LIMITS.lineBytes`), before and after the handshake | 64 KiB |
+| one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
 ## Handshake
 
@@ -110,7 +110,7 @@ A `cmdResult` with an unknown or late `id` is ignored.
 | `stopping` then disconnect | clean stop | "🛑 Server stopped" |
 | disconnect without `stopping` | crash / killed | "💥 Server went down unexpectedly" |
 | no heartbeat for 30 s, after at least one heartbeat on this connection and before `stopping` | hung | "⚠️ Server not responding"; next heartbeat posts "✅ Server responding again" |
-| not connected 60 s after hub start | offline (recorded as `down` for uptime) | — |
+| not connected 60 s after hub start | offline (recorded as `down` for uptime); a factorio server whose Agent isn't connected stays `unknown` | — |
 | a factorio server's Agent sends `bye`, or is lost (see "Agent connection") | `lost`: its game connection is dropped, players and rate cleared (recorded as `unknown`) | — (a lost Agent is one host notice instead) |
 
 Hung detection is armed by the first heartbeat (not by `started`) so it also

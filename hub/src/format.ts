@@ -47,6 +47,8 @@ function noticeText(n: Notice): string | null {
     case 'restartFailed':
       return `❌ Restart failed: ${n.error}`;
     case 'lag': {
+      // Only Minecraft has dimensions to name (Factorio's rate is UPS); an older Mod sends none.
+      if (n.label === 'UPS') return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}`;
       const where = n.worst ? `${n.worst.name} (DIM ${n.worst.id}) ${Math.round(n.worst.ms)} ms/tick` : 'unknown';
       return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}; slowest: ${where}`;
     }

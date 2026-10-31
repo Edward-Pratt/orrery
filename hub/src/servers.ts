@@ -36,6 +36,11 @@ export type HubOptions = {
   helloTimeoutMs?: number;
   graceMs?: number;
   lateMs?: number;
+  /**
+   * How long a factorio server's game connection that closed without `stopping`, while its Agent connection is up,
+   * waits for that one to close too (then its Agent is lost, not the server crashed).
+   */
+  settleMs?: number;
   /** Where audit entries go (the hub's database). */
   audit?: (entry: AuditEntry) => void;
 };
@@ -75,14 +80,23 @@ export function mcText(s: string, max: number): string {
   );
 }
 
-function tokenMatches(expected: string, got: string): boolean {
+/** Compares a configured token with one a connection sent, in constant time. */
+export function tokenMatches(expected: string, got: string): boolean {
   const a = Buffer.from(expected);
   const b = Buffer.from(got);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** Why a hello's protocol version is refused (the same range for a Mod's hello and an Agent's), or null. */
+export function protocolRefusal(p: number): string | null {
+  if (Number.isInteger(p) && p >= MIN_PROTOCOL && p <= PROTOCOL_VERSION) return null;
+  const speaks = MIN_PROTOCOL === PROTOCOL_VERSION ? `${PROTOCOL_VERSION}` : `${MIN_PROTOCOL}–${PROTOCOL_VERSION}`;
+  return `protocol ${p} not supported (hub speaks ${speaks})`;
+}
+
 /**
- * Owns the mod connections and every configured server's state.
+ * Owns the game connections (a Mod's on the Mod port; an Agent's for its factorio server, handed over by `Agents`
+ * through `attach`) and every configured server's state.
  * Frontends (Discord now, a web dashboard later) use only this public API.
  * Server events are `event`s; events about the host, services and checks are `target`s, so server handlers never see them.
  */
@@ -91,7 +105,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
   #modVersions = new Map<string, string>(); // kept after a disconnect: what the server last ran
-  #sockets = new Set<Socket>(); // every accepted socket, including ones still before the handshake
+  #sockets = new Set<Socket>(); // every accepted or attached socket, including ones still before the handshake
+  #agentsUp = new Set<string>(); // factorio servers whose Agent connection is up
+  #settling = new Map<string, NodeJS.Timeout>(); // factorio servers whose game connection closed, waiting on the Agent
   #server: Server | null = null;
   #timer: NodeJS.Timeout | undefined;
   #grace: NodeJS.Timeout | undefined;
@@ -102,6 +118,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #late = new Map<string, Late>(); // command id -> handler for output that arrives after the result
   #helloTimeoutMs: number;
   #graceMs: number;
+  #settleMs: number;
   #audit: (entry: AuditEntry) => void;
 
   constructor(servers: ServerConfig[], opts: HubOptions = {}) {
@@ -116,21 +133,32 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.#lateMs = opts.lateMs ?? 15 * 60_000; // Discord allows interaction follow-ups for 15 minutes
     this.#helloTimeoutMs = opts.helloTimeoutMs ?? 5_000;
     this.#graceMs = opts.graceMs ?? 60_000; // longer than the mod's 30 s max reconnect backoff
+    this.#settleMs = opts.settleMs ?? 5_000;
     this.#audit = opts.audit ?? (() => {});
   }
 
-  /** Starts listening. Resolves with the bound port (pass 0 for a random one). */
+  /**
+   * Starts hung detection and the grace period, whichever connections come (the Mod port's, the Agent port's): the
+   * hub always calls it.
+   */
+  start(): void {
+    this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
+    // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); a factorio
+    // server whose Agent isn't connected stays unknown.
+    this.#grace = setTimeout(() => {
+      for (const s of this.#states.values()) {
+        if (!this.#conns.has(s.id) && (s.game !== 'factorio' || this.#agentsUp.has(s.id))) this.#emit(s.id, 'offline');
+      }
+    }, this.#graceMs);
+  }
+
+  /** Opens the Mod port. Resolves with the bound port (pass 0 for a random one). */
   listen(port: number, host = '127.0.0.1'): Promise<number> {
     return new Promise((resolve, reject) => {
       const server = createServer((socket) => this.#accept(socket));
       server.once('error', reject);
       server.listen(port, host, () => {
         this.#server = server;
-        this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
-        // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever).
-        this.#grace = setTimeout(() => {
-          for (const id of this.#states.keys()) if (!this.#conns.has(id)) this.#emit(id, 'offline');
-        }, this.#graceMs);
         resolve((server.address() as AddressInfo).port);
       });
     });
@@ -140,6 +168,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.#closing = true;
     clearInterval(this.#timer);
     clearTimeout(this.#grace);
+    for (const timer of this.#settling.values()) clearTimeout(timer);
     for (const late of this.#late.values()) clearTimeout(late.timer);
     for (const socket of this.#sockets) socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
@@ -230,9 +259,42 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     });
   }
 
+  /**
+   * A factorio server's game connection, its hello already checked by `Agents` (the Agent's token, for its own server,
+   * while its Agent connection is up). From here it is like a Mod's: the welcome goes out, and the returned function
+   * takes each of its lines, which `Agents` reads with its line cap and rate limit.
+   */
+  attach(socket: Socket, serverId: string, modVersion: string): (line: string) => void {
+    this.#sockets.add(socket);
+    socket.on('close', () => this.#sockets.delete(socket));
+    return this.#open(socket, serverId, modVersion);
+  }
+
+  /** A factorio server's Agent connection is up: its game connection may come, and it is offline until it does. */
+  agentUp(serverId: string): void {
+    this.#agentsUp.add(serverId);
+  }
+
+  /**
+   * A factorio server's Agent left, by `bye` or lost: its game connection (if any) is dropped and the server is `lost`
+   * (unknown, nothing posted), even if that connection had just closed without `stopping`.
+   */
+  agentDown(serverId: string): void {
+    this.#agentsUp.delete(serverId);
+    const settling = this.#settling.get(serverId);
+    clearTimeout(settling);
+    this.#settling.delete(serverId);
+    const conn = this.#conns.get(serverId);
+    if (conn) {
+      this.#conns.delete(serverId); // its close is then not a crash
+      this.#offline(serverId);
+      conn.socket.destroy();
+    }
+    if (!this.#closing) this.#emit(serverId, 'lost');
+  }
+
   #accept(socket: Socket): void {
-    let id = '';
-    let conn: Conn | null = null;
+    let onLine: ((line: string) => void) | null = null;
     this.#sockets.add(socket);
     socket.on('error', () => {}); // 'close' always follows and does the cleanup
     const helloTimer = setTimeout(() => socket.destroy(), this.#helloTimeoutMs);
@@ -240,50 +302,77 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     lines.on('error', () => {});
     lines.on('line', (line) => {
       if (socket.destroyed || socket.writableEnded) return;
-      const msg = parseModLine(line);
-      if (conn) {
-        if (msg && msg.type !== 'hello') this.#handle(id, conn, msg); // junk after handshake is ignored
-        return;
-      }
+      if (onLine) return onLine(line);
       clearTimeout(helloTimer);
+      const msg = parseModLine(line);
       if (msg?.type !== 'hello') return void socket.destroy();
       const reason = this.#checkHello(msg);
       if (reason) {
         this.#send(socket, { type: 'reject', reason });
         return void socket.end();
       }
-      id = msg.serverId;
-      conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
-      const old = this.#conns.get(id);
-      this.#conns.set(id, conn);
-      old?.socket.destroy();
-      Object.assign(this.#states.get(id)!, { online: true, hung: false });
-      this.#modVersions.set(id, msg.modVersion); // before `connected`, which a Mod deploy waits on
-      this.#send(socket, { type: 'welcome' });
-      this.#emit(id, 'connected');
+      onLine = this.#open(socket, msg.serverId, msg.modVersion);
     });
     socket.on('close', () => {
       this.#sockets.delete(socket);
       clearTimeout(helloTimer);
-      if (!conn) return;
-      for (const p of conn.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error('server disconnected'));
-      }
-      conn.pending.clear();
-      if (this.#conns.get(id) !== conn) return; // replaced by a newer connection: no alert
-      this.#conns.delete(id);
-      Object.assign(this.#states.get(id)!, { online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
-      if (!this.#closing) this.#emit(id, conn.stopping ? 'stopped' : 'crashed');
     });
   }
 
-  #checkHello(hello: Hello): string | null {
-    const p = hello.protocol;
-    if (!Number.isInteger(p) || p < MIN_PROTOCOL || p > PROTOCOL_VERSION) {
-      const speaks = MIN_PROTOCOL === PROTOCOL_VERSION ? `${PROTOCOL_VERSION}` : `${MIN_PROTOCOL}–${PROTOCOL_VERSION}`;
-      return `protocol ${p} not supported (hub speaks ${speaks})`;
+  /** Makes an accepted game connection its server's: welcomed, online, and its lines handled from then on. */
+  #open(socket: Socket, id: string, modVersion: string): (line: string) => void {
+    this.#settle(id); // a crash waiting on the Agent is decided before the new connection counts
+    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
+    const old = this.#conns.get(id);
+    this.#conns.set(id, conn);
+    old?.socket.destroy();
+    Object.assign(this.#states.get(id)!, { online: true, hung: false });
+    this.#modVersions.set(id, modVersion); // before `connected`, which a Mod deploy waits on
+    this.#send(socket, { type: 'welcome' });
+    this.#emit(id, 'connected');
+    socket.on('close', () => this.#closed(id, conn));
+    return (line) => {
+      if (socket.destroyed || socket.writableEnded) return;
+      const msg = parseModLine(line);
+      if (msg && msg.type !== 'hello') this.#handle(id, conn, msg); // junk after handshake is ignored
+    };
+  }
+
+  #closed(id: string, conn: Conn): void {
+    for (const p of conn.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error('server disconnected'));
     }
+    conn.pending.clear();
+    if (this.#conns.get(id) !== conn) return; // replaced by a newer connection, or dropped with its Agent: no alert
+    this.#conns.delete(id);
+    this.#offline(id);
+    if (this.#closing) return;
+    if (conn.stopping) return this.#emit(id, 'stopped');
+    if (!this.#agentsUp.has(id)) return this.#emit(id, 'crashed');
+    // An Agent's game connection, with the Agent connection still up: if that one closes too, the Agent is lost.
+    this.#settling.set(
+      id,
+      setTimeout(() => this.#settle(id), this.#settleMs),
+    );
+  }
+
+  /** Decides a game connection waiting on its Agent (see `#closed`): a crash. */
+  #settle(id: string): void {
+    const timer = this.#settling.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.#settling.delete(id);
+    this.#emit(id, 'crashed');
+  }
+
+  #offline(id: string): void {
+    Object.assign(this.#states.get(id)!, { online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
+  }
+
+  #checkHello(hello: Hello): string | null {
+    const refused = protocolRefusal(hello.protocol);
+    if (refused) return refused;
     const cfg = this.#configs.get(hello.serverId);
     if (!cfg?.token || !tokenMatches(cfg.token, hello.token)) return 'unknown serverId or bad token';
     return null;
@@ -293,12 +382,16 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     const state = this.#states.get(id)!;
     switch (msg.type) {
       case 'heartbeat':
-        conn.lastBeat = Date.now();
-        if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {
-          conn.sentTps = msg.tps;
-          this.emit('event', { serverId: id, type: 'tps', tps: msg.tps });
+        conn.lastBeat = Date.now(); // paused or not: a frozen game stops them, so hung detection stays on
+        state.paused = msg.paused === true;
+        if (!state.paused) {
+          // While paused the rate means nothing: it is left out of the state and the stream (and so of lag and history).
+          if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {
+            conn.sentTps = msg.tps;
+            this.emit('event', { serverId: id, type: 'tps', tps: msg.tps });
+          }
+          state.tps = msg.tps;
         }
-        state.tps = msg.tps;
         state.players = msg.players;
         state.dims = msg.dims ?? [];
         if (conn.hung) {
@@ -330,13 +423,16 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
         return;
       }
       default:
-        this.emit('event', { ...msg, serverId: id }); // serverId last: a mod can't speak for another server
+        // `msg` is parseModLine's copy of only the schema's fields; serverId last: a mod can't speak for another server.
+        this.emit('event', { ...msg, serverId: id });
     }
   }
 
   #checkHung(): void {
     const now = Date.now();
     for (const [id, conn] of this.#conns) {
+      // A factorio server whose Agent is lost has its own one host notice instead (its connection is dropped anyway).
+      if (this.#states.get(id)!.game === 'factorio' && !this.#agentsUp.has(id)) continue;
       // Armed by the first heartbeat (world load sends none) and disarmed by `stopping` (shutdown save).
       if (conn.hung || conn.stopping || conn.lastBeat === 0 || now - conn.lastBeat < this.#hungMs) continue;
       conn.hung = true;

@@ -265,7 +265,7 @@ test("a factorio server's rate is UPS out of 60: bands, trend and wording, and n
   assert.equal(formatTopic(s), '🟢 Online · 54 UPS · 1 player: Ann');
   const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'f' });
   assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 41.5, label: 'UPS', worst: null }), {
-    embeds: [{ title: '🐢 Lag: 41.5 UPS; slowest: unknown', color: COLORS.orange }],
+    embeds: [{ title: '🐢 Lag: 41.5 UPS', color: COLORS.orange }], // no dimensions to name
   });
   assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 59.9, label: 'UPS' }), {
     embeds: [{ title: '✅ UPS back to normal (59.9)', color: COLORS.green }],

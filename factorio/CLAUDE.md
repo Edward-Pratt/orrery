@@ -31,10 +31,11 @@ file is the contract between the mod and the agent.
   255 and no save. A command answers its error as JSON; an event handler `log()`s it and drops the event.
 - Commands are registered in the main chunk. `on_init` and `on_configuration_changed` set up and seed `storage`;
   `on_load` does nothing (storage and the game are read-only there).
-- The five agent commands refuse a player (`player_index ~= nil`) silently. The two player commands refuse RCON and
+- The six agent commands refuse a player (`player_index ~= nil`) silently. The two player commands refuse RCON and
   take the name from `game.get_player(player_index).name`, never from the command's text.
-- Text from outside (`author`, `message` of `say`, `notice` and `reply`) gets U+200B after every `[`, so it never
-  renders as rich text (`[color=…]`, `[img=…]`, `[gps=…]`).
+- Text from outside (`author`, `message` of `say`, `notice` and `reply`) has its control characters (`\n`, `\r`,
+  tab, and the rest of 0x00 to 0x1F and 0x7F) turned into spaces, so it prints as one line and cannot fake a second
+  relayed line, then gets U+200B after every `[`, so it never renders as rich text (`[color=…]`, `[img=…]`, `[gps=…]`).
 - Chat with no `player_index` (plain text typed on the server console or over RCON) is never sent.
 - The mod never uses `/sc` or `/c`, and neither does the agent: on an unflagged save the repeat flags it for good.
 - Only use APIs of the 2.1 runtime (https://lua-api.factorio.com/latest/). Factorio's Lua is 5.2: no `utf8`
@@ -44,7 +45,8 @@ file is the contract between the mod and the agent.
 
 `helpers.send_udp(34199, helpers.table_to_json(evt), 0)`: sent by the server only, to `127.0.0.1:34199`, from
 Factorio's `--enable-lua-udp` port (34198 in production). One event per datagram, at most 4096 bytes of JSON. Every
-event has `seq`, one more than the last (kept in `storage.seq`, so it is saved with the map and rewinds with it).
+event has `seq`, one more than the last (kept in `storage.seq`, so it is saved with the map and rewinds with it after
+a crash or a restore). So after each start the agent sends `/orrery-hello` and takes its `seq` as the baseline.
 `table_to_json` writes non-ASCII as raw UTF-8 and control characters as `\u00XX`.
 
 | `t` | fields | when |
@@ -56,6 +58,7 @@ event has `seq`, one more than the last (kept in `storage.seq`, so it is saved w
 | `milestone` | `kind`, `text`, optional `player`, optional `force` | see below |
 | `link` | `player`, `code` | `/orrery-link CODE` by that player; `code` is 1 to 16 letters or digits, as typed |
 | `unlink` | `player` | `/orrery-unlink` by that player |
+| `hello` | `seq` only | `/orrery-hello` over RCON. Not an event: `seq` is the last event's (0 on a fresh map) and is not used up, so the next event is `seq + 1`. Never counted or gap-checked |
 
 Field caps, in bytes and on a UTF-8 character boundary: `player`, `killer`, `cause` and `force` 64; `message` 1000
 (the hub's 1 KiB); `text` 200. If the JSON is still over 4096 bytes (control characters escape to 6 bytes each), the
@@ -81,7 +84,8 @@ physical one), and a platform surface has no planet.
 
 `storage.firsts[force name]` is `{rocket = true, platform = true, landing = {[planet name] = true}}`. Seeding (in
 `on_init` and `on_configuration_changed`) only ever adds: `rocket` if `force.rockets_launched > 0`, `platform` if
-`#force.platforms > 0`, `landing.nauvis` for every force, and the planet every player physically stands on. So adding
+`next(force.platforms) ~= nil` (`platforms` is keyed by platform index, which counts across forces, so `#` may read
+0), `landing.nauvis` for every force, and the planet every player physically stands on. So adding
 the mod to an existing save posts no stale firsts.
 
 ## Agent to mod: RCON commands
@@ -96,6 +100,7 @@ is `{}`, not `[]`, when nobody is online.
 | `/orrery-notice {json}` | `{message}`, printed to everyone in yellow | `{"ok":true}` |
 | `/orrery-reply {json}` | `{player, ok, message}`, printed to that player only as `[Discord] message`, green if `ok` is `true`, else red | `{"ok":true}`; `not online: <player>` if they are not connected |
 | `/orrery-status` | none | `{"ok":true, tick, tick_paused, players, version, mods, loaded}`: `game.tick`, `game.tick_paused`, the online players' names, `helpers.game_version`, `script.active_mods` (name to version), and `loaded`, `true` once the mod's `storage` is set up in the loaded map |
+| `/orrery-hello` | none | sends the `hello` datagram, then `{"ok":true,"seq":N}` with the same `seq`. Writes nothing to `storage` |
 | `/orrery-save <name>` | a plain name: a letter or digit, then letters, digits, `.`, `_`, `-`, at most 100 (so never `_autosave…`); `game.server_save(name)` writes `saves/<name>.zip` | `{"ok":true,"name":"<name>"}` |
 
 Player commands: `/orrery-link <CODE>` (sends `link`, tells the player "Linking…") and `/orrery-unlink` (sends

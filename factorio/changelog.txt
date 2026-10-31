@@ -5,4 +5,4 @@ Version: 0.1.0
     - Join, leave and death events, with the cause of death.
     - Every research finished in labs, infinite levels included, and firsts per force: first rocket, first space platform, first landing on each planet.
     - /orrery-link and /orrery-unlink, to link a Factorio name to a Discord account.
-    - Console commands for the orrery agent over RCON: status, save, notices and replies.
+    - Console commands for the orrery agent over RCON: status, save, notices, replies, and a hello over UDP with the last event's number.

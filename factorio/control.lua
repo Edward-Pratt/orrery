@@ -36,9 +36,10 @@ local function cut(s, n)
   return s:sub(1, n)
 end
 
---- Outside text as plain text: a "[" followed by U+200B starts no rich-text tag ([color=...], [img=...], [gps=...]).
+--- Outside text as plain text, on one line: control characters (newlines included, so no line can pass for a relay
+--- of its own) become spaces, and a "[" followed by U+200B starts no rich-text tag ([color=...], [img=...], [gps=...]).
 local function plain(s)
-  return (s:gsub("%[", "[" .. ZWSP))
+  return (s:gsub("%c", " "):gsub("%[", "[" .. ZWSP))
 end
 
 --- An internal name for people: "mining-productivity" -> "Mining productivity", "vulcanus" -> "Vulcanus".
@@ -117,7 +118,8 @@ local function seed()
   for _, force in pairs(game.forces) do
     local f = firsts_of(force)
     if force.rockets_launched > 0 then f.rocket = true end
-    if #force.platforms > 0 then f.platform = true end
+    -- platforms is keyed by the platform's index, which counts across all forces, so `#` can read 0 here.
+    if next(force.platforms) ~= nil then f.platform = true end
     f.landing.nauvis = true
   end
   for _, player in pairs(game.players) do
@@ -309,6 +311,13 @@ console("orrery-status", function()
     mods = script.active_mods,
     loaded = storage.seq ~= nil,
   }
+end)
+
+-- Tells the agent the seq of the last event sent, over UDP and in the reply, without sending an event: after each
+-- start the agent expects seq + 1 next, and seeing the datagram arrive proves the UDP channel works.
+console("orrery-hello", function()
+  helpers.send_udp(AGENT_PORT, helpers.table_to_json({ t = "hello", seq = storage.seq }), 0)
+  return { ok = true, seq = storage.seq }
 end)
 
 -- <name>: saves the map as saves/<name>.zip. Plain names only, never one of Factorio's _autosave files.

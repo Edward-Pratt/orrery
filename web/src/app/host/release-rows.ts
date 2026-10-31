@@ -1,11 +1,14 @@
 import type { DeployPart, DeployRow, DeploysAnswer, Release } from '@hub/api';
 
-/** One deployable thing on the Host page: the hub, the dashboard, or one server's Mod. */
+/** One deployable thing on the Host page: the hub, the dashboard, one server's Mod, or one Host's Agent. */
 export type ReleaseRow = {
   key: string;
   label: string;
   part: DeployPart;
+  /** The Mod's server. */
   server?: string;
+  /** The Agent's id (its Host's). */
+  host?: string;
   running: string | null;
   latest: string | null;
   releases: Release[];
@@ -13,32 +16,39 @@ export type ReleaseRow = {
   newer: boolean;
   /** Its deploy in progress, if any. */
   deploying: DeployRow | undefined;
-  /** Why it can't deploy now: a pack update runs (on its server, for a Mod; anywhere, for the hub). */
+  /**
+   * Why it can't deploy now: an update runs (a pack update on its server, for a Mod; a game update on the server it
+   * runs, for an Agent; either anywhere, for the hub).
+   */
   why: string | null;
 };
 
 const DAY = 24 * 60 * 60_000;
 
 export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
-  const running = (part: DeployPart, server?: string) => a.history.find((h) => h.outcome === 'running' && h.part === part && (!server || h.target === server));
-  const why = (part: DeployPart, server?: string, name?: string) =>
-    part === 'hub' && a.packing.length ? 'A pack update is running.' : server && a.packing.includes(server) ? `A pack update is running on ${name}.` : null;
-  const row = (key: string, label: string, part: DeployPart, run: string | null, latest: string | null, releases: Release[], server?: string, name?: string): ReleaseRow => ({
+  /** A Mod's or an Agent's deploy has its server or Agent as its target. */
+  const running = (part: DeployPart, target?: string) => a.history.find((h) => h.outcome === 'running' && h.part === part && (!target || h.target === target));
+  const row = (key: string, label: string, part: DeployPart, run: string | null, latest: string | null, releases: Release[], why: string | null, more: { server?: string; host?: string } = {}): ReleaseRow => ({
     key,
     label,
     part,
-    server,
+    ...more,
     running: run,
     latest,
     releases,
     newer: releases.findIndex((r) => r.tag === run) > 0,
-    deploying: running(part, server),
-    why: why(part, server, name),
+    deploying: running(part, more.server ?? more.host),
+    why,
   });
   return [
-    row('hub', 'Hub', 'hub', a.hub.running, a.hub.latest, a.hub.releases),
-    row('web', 'Dashboard', 'web', a.web.running, a.web.latest, a.web.releases),
-    ...a.mod.servers.map((s) => row(`mod:${s.id}`, `Mod on ${s.name}`, 'mod', s.running, a.mod.latest, a.mod.releases, s.id, s.name)),
+    row('hub', 'Hub', 'hub', a.hub.running, a.hub.latest, a.hub.releases, a.packing.length ? 'A pack or game update is running.' : null),
+    row('web', 'Dashboard', 'web', a.web.running, a.web.latest, a.web.releases, null),
+    ...a.mod.servers.map((s) =>
+      row(`mod:${s.id}`, `Mod on ${s.name}`, 'mod', s.running, a.mod.latest, a.mod.releases, a.packing.includes(s.id) ? `A pack update is running on ${s.name}.` : null, { server: s.id }),
+    ),
+    ...a.agent.hosts.map((h) =>
+      row(`agent:${h.id}`, `Agent on ${h.name}`, 'agent', h.running, a.agent.latest, a.agent.releases, a.packing.includes(h.server) ? `A game update is running on ${h.server}.` : null, { host: h.id }),
+    ),
   ];
 }
 
@@ -49,4 +59,4 @@ export function overdue(r: ReleaseRow, a: DeploysAnswer, now = Date.now()): bool
 }
 
 /** `hub-v2.6.0` → `v2.6.0`. */
-export const short = (tag: string | null) => tag?.replace(/^(hub|web|mod)-/, '') ?? 'unknown';
+export const short = (tag: string | null) => tag?.replace(/^(hub|web|mod|agent)-/, '') ?? 'unknown';

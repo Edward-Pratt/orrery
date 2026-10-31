@@ -24,6 +24,7 @@ const SECTIONS: { path: string; label: string; factorio?: string; has: (d: Serve
   { path: 'backups', label: 'Backups', factorio: 'Saves', has: (d) => d.backups.configured },
   { path: 'logs', label: 'Logs', has: (d) => d.logs },
   { path: 'pack', label: 'Pack', has: (d) => d.pack },
+  { path: 'game', label: 'Game', has: (d) => d.card.features.update },
 ];
 
 /** A server's page: header (name, state, linked service, actions), tabs, and the sections, which read the detail from here. */

@@ -312,8 +312,52 @@ describe('host page releases', () => {
     expect(row('mod:gtnh').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
     expect(row('mod:gtnh').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running on GTNH.');
     expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
-    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running.');
+    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack or game update is running.');
     expect(row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
+  });
+
+  const AGENTS: DeploysAnswer = {
+    ...ANSWER,
+    agent: {
+      latest: 'agent-v1.1.0',
+      releases: [rel('agent-v1.1.0'), rel('agent-v1.0.0')],
+      hosts: [
+        { id: 'vm', name: 'Friend VM', server: 'space', running: 'agent-v1.0.0' },
+        { id: 'pi', name: 'Pi', server: 'tiny', running: null },
+      ],
+    },
+  };
+
+  it("shows a row per Host's Agent; its Deploy names the Agent and posts its part with the Host", async () => {
+    const { row, rowText, deploy, backend, render } = await releases(AGENTS);
+    const shown = (key: string) => ['[data-running]', '[data-latest]', '[data-newer]'].map((sel) => row(key).querySelector(sel)?.textContent?.trim());
+    expect(shown('agent:vm')).toEqual(['agent-v1.0.0', 'agent-v1.1.0', 'newer available']);
+    expect(shown('agent:pi')).toEqual(['unknown', 'agent-v1.1.0', undefined]); // never connected
+    expect(rowText('agent:vm')).toContain('Agent on Friend VM');
+    const select = await deploy('agent:vm');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['agent-v1.1.0', 'agent-v1.0.0 (running)']);
+    expect(dialog()!.textContent).toContain('Deploy Agent on Friend VM v1.0.0 → v1.1.0?');
+    dialogButton('ok').click();
+    await render();
+    const req = backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys');
+    expect(req.request.body).toEqual({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' });
+  });
+
+  it("no Agent deploy while a game update runs on its server; another Host's Agent can deploy", async () => {
+    const { row } = await releases({ ...AGENTS, packing: ['space'] });
+    expect(row('agent:vm').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
+    expect(row('agent:vm').querySelector('[data-why]')?.textContent?.trim()).toBe('A game update is running on space.');
+    expect(row('agent:pi').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
+    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack or game update is running.');
+  });
+
+  it("a running Agent deploy spins on its own Host's row, and the history names the Agent", async () => {
+    const running = { id: 3, part: 'agent' as const, target: 'vm', from: 'agent-v1.0.0', to: 'agent-v1.1.0', by: 'web:alex (5)', started: 1, finished: null, outcome: 'running' as const, log: '' };
+    const { rowText, row, el } = await releases({ ...AGENTS, history: [running, ...ANSWER.history] });
+    expect(rowText('agent:vm')).toContain('deploying agent-v1.1.0');
+    expect(row('agent:pi').querySelector('[data-deploying]')).toBeNull();
+    expect(row('agent:pi').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true); // one deploy at a time
+    expect(el.querySelector('[data-deploy-row="3"]')!.textContent).toContain('Agent on vm: agent-v1.0.0 → agent-v1.1.0');
   });
 
   it('has no section with the GitHub integration off', async () => {

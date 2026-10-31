@@ -144,13 +144,14 @@ export class Attention {
       .subscribe((on) => on && this.#start(on));
   }
 
-  #start(on: { minecraft: boolean; systemd: boolean; checks: boolean; github: boolean; host: boolean }): void {
+  #start(on: { minecraft: boolean; agents: boolean; systemd: boolean; checks: boolean; github: boolean; host: boolean }): void {
     // Debounced: the stream's replay can hold many changes at once.
     const fetching = <T>(refetch: Subject<void>, url: string, into: (v: T) => void) =>
       refetch
         .pipe(debounceTime(50), startWith(undefined), switchMap(() => this.#http.get<T>(url).pipe(catchError(() => EMPTY))), takeUntilDestroyed(this.#destroyRef))
         .subscribe(into);
-    if (on.minecraft) fetching<ServerCard[]>(this.#refetchCards, '/api/servers', (v) => this.#cards.set(v));
+    // Servers come and go with a game connection: a Mod's (minecraft) or an Agent's (agents).
+    if (on.minecraft || on.agents) fetching<ServerCard[]>(this.#refetchCards, '/api/servers', (v) => this.#cards.set(v));
     // A restore sends no event, but ends a pack rollback's offer: the cards are fetched again when one starts or ends.
     this.#running$.pipe(skip(1), takeUntilDestroyed(this.#destroyRef)).subscribe(() => this.#refetchCards.next());
     if (on.systemd) fetching<ServiceStatus[]>(this.#refetchServices, '/api/services', (v) => this.#services.set(v));

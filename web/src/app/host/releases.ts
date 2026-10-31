@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { DeployAnswer, DeployOutcome, DeployRequest, DeploysAnswer, LiveEvent } from '@hub/api';
+import type { DeployAnswer, DeployOutcome, DeployRequest, DeployRow, DeploysAnswer, LiveEvent } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { debounceTime, filter } from 'rxjs';
@@ -10,7 +10,7 @@ import { LiveEvents, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { releaseRows, short, type ReleaseRow } from './release-rows';
 
-/** A pack update started or ended: Deploy may be refused or allowed again. */
+/** A pack or game update started or ended: Deploy may be refused or allowed again. */
 const packNotice = (e: LiveEvent) => 'serverId' in e && e.type === 'notice' && (e.kind === 'packUpdateStarted' || e.kind === 'packUpdateFinished');
 
 const OUTCOME: Record<DeployOutcome, string> = {
@@ -88,7 +88,7 @@ const OUTCOME: Record<DeployOutcome, string> = {
             <li class="p-3" [attr.data-deploy-row]="h.id">
               <div class="flex flex-wrap items-center gap-x-3">
                 <span class="rounded-full px-2 text-xs" [class]="outcome[h.outcome]" data-outcome>{{ h.outcome }}</span>
-                <span>{{ h.part === 'mod' ? 'Mod on ' + h.target : h.part === 'web' ? 'dashboard' : 'hub' }}: {{ h.from ?? 'unknown' }} → {{ h.to }}</span>
+                <span>{{ what(h) }}: {{ h.from ?? 'unknown' }} → {{ h.to }}</span>
                 <span class="text-muted-foreground">{{ h.by }}, {{ h.started | date: 'd MMM HH:mm' }}</span>
               </div>
               @if (h.log) {
@@ -128,6 +128,11 @@ export class Releases {
       .subscribe(() => this.#load());
   }
 
+  /** What a deploy in the history put in place: a Mod's server and an Agent's Host by their ids. */
+  protected what(h: DeployRow): string {
+    return h.part === 'mod' ? `Mod on ${h.target}` : h.part === 'agent' ? `Agent on ${h.target}` : h.part === 'web' ? 'dashboard' : 'hub';
+  }
+
   /** Going back: the tag is older than the one running (when that is a listed release). */
   protected older(r: ReleaseRow, tag: string): boolean {
     const at = r.releases.findIndex((rel) => rel.tag === r.running);
@@ -143,13 +148,13 @@ export class Releases {
     const tag = this.choice();
     const older = this.older(r, tag);
     const ok = await this.#feedback.confirm({
-      title: `Deploy ${r.part === 'mod' ? r.label : r.label.toLowerCase()} ${short(r.running)} → ${short(tag)}${older ? ' (older release)' : ''}?`,
+      title: `Deploy ${r.part === 'mod' || r.part === 'agent' ? r.label : r.label.toLowerCase()} ${short(r.running)} → ${short(tag)}${older ? ' (older release)' : ''}?`,
       description: older ? 'This goes back to an older release than the one running.' : undefined,
       verb: 'Deploy',
       destructive: older,
     });
     if (!ok) return;
-    const body: DeployRequest = { part: r.part, tag, ...(r.server && { server: r.server }) };
+    const body: DeployRequest = { part: r.part, tag, ...(r.server && { server: r.server }), ...(r.host && { host: r.host }) };
     this.posting.set(true);
     this.#http.post<DeployAnswer>('/api/deploys', body).subscribe({
       next: () => {

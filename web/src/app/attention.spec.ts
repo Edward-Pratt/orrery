@@ -32,7 +32,7 @@ const service = (id: string, state: string, sub = 'x'): ServiceStatus => ({ id, 
 const check = (id: string, up: boolean | null): CheckStatus => ({ id, url: 'http://x', up, ms: 1, error: up === false ? 'HTTP 500' : null, checkedAt: 1, service: null });
 
 /** Opens the shell logged in, answering what the attention strip fetches. */
-async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer) {
+async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer, on: Partial<Integrations> = {}) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
@@ -42,7 +42,7 @@ async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks:
   await settle();
   backend.expectOne('/api/me').flush(ALEX);
   await settle();
-  backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys }));
+  backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys, ...on }));
   await settle();
   if (deploys) backend.expectOne('/api/deploys').flush(deploys);
   backend.expectOne('/api/servers').flush(cards);
@@ -108,6 +108,14 @@ describe('the attention strip', () => {
       card('space', { ...factorio, online: false, service: { id: 'factorio', state: 'active' } }),
       card('moon', { ...factorio, online: false, service: { id: 'moon', state: 'inactive' } }),
     ]);
+    expect(lines()).toEqual(["SPACE is offline: its service runs, but its Agent is not connected or RCON doesn't answer Restart"]);
+  });
+
+  it('fetches the cards on a hub with Agents and no Minecraft, so a factorio server has its items', async () => {
+    const { lines } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 }, online: false, service: { id: 'factorio', state: 'active' } })], [], [], undefined, {
+      minecraft: false,
+      agents: true,
+    });
     expect(lines()).toEqual(["SPACE is offline: its service runs, but its Agent is not connected or RCON doesn't answer Restart"]);
   });
 

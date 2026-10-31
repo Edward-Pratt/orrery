@@ -55,7 +55,7 @@ async function setup(on: Integrations = ALL, data: { services?: ServiceStatus[];
   await settle();
   if (on.systemd) backend.expectOne('/api/services').flush(data.services ?? [GRAFANA, CADDY]);
   if (on.checks) backend.expectOne('/api/checks').flush(data.checks ?? [check('grafana'), check('api', { up: false, ms: null, error: 'timeout' })]);
-  if (on.minecraft) backend.expectOne('/api/servers').flush(data.cards ?? []);
+  if (on.minecraft || on.agents) backend.expectOne('/api/servers').flush(data.cards ?? []);
   const el = fixture.nativeElement as HTMLElement;
   const render = async () => (await settle(), fixture.detectChanges(), await fixture.whenStable(), await settle());
   await render();
@@ -152,6 +152,12 @@ describe('services page', () => {
     backend.expectOne('/api/services/caddy/start').flush('systemctl failed', { status: 502, statusText: 'Bad Gateway' });
     await render();
     expect(toasts()[0]).toContain('Start of caddy.service failed: systemctl failed');
+  });
+
+  it('links a service to the factorio server it runs on a hub with Agents and no Minecraft', async () => {
+    const space = { ...CARD, id: 'space', name: 'Space', game: 'factorio', rate: { label: 'UPS', max: 60 }, service: { id: 'mc', state: 'active' } } as const;
+    const { row, text } = await setup({ ...ALL, minecraft: false, agents: true }, { services: [svc('mc', 'active')], cards: [space] });
+    expect(text(row('mc').querySelector('[data-runs]'))).toBe('runs Space →');
   });
 
   it('links a service that runs a server to it, with the server actions', async () => {

@@ -187,6 +187,10 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 
+Release 1's Agent has no handler for `update`, `updateResume`, `updateCancel` and `deploy`: it answers each with a `reply`
+`ok: false`, and sends no `installed`, `updateStep`, `updateDone` or `deployResult`. The hub parses all of them already,
+and sends none of the requests yet: game updates and Agent deploys (release 2) will use them.
+
 The Agent treats every request as untrusted: it never runs a path or argv it was sent, checks names against its
 own listings, and refuses an `update` whose versions, names or URLs fail its checks (see `agent/CLAUDE.md`).
 

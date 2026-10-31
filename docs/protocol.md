@@ -148,7 +148,7 @@ The first line on the Agent port is one of:
 | first line | accepted when | reply |
 |---|---|---|
 | `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
-| `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up. `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
+| `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up (else `reject` with `its agent is not connected`). `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
 
 ```json
 {"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}

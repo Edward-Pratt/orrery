@@ -243,7 +243,14 @@ export class Agents extends EventEmitter<AgentEvents> {
     };
     const allowed = limiter(socket, this.#rate);
     readLines(socket, LIMITS.lineBytes, (line) => {
-      if (!socket.destroyed && !socket.writableEnded && allowed()) onLine(line);
+      if (socket.destroyed || socket.writableEnded || !allowed()) return;
+      try {
+        onLine(line);
+      } catch (err) {
+        // One bad line must never take the hub down: it ends only its own connection.
+        console.error(`[agents] ${peer}: a line failed, closing:`, err);
+        socket.destroy();
+      }
     });
     socket.resume();
   }

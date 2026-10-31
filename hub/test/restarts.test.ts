@@ -99,7 +99,7 @@ test('cancel stops the countdown and tells players', (t) => {
   assert.deepEqual(notices, [scheduled(5, 'alice'), cancelled('bob')]);
 });
 
-test('the server going down first cancels; its own stop does not', (t) => {
+test('the server going down (or its Agent leaving) first cancels; its own stop does not', (t) => {
   const { restarts, events, commands, notices } = setup(t);
   restarts.schedule('gtnh', 5, 'alice');
   events.emit('event', { serverId: 'gtnh', type: 'crashed' });
@@ -111,6 +111,12 @@ test('the server going down first cancels; its own stop does not', (t) => {
   t.mock.timers.tick(0);
   events.emit('event', { serverId: 'gtnh', type: 'stopped' }); // caused by our own stop
   assert.deepEqual(notices, [NOW]);
+  notices.length = 0;
+  restarts.schedule('gtnh', 5, 'alice');
+  events.emit('event', { serverId: 'gtnh', type: 'lost' }); // its Agent left: no game connection to warn through
+  assert.deepEqual(notices.slice(1), [DOWN]);
+  t.mock.timers.tick(10 * MIN);
+  assert.equal(commands.filter((c) => c === 'stop').length, 1); // only the earlier countdown's
 });
 
 test('stop failing with a disconnect is success; a timeout is reported', async (t) => {

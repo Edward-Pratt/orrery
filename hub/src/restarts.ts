@@ -43,7 +43,8 @@ export class RestartScheduler {
     this.#hub = hub;
     this.#paused = paused;
     hub.on('event', (e) => {
-      if ((e.type === 'stopped' || e.type === 'crashed') && this.#clear(e.serverId)) {
+      // `lost`: its Agent left, taking the game connection the countdown speaks through.
+      if ((e.type === 'stopped' || e.type === 'crashed' || e.type === 'lost') && this.#clear(e.serverId)) {
         hub.publish(e.serverId, { severity: 'info', kind: 'restartCancelledDown' });
       }
     });

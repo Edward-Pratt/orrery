@@ -375,3 +375,19 @@ test('requests carry fresh ids, answer with checked data, and fail on refusal, b
   agent.socket.destroy();
   await assert.rejects(dropped, /disconnected/);
 });
+
+test('a line whose handling throws ends only its own connection; a deeply nested reply is just refused', async (t) => {
+  const errors = t.mock.method(console, 'error', () => {});
+  const { agents, port } = await setup(t);
+  agents.on('saves', () => {
+    throw new Error('a listener broke');
+  });
+  const agent = await agentUp(port);
+  const depth = 500_000; // under the line cap
+  agent.send(`{"type":"reply","id":"x","ok":true,"data":${'['.repeat(depth)}${']'.repeat(depth)}}`);
+  agent.send({ type: 'saves', saves: [], free: 1 });
+  await agent.closed;
+  assert.equal(errors.mock.calls.filter((c) => /a line failed, closing/.test(String(c.arguments[0]))).length, 1);
+  await agentUp(port); // the hub is still up
+  assert.equal(agents.get('vm')?.connected, true);
+});

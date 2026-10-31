@@ -121,11 +121,20 @@ const object =
   (fields: Record<string, Check>): Check =>
   (v) =>
     isObject(v) ? pick(fields, v) : BAD;
-/** Any JSON value up to `max` characters serialised, as is (it came from `JSON.parse`, so it is a fresh tree). */
+/**
+ * Any JSON value up to `max` characters serialised, as is (it came from `JSON.parse`, so it is a fresh tree). One
+ * too deeply nested to serialise again is refused, not thrown.
+ */
 const json =
   (max: number): Check =>
-  (v) =>
-    v === undefined || JSON.stringify(v).length <= max ? v : BAD;
+  (v) => {
+    if (v === undefined) return v;
+    try {
+      return JSON.stringify(v).length <= max ? v : BAD;
+    } catch {
+      return BAD;
+    }
+  };
 
 const player = str(LIMITS.player);
 const output = clippedList(clipped(LIMITS.line), LIMITS.output);

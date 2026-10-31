@@ -258,11 +258,11 @@ sha() { sha256sum < "$1" | cut -c1-64; }
 } > "$X/$SUMS"
 echo '{"experimental":{"headless":"2.1.25"},"stable":{"headless":"2.1.24"}}' > "$X/factorio.com/api/latest-releases"
 DL=github.com/Edward-Pratt/orrery/releases/download
-AGENT_TGZ=$DL/agent-v0.10.0/orrery-agent-agent-v0.10.0.tar.gz
+AGENT_TGZ=$DL/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz # release.yml: orrery-$GITHUB_REF_NAME.tar.gz
 MOD_ZIP=$DL/factorio-v0.1.0/orrery_0.1.0.zip
 mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/factorio-v0.1.0"
 tar -czf "$X/$AGENT_TGZ" -C "$B/agent" . # as ci.yml packs it
-echo "$(sha "$X/$AGENT_TGZ")  orrery-agent-agent-v0.10.0.tar.gz" > "$X/$AGENT_TGZ.sha256"
+echo "$(sha "$X/$AGENT_TGZ")  orrery-agent-v0.10.0.tar.gz" > "$X/$AGENT_TGZ.sha256"
 echo 'the orrery mod' > "$X/$MOD_ZIP"
 API=api.github.com/repos/Edward-Pratt/orrery/releases
 api() { # <zip digest>: a release list with drafts, other parts, and agent versions that sort wrong as text
@@ -407,7 +407,7 @@ check 'creates a world in a one-off container, as factorio, with its mods' '
   called "^podman run --rm --network=none --user 986:986 .* -e HOME=/srv/factorio -v $R/opt/factorio:/opt/factorio:ro,z -v $R/srv/factorio:/srv/factorio:z .* --config /srv/factorio/config/config.ini --mod-directory /srv/factorio/mods --create /srv/factorio/saves/world.zip$"'
 check 'installs the newest agent release by version (not a draft, not by text), checked against its .sha256' '
   [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 && -f $R/srv/orrery-agent/releases/agent-v0.10.0/src/index.ts ]] &&
-  called "^curl https://github.com/Edward-Pratt/orrery/releases/download/agent-v0.10.0/orrery-agent-agent-v0.10.0.tar.gz.sha256$"'
+  called "^curl https://github.com/Edward-Pratt/orrery/releases/download/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz.sha256$"'
 check 'takes the units, the polkit file and deploy-agent.sh from the same agent tag' '
   [[ $(grep -c "^curl https://$RAW/" "$F/calls") == 5 ]] && ! grep "^curl https://raw" "$F/calls" | grep -vq "/agent-v0.10.0/"'
 WANT_AGENT=$(printf '{"id":"factorio-vm","hub":{"host":"127.0.0.1","port":%s},"server":{"id":"factorio","unit":"factorio.service","install":"/opt/factorio","data":"/srv/factorio","rconPort":27015,"factorioUdpPort":34198,"agentUdpPort":34199},"mounts":["/"]}' "${HUB##*:}")
@@ -671,7 +671,7 @@ check 'and leaves no download behind' '[[ -z $(ls -A "$R/opt/factorio/.incoming"
 refuses_late 'a sha256sums/ without the arm64 file' 'lists no factorio-headless_linux-arm64_2.1.24.tar.xz' \
   'grep -v arm64 "$X/$SUMS" | override "$SUMS"' "$R/opt/factorio/current" "${ARGS[@]}"
 refuses_late 'an agent download not matching its .sha256' "doesn't match its .sha256" \
-  'echo "$DIGEST2  orrery-agent-agent-v0.10.0.tar.gz" | override "$AGENT_TGZ.sha256"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
+  'echo "$DIGEST2  orrery-agent-v0.10.0.tar.gz" | override "$AGENT_TGZ.sha256"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'a mod download not matching its listed sha256' "doesn't match the sha256 GitHub lists" \
   'api "$DIGEST2" | override "$API"' "$R/srv/factorio/mods/orrery_0.1.0.zip" "${ARGS[@]}"
 refuses_late 'no agent release' 'GitHub has no agent-v release yet' 'grep -v "\"agent-v0" "$X/$API" | override "$API"' \

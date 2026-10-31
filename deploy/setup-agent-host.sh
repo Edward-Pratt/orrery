@@ -16,10 +16,10 @@
 #   --new-token            ask for the agent token again (a re-run keeps the one it has)
 # The agent token is asked for on the terminal, never taken from argv.
 #
-# It installs the newest agent-v* release (orrery-agent-<tag>.tar.gz, checked against its .sha256, and this folder's
-# factorio.container, orrery-agent.service, orrery-agent-deploy@.service, 60-orrery-agent.rules and deploy-agent.sh at
-# that same tag) and, when mods/ has none, the newest factorio-v* release's orrery_<ver>.zip (checked against the
-# sha256 GitHub lists for it). All public on GitHub, fetched without a token.
+# It installs the newest agent-v* release (orrery-agent-vX.Y.Z.tar.gz, as release.yml names it, checked against its
+# .sha256, and this folder's factorio.container, orrery-agent.service, orrery-agent-deploy@.service,
+# 60-orrery-agent.rules and deploy-agent.sh at that same tag) and, when mods/ has none, the newest factorio-v*
+# release's orrery_<ver>.zip (checked against the sha256 GitHub lists for it). All public on GitHub, no token.
 #
 # It touches only: the user and group factorio; /opt/factorio, /srv/factorio, /srv/orrery-agent, /usr/local/lib/orrery,
 # /etc/orrery-agent/, /etc/orrery-agent.env, /etc/orrery-factorio.env; /etc/containers/systemd/factorio.container,
@@ -446,6 +446,7 @@ if compgen -G "$srv/mods/orrery_*.zip" > /dev/null; then
   echo "kept the orrery mod in /srv/factorio/mods (Game updates change it)"
 else
   ftag=$(newest factorio) || die "GitHub has no factorio-v release of the orrery mod yet"
+  [[ $ftag =~ ^factorio-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a factorio-vX.Y.Z tag: $ftag"
   zip=orrery_${ftag#factorio-v}.zip
   zsha=$(asset_sha "$ftag" "$zip") || die "the $ftag release has no $zip with a sha256"
   t=$(ffetch "https://github.com/$REPO/releases/download/$ftag/$zip" "$srv/mods" "$zip")
@@ -469,9 +470,10 @@ fi
 
 # ---- 12. The agent: the newest agent-v release, and this folder's files at the same tag.
 atag=$(newest agent) || die "GitHub has no agent-v release yet"
+[[ $atag =~ ^agent-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not an agent-vX.Y.Z tag: $atag"
 rel=$agent/releases/$atag
 if [[ ! -f $rel/src/index.ts ]]; then
-  tgz=orrery-agent-$atag.tar.gz base=https://github.com/$REPO/releases/download/$atag
+  tgz=orrery-$atag.tar.gz base=https://github.com/$REPO/releases/download/$atag
   sum=$(fetch_text "$base/$tgz.sha256")
   sum=${sum%% *}
   [[ $sum =~ ^[0-9a-f]{64}$ ]] || die "$tgz.sha256 holds no sha256"

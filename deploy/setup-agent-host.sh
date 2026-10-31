@@ -234,8 +234,9 @@ config() {
       return 0
     fi
   fi
-  put "$saved" 644 <<< "$new"
+  # The target first: a run stopped between the two finds it equal to the new default, so the next run saves it.
   if [[ $1 == factorio ]]; then fput "$2" <<< "$new"; else put "$2" 644 <<< "$new"; fi
+  put "$saved" 644 <<< "$new"
 }
 fsha() { local h; h=$(as_factorio sha256sum -- "$1"); printf '%s' "${h%% *}"; }
 fetch() { "${CURL[@]}" -o "$2" "$1" || die "can't download ${1%%\?*}"; }
@@ -594,9 +595,11 @@ if ((active && quadlet_changed)); then
 fi
 
 # ---- 18. The first-boot report, by the agent's own check (run as factorio; the secrets go in its environment only).
+# HOME as its units set it: runuser sets factorio's own, /srv/factorio, which the container can write, and nothing
+# native may read a dotfile from there.
 report=$(
   echo "setup-agent-host: agent $agent_id ($atag), Factorio $ver, image $ref (glibc $glibc), $(podman --version)"
-  RCON_PASSWORD=$rcon ORRERY_AGENT_TOKEN=$token runuser -u factorio -- "$node" "$agent/current/src/index.ts" check 2>&1
+  RCON_PASSWORD=$rcon ORRERY_AGENT_TOKEN=$token runuser -u factorio -- env HOME=/srv/orrery-agent "$node" "$agent/current/src/index.ts" check 2>&1
 ) && ok=1 || ok=0
 printf '%s\n' "$report"
 fput "$srv/first-boot.txt" <<< "$report"

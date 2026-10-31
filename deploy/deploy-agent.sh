@@ -4,12 +4,16 @@
 # agent won't connect to the hub. Run by orrery-agent-deploy@<tag>.service as factorio (never root), not by hand:
 #   bash /usr/local/lib/orrery/deploy-agent.sh <agent-vX.Y.Z>
 # It runs from setup-agent-host.sh's root-owned copy, so neither a release nor the agent can change what rolls it back.
-# The release comes from the public GitHub release, with no token: orrery-agent-<tag>.tar.gz, checked against its
-# .sha256, and refused unless it holds only plain files and folders, all inside its own top folder.
+# The release comes from the public GitHub release, with no token: orrery-<tag>.tar.gz (orrery-agent-vX.Y.Z.tar.gz),
+# checked against its .sha256, and refused unless it holds only plain files and folders, all inside its own top folder.
 # The gate: within DEPLOY_GATE_SECONDS of the restart, the agent writes <root>/connected after the hub's welcome,
 #   {"version":"agent-vX.Y.Z","time":<epoch ms>}
 # naming this tag with a time from the restart on. Otherwise current flips back, and the old agent must connect.
 # Writes <root>/deploy-status.json: {"tag","from","outcome":"ok"|"failed"|"rolled back","finished","log"}.
+# It removes that file when it starts and writes it only at the end, after the gate: so the restarted agent (the new
+# one, or the old one after a rollback) connects before its outcome exists. The agent reads it only once
+# orrery-agent-deploy@<tag>.service has left activating, active, reloading and deactivating (as hub/src/deploys.ts
+# watches deploy-hub.sh's unit), then sends deployResult from it.
 # DEPLOY_ROOT, DEPLOY_GATE_SECONDS and DEPLOY_GATE_POLL exist for the tests (deploy/test-deploy-agent.sh).
 set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <agent-vX.Y.Z>" >&2; exit 2; }

@@ -85,7 +85,7 @@ Hub, mod, dashboard, agent and Factorio mod are versioned separately (`docs/adr/
 Cut one with `.github/release.sh <hub|mod|web|agent|factorio> <major|minor|patch>`
 from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N (`--yes` skips) and pushes only that tag.
 Never delete or move a tag; fix a failed release forward with the next patch.
-`.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`), then creates the GitHub release. Its notes are
+`.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`; an agent tag also runs the deploy tests, as the agent Host's setup ships at that tag), then creates the GitHub release. Its notes are
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests
 as `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`

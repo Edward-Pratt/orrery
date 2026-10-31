@@ -3,7 +3,9 @@
 # (dnf, rpm, useradd, getent, id, install's owner flags, runuser, systemctl, firewall-cmd, ip, selinuxenabled,
 # getenforce, semanage, restorecon, tailscale, uname, ss, df, podman, curl) and a fake Quadlet generator under the
 # prefix. curl serves local fixtures, and this folder's factorio.container, units and polkit file as the release's.
-# tar, xz, sha256sum and node are real, and the hub is a real local TCP listener.
+# tar, xz, sha256sum and node are real, and the hub is a real local TCP listener. In the script's runs only, mv,
+# mktemp, tar, ln, rm and mkdir are logging wrappers around the real ones, noting who runs them, so the test sees
+# which writes run as factorio.
 #   bash deploy/test-setup-agent-host.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -58,9 +60,12 @@ exec "$REAL_INSTALL" "${args[@]}"
 EOF
 cat > "$T/bin/runuser" << 'EOF'
 #!/usr/bin/env bash
-# runuser -u <user> -- <cmd…>: notes it, then runs it as whoever runs the test.
+# runuser -u <user> -- <cmd…>: notes it, then runs it as whoever runs the test, with HOME set to the user's home as
+# the real one does, and FAKE_AS naming the user for the logging wrappers and curl.
 [[ $1 == -u && $3 == -- ]] || { echo "fake runuser: want -u <user> -- <cmd…>" >&2; exit 1; }
 echo "runuser $2 ${*:4}" >> "$F/calls"
+FAKE_AS=$2 HOME=$(grep "^$2:" "$F/passwd" | cut -d: -f6)
+export FAKE_AS HOME
 shift 3
 exec "$@"
 EOF
@@ -184,6 +189,7 @@ while (($#)); do
   esac
 done
 echo "curl $url" >> "$F/calls"
+[[ -z $out ]] || echo "as ${FAKE_AS:-root} curl -o $out" >> "$F/calls"
 path=${url#https://}
 path=${path%%\?*}
 [[ $path != */ ]] || path+=index
@@ -216,7 +222,13 @@ done < "$f"
 echo '---factorio.service---'
 echo 'ExecStart=/usr/bin/podman run --name factorio --replace --rm --cgroups=split --network host --sdnotify=conmon -d …'
 EOF
-chmod +x "$T/bin/"* "$T/quadlet"
+# The logging wrappers, on PATH for the script's runs only (run() below): each notes "as <who> <cmd> <args…>", who
+# being factorio under the fake runuser and root otherwise, then runs the real command.
+mkdir -p "$T/wrap"
+for c in mv mktemp tar ln rm mkdir; do
+  printf '#!/usr/bin/env bash\necho "as ${FAKE_AS:-root} %s $*" >> "$F/calls"\nexec %q "$@"\n' "$c" "$(command -v "$c")" > "$T/wrap/$c"
+done
+chmod +x "$T/bin/"* "$T/wrap/"* "$T/quadlet"
 export PATH=$T/bin:$PATH
 for c in "$T/bin/"*; do # never the real one: the script must reach only fakes
   [[ $(command -v "${c##*/}") == "$c" ]] || { echo "FAIL the fake ${c##*/} isn't first on PATH"; exit 1; }
@@ -235,7 +247,7 @@ cat > "$B/agent/src/index.ts" << 'EOF'
 const fs = require('fs');
 if (process.argv[2] === 'check') {
   const e = process.env;
-  const got = { args: process.argv.slice(2), rcon: /^[A-Za-z0-9]{32}$/.test(e.RCON_PASSWORD || ''), token: (e.ORRERY_AGENT_TOKEN || '').length >= 32 };
+  const got = { args: process.argv.slice(2), home: e.HOME, rcon: /^[A-Za-z0-9]{32}$/.test(e.RCON_PASSWORD || ''), token: (e.ORRERY_AGENT_TOKEN || '').length >= 32 };
   fs.writeFileSync(e.F + '/check-ran', JSON.stringify(got) + '\n');
   console.log('first-boot check (fixture): every check ran');
   process.exitCode = fs.existsSync(e.F + '/check-fails') ? 1 : 0;
@@ -304,7 +316,7 @@ gone() { mkdir -p "$(dirname "$F/gone/$1")"; touch "$F/gone/$1"; } # <host/path>
 run() { # [args…]: the script with $IN (default: the token) on stdin, its output in $T/out
   local r=0
   : > "$F/calls"
-  bash "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
+  PATH=$T/wrap:$PATH bash "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
   cat "$F/calls" >> "$T/all-calls"
   return $r
 }
@@ -357,7 +369,7 @@ polkit_ok() { # the rules file, run against a polkit stand-in
     if (bad.length) { console.error("wrong:", JSON.stringify(bad)); process.exit(1); }' "$1"
 }
 RCON_OF() { sed -n 's/^RCON_PASSWORD=//p' "$R/etc/orrery-factorio.env"; }
-MUTATING='^(dnf|useradd|install |semanage fcontext -[am]|restorecon|podman (pull|run|image rm)|firewall-cmd .*--add|systemctl (daemon-reload|start|enable|restart|stop)|runuser|curl)'
+MUTATING='^(dnf|useradd|install |semanage fcontext -[am]|restorecon|podman (pull|run|image rm)|firewall-cmd .*--add|systemctl (daemon-reload|start|enable|restart|stop)|runuser|curl|as [a-z]+ )'
 STARTED='^systemctl (daemon-reload|start|enable|restart)'
 
 check 'the script pins Node by version and sha256; the copy under test differs only in that sha256' '
@@ -457,9 +469,9 @@ check 'starts factorio.service, then enables and restarts the agent; never enabl
 systemctl start factorio.service
 systemctl enable orrery-agent.service
 systemctl restart orrery-agent.service" ]]'
-check 'runs the agent check as factorio, the secrets in its environment only, and saves the report' '
-  called "^runuser factorio $R/usr/local/lib/orrery/node/bin/node $R/srv/orrery-agent/current/src/index.ts check$" &&
-  [[ $(cat "$F/check-ran") == "{\"args\":[\"check\"],\"rcon\":true,\"token\":true}" ]] &&
+check 'runs the agent check as factorio with its units'\'' HOME (not factorio'\''s, the container'\''s to write), the secrets in its environment only, and saves the report' '
+  called "^runuser factorio env HOME=/srv/orrery-agent $R/usr/local/lib/orrery/node/bin/node $R/srv/orrery-agent/current/src/index.ts check$" &&
+  [[ $(cat "$F/check-ran") == "{\"args\":[\"check\"],\"home\":\"/srv/orrery-agent\",\"rcon\":true,\"token\":true}" ]] &&
   grep -q "^setup-agent-host: agent factorio-vm (agent-v0.10.0), Factorio 2.1.24, image $OL@sha256:$DIGEST1 (glibc 2.39)" "$R/srv/factorio/first-boot.txt" &&
   grep -qx "first-boot check (fixture): every check ran" "$R/srv/factorio/first-boot.txt" && says "every check ran"'
 check 'with firewalld and SELinux off: no firewall-cmd, no SELinux tools; the OCI ingress reminder' '
@@ -488,6 +500,14 @@ check 'keeps a hand-edited server-settings.json and agent config, and says so' '
   cmp -s "$T/server-settings.json" "$R/srv/factorio/config/server-settings.json" && cmp -s "$T/config.json" "$R/etc/orrery-agent/config.json" &&
   says "kept /srv/factorio/config/server-settings.json: edited by hand" && says "kept /etc/orrery-agent/config.json: edited by hand"'
 check 'rewrites a config still at its previous default: the new admins' '[[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\",\"Carol\"]" ]]'
+
+# ---- A config write that fails is finished by the next run: its saved default changes only after the file does.
+# (The test runs as a normal user, as CI does, so the read-only folder stops factorio's write.)
+chmod 555 "$R/srv/factorio/config"
+check 'a run whose admin-list write fails stops there' '! IN= run "${ARGS[@]}" && says "Permission denied" && [[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\",\"Carol\"]" ]]'
+chmod 755 "$R/srv/factorio/config"
+check 'the next run writes the new admin list, rather than keeping the old one as edited by hand' '
+  IN= run "${ARGS[@]}" && [[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\"]" ]] && ! says "kept /srv/factorio/config/server-adminlist.json"'
 
 # ---- --new-token replaces the token only; other lines of the file stay.
 echo 'FACTORIO_USERNAME=someone' >> "$R/etc/orrery-agent.env"
@@ -692,5 +712,14 @@ check 'dnf never updates, upgrades or touches a module; only installs' '[[ -z $(
 check 'never enables factorio.service, nor starts, enables or reloads firewalld' '
   ! grep -qE "^systemctl .*enable.*factorio\.service|^systemctl (start|enable|restart|reload|stop).*firewalld|^firewall-cmd .*(reload|--set-|--new-zone|--change|--remove)" "$T/all-calls"'
 check 'runs things only as factorio' '[[ -z $(grep ^runuser "$T/all-calls" | grep -v "^runuser factorio ") ]]'
+check 'root never writes inside factorio'\''s trees: every download, unpack, temp file, rename, link, mkdir and rm there runs as factorio' '
+  [[ -z $(grep "^as root " "$T/all-calls" | grep -F -e " $R/opt" -e " $R/srv") ]] &&
+  grep -qF "as factorio curl -o $R/opt/factorio/.incoming/.factorio-headless_linux-arm64_2.1.24.tar.xz." "$T/all-calls" &&
+  grep -qF "as factorio tar -xJf $R/opt/factorio/.incoming/" "$T/all-calls" &&
+  grep -qF "as factorio curl -o $R/srv/factorio/mods/.orrery_0.1.0.zip." "$T/all-calls" &&
+  grep -qF "as factorio curl -o $R/srv/orrery-agent/.incoming/.orrery-agent-v0.10.0.tar.gz." "$T/all-calls" &&
+  grep -qE "^as factorio mv -T $R/srv/factorio/config/\.server-adminlist\.json\.[A-Za-z0-9]{6} $R/srv/factorio/config/server-adminlist\.json$" "$T/all-calls" &&
+  grep -qF "as factorio ln -sfn releases/2.1.24 $R/opt/factorio/.current.new" "$T/all-calls" &&
+  grep -qE "^as root mv -T $R/usr/local/lib/orrery/" "$T/all-calls"'
 
 exit $fail

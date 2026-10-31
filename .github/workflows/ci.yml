@@ -14,6 +14,8 @@ jobs:
       mod: ${{ steps.parts.outputs.mod }}
       web: ${{ steps.parts.outputs.web }}
       deploy: ${{ steps.parts.outputs.deploy }}
+      agent: ${{ steps.parts.outputs.agent }}
+      factorio: ${{ steps.parts.outputs.factorio }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,6 +100,45 @@ jobs:
         with:
           name: web-dist
           path: web/dist/web/browser
+
+  agent:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck # imports hub/src/types.ts: an incompatible change there fails here
+      - run: tar -czf ../agent-dist.tar.gz --exclude=./node_modules --exclude=./test . # a tarball keeps file modes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-dist
+          path: agent-dist.tar.gz
+
+  factorio:
+    needs: changes
+    if: needs.changes.outputs.factorio == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version comes from factorio-v* tags
+      - run: |
+          tag=$(git describe --tags --abbrev=0 --match 'factorio-v*' 2>/dev/null || echo factorio-v0.0.0)
+          bash .github/factorio-zip.sh factorio "${tag#factorio-v}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factorio-zip
+          path: dist/orrery_*.zip
 
   deploy:
     needs: changes

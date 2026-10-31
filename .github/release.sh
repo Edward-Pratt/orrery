@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Cuts a part's next release: tags HEAD of an up-to-date main and pushes only that tag (release.yml does the rest).
-#   .github/release.sh <hub|mod|web> <major|minor|patch> [--yes]
+#   .github/release.sh <hub|mod|web|agent|factorio> <major|minor|patch> [--yes]
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 die() { echo "release: $*" >&2; exit 1; }
 
-[[ $# -ge 2 && $1 =~ ^(hub|mod|web)$ && $2 =~ ^(major|minor|patch)$ && ($# -eq 2 || ($# -eq 3 && $3 == --yes)) ]] ||
-  die 'usage: release.sh <hub|mod|web> <major|minor|patch> [--yes]'
+[[ $# -ge 2 && $1 =~ ^(hub|mod|web|agent|factorio)$ && $2 =~ ^(major|minor|patch)$ && ($# -eq 2 || ($# -eq 3 && $3 == --yes)) ]] ||
+  die 'usage: release.sh <hub|mod|web|agent|factorio> <major|minor|patch> [--yes]'
 part=$1 level=$2 yes=${3:-}
 
 [[ $(git branch --show-current) == main ]] || die 'not on main'

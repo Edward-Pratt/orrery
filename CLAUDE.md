@@ -7,6 +7,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `mod/` — server-side Forge 1.7.10 mod, a thin adapter. See `mod/CLAUDE.md`.
 - `agent/` — Node/TypeScript service on a remote Host that dials out to the hub and runs that Host's Factorio server. See `agent/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
+- `factorio/` — the Factorio mod `orrery`, control-only Lua, published on the mod portal. See `factorio/CLAUDE.md`.
 - `deploy/` — systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config), the `Caddyfile` (TLS for the dashboard and Grafana;
   serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
   there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
@@ -64,12 +65,13 @@ cd hub && npm test && npm run typecheck
 cd agent && npm test && npm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && npm test && npm run build       # the build also type-checks against the hub's API types
+cd agent && npm test && npm run typecheck # the typecheck also covers the hub's types it imports
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo, and mod-jars.sh
+bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh and factorio-zip.sh (needs zip, unzip and jq)
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
@@ -77,13 +79,16 @@ smoke test in the release's tickets — say so rather than claiming it works.
 
 ## Releases
 
-Hub, mod and dashboard are versioned separately (`docs/adr/0001`); a part's version is only its latest
-`hub-vX.Y.Z`, `mod-vX.Y.Z` or `web-vX.Y.Z` tag. Cut one with `.github/release.sh <hub|mod|web> <major|minor|patch>`
+Hub, mod, dashboard, agent and Factorio mod are versioned separately (`docs/adr/0001`); a part's version is only its latest
+`hub-vX.Y.Z`, `mod-vX.Y.Z`, `web-vX.Y.Z`, `agent-vX.Y.Z` or `factorio-vX.Y.Z` tag (the prefix is the part's folder).
+Cut one with `.github/release.sh <hub|mod|web|agent|factorio> <major|minor|patch>`
 from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N (`--yes` skips) and pushes only that tag.
 Never delete or move a tag; fix a failed release forward with the next patch.
 `.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`), then creates the GitHub release. Its notes are
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
-(the server never builds Angular; `web-v0.x` until the dashboard is finished). Deploy from the dashboard's Host page
+(the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests
+as `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
+(`.github/factorio-zip.sh`, tested by `test-release.sh`; uploading it to the mod portal is still by hand). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
 `hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,

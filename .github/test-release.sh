@@ -8,7 +8,8 @@ trap 'rm -rf "$T"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# Origin: hub-v1.2.3 and hub-v1.10.0 (sort -V, not lexical), mod-v0.4.0 on HEAD, then a hub commit and a web commit.
+# Origin: hub-v1.2.3 and hub-v1.10.0 (sort -V, not lexical), mod-v0.4.0 on HEAD, then a hub, a web, an agent and a
+# factorio commit.
 git init -q --bare -b main "$T/origin.git"
 git clone -q "$T/origin.git" "$T/c" 2> /dev/null # empty repository warning
 cd "$T/c"
@@ -18,6 +19,8 @@ commit hub/a 'fix: hub two'; git tag hub-v1.10.0
 commit mod/a 'feat: mod one'; git tag mod-v0.4.0
 commit hub/a 'feat: hub three'
 commit web/a 'feat: web one'
+commit agent/a 'feat: agent one'
+commit factorio/a 'feat: factorio one'
 git push -q origin main --tags
 git branch local-only
 remote() { git ls-remote "$T/origin.git" | sort; }
@@ -41,6 +44,9 @@ check 'notes are only the part'\''s commits since its tag' \
 check 'any answer but y pushes nothing' \
   '! release hub patch <<< yes && ! release hub patch < /dev/null && says "Nothing pushed" && nothing_pushed'
 check 'first release of a part bumps from 0.0.0' '! release web minor <<< n && says "(none) → web-v0.1.0" && says "feat: web one"'
+check 'the agent and the Factorio mod are parts too' \
+  '! release agent minor <<< n && says "(none) → agent-v0.1.0" && says "feat: agent one" && ! says "factorio one" &&
+   ! release factorio patch <<< n && says "(none) → factorio-v0.0.1" && says "feat: factorio one"'
 check 'refuses with nothing new for the part' '! release mod patch && says "nothing to release" && nothing_pushed'
 
 git checkout -q -b side
@@ -78,4 +84,24 @@ touch "$T/mod/build/libs/orrery-1.5.0"{,-dev,-sources}.jar
 check 'the Mod jar is named for its Minecraft target' 'mod_jars && [[ $(ls "$T/dist") == orrery-1.7.10-1.5.0.jar ]]'
 touch "$T/mod/build/libs/orrery-1.4.0.jar"
 check 'the Mod jar must be the only one' '! mod_jars && says "want one built jar"'
+# The Factorio mod's release asset: orrery_<version>.zip, one top folder orrery_<version>/, the version in its info.json.
+factorio_zip() { bash "$HERE/factorio-zip.sh" "$T/factorio" "$1" "$T/fdist" > "$T/out" 2>&1; }
+mkdir -p "$T/factorio/locale/en"
+check 'the Factorio zip needs an info.json' '! factorio_zip 1.2.3 && says "want one info.json"'
+echo '{"name": "other", "version": "0.0.0"}' > "$T/factorio/info.json"
+check 'the Factorio zip needs the mod named orrery' '! factorio_zip 1.2.3 && says "want one info.json"'
+echo '{"name": "orrery", "version": "0.0.0"}' > "$T/factorio/info.json"
+cp "$T/factorio/info.json" "$T/factorio/locale/en/info.json"
+check 'the Factorio zip needs only one info.json' '! factorio_zip 1.2.3 && says "want one info.json"'
+rm "$T/factorio/locale/en/info.json"
+check 'the Factorio zip needs a version X.Y.Z' \
+  '! factorio_zip 1.2 && says "want a version" && ! factorio_zip v1.2.3 && [[ ! -e $T/fdist ]]'
+touch "$T/factorio/control.lua" "$T/factorio/locale/en/orrery.cfg" "$T/factorio/CLAUDE.md"
+check 'the Factorio zip has the portal'\''s layout, without CLAUDE.md' \
+  'factorio_zip 1.2.3 && [[ $(ls "$T/fdist") == orrery_1.2.3.zip ]] &&
+   diff <(unzip -Z1 "$T/fdist/orrery_1.2.3.zip" | grep -v "/$" | sort) \
+     <(printf "orrery_1.2.3/%s\n" control.lua info.json locale/en/orrery.cfg) > /dev/null'
+check 'the Factorio zip carries the version, the source keeps its own' \
+  'unzip -p "$T/fdist/orrery_1.2.3.zip" orrery_1.2.3/info.json | jq -e ".name == \"orrery\" and .version == \"1.2.3\"" > /dev/null &&
+   [[ $(jq -r .version "$T/factorio/info.json") == 0.0.0 ]]'
 exit $fail

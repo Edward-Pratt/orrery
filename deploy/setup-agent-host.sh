@@ -521,7 +521,7 @@ asset_sha() { # <tag> <name>: the sha256 GitHub lists for that release asset
     process.stdout.write(d.slice(7));' "$1" "$2" <<< "$releases"
 }
 if compgen -G "$srv/mods/orrery_*.zip" > /dev/null; then
-  echo "kept the orrery mod in /srv/factorio/mods (update it by hand until Game updates exist)"
+  echo "kept the orrery mod in /srv/factorio/mods (a Game update from the dashboard updates it)"
 else
   ftag=$(newest factorio) || die "GitHub has no factorio-v release of the orrery mod yet"
   [[ $ftag =~ ^factorio-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a factorio-vX.Y.Z tag: $ftag"

@@ -19,6 +19,7 @@ export default [
       { path: 'logs', loadComponent: () => import('./logs') },
       { path: 'pack', loadComponent: () => import('./pack') },
       { path: 'game', loadComponent: () => import('./game') },
+      { path: 'settings', loadComponent: () => import('./settings') },
     ],
   },
 ] satisfies Routes;

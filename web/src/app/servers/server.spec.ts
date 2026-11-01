@@ -894,6 +894,15 @@ describe("a factorio server's saves", () => {
     expect(offline.text(offline.el.querySelector('[data-empty] p'))).toBe('No saves yet');
   });
 
+  it("names a restored copy's copy after the original save, as the Agent does", async () => {
+    const restored = { ...SAVES, backups: [{ name: 'restored-20261031T120000Z-restored-20261030T080000Z-world.zip', size: GB, mtimeMs: new Date(2026, 9, 31, 12, 0).getTime(), kind: 'world' as const, current: true }] };
+    const page = await setup('/space/backups', { ...FACTORIO, online: false }, { ...FACTORIO_SVC, state: 'inactive', sub: 'dead' }, { backups: restored });
+    await openMenu(page);
+    document.querySelector<HTMLButtonElement>('[data-restore]')!.click();
+    await page.render();
+    expect(dialog()?.textContent).toContain('copies the save as the newest one (restored-<time>-world.zip)');
+  });
+
   it('restores a save only with its service stopped, copying it as the newest one, which the next start loads', async () => {
     const running = await setup('/space/backups', { ...FACTORIO, online: false }, FACTORIO_SVC, { backups: SAVES });
     await openMenu(running);

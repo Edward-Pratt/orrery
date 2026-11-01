@@ -154,7 +154,7 @@ test("bad names, versions, hashes and links from the portal are rejected, never 
   }
 });
 
-test("Factorio's releases and their sha256 come from factorio.com; a redirect away from https is refused", async () => {
+test("Factorio's releases and their sha256 come from factorio.com; a redirect is followed only to https on factorio.com, checked before it is asked", async () => {
   const hash = (n: number) => String(n).repeat(64).slice(0, 64);
   const sums = [`${hash(1)}  factorio-headless_linux_2.1.24.tar.xz`, `${hash(2)}  factorio-headless_linux-arm64_2.1.24.tar.xz`, `${hash(3)}  factorio-headless_linux-arm64_2.1.25.tar.xz`].join('\n');
   const { fetch, asked } = portal({
@@ -168,10 +168,31 @@ test("Factorio's releases and their sha256 come from factorio.com; a redirect aw
   assert.equal(await catalog.sha256('2.0.0'), undefined);
   assert.equal(catalog.download('2.1.24'), 'https://www.factorio.com/get-download/2.1.24/headless/linux-arm64');
   assert.equal(asked.filter((a) => a.url.includes('sha256sums')).length, 1); // reused, not asked again
-  assert.ok(asked.every((a) => a.redirect === 'follow'));
+  assert.ok(asked.every((a) => a.redirect === 'manual'), 'redirects are followed by the hub, each checked');
 
-  const away = new FactorioCatalog(portal({ 'https://factorio.com/api/latest-releases': { body: {}, url: 'http://factorio.com/api/latest-releases' } }).fetch);
-  await assert.rejects(away.releases(), (err: GameRefused) => err.status === 502 && err.message === 'factorio.com redirected away from https.');
+  const to = (location: string): Page => ({ status: 302, headers: { location } });
+  const LATEST = 'https://factorio.com/api/latest-releases';
+  // factorio.com to www.factorio.com, relative and absolute: followed.
+  const moved = portal({ [LATEST]: to('https://www.factorio.com/api/x'), 'https://www.factorio.com/api/x': to('/api/latest'), 'https://www.factorio.com/api/latest': { body: { stable: { headless: '2.1.24' } } } });
+  assert.deepEqual(await new FactorioCatalog(moved.fetch).releases(), [{ version: '2.1.24', channel: 'stable' }]);
+  assert.deepEqual(moved.asked.map((a) => a.url), [LATEST, 'https://www.factorio.com/api/x', 'https://www.factorio.com/api/latest']);
+
+  // To http, the hub's own loopback, another host, a port or a user: refused, and that hop never asked.
+  for (const [location, why] of [
+    ['http://factorio.com/api/latest-releases', 'factorio.com redirected away from https.'],
+    ['https://127.0.0.1:25581/api/servers', 'factorio.com redirected away from factorio.com, www.factorio.com, mods.factorio.com.'],
+    ['https://evil.example/x', 'factorio.com redirected away from factorio.com, www.factorio.com, mods.factorio.com.'],
+    ['https://www.factorio.com:8443/x', 'factorio.com redirected away from factorio.com, www.factorio.com, mods.factorio.com.'],
+    ['https://user@www.factorio.com/x', 'factorio.com redirected away from factorio.com, www.factorio.com, mods.factorio.com.'],
+  ]) {
+    const away = portal({ [LATEST]: to(location!) });
+    await assert.rejects(new FactorioCatalog(away.fetch).releases(), (err: GameRefused) => err.status === 502 && err.message === why, location);
+    assert.deepEqual(away.asked.map((a) => a.url), [LATEST], `${location} never asked`);
+  }
+  // A loop: 3 hops at most.
+  const loop = portal({ [LATEST]: to(LATEST) });
+  await assert.rejects(new FactorioCatalog(loop.fetch).releases(), (err: GameRefused) => err.status === 502 && err.message === 'factorio.com redirected more than 3 times.');
+  assert.equal(loop.asked.length, 4);
 });
 
 test('a download link is the signed dl-mod.factorio.com one: asked with the account, never following a redirect, and passed on without it', async () => {

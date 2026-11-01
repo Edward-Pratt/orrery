@@ -19,8 +19,9 @@ set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <agent-vX.Y.Z>" >&2; exit 2; }
 tag=$1 root=${DEPLOY_ROOT:-/srv/orrery-agent} unit=orrery-agent.service
 gate=${DEPLOY_GATE_SECONDS:-60} poll=${DEPLOY_GATE_POLL:-2}
-# -q first: no .curlrc. Never a header: the release is public.
-CURL=(curl -q -fsSL --proto =https --proto-redir =https --retry 2)
+# -q first: no .curlrc. Never a header: the release is public. A transfer that stalls for 60 s is stopped (and
+# retried), and nothing over 64 MiB is taken, so the deploy never waits for the unit's 15-minute timeout.
+CURL=(curl -q -fsSL --proto =https --proto-redir =https --retry 2 --connect-timeout 30 --speed-limit 1 --speed-time 60 --max-filesize $((64 * 1024 * 1024)))
 
 [[ $tag =~ ^agent-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not an agent-vX.Y.Z tag: $tag" >&2; exit 2; }
 [[ $(id -u) -ne 0 ]] || { echo "refusing to run as root: run as factorio" >&2; exit 2; }

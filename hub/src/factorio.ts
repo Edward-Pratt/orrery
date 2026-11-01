@@ -2,8 +2,9 @@ import type { CatalogMod, FactorioRelease, GameModPick, UnresolvedDependency } f
 import { LIMITS } from './protocol.ts';
 
 /**
- * factorio.com's and the mod portal's requests (`fetch`): a public read follows redirects (`https:` only, checked on
- * the answer's `url`); a mod's download link is asked with `redirect: 'manual'`, so its credentials never follow one.
+ * factorio.com's and the mod portal's requests (`fetch`), all with `redirect: 'manual'`: a public read follows
+ * redirects itself, each checked before it is asked (`https:` on `PUBLIC_HOSTS`, 3 at most); a mod's download link
+ * follows none, so its credentials never go along.
  */
 export type PortalFetch = (url: string, init: { redirect: 'follow' | 'manual'; signal: AbortSignal }) => Promise<Response>;
 
@@ -38,6 +39,9 @@ const PORTAL = 'https://mods.factorio.com';
 /** Where the portal's signed download links point (S11). */
 const MOD_CDN = 'dl-mod.factorio.com';
 const TIMEOUT_MS = 15_000;
+/** The only hosts a public read (or its redirect) goes to, over https with no port or user. */
+const PUBLIC_HOSTS = new Set(['factorio.com', 'www.factorio.com', 'mods.factorio.com']);
+const MAX_HOPS = 3;
 /** How long an answer of factorio.com or the portal is reused: the dashboard asks the catalog on every change. */
 const CACHE_MS = 5 * 60_000;
 const CAPS = { latest: 64 * 1024, sums: 4 * 1024 * 1024, mod: 4 * 1024 * 1024 };
@@ -344,15 +348,29 @@ export class FactorioCatalog {
   async #text(url: string, cap: number, who: string, missing: true): Promise<string | null>;
   async #text(url: string, cap: number, who: string): Promise<string>;
   async #text(url: string, cap: number, who: string, missing = false): Promise<string | null> {
+    const signal = AbortSignal.timeout(TIMEOUT_MS);
     let res: Response;
-    try {
-      res = await this.#fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
-    } catch (err) {
-      throw new GameRefused(502, `${who} can't be read: ${failure(err)}.`);
-    }
-    if (res.url && !res.url.startsWith('https://')) {
+    for (let at = url, hop = 0; ; hop++) {
+      try {
+        res = await this.#fetch(at, { redirect: 'manual', signal });
+      } catch (err) {
+        throw new GameRefused(502, `${who} can't be read: ${failure(err)}.`);
+      }
+      if (res.status < 300 || res.status > 399) break;
+      // A redirect, followed only once its target is checked: never to http, another host or a port.
       await res.body?.cancel().catch(() => {});
-      throw new GameRefused(502, `${who} redirected away from https.`);
+      if (hop >= MAX_HOPS) throw new GameRefused(502, `${who} redirected more than ${MAX_HOPS} times.`);
+      let next: URL;
+      try {
+        next = new URL(res.headers.get('location') ?? '', at);
+      } catch {
+        throw new GameRefused(502, `${who} redirected to something that isn't a URL.`);
+      }
+      if (next.protocol !== 'https:') throw new GameRefused(502, `${who} redirected away from https.`);
+      if (!PUBLIC_HOSTS.has(next.hostname) || next.port || next.username || next.password) {
+        throw new GameRefused(502, `${who} redirected away from ${[...PUBLIC_HOSTS].join(', ')}.`);
+      }
+      at = next.href;
     }
     if (missing && res.status === 404) {
       await res.body?.cancel().catch(() => {});

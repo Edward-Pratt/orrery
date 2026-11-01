@@ -336,9 +336,12 @@ export class Updates {
     };
   }
 
-  /** Whether an update runs (a restore is refused then). */
+  /**
+   * Whether an update runs, or one is being checked or recovered after a restart (`#starting`, the gap before it
+   * runs): a restore and a deploy are refused then.
+   */
   get busy(): boolean {
-    return this.#running !== null;
+    return this.#running !== null || this.#starting;
   }
 
   get #file(): string {

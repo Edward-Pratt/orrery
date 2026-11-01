@@ -9,7 +9,8 @@ import type { BackupResult, SavesMsg } from './saves.ts';
 import { RunWatch, type RunEnd, type UnitState } from './service.ts';
 import type { Reading } from './status.ts';
 import type { InstalledMsg } from './update.ts';
-import { LIMITS, LineReader, PROTOCOL_VERSION, encode, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
+import { redact } from './logs.ts';
+import { LIMITS, LineReader, PROTOCOL_VERSION, cut, encode, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
 
 /** What answers a request: resolves with its reply's `data` (undefined: none); a throw is the reply's `error`. */
 export type Handlers = { [T in AgentRequest['type']]?: (req: Request<T>) => Promise<unknown> };
@@ -26,7 +27,7 @@ export type HubOptions = {
   command?: (command: string) => Promise<string[]>;
   /** The game connection's `save`: makes a named save, whose outcome comes back through `backup`. */
   save?: () => void;
-  /** After each welcome, once the state pushed on connect is out: a game update's step and outcome go again. */
+  /** After each welcome, once the state pushed on connect is out: a game update's step and outcome, and a deploy's outcome, go again. */
   welcomed?: () => void;
   pingMs?: number;
   /** For the TCP connect and the hub's answer to a hello. */
@@ -110,9 +111,10 @@ class Link {
 /**
  * The agent's two connections to the hub (docs/protocol.md, "Agent connection"). The Agent connection opens with
  * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state, the saves and what is
- * installed (on connect and on change) and host samples, carries a game update's steps (`send`), and answers each
- * request by its id. It reconnects after any close, with capped exponential backoff and jitter, logging once per
- * change of state, so with no hub reachable the agent just keeps trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
+ * installed (on connect and on change) and host samples, carries a game update's steps and a deploy's outcome
+ * (`send`), and answers each request by its id. It reconnects after any close, with capped exponential backoff and
+ * jitter, logging once per change of state, so with no hub reachable the agent just keeps trying. After each welcome
+ * it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate (deploy/deploy-agent.sh).
  *
  * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
  * and the orrery mod's version, `started` once per run of the unit, then a heartbeat per `/orrery-status` answer, the
@@ -251,7 +253,7 @@ export class HubClient {
     if (this.connected) this.#agent!.send({ type: 'installed', ...msg });
   }
 
-  /** A message on the Agent connection (a game update's `updateStep`, `updateDone`): false while it isn't up. */
+  /** A message on the Agent connection (a game update's `updateStep`, `updateDone`; `deployResult`): false while it isn't up. */
   send(msg: AgentMsg): boolean {
     if (!this.connected || this.#stopping) return false;
     this.#agent!.send(msg);
@@ -335,7 +337,8 @@ export class HubClient {
         const data = await handler(req);
         reply = data === undefined ? { type: 'reply', id: req.id, ok: true } : { type: 'reply', id: req.id, ok: true, data };
       } catch (err) {
-        reply = { type: 'reply', id: req.id, ok: false, error: String(err instanceof Error ? err.message : err).slice(0, LIMITS.detail) };
+        // No URL query string in an error (docs/protocol.md), and within the hub's limit for one.
+        reply = { type: 'reply', id: req.id, ok: false, error: cut(redact(String(err instanceof Error ? err.message : err)), LIMITS.detail) };
       }
     }
     if (this.#agent === link) link.send(reply);
@@ -462,7 +465,7 @@ export class HubClient {
 }
 
 /** Writes `file` whole or not at all: a temp file beside it, then a rename. */
-async function writeAtomic(file: string, content: string): Promise<void> {
+export async function writeAtomic(file: string, content: string): Promise<void> {
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, content);
   await rename(tmp, file);

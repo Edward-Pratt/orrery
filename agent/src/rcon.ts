@@ -26,6 +26,8 @@ export class RconTimeout extends RconError {}
 export class RconNoAnswer extends RconTimeout {}
 /** A command was never sent: its connection ended while it waited its turn, so it did not run. */
 export class RconNotSent extends RconError {}
+/** RCON refused the password (an auth answer with id -1): trying again can't help. */
+export class RconRefused extends RconError {}
 
 /** One packet: int32 LE length (of the rest), id and type, then the body and two NULs. */
 export function encode(id: number, type: number, body: string | Buffer): Buffer {
@@ -131,7 +133,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
             resolve();
           } else {
             const refused = p.type === AUTH_RESPONSE && p.id === -1;
-            this.#end(new RconError(refused ? 'RCON password refused' : 'unexpected RCON auth answer'), false);
+            this.#end(refused ? new RconRefused('RCON password refused') : new RconError('unexpected RCON auth answer'), false);
           }
         },
         fail: (err) => {

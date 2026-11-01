@@ -2,8 +2,8 @@
 // game connection's messages, and the hub's say, notice and linkResult out, as the mod's RCON commands.
 import { createSocket, type RemoteInfo, type Socket } from 'node:dgram';
 import { EventEmitter } from 'node:events';
-import { constants, open, type FileHandle } from 'node:fs/promises';
 import type { ModMsg } from '../../hub/src/types.ts';
+import { head } from './files.ts';
 import type { UnitState } from './service.ts';
 import { parseStatus } from './status.ts';
 import { LIMITS, printable, type ToGame } from './wire.ts';
@@ -97,7 +97,7 @@ function toEvent(t: string, raw: Record<string, unknown>): GameEvent | string {
 }
 
 /** An engine line of the log (seconds since start, level, `File.cpp:N:`), so a chat line or a mod's `log()` can't pass for one. */
-const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
+export const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
 const FAILED = new RegExp(ENGINE + 'Opening Lua UDP Socket failed');
 
 /**
@@ -115,27 +115,6 @@ export function socketState(log: string, port: number): 'on' | 'off' | null {
     if (FAILED.test(line)) return 'off';
   }
   return null;
-}
-
-/**
- * The head of Factorio's log if it was written at or after `freshAfter` (epoch ms), else null (or if it can't be
- * read). The container writes it, so no symlink is followed, nothing blocks, and only a regular file is read, up to
- * `HEAD_MAX` bytes.
- */
-async function readHead(file: string, freshAfter: number): Promise<string | null> {
-  let handle: FileHandle | undefined;
-  try {
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const st = await handle.stat();
-    if (!st.isFile() || st.mtimeMs < freshAfter) return null;
-    const buf = Buffer.alloc(Math.min(st.size, HEAD_MAX));
-    const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
-    return buf.subarray(0, bytesRead).toString('utf8');
-  } catch {
-    return null;
-  } finally {
-    await handle?.close();
-  }
 }
 
 /**
@@ -359,9 +338,10 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     const run = this.#run;
     const until = Date.now() + this.#o.deadlineMs;
     const look = async (): Promise<void> => {
-      const head = await readHead(this.#o.log, freshAfter);
+      // The previous run's log (written before `freshAfter`) is no answer: read again until Factorio replaces it.
+      const text = await head(this.#o.log, HEAD_MAX, freshAfter);
       if (run !== this.#run) return;
-      const state = head === null ? null : socketState(head, this.#o.factorioPort);
+      const state = text === null ? null : socketState(text, this.#o.factorioPort);
       if (state === 'on') {
         this.#gate = 'on';
         return console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);

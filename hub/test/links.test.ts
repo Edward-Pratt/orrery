@@ -159,7 +159,7 @@ test('names with wrong codes are kept at most 1000, the oldest dropped, and forg
   assert.equal(links.failing, 0);
 });
 
-test('twenty wrong codes on a server lock it for any name, a right code too, until they age out; the Mod path the same', () => {
+test("twenty wrong codes on a factorio server lock it for any name, a right code too, until they age out; a Mod's server only per name", () => {
   const { links, events, results } = setup();
   for (let i = 0; i < 20; i++) assert.match(links.redeem('WRONG1', 'factorio', `fresh${i}`, '', 1000, 'space').message, /unknown or expired/);
   const code = links.issue('d1', 'A', 1000);
@@ -168,11 +168,11 @@ test('twenty wrong codes on a server lock it for any name, a right code too, unt
   const again = links.issue('d1', 'A', 1000 + 10 * 60_000);
   assert.equal(links.redeem(again, 'factorio', 'engineer', '', 1000 + 10 * 60_000, 'space').ok, true); // the lock wears off
 
-  // A Mod's link messages count against their server the same way.
-  for (let i = 0; i < 20; i++) events.emit('event', { serverId: 'gtnh', type: 'link', player: `guess${i}`, uuid: 'u', code: 'WRONG1' });
+  // A Mod's players are on its server (trusted input): their wrong codes lock only their own names.
+  for (let i = 0; i < 40; i++) events.emit('event', { serverId: 'gtnh', type: 'link', player: `typo${i % 8}`, uuid: 'u', code: 'WRONG1' });
   const right = links.issue('d2', 'B');
+  events.emit('event', { serverId: 'gtnh', type: 'link', player: 'typo0', uuid: 'u', code: right });
+  assert.equal(results.at(-1), 'gtnh|typo0|false|Too many attempts; try again in a few minutes.');
   events.emit('event', { serverId: 'gtnh', type: 'link', player: 'Alex', uuid: 'u2', code: right });
-  assert.equal(results.at(-1), 'gtnh|Alex|false|Too many attempts; try again in a few minutes.');
-  events.emit('event', { serverId: 'space', type: 'link', player: 'pilot', uuid: '', code: right });
-  assert.equal(results.at(-1), 'space|pilot|true|Linked to B on Discord.');
+  assert.equal(results.at(-1), 'gtnh|Alex|true|Linked to B on Discord.');
 });

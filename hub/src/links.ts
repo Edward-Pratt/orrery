@@ -10,8 +10,10 @@ const CODE_MS = 10 * 60_000;
 /** Wrong codes in a code's lifetime that lock a name (per game). */
 const MAX_FAILS = 5;
 /**
- * Wrong codes in a code's lifetime that lock a server, whoever typed them, so fresh names can't guess on: with 32^6
- * (about 10^9) codes, 20 guesses per 10 minutes find a given live code with a chance of about 2 in 10^8.
+ * Wrong codes in a code's lifetime that lock a factorio server, whoever typed them, so fresh names can't guess on: with
+ * 32^6 (about 10^9) codes, 20 guesses per 10 minutes find a given live code with a chance of about 2 in 10^8. Only
+ * there: its Agent's link messages name any player it likes, while a Mod's come from players on the server (trusted
+ * input), whom the per-name lock is enough for.
  */
 const MAX_SERVER_FAILS = 20;
 /** Names with recent wrong codes kept at most: past it the oldest are dropped. */
@@ -31,7 +33,7 @@ export class Links {
   #codes = new Map<string, { discordId: string; discordName: string; expires: number }>();
   // "<game>:<lower-case player>" -> recent failed attempt times, in the order of each one's newest (oldest first)
   #fails = new Map<string, number[]>();
-  #serverFails = new Map<string, number[]>(); // server id -> recent failed attempt times
+  #serverFails = new Map<string, number[]>(); // factorio server id -> recent failed attempt times
 
   constructor(db: Db, hub: Pick<ServerHub, 'on' | 'get' | 'sendLinkResult' | 'announce'>) {
     this.#db = db;
@@ -73,20 +75,20 @@ export class Links {
   /**
    * Links the code's Discord user to `player` in `game` (`uuid`: Minecraft's; Factorio has none), replacing that user's
    * and that name's earlier link in the game. Wrong codes are counted per game and name (five in 10 minutes lock it)
-   * and per server it was typed on (`serverId`, the game's name when not given; twenty in 10 minutes lock it for
-   * everyone, a right code too, so fresh names can't guess on).
+   * and, in Factorio, per server it was typed on (`serverId`, the game's name when not given; twenty in 10 minutes lock
+   * it for everyone, a right code too, so fresh names can't guess on).
    */
   redeem(code: string, game: Game, player: string, uuid: string, now = Date.now(), serverId: string = game): RedeemResult {
     this.#sweep(now);
     const serverFails = (this.#serverFails.get(serverId) ?? []).filter((t) => now - t < CODE_MS);
-    if (serverFails.length >= MAX_SERVER_FAILS) return { ok: false, message: TOO_MANY };
+    if (game === 'factorio' && serverFails.length >= MAX_SERVER_FAILS) return { ok: false, message: TOO_MANY };
     const key = `${game}:${player.toLowerCase()}`;
     const fails = (this.#fails.get(key) ?? []).filter((t) => now - t < CODE_MS);
     if (fails.length >= MAX_FAILS) return { ok: false, message: TOO_MANY };
     const normalized = code.trim().toUpperCase();
     const entry = this.#codes.get(normalized);
     if (!entry || entry.expires <= now) {
-      this.#serverFails.set(serverId, [...serverFails, now]);
+      if (game === 'factorio') this.#serverFails.set(serverId, [...serverFails, now]);
       this.#fails.delete(key); // re-added last: the Map stays in the order of each name's newest attempt
       this.#fails.set(key, [...fails, now]);
       for (const oldest of this.#fails.keys()) {

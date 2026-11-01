@@ -8,7 +8,7 @@ const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'milestone', '
 /**
  * Numbers every hub event, stamps it with the time it arrived (`at`), and keeps the last `perTarget` of each server's (and each host's, service's and check's)
  * in memory, so a live stream can replay them and resume after a given id. TPS and `paused` events, host samples and check
- * results stay out of that buffer (they would push chat and notices out; an Agent's heartbeats have only its line budget):
+ * results stay out of that buffer (they would push chat and notices out, at an Agent's heartbeat budget of 1 a second too):
  * only the latest of each is kept, a server's TPS and `paused` until it goes down (or its Agent leaves), a server's latest
  * `packUpdateStep` until its update finishes, and a library add's latest progress until it finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also stored in `Db`,
  * and seed its buffer when the hub starts (only for servers still in the config), so they survive a restart with their

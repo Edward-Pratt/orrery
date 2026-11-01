@@ -7,6 +7,7 @@ import { Agents, type AgentsOptions } from '../src/agents.ts';
 import { Db } from '../src/db.ts';
 import { Hosts } from '../src/host.ts';
 import { LiveFeed } from '../src/live.ts';
+import { PlaytimeTracker } from '../src/playtime.ts';
 import { LIMITS } from '../src/protocol.ts';
 import { ServerHub, type HubEvent, type HubOptions, type TargetEvent } from '../src/servers.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
@@ -364,18 +365,22 @@ test('a frozen game while paused is reported hung: its Agent pings on, its heart
 });
 
 test("a change in a factorio server's paused goes on the stream, once per change, before its rate", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const { hub, port, events } = await setup(t);
+  const sides = hubSides(t, port);
   await agentUp(port);
   const game = await gameUp(port);
-  const beat = (paused: boolean | undefined, tps = 60) => game.send({ type: 'heartbeat', tps, players: [], ...(paused === undefined ? {} : { paused }) });
-  beat(false); // as it was: not paused
-  beat(true);
-  beat(true);
-  beat(undefined, 59); // no `paused` is not paused
-  beat(false, 59);
-  beat(true, 59);
-  await until(() => events.filter((e) => e.type === 'paused').length === 3);
-  await sleep(50);
+  const beat = async (paused: boolean | undefined, tps = 60) => {
+    game.send({ type: 'heartbeat', tps, players: [], ...(paused === undefined ? {} : { paused }) });
+    await readAll(sides.at(-1)!, game.socket);
+    t.mock.timers.tick(1000); // within the heartbeat budget
+  };
+  await beat(false); // as it was: not paused
+  await beat(true);
+  await beat(true);
+  await beat(undefined, 59); // no `paused` is not paused
+  await beat(false, 59);
+  await beat(true, 59);
   const seen = () => events.flatMap((e) => (e.type === 'paused' ? [`paused ${e.paused}`] : e.type === 'tps' ? [`tps ${e.tps}`] : []));
   assert.deepEqual(seen(), ['tps 60', 'paused true', 'paused false', 'tps 59', 'paused true']);
   assert.equal(hub.get('space')?.paused, true);
@@ -624,12 +629,12 @@ test('reconnecting never refills a budget: each connection goes on with what the
   assert.equal(pushed.length, 10); // serviceState's burst, once in all
   for (let round = 0; round < 10; round++) {
     const game = await gameUp(port); // replaces the last one, which stays open
-    for (let i = 0; i < 200; i++) game.send(i % 2 ? { type: 'chat', player: 'Ann', message: `spam ${i}` } : { type: 'backup', ok: true, detail: `${i}` });
+    // A chat line in every 10, the rest a command's answer nobody waits for (no budget of its own, and no effect).
+    for (let i = 0; i < 100; i++) game.send(i % 10 === 9 ? { type: 'chat', player: 'Ann', message: `round ${round}` } : { type: 'cmdResult', id: `none ${i}`, output: [] });
     await readAll(sides.at(-1)!, game.socket);
   }
-  // The line burst once in all (100 lines, half of them backups), and of its chat the game events' burst once.
-  assert.equal(events.filter((e) => e.type === 'backup').length, 50);
-  assert.equal(events.filter((e) => e.type === 'chat').length, 30);
+  // The line burst once in all: the first round's 100 lines, so only its 10 chat lines got through.
+  assert.deepEqual(events.flatMap((e) => (e.type === 'chat' ? [e.message] : [])), Array(10).fill('round 0'));
 });
 
 test('a connection welcomed again under 5 s after the last of its kind is refused, and the live one stays', async (t) => {
@@ -708,4 +713,93 @@ test("an Agent's Host watches the first 32 mounts its samples name, by its own l
   t.mock.timers.tick(10 * 60_000);
   record(50 * GB); // and ok again before it was told: nothing to tell
   assert.equal(told().length, 64);
+});
+
+test("an Agent's backups pass at most one per 10 s, in bursts of 3, each a notice to post; the connection stays", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const errors = t.mock.method(console, 'error', () => {});
+  const { port, events } = await setup(t);
+  const sides = hubSides(t, port);
+  await agentUp(port);
+  const game = await gameUp(port);
+  for (let step = 0; step < 6; step++) {
+    for (let i = 0; i < 100; i++) game.send({ type: 'backup', ok: true, detail: `${step}.${i}` }); // under the line rate
+    await readAll(sides.at(-1)!, game.socket);
+    t.mock.timers.tick(10_000);
+  }
+  assert.deepEqual(
+    events.flatMap((e) => (e.type === 'backup' ? [e.detail] : [])),
+    ['0.0', '0.1', '0.2', '1.0', '2.0', '3.0', '4.0', '5.0'],
+  );
+  assert.equal(game.socket.destroyed, false);
+  assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] game space: over the backup budget, dropped 1']);
+});
+
+test("an Agent's heartbeats pass at most 1 a second, in bursts of 5, so toggling paused can't flood the stream", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.method(console, 'error', () => {});
+  const { port, events } = await setup(t);
+  const sides = hubSides(t, port);
+  await agentUp(port);
+  const game = await gameUp(port);
+  const paused = () => events.filter((e) => e.type === 'paused').length;
+  for (let i = 0; i < 100; i++) game.send({ type: 'heartbeat', tps: 60, players: [], paused: i % 2 === 0 }); // the line burst
+  await readAll(sides.at(-1)!, game.socket);
+  assert.equal(paused(), 5);
+  t.mock.timers.tick(1000);
+  for (let i = 0; i < 10; i++) game.send({ type: 'heartbeat', tps: 60, players: [], paused: false });
+  await readAll(sides.at(-1)!, game.socket);
+  assert.equal(paused(), 6);
+  assert.equal(game.socket.destroyed, false);
+});
+
+test("a heartbeat's names new to its server join it at most 1 per 10 s past a full list: churning names, or reconnecting, can't make sessions faster", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const errors = t.mock.method(console, 'error', () => {});
+  const { hub, db, port, types } = await setup(t);
+  const playtime = new PlaytimeTracker(hub, db);
+  const sides = hubSides(t, port);
+  await agentUp(port);
+  let game = await gameUp(port);
+  const fresh = (round: number) => Array.from({ length: LIMITS.players }, (_, i) => `p${round}-${i}`);
+  /** A heartbeat with `players`, then the tracker's poll, then 10 s on (`wait`). */
+  const beat = async (players: string[], wait = true) => {
+    game.send({ type: 'heartbeat', tps: 60, players });
+    await readAll(sides.at(-1)!, game.socket);
+    playtime.poll(Date.now());
+    if (wait) t.mock.timers.tick(10_000);
+  };
+  const sessions = () => db.sessionsSince('space', 0).length;
+  await beat(fresh(0), false); // a full list at once, as after a connect
+  await beat(fresh(0)); // the same names again: none of them is new
+  assert.equal(hub.get('space')?.players.length, LIMITS.players);
+  assert.equal(sessions(), LIMITS.players);
+  for (let round = 1; round <= 10; round++) await beat(fresh(round)); // every poll a fresh 200
+  assert.deepEqual(hub.get('space')?.players, ['p10-0']); // one new name per 10 s, the rest left out
+  assert.equal(sessions(), LIMITS.players + 10);
+  assert.match(String(errors.mock.calls[0]!.arguments[0]), /^\[agents\] game space: over the new players budget, dropped 1$/);
+
+  game.socket.destroy(); // a reconnect empties its list: the names it brings back are new again
+  await waitFor(() => types().includes('crashed'), 'the hub saw it close');
+  playtime.poll(Date.now());
+  game = await gameUp(port);
+  await beat(fresh(0));
+  assert.deepEqual(hub.get('space')?.players, ['p0-0']);
+  assert.equal(sessions(), LIMITS.players + 11);
+});
+
+test('a clock stepping back neither refuses a handshake nor drops host samples for the length of the step', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { db, port } = await setup(t, { agents: { handshakeMs: 5_000 } });
+  const sides = hubSides(t, port);
+  const start = Date.now();
+  const agent = await agentUp(port);
+  agent.send({ type: 'hostSample', sample: SAMPLE });
+  await readAll(sides.at(-1)!, agent.socket);
+  t.mock.timers.setTime(start - 60_000); // the hub's clock stepped back a minute (NTP)
+  const again = await agentUp(port); // welcomed, not "reconnecting too fast"
+  await agent.closed;
+  again.send({ type: 'hostSample', sample: SAMPLE });
+  await readAll(sides.at(-1)!, again.socket);
+  assert.deepEqual(db.hostSamples('vm', 0).map((s) => s.ts).sort((a, b) => a - b), [start - 60_000, start]);
 });

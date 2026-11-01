@@ -209,8 +209,10 @@ own listings, and refuses an `update` whose versions, names or URLs fail its che
 
 ### Rate rules
 
-The hub's budgets on the Agent port are its safety net against a token holder; an Agent stays under them. What goes
-over is dropped (the hub logs it at most once a minute, with a count), never answered.
+The hub's budgets on the Agent port are its safety net against a token holder. What goes over is dropped (the hub
+logs it at most once a minute, with a count), never answered. An Agent stays under them, except for game events: it
+forwards up to 5 a second (see below) but the hub takes 2, so a busy server's game events over 2 a second are dropped
+at the hub, without the Agent knowing.
 
 - **Connections**: at most 4 at once from one address (an Agent connection, a game connection and two spare),
   handshaken or not; a fifth is destroyed before any byte is read. Agents sharing an address share the 4. A refused
@@ -231,6 +233,8 @@ over is dropped (the hub logs it at most once a minute, with a count), never ans
 | `updateStep` | 5 a second, bursts of 20 |
 | `serviceState`, `saves`, `installed`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
 | `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
+| `heartbeat` | 1 a second, bursts of 5. Its names not on its server's player list yet (none are while the server is offline, so after a reconnect all are) at most 1 per 10 s, bursts of 200 (a full `players`): a name over it is left out of that heartbeat and comes with a later one |
+| `backup` | 1 per 10 s, bursts of 3 |
 | any other | the line budget only |
 
 What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples
@@ -238,5 +242,5 @@ name, each mount's change told at most once per 10 min (a change meanwhile is to
 and its service's failure is a notice at most once per 10 min (every state still goes on the stream).
 
 An Agent forwards its server's game events at most 5 a second (bursts of 30, every type together, the rest dropped),
-so a player flooding chat never gets the game connection closed, and sends an `updateStep` for the same step at
-most once a second unless its `state` changes.
+so a player flooding chat never gets the game connection closed; of those the hub takes 2 a second (above). It sends
+an `updateStep` for the same step at most once a second unless its `state` changes.

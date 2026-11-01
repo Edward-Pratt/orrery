@@ -3,9 +3,15 @@ import { cpus, loadavg } from 'node:os';
 import { diskSpace } from './backups.ts';
 import type { HostIntegration } from './config.ts';
 import type { Db } from './db.ts';
+import { LIMITS } from './protocol.ts';
 import type { HostSample, ServerHub } from './servers.ts';
 
 const GB = 1024 ** 3;
+/**
+ * How long a mount of a Host with no mounts in config (an Agent's: its samples name them) waits after a disk notice
+ * before its next: a change meanwhile is told at the first sample after the wait, if it still holds.
+ */
+export const DISK_NOTICE_MS = 10 * 60_000;
 /** The most samples `history` returns: a longer period (over 25 hours of minutes) is averaged into this many buckets. */
 export const HISTORY_POINTS = 1500;
 
@@ -44,7 +50,9 @@ export const localHost: HostReaders = {
  * One host's samples: each is stored into the database and put on the event stream (`record`). Warns (once, then once
  * when it clears) when memory use stays at or over the limit for `memoryMinutes` samples, and when a mount runs low
  * on disk. Only the hub's own host samples itself, once a minute (`start`); other hosts' samples are reported to the
- * hub. Hub core.
+ * hub. A Host with no mounts in config (an Agent's) watches the first `LIMITS.disks` (32) mounts its samples name, and
+ * tells each one's changes at most once per `DISK_NOTICE_MS` (10 min), so what a sample names can't flood the alerts.
+ * Hub core.
  */
 export class HostMonitor {
   #hub: Pick<ServerHub, 'publishTarget'>;
@@ -54,7 +62,8 @@ export class HostMonitor {
   #latest: HostSample | null = null;
   #highMemory = 0; // consecutive samples at or over the limit
   #memoryWarned = false;
-  #lowDisks = new Set<string>();
+  /** Each watched mount: whether it was last told as low, and when (the hub's clock). */
+  #disks = new Map<string, { low: boolean; at: number }>();
   #timer: NodeJS.Timeout | undefined;
 
   constructor(hub: Pick<ServerHub, 'publishTarget'>, db: Db, cfg: HostIntegration) {
@@ -117,14 +126,20 @@ export class HostMonitor {
       this.#memoryWarned = false;
       this.#hub.publishTarget({ ...at, severity: 'good', kind: 'memoryOk', percent });
     }
+    const reported = this.#cfg.mounts.length === 0; // an Agent's Host: its samples name its mounts
     for (const { mount, free } of sample.disks) {
-      if (free < this.#cfg.diskMinFreeGB * GB) {
-        if (this.#lowDisks.has(mount)) continue;
-        this.#lowDisks.add(mount);
-        this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'diskLow', mount, free, minFreeGB: this.#cfg.diskMinFreeGB });
-      } else if (this.#lowDisks.delete(mount)) {
-        this.#hub.publishTarget({ ...at, severity: 'good', kind: 'diskOk', mount, free });
+      const low = free < this.#cfg.diskMinFreeGB * GB;
+      let disk = this.#disks.get(mount);
+      if (!disk) {
+        if (reported && this.#disks.size >= LIMITS.disks) continue; // the first 32 it named only
+        this.#disks.set(mount, (disk = { low: false, at: -Infinity }));
       }
+      if (low === disk.low) continue;
+      const now = Date.now();
+      if (reported && now - disk.at < DISK_NOTICE_MS) continue;
+      Object.assign(disk, { low, at: now });
+      if (low) this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'diskLow', mount, free, minFreeGB: this.#cfg.diskMinFreeGB });
+      else this.#hub.publishTarget({ ...at, severity: 'good', kind: 'diskOk', mount, free });
     }
   }
 

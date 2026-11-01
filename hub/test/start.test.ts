@@ -1849,6 +1849,7 @@ test("an Agent's bye records its server lost, as unknown, and posts nothing; a l
       return { stop: () => {} };
     },
     get: () => assert.fail('nothing to request'),
+    agents: { handshakeMs: 0 }, // it reconnects at once
   });
   const port = await handle.agentPort!;
   const first = await agentOnline(port);
@@ -1893,8 +1894,11 @@ test("with agents but no host integration, each Agent's Host is served with its 
   const sample: HostSample = { ts: Date.now(), cpu: 0.5, load: [1, 1, 1], memory: { used: 2, total: 8 }, disks: [{ mount: '/', free: 50 * 1024 ** 3, total: 100 * 1024 ** 3 }] };
   agent.send({ type: 'hostSample', sample });
   await until(() => handle.hosts.get('vm')!.latest() !== null);
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample }]);
-  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [sample]);
+  const stored = handle.hosts.get('vm')!.latest()!; // stamped with the hub's clock
+  assert.ok(stored.ts >= sample.ts && stored.ts <= Date.now());
+  assert.deepEqual(stored, { ...sample, ts: stored.ts });
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: stored }]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [stored]);
   assert.equal((await app.request('/api/host', { headers: { cookie } })).status, 404);
   assert.equal((await app.request('/api/hosts/oracle/samples', { headers: { cookie } })).status, 404);
 });
@@ -2143,6 +2147,20 @@ test("a factorio server's console command keeps its leading slash; control chara
   assert.equal(cmd.command, '/players online');
   game.send({ type: 'cmdResult', id: cmd.id, output: ['Online players (1):', '  Ann (online)'] });
   assert.deepEqual(await (await pending).json(), { output: ['Online players (1):', '  Ann (online)'] } satisfies CommandOutput);
+});
+
+test("a factorio console command over the Agent's 256 characters is refused with why, before it is audited or sent", async (t) => {
+  const { app, cookie, get, game } = await agentServicesHub(t, []);
+  const long = `/c ${'x'.repeat(254)}`; // 257
+  const res = await post(app, cookie, '/api/servers/space/command', { command: ` ${long}\u0007 ` }); // what is cut is not counted
+  assert.equal(res.status, 400);
+  assert.equal(await res.text(), 'A Factorio console command is at most 256 characters');
+  assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')).filter((e) => e.action === 'command'), []);
+  const pending = post(app, cookie, '/api/servers/space/command', { command: long.slice(0, 256) });
+  const cmd = (await game.next()) as { id: string; command: string }; // the first the game connection gets
+  assert.equal(cmd.command, long.slice(0, 256));
+  game.send({ type: 'cmdResult', id: cmd.id, output: [] });
+  assert.equal((await pending).status, 200);
 });
 
 test("a factorio server's logs are the files its Agent serves, newest first; a log is read only by a name it lists", async (t) => {

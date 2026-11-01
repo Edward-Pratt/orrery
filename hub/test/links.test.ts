@@ -141,3 +141,38 @@ test('an in-game unlink removes only its own game\'s link: a Factorio unlink nev
   assert.equal(db.linkByPlayer('Steve'), null);
   assert.deepEqual(results, ['space|steve|true|Unlinked from Discord.', "space|Steve|false|You weren't linked.", 'gtnh|Steve|true|Unlinked from Discord.']);
 });
+
+test('names with wrong codes are kept at most 1000, the oldest dropped, and forgotten a code lifetime after their newest', () => {
+  const { links } = setup();
+  for (let i = 0; i < 5; i++) links.redeem('WRONG1', 'minecraft', 'Steve', 'u1', 1000, 'gtnh'); // Steve is locked
+  // 5000 fresh names, each on its own server so no server's limit stops them first
+  for (let i = 0; i < 5000; i++) {
+    links.redeem('WRONG1', 'factorio', `name${i}`, '', 2000 + i, `server${i}`);
+    assert.ok(links.failing <= 1000);
+  }
+  assert.equal(links.failing, 1000);
+  const code = links.issue('d1', 'A', 7000);
+  assert.equal(links.redeem(code, 'minecraft', 'Steve', 'u1', 7001, 'gtnh').ok, true); // the oldest went: Steve too
+  links.issue('d2', 'B', 2000 + 4998 + 10 * 60_000); // all but the newest are a code lifetime old
+  assert.equal(links.failing, 1);
+  links.issue('d2', 'B', 2000 + 4999 + 10 * 60_000);
+  assert.equal(links.failing, 0);
+});
+
+test("twenty wrong codes on a factorio server lock it for any name, a right code too, until they age out; a Mod's server only per name", () => {
+  const { links, events, results } = setup();
+  for (let i = 0; i < 20; i++) assert.match(links.redeem('WRONG1', 'factorio', `fresh${i}`, '', 1000, 'space').message, /unknown or expired/);
+  const code = links.issue('d1', 'A', 1000);
+  assert.match(links.redeem(code, 'factorio', 'engineer', '', 2000, 'space').message, /Too many attempts/);
+  assert.equal(links.redeem(code, 'minecraft', 'Steve', 'u1', 2000, 'gtnh').ok, true); // another server is not locked
+  const again = links.issue('d1', 'A', 1000 + 10 * 60_000);
+  assert.equal(links.redeem(again, 'factorio', 'engineer', '', 1000 + 10 * 60_000, 'space').ok, true); // the lock wears off
+
+  // A Mod's players are on its server (trusted input): their wrong codes lock only their own names.
+  for (let i = 0; i < 40; i++) events.emit('event', { serverId: 'gtnh', type: 'link', player: `typo${i % 8}`, uuid: 'u', code: 'WRONG1' });
+  const right = links.issue('d2', 'B');
+  events.emit('event', { serverId: 'gtnh', type: 'link', player: 'typo0', uuid: 'u', code: right });
+  assert.equal(results.at(-1), 'gtnh|typo0|false|Too many attempts; try again in a few minutes.');
+  events.emit('event', { serverId: 'gtnh', type: 'link', player: 'Alex', uuid: 'u2', code: right });
+  assert.equal(results.at(-1), 'gtnh|Alex|true|Linked to B on Discord.');
+});

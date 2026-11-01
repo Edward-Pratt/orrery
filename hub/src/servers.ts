@@ -17,6 +17,7 @@ export type {
   Lifecycle,
   LiveEvent,
   Notice,
+  Paused,
   ServerState,
   ServiceStatus,
   ServiceVerb,
@@ -56,6 +57,8 @@ type Conn = {
   pending: Map<string, Pending>;
   /** The last TPS put on the event stream. */
   sentTps: number | null;
+  /** Its `started` is on the stream: one per connection (a Mod's server starts once per connection anyway). */
+  started: boolean;
 };
 
 /** Removes Minecraft § formatting codes. */
@@ -86,6 +89,12 @@ export function tokenMatches(expected: string, got: string): boolean {
   const b = Buffer.from(got);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/**
+ * A console command its server's game connection would not take, refused before it is audited or sent: a factorio
+ * server's over `LIMITS.text` (256) characters, which its Agent refuses (docs/protocol.md, `cmd`).
+ */
+export class CommandRefused extends Error {}
 
 /** Why a hello's protocol version is refused (the same range for a Mod's hello and an Agent's), or null. */
 export function protocolRefusal(p: number): string | null {
@@ -261,16 +270,21 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
 
   /**
    * Runs a console command, control characters taken out; a Mod's without a leading `/`, a factorio server's as typed
-   * (`/players`: Factorio's console takes plain text as chat). `by` names who asked, for the audit log. `onLate` gets
-   * output that arrives after the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also
-   * goes on the event stream.
+   * (`/players`: Factorio's console takes plain text as chat) and at most `LIMITS.text` (256) characters, as its Agent
+   * takes no longer one (else `CommandRefused`). `by` names who asked, for the audit log. `onLate` gets output that
+   * arrives after the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also goes on the
+   * event stream.
    */
   runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
     const conn = this.#conns.get(id);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
     const typed = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
-    const cmd = this.#states.get(id)!.game === 'factorio' ? typed : typed.replace(/^\//, '');
+    const factorio = this.#states.get(id)!.game === 'factorio';
+    const cmd = factorio ? typed : typed.replace(/^\//, '');
     if (!cmd) return Promise.reject(new Error('empty command'));
+    if (factorio && cmd.length > LIMITS.text) {
+      return Promise.reject(new CommandRefused(`A Factorio console command is at most ${LIMITS.text} characters`));
+    }
     this.audit(by, 'command', id, cmd);
     const cmdId = randomUUID();
     return new Promise((resolve, reject) => {
@@ -294,9 +308,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   /**
    * A factorio server's game connection, its hello already checked by `Agents` (the Agent's token, for its own server,
    * while its Agent connection is up). From here it is like a Mod's: the welcome goes out, and the returned function
-   * takes each of its lines, which `Agents` reads with its line cap and rate limit.
+   * takes each of its messages, which `Agents` reads with its line cap and budgets and parses with `parseModLine`.
    */
-  attach(socket: Socket, serverId: string, modVersion: string): (line: string) => void {
+  attach(socket: Socket, serverId: string, modVersion: string): (msg: ModMsg) => void {
     this.#sockets.add(socket);
     socket.on('close', () => this.#sockets.delete(socket));
     return this.#open(socket, serverId, modVersion);
@@ -326,7 +340,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   #accept(socket: Socket): void {
-    let onLine: ((line: string) => void) | null = null;
+    let onMsg: ((msg: ModMsg) => void) | null = null;
     this.#sockets.add(socket);
     socket.on('error', () => {}); // 'close' always follows and does the cleanup
     const helloTimer = setTimeout(() => socket.destroy(), this.#helloTimeoutMs);
@@ -334,16 +348,19 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     lines.on('error', () => {});
     lines.on('line', (line) => {
       if (socket.destroyed || socket.writableEnded) return;
-      if (onLine) return onLine(line);
-      clearTimeout(helloTimer);
       const msg = parseModLine(line);
+      if (onMsg) {
+        if (msg && msg.type !== 'hello') onMsg(msg); // junk after handshake is ignored
+        return;
+      }
+      clearTimeout(helloTimer);
       if (msg?.type !== 'hello') return void socket.destroy();
       const reason = this.#checkHello(msg);
       if (reason) {
         this.#send(socket, { type: 'reject', reason });
         return void socket.end();
       }
-      onLine = this.#open(socket, msg.serverId, msg.modVersion);
+      onMsg = this.#open(socket, msg.serverId, msg.modVersion);
     });
     socket.on('close', () => {
       this.#sockets.delete(socket);
@@ -351,10 +368,10 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     });
   }
 
-  /** Makes an accepted game connection its server's: welcomed, online, and its lines handled from then on. */
-  #open(socket: Socket, id: string, modVersion: string): (line: string) => void {
+  /** Makes an accepted game connection its server's: welcomed, online, and its messages handled from then on. */
+  #open(socket: Socket, id: string, modVersion: string): (msg: ModMsg) => void {
     this.#settle(id); // a crash waiting on the Agent is decided before the new connection counts
-    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
+    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null, started: false };
     const old = this.#conns.get(id);
     this.#conns.set(id, conn);
     old?.socket.destroy();
@@ -363,10 +380,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.#send(socket, { type: 'welcome' });
     this.#emit(id, 'connected');
     socket.on('close', () => this.#closed(id, conn));
-    return (line) => {
-      if (socket.destroyed || socket.writableEnded) return;
-      const msg = parseModLine(line);
-      if (msg && msg.type !== 'hello') this.#handle(id, conn, msg); // junk after handshake is ignored
+    return (msg) => {
+      if (!socket.destroyed && !socket.writableEnded) this.#handle(id, conn, msg);
     };
   }
 
@@ -415,7 +430,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     switch (msg.type) {
       case 'heartbeat':
         conn.lastBeat = Date.now(); // paused or not: a frozen game stops them, so hung detection stays on
-        state.paused = msg.paused === true;
+        if ((msg.paused === true) !== state.paused) {
+          // Only an Agent's heartbeat has `paused`; the card shows it, so a change goes on the stream.
+          state.paused = msg.paused === true;
+          this.emit('event', { serverId: id, type: 'paused', paused: state.paused });
+        }
         if (!state.paused) {
           // While paused the rate means nothing: it is left out of the state and the stream (and so of lag and history).
           if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {
@@ -432,6 +451,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
         }
         return;
       case 'started':
+        if (conn.started) return; // a repeat would be another lifecycle row and another post for one start
+        conn.started = true;
         return this.#emit(id, 'started');
       case 'stopping':
         conn.stopping = true;

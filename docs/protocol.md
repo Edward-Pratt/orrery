@@ -75,15 +75,15 @@ replaces the old one; the old connection's close is then ignored (no alert).
 | `unlink` | `player` | in-game `/discord unlink` |
 | `backup` | `ok` (boolean), `detail` | ServerUtilities logs "Backup done in …" or "Error while backing up" |
 
-An Agent's game connection for a Factorio server sends the same messages (no `achievement`, `quest` or `cmdLate`),
-plus these:
+An Agent's game connection for a Factorio server sends the same messages (no `achievement`, `quest` or `cmdLate`:
+the hub drops them from it), plus these:
 
 | type | fields | when |
 |---|---|---|
 | `heartbeat` | adds optional `paused` (boolean) | after each `/orrery-status` RCON round trip (5 s); `paused` while auto-paused with nobody on, or `tick_paused`, or a stalled tick with players on. The hub ignores `tps` while paused |
 | `milestone` | `kind` (`research`, `rocket`, `platform` or `landing`), `text`, optional `player`, optional `force` | a research finished (not by script), or a force's first rocket, first space platform, or first landing on each planet |
 | `link` | `uuid` is `""` | in-game `/orrery-link <code>`: Factorio has no player UUIDs |
-| `backup` | `ok`, `detail` | the save a `save` asked for is written (its size stable for 5 s), or failed |
+| `backup` | `ok`, `detail` | a named save is written (its size stable for 5 s), or failed: one a `save` asked for, or the Agent's own every 6 h after play |
 
 While disconnected the mod drops everything except `started`/`stopping`, so
 a hub outage never replays stale chat into Discord.
@@ -93,7 +93,7 @@ a hub outage never replays stale chat into Discord.
 | type | fields | effect |
 |---|---|---|
 | `say` | `author`, `message`, `source` (optional: `discord` or `dashboard`, where the line was typed) | broadcast `[Dashboard] <author> message` (gold) for `dashboard`, else `[Discord] <author> message` (blue), in MC chat. `source` was added without a protocol bump: an older mod ignores it and prints `[Discord]` |
-| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept |
+| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept, and 1 to 256 characters: the hub refuses a longer one before sending it, and the Agent refuses one too |
 | `linkResult` | `player`, `ok` (boolean), `message` | answer to `link`/`unlink`, shown to that player |
 | `notice` | `message` | Factorio only (the Agent's game connection): a system line in game, such as a countdown. A Mod gets `cmd` `say …` instead |
 | `save` | — | Factorio only: the Agent makes a named save (`orrery-<time>`), then sends `backup` |
@@ -106,7 +106,7 @@ A `cmdResult` with an unknown or late `id` is ignored.
 | Hub observes | Meaning | Discord alert |
 |---|---|---|
 | `hello` accepted | online (no alert — may be a reconnect after hub restart) | — |
-| `started` | server finished starting | "✅ Server started" |
+| `started` | server finished starting (one per connection: a repeat on it is ignored) | "✅ Server started" |
 | `stopping` then disconnect | clean stop | "🛑 Server stopped" |
 | disconnect without `stopping` | crash / killed | "💥 Server went down unexpectedly" |
 | no heartbeat for 30 s, after at least one heartbeat on this connection and before `stopping` | hung | "⚠️ Server not responding"; next heartbeat posts "✅ Server responding again" |
@@ -129,8 +129,8 @@ An Agent is a small service on another Host that runs one Factorio server there 
 hub's Agent port, `integrations.agents.listen` (for example the hub's tailnet address, port 25584), never the Mod
 port. The same transport and handshake rules apply, with these on top: the peer's address must be the Agent's
 configured `address`, checked before any byte is read (else the socket is destroyed silently, for either first
-line); a line over its cap (see "Field limits"), or 10 s over the rate limit, closes the connection; every field has
-its limit (above).
+line); a line over its cap (see "Field limits"), or 10 s over the line budget (see "Rate rules"), closes the
+connection; every field has its limit (above).
 
 An Agent opens two connections:
 
@@ -149,6 +149,9 @@ The first line on the Agent port is one of:
 |---|---|---|
 | `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
 | `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up (else `reject` with `its agent is not connected`). `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
+
+Either is refused (`reject` with `reconnecting too fast`) under 5 s after the last one of its kind for that Agent was
+welcomed; the connection that one opened stays.
 
 ```json
 {"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}
@@ -203,3 +206,41 @@ own listings, and refuses an `update` whose versions, names or URLs fail its che
   connection to close too (then the Agent is lost); otherwise the server crashed.
 - Hung detection is the Mod's (30 s without a heartbeat), and stays on while paused, since the Agent's heartbeats
   follow each RCON round trip, paused or not. It is off only while the Agent is lost.
+
+### Rate rules
+
+The hub's budgets on the Agent port are its safety net against a token holder. What goes over is dropped (the hub
+logs it at most once a minute, with a count), never answered. An Agent stays under them, except for game events: it
+forwards up to 5 a second (see below) but the hub takes 2, so a busy server's game events over 2 a second are dropped
+at the hub, without the Agent knowing.
+
+- **Connections**: at most 4 at once from one address (an Agent connection, a game connection and two spare),
+  handshaken or not; a fifth is destroyed before any byte is read. Agents sharing an address share the 4. A refused
+  first line gets its `reject`, then the hub closes the connection within 2 s, whatever the peer does.
+- **Lines**: each connection (the Agent connection and the game connection, each its own) 20 lines a second, in bursts
+  of up to 100. A line over it is dropped; a connection still dropping lines 10 s on is closed. A connection's budgets
+  are kept across reconnects: one that replaces another, or comes after it closed, goes on with what that one left,
+  so reconnecting never starts a fresh burst. A first line, before the handshake says whose it is, takes from its
+  address's own budget, the same size.
+- **Handshakes**: an Agent connection, and a game connection for its server, each welcomed at most once per 5 s (see
+  "Handshake").
+- **Message types**, each within its own connection: a message over its budget is dropped and the connection stays.
+
+| type | budget |
+|---|---|
+| `chat`, `join`, `leave`, `death`, `milestone`, together | 2 a second, bursts of 30 |
+| `link`, `unlink`, together | 1 a second, bursts of 5 |
+| `updateStep` | 5 a second, bursts of 20 |
+| `serviceState`, `saves`, `installed`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
+| `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
+| `heartbeat` | 1 a second, bursts of 5. Its names not on its server's player list yet (none are while the server is offline, so after a reconnect all are) at most 1 per 10 s, bursts of 200 (a full `players`): a name over it is left out of that heartbeat and comes with a later one |
+| `backup` | 1 per 10 s, bursts of 3 |
+| any other | the line budget only |
+
+What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples
+name, each mount's change told at most once per 10 min (a change meanwhile is told after the wait, if it still holds),
+and its service's failure is a notice at most once per 10 min (every state still goes on the stream).
+
+An Agent forwards its server's game events at most 5 a second (bursts of 30, every type together, the rest dropped),
+so a player flooding chat never gets the game connection closed; of those the hub takes 2 a second (above). It sends
+an `updateStep` for the same step at most once a second unless its `state` changes.

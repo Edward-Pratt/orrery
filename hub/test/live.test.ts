@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Db } from '../src/db.ts';
+import { Db, FEED_CAP, FEED_CAP_EVERY } from '../src/db.ts';
 import { LiveFeed } from '../src/live.ts';
 import { ServerHub } from '../src/servers.ts';
 import type { HubEvent } from '../src/types.ts';
@@ -94,6 +94,19 @@ test('maintain keeps the newest 500 stored feed events of each server', async (t
   assert.deepEqual(db.feed('other', 1000).map(([id]) => id), [3, 5, 7]);
 });
 
+test("a server's stored feed is capped as it is written: past FEED_CAP, its oldest rows go every FEED_CAP_EVERY inserts", () => {
+  const db = new Db(':memory:');
+  const total = FEED_CAP + 2 * FEED_CAP_EVERY + 50;
+  for (let i = 1; i <= total; i++) db.recordFeed(i * 2, { serverId: 'space', type: 'chat', player: 'Ann', message: `${i}`, at: i });
+  db.recordFeed(1, { serverId: 'gtnh', type: 'join', player: 'Steve', at: 1 });
+  const kept = db.feed('space', 2 * FEED_CAP).map(([id]) => id);
+  // Checked at each 100th insert: the last check left the newest FEED_CAP, and 50 came after it.
+  assert.equal(kept.length, FEED_CAP + 50);
+  assert.deepEqual([kept[0], kept.at(-1)], [(2 * FEED_CAP_EVERY + 1) * 2, total * 2]);
+  assert.deepEqual(db.feed('gtnh').map(([id]) => id), [1]); // another server's rows are its own
+  assert.equal(db.feedMaxId(), total * 2);
+});
+
 test("a server's latest TPS is dropped when it stops, crashes or its Agent leaves", () => {
   const db = new Db(':memory:');
   const hub = hubOf('a', 'b', 'c');
@@ -103,6 +116,31 @@ test("a server's latest TPS is dropped when it stops, crashes or its Agent leave
     hub.emit('event', { serverId, type: down });
   }
   assert.deepEqual(unstamped(live.since()), [
+    { serverId: 'a', type: 'stopped' },
+    { serverId: 'b', type: 'crashed' },
+    { serverId: 'c', type: 'lost' },
+  ]);
+  db.close();
+});
+
+test("a server's paused changes: only the latest is replayed, beside its TPS, and none after it stops, crashes or its Agent leaves", () => {
+  const db = new Db(':memory:');
+  const hub = hubOf('space', 'a', 'b', 'c');
+  const live = new LiveFeed(hub, db);
+  hub.emit('event', { serverId: 'space', type: 'tps', tps: 60 });
+  for (let i = 0; i < 1000; i++) hub.emit('event', { serverId: 'space', type: 'paused', paused: i % 2 === 0 }); // no chat pushed out
+  hub.emit('event', { serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' });
+  assert.deepEqual(unstamped(live.since()), [
+    { serverId: 'space', type: 'tps', tps: 60 },
+    { serverId: 'space', type: 'paused', paused: false },
+    { serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' },
+  ]);
+  assert.deepEqual(unstamped(db.feed('space')), [{ serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' }]);
+  for (const [serverId, down] of [['a', 'stopped'], ['b', 'crashed'], ['c', 'lost']] as const) {
+    hub.emit('event', { serverId, type: 'paused', paused: true });
+    hub.emit('event', { serverId, type: down });
+  }
+  assert.deepEqual(unstamped(live.since()).slice(3), [
     { serverId: 'a', type: 'stopped' },
     { serverId: 'b', type: 'crashed' },
     { serverId: 'c', type: 'lost' },

@@ -46,6 +46,7 @@ export type {
   PackOutcome,
   PackStep,
   PackStepState,
+  Paused,
   Period,
   PlaytimeAnswer,
   Rate,
@@ -189,7 +190,7 @@ export type ServerCard = {
   rate: Rate;
   online: boolean;
   hung: boolean;
-  /** A factorio server is paused (nobody on, or an admin's pause): show "Paused", not its rate. */
+  /** A factorio server is paused (nobody on, or an admin's pause): show "Paused", not its rate. A change comes as a `paused` event. */
   paused: boolean;
   tps: number | null;
   players: string[];
@@ -259,7 +260,8 @@ export type AuditLog = { entries: AuditRow[]; older: boolean };
 /**
  * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. A server's events
  * have `serverId`; the host's, a service's and a check's have `target` and `id` instead. `tps` events come from
- * heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest. `at` is when the hub saw
+ * heartbeats when TPS moved by 0.1 or more, and `paused` ones when a factorio server's heartbeat changed its `paused`;
+ * a replay holds only each online server's latest of each. `at` is when the hub saw
  * the event (epoch ms), the same in a replay. A `say` (chat sent into the game) has its `source`: `discord` or `dashboard`.
  */
 export type LiveEvent = FeedEvent;
@@ -272,7 +274,11 @@ export type LiveEvent = FeedEvent;
 /** `POST /api/servers/:id/chat`: said in game as the admin (their Minecraft name if linked). 204. */
 export type ChatRequest = { message: string };
 
-/** `POST /api/servers/:id/command`: a console command, answered with `CommandOutput`; later output comes as `console` events. */
+/**
+ * `POST /api/servers/:id/command`: a console command, answered with `CommandOutput`; later output comes as `console`
+ * events. 400 for an empty one, and for a factorio server's over 256 characters (its Agent runs no longer one; the
+ * answer's text says so).
+ */
 export type CommandRequest = { command: string };
 
 /** `POST /api/servers/:id/restart`: a countdown restart in 0–60 whole minutes. 204; cancel with `POST …/restart/cancel`. */

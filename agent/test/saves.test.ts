@@ -285,6 +285,28 @@ test('restore copies a listed save to restored-<time>-<name>, never over a file,
   assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now + 1000);
 });
 
+test('restore writes the copy under a name that is no save, and refuses if the server started meanwhile: nothing left behind', async (t) => {
+  let reads = 0;
+  let during: string[] = [];
+  let listed: string[] = [];
+  const w = await world(t, {
+    now: () => T0, // the copy's name
+    unit: async () => {
+      if (++reads === 1) return stopped;
+      // The second read, the copy whole but not yet given its name: no save of it is there for a start to load.
+      during = await readdir(w.saves);
+      listed = (await w.s.list()).saves.map((s) => s.name);
+      return { ...stopped, active: 'active', sub: 'running' }; // someone pressed Start during the copy
+    },
+  });
+  await file(w.saves, 'world.zip', T0 - HOUR, 'the world');
+  await assert.rejects(w.s.restore('world.zip'), /^Error: the server started during the restore \(it is active\): nothing was restored$/);
+  assert.equal(reads, 2, 'the unit read again before the copy got its name');
+  assert.deepEqual(during.sort(), [`.restored-${stamp(T0)}-world.zip.partial`, 'world.zip']);
+  assert.deepEqual(listed, ['world.zip'], 'the partial copy is not listed');
+  assert.deepEqual(await readdir(w.saves), ['world.zip'], 'no copy and no partial file left');
+});
+
 test('a save that never appears times out after the bounded wait; one that keeps changing too', async (t) => {
   const w = await world(t, { waitMs: 300 });
   w.write = async () => {}; // the mod says ok, but no file comes

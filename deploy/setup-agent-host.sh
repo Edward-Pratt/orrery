@@ -36,7 +36,7 @@
 # (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
 # game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
 # factorio's), never on the terminal, in an argv or in a trace. Its name is the fixed "orrery Factorio" and its
-# description empty: Factorio refuses to host without both keys, and an unlisted server shows them nowhere else.
+# description empty: Factorio refuses to host without both keys, and an unlisted server shows them only to its players.
 # Everything else but that report is written only when it differs, so a second run finishes a half-failed one. On a
 # re-run the Quadlet file, then Factorio's current link and image.json switch, one right after another and after every
 # download and check (Factorio's --version runs in the image the Quadlet file gets); the agent's current link switches

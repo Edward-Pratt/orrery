@@ -406,6 +406,23 @@ test('formatEvent posts a pack update when it starts and ends, coloured by outco
   assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
 });
 
+test("a factorio server's update is a game update, and the Agent's pre-update save is escaped", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'space' }, 'factorio');
+  const title = (n: Notice) => (post(n) as { embeds: APIEmbed[] }).embeds[0]?.title;
+  const from = '2.1.24 · 1 mod';
+  const to = '2.1.25 · 3 mods';
+  assert.equal(title({ severity: 'info', kind: 'packUpdateStarted', from, to, by: 'alex' }), `📦 Updating the game: ${from} → ${to} (by alex)`);
+  const done = { kind: 'packUpdateFinished', from, to, ms: 400_000 } as const;
+  assert.equal(title({ ...done, severity: 'good', outcome: 'ok' }), `✅ Game updated to ${to} (6 m 40 s)`);
+  assert.equal(
+    title({ ...done, severity: 'problem', outcome: 'rolled back', backup: 'orrery-pre-update_*x*_.zip' }),
+    `❌ Game update to ${to} rolled back: ${from} is running again. Pre-update save: orrery-pre-update\\_\\*x\\*\\_.zip`,
+  );
+  assert.equal(title({ ...done, severity: 'problem', outcome: 'failed before swap' }), `❌ Game update to ${to} failed after the stop, before anything changed: ${from} is starting again`);
+  assert.equal(title({ ...done, severity: 'info', outcome: 'cancelled' }), `❎ Game update to ${to} cancelled: the server wasn't touched`);
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
+});
+
 test('a notice is coloured by its severity, not its text', () => {
   const color = (severity: Severity) =>
     (formatEvent({ severity, kind: 'restartNow', type: 'notice', serverId: 's' }) as { embeds: APIEmbed[] }).embeds[0].color;
@@ -464,6 +481,18 @@ test('deploy notices reach Discord worded and coloured by outcome', () => {
     '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
     0xe74c3c,
   ]);
+
+  // An Agent's: `from` is what its hello said it runs, so it is escaped.
+  const agent = (n: object) => formatTargetEvent({ target: 'deploy', id: 'factorio-vm', type: 'notice', part: 'agent', to: 'agent-v1.2.0', ...n } as TargetEvent) as { embeds: { title: string }[] };
+  assert.equal(
+    agent({ severity: 'info', kind: 'deployStarted', from: '**[x](https://evil.example)**', by: 'web:alex (1)' }).embeds[0]!.title,
+    '🚀 Deploying the agent on factorio-vm: \\*\\*\\[x](https://evil.example)\\*\\* → agent-v1.2.0 (by web:alex (1))',
+  );
+  assert.equal(
+    agent({ severity: 'problem', kind: 'deployFinished', from: '__v__', outcome: 'rolled back' }).embeds[0]!.title,
+    '❌ Deploying the agent on factorio-vm agent-v1.2.0 failed: rolled back to \\_\\_v\\_\\_',
+  );
+  assert.equal(agent({ severity: 'good', kind: 'deployFinished', from: 'agent-v1.1.0', outcome: 'ok' }).embeds[0]!.title, '✅ Deployed the agent on factorio-vm: agent-v1.2.0');
 });
 
 test('chat and other plain posts are cut to 2000 characters after escaping, never splitting an emoji', () => {

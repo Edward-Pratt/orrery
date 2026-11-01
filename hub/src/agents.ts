@@ -24,10 +24,10 @@ export type AgentsOptions = {
 type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'reply' }>;
 
 /**
- * `Agents`' events, each with the Agent's id: `agentLost` (it went silent, or closed without `bye`) and `agentBack`
- * (it connected again after that), and what it pushes.
+ * `Agents`' events, each with the Agent's id: `agentUp` (its Agent connection was welcomed, every time), `agentLost`
+ * (it went silent, or closed without `bye`) and `agentBack` (it connected again after that), and what it pushes.
  */
-export type AgentEvents = { agentLost: [agentId: string]; agentBack: [agentId: string] } & {
+export type AgentEvents = { agentUp: [agentId: string]; agentLost: [agentId: string]; agentBack: [agentId: string] } & {
   [T in Pushed['type']]: [agentId: string, msg: Extract<Pushed, { type: T }>];
 };
 
@@ -205,14 +205,14 @@ export class Agents extends EventEmitter<AgentEvents> {
   }
 
   /**
-   * Sends a request to a connected Agent, with a fresh id, and resolves with its reply: the checked `data` for the
-   * requests that answer with data. Rejects when the Agent isn't connected, refuses (with its `error`), doesn't answer
-   * in 30 s, leaves first, or answers with data that isn't the request's.
+   * Sends a request to a connected Agent, with a fresh id (or `id`: an `update`'s, which its steps carry), and
+   * resolves with its reply: the checked `data` for the requests that answer with data. Rejects when the Agent isn't
+   * connected, refuses (with its `error`), doesn't answer in 30 s, leaves first, or answers with data that isn't the
+   * request's.
    */
-  request<C extends AgentCall>(agentId: string, call: C): Promise<AgentAnswer<C['type']>> {
+  request<C extends AgentCall>(agentId: string, call: C, id: string = randomUUID()): Promise<AgentAnswer<C['type']>> {
     const conn = this.#conns.get(agentId);
     if (!conn) return Promise.reject(new Error(`agent ${agentId} is not connected`));
-    const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         conn.pending.delete(id);
@@ -268,6 +268,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     this.#versions.set(cfg.id, hello.agentVersion);
     this.#send(socket, { type: 'welcome' });
     this.#hub.agentUp(cfg.server);
+    this.emit('agentUp', cfg.id);
     if (this.#lost.delete(cfg.id)) {
       this.#hub.publishTarget({ target: 'host', id: cfg.id, type: 'notice', severity: 'good', kind: 'agentBack', name: cfg.name });
       this.emit('agentBack', cfg.id);

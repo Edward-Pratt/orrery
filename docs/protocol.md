@@ -41,6 +41,7 @@ Lengths count characters (UTF-16 code units).
 | `quests[]` | 1 to 50 entries |
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
+| an `update`'s `url`s (`factorio.url`, `mods[].url`: a mod's signed link is long) | 2 KiB (2048 characters) |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
 | one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
@@ -166,7 +167,7 @@ The first line on the Agent port is one of:
 | `installed` | `factorio` (version), `mods` (`{ name, version }[]`, every enabled mod) | on connect, and after an update |
 | `updateStep` | `id`, `step` (`prepare`, `backup`, `stop`, `swap`, `gate` or `rollback`), `state` (`waiting`, `running`, `done` or `failed`), `detail` | during an update; `id` is the `update` request's |
 | `updateDone` | `id`, `outcome` (`ok`, `rolled back`, `failed in staging`, `failed before swap`, `failed` or `cancelled`), `from`, `to`, optional `backup` (the pre-update save) | at the end of an update |
-| `deployResult` | `tag`, `outcome` (`ok`, `failed` or `rolled back`), `log` | after reconnecting from its own deploy, from `deploy-status.json` |
+| `deployResult` | `tag`, `outcome` (`ok`, `failed` or `rolled back`), `log` | once its own deploy's unit is over (after the restart, on whichever release came back), from `deploy-status.json` |
 | `reply` | `id`, `ok` (boolean), optional `error`, optional `data` | the answer to a request |
 
 The Agent never sends a URL query string in `detail`, `error` or `log`.
@@ -187,12 +188,61 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 
-Release 1's Agent has no handler for `update`, `updateResume`, `updateCancel` and `deploy`: it answers each with a `reply`
-`ok: false`, and sends no `installed`, `updateStep`, `updateDone` or `deployResult`. The hub parses all of them already,
-and sends none of the requests yet: game updates and Agent deploys (release 2) will use them.
+The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
+deploys (both below). Release 1's Agent has no handler for these requests: it answers each with a `reply`
+`ok: false` (the hub ends that update `failed in staging`, or that deploy `failed`, with its error), and sends no
+`installed`, so the hub never offers it an update.
 
 The Agent treats every request as untrusted: it never runs a path or argv it was sent, checks names against its
 own listings, and refuses an `update` whose versions, names or URLs fail its checks (see `agent/CLAUDE.md`).
+
+### Game updates
+
+The hub resolves the update (the Factorio version, and the portal mods with their dependencies) and decides; the
+Agent carries it out. In order:
+
+1. The hub sends `update` with a fresh `id`, U: `factorio` (`url`: `https://www.factorio.com/get-download/<version>/headless/linux-arm64`,
+   `sha256` from factorio.com's list) and `mods`, every portal mod the server is to have (the game's own, like
+   `base`, come with its version; a mod left out is removed), each with its portal `sha1` and a signed link on
+   `https://dl-mod.factorio.com` whose only query key is `secure`, resolved right before. No credential is ever in
+   it. The `reply` says whether the Agent took it; then every `updateStep` and the `updateDone` carry U.
+2. The Agent prepares (`prepare`) and saves (`backup`; a stopped server: none, and it names the newest save), then
+   sends `updateStep` `stop` `waiting` and waits. Its `stop` step is only ever `waiting`: the stop is the hub's.
+3. The hub stops the unit (`serviceAct` `stop`, after the usual 5-minute countdown in game while players are on;
+   not at all when it is already inactive or failed) and, once the pushed `serviceState` is inactive or failed,
+   sends `updateResume`.
+4. The Agent swaps (`swap`), starts the unit and gates it (`gate`), rolls back if that fails (`rollback`), sends
+   `installed`, then `updateDone` (`backup`: the pre-update save).
+
+`updateResume` and `updateCancel` carry fresh request ids of their own and act on the update running, the one
+update an Agent runs at a time. `updateCancel` is taken only before the swap (else `ok: false`); it never starts or
+stops the unit, and the Agent ends the update with `updateDone` `cancelled`. The hub sends it when Cancel is pressed
+while the Agent prepares, when the countdown is cancelled, when it gives up before the swap (it stopped the server:
+it starts it again), and, on the Agent's next `agentHello`, for an update the hub closed before its swap while the
+Agent was away or the hub restarted. An Agent with no update running answers it `ok: false`. The hub gives up an
+update the Agent says nothing about for 15 minutes (while the hub itself stops the server, it doesn't count); an
+`updateDone` that comes after the hub closed the update (on a restart, the hub no longer knows U, so the next one)
+is still recorded on it.
+
+### Agent deploys
+
+The Agent deploys itself; the hub picks the release and records the outcome. In order:
+
+1. The hub sends `deploy` with a release GitHub lists, `tag` `agent-vX.Y.Z` (never one below `agent-v1.0.0`), only
+   while the Agent is connected and no game update, restore or countdown runs on its server. The Agent checks the
+   tag again and starts `orrery-agent-deploy@<tag>.service`: the `reply` means started.
+2. The deploy restarts the Agent: it sends `bye` first, so its server is `lost` with nothing posted.
+3. The new release's `agentHello` names the tag as `agentVersion` (as every `agentHello` names the Agent's own
+   release, `agent-vX.Y.Z`): the hub records the deploy `ok`. An `agentHello` naming another release (the old one,
+   after a rollback) doesn't end it.
+4. Once its deploy unit has left activating, active, reloading and deactivating, the Agent sends `deployResult`
+   from `deploy-status.json`, whichever release runs: also when the deploy failed before the restart (a failed
+   download). The hub records its `outcome` and `log` on the running deploy of that `tag` (`rolled back`: the old
+   release came back; an `ok` while the Agent's `agentHello` named another release is recorded as `failed`).
+
+The hub gives a deploy up as `failed` when neither the tag's `agentHello` nor its `deployResult` comes within 10
+minutes, and closes one a hub restart interrupted as `failed`. A `deployResult` for no deploy running, of another
+tag or after the hub closed it, is ignored.
 
 ### Liveness
 

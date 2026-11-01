@@ -1,12 +1,13 @@
 import { constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import type { Agents } from './agents.ts';
 import type { Environment, GithubIntegration, ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { ServerHub } from './servers.ts';
 import type { Run } from './services.ts';
-import type { DeployOutcome, DeployPart, DeployRow, HubEvent, Release } from './types.ts';
+import type { AgentMsg, DeployOutcome, DeployPart, DeployRow, HubEvent, Release } from './types.ts';
 import type { DeploysAnswer, PartReleases } from './api.ts';
 
 /** A release as GitHub lists it, drafts and prereleases included. */
@@ -56,14 +57,15 @@ export class DeployRefused extends Error {
   }
 }
 
-const TAG = /^(hub|web|mod)-v(\d+)\.(\d+)\.(\d+)$/;
+/** A release's tag; a Factorio mod's `factorio-v` ones aren't deployed here (a game update installs the mod). */
+const TAG = /^(hub|web|mod|agent)-v(\d+)\.(\d+)\.(\d+)$/;
 const version = (tag: string) => TAG.exec(tag)!.slice(2).map(Number);
 /** Newest first, by version. */
 const newestFirst = (a: Release, b: Release) => {
   const [x, y] = [version(a.tag), version(b.tag)];
   return y[0]! - x[0]! || y[1]! - x[1]! || y[2]! - x[2]!;
 };
-/** The first hub and dashboard releases that can deploy: an older one would take the deploy flow away. */
+/** The first hub, dashboard and Agent releases that can deploy: an older one would take the deploy flow away. */
 export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0', agent: 'agent-v1.0.0' } as const;
 /** A renamed Mod release's builds, one per Minecraft target: `orrery-<mc>-<version>.jar`. */
 const MOD_BUILD = /^orrery-(.+)-(\d+\.\d+\.\d+)\.jar$/;
@@ -90,10 +92,12 @@ export type DeploysDeps = {
   servers: Pick<ServerSettings, 'id' | 'dir'>[];
   /** Whether a server has a Mod token. */
   hasMod: (serverId: string) => boolean;
-  /** Whether any restore runs (a hub deploy's restart would kill it). */
-  restoring: () => boolean;
-  /** Whether a pack update runs on a server (undefined: on any). */
-  packing: (serverId?: string) => boolean;
+  /** Only with the agents integration: each Agent, the version it said it runs, its requests and events. */
+  agents?: Pick<Agents, 'get' | 'list' | 'request' | 'on' | 'off'>;
+  /** Whether a restore runs on a server (undefined: on any; a hub deploy's restart would kill it). */
+  restoring: (serverId?: string) => boolean;
+  /** What update runs on a server (undefined: on any): `pack update` or `game update`; null: none. */
+  updating: (serverId?: string) => string | null;
   /** Whether a library add runs (a hub deploy's restart would lose it). */
   libraryAdding: () => boolean;
   /** Whether a New server install runs (likewise). */
@@ -105,33 +109,40 @@ export type DeploysDeps = {
 };
 
 /** Shortened in tests. */
-export type DeploysOptions = { pollMs?: number; watchMs?: number; modTimeoutMs?: number; countdownMinutes?: number };
+export type DeploysOptions = { pollMs?: number; watchMs?: number; modTimeoutMs?: number; agentTimeoutMs?: number; countdownMinutes?: number };
 
 /**
  * Releases and deploys: GitHub's published releases (asked hourly and on `check`) against what each part runs, and
  * deploying one, one at a time, recorded in the `deploys` history, audited and announced as `deploy` target notices.
  * The hub and dashboard deploy through their environment's templated units (`<template>@<tag>.service`, only for a
  * tag GitHub listed), whose outcome comes back in `deploy-status.json`; a Mod deploy puts the jar in place itself,
- * at the end of the server's countdown when it runs. Hub core.
+ * at the end of the server's countdown when it runs; an Agent deploys itself (`deploy`), ok once it says hello as
+ * the new release. Hub core.
  */
 export class Deploys {
   #d: DeploysDeps;
   #pollMs: number;
   #watchMs: number;
   #modTimeoutMs: number;
+  #agentTimeoutMs: number;
   #countdownMinutes: number;
   #releases: Release[] = [];
   #checkedAt: number | null = null;
   #error: string | null = null;
   #starting = false; // between the checks and the row, so two requests can't both pass
   #timers = new Set<NodeJS.Timeout>();
-  #listeners = new Set<(e: HubEvent) => void>();
+  /** Takes each listener of a running Mod or Agent deploy off again. */
+  #listeners = new Set<() => void>();
 
-  constructor(deps: DeploysDeps, { pollMs = 3_600_000, watchMs = 5_000, modTimeoutMs = 10 * 60_000, countdownMinutes = 5 }: DeploysOptions = {}) {
+  constructor(
+    deps: DeploysDeps,
+    { pollMs = 3_600_000, watchMs = 5_000, modTimeoutMs = 10 * 60_000, agentTimeoutMs = 10 * 60_000, countdownMinutes = 5 }: DeploysOptions = {},
+  ) {
     this.#d = deps;
     this.#pollMs = pollMs;
     this.#watchMs = watchMs;
     this.#modTimeoutMs = modTimeoutMs;
+    this.#agentTimeoutMs = agentTimeoutMs;
     this.#countdownMinutes = countdownMinutes;
   }
 
@@ -142,15 +153,15 @@ export class Deploys {
     poll.unref();
     this.#timers.add(poll);
     for (const row of this.#d.db.deploys(HISTORY, { running: true })) {
-      // A Mod deploy's countdown lived in the hub that started it.
-      if (row.part === 'mod') this.#finish(row, 'failed', 'interrupted: the hub restarted');
+      // A Mod deploy's countdown, and the wait for an Agent's hello, lived in the hub that started it.
+      if (row.part === 'mod' || row.part === 'agent') this.#finish(row, 'failed', 'interrupted: the hub restarted');
       else this.#watch(row);
     }
   }
 
   stop(): void {
     for (const t of this.#timers) clearTimeout(t);
-    for (const l of this.#listeners) this.#d.hub.off('event', l);
+    for (const off of this.#listeners) off();
   }
 
   /** Asks GitHub for its releases now; a failure keeps the last list and is reported in `answer`. */
@@ -191,6 +202,11 @@ export class Deploys {
     return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'mod' && r.target === serverId);
   }
 
+  /** Whether an Agent's deploy runs (a game update of its server must wait for it). */
+  agentBusy(agentId: string): boolean {
+    return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'agent' && r.target === agentId);
+  }
+
   /** What runs against what is published, and the history newest first, 50 rows older than `before`. */
   answer(before?: number): DeploysAnswer {
     const part = (p: 'hub' | 'web'): PartReleases => {
@@ -198,6 +214,7 @@ export class Deploys {
       return { running: this.#running(p), latest: releases[0]?.tag ?? null, releases };
     };
     const mod = this.#of('mod');
+    const agent = this.#of('agent');
     const history = this.#d.db.deploys(HISTORY + 1, { before });
     return {
       hub: part('hub'),
@@ -211,39 +228,49 @@ export class Deploys {
           .filter((s) => s.game === 'minecraft')
           .map((s) => ({ id: s.id, name: s.name, running: this.#running('mod', s.id) })),
       },
-      agent: { latest: null, releases: [], hosts: [] }, // Agent deploys aren't built yet
+      agent: {
+        latest: agent[0]?.tag ?? null,
+        releases: agent,
+        hosts: (this.#d.agents?.list() ?? []).map((a) => ({ id: a.id, name: a.name, server: a.server, running: this.#running('agent', a.id) })),
+      },
       checkedAt: this.#checkedAt,
       error: this.#error,
       newerAfterDays: this.#d.config.newerAfterDays,
       history: history.slice(0, HISTORY),
       older: history.length > HISTORY,
-      packing: this.#d.hub.list().flatMap((s) => (this.#d.packing(s.id) ? [s.id] : [])),
+      packing: this.#d.hub.list().flatMap((s) => (this.#d.updating(s.id) ? [s.id] : [])),
     };
   }
 
   /**
-   * Starts deploying a listed release (`serverId`: the Mod's server; `by` to the audit log, `byName` to players)
-   * and resolves with its history row's id once it is under way; the outcome comes as a `deployFinished` notice.
-   * Rejects with `DeployRefused`, or another error if systemctl or the download fails (the row then closes failed).
+   * Starts deploying a listed release (`on`: the Mod's server, or the Agent's id; `by` to the audit log, `byName` to
+   * players) and resolves with its history row's id once it is under way; the outcome comes as a `deployFinished`
+   * notice. Rejects with `DeployRefused`, or another error if systemctl, the download or the Agent's `deploy` fails
+   * (the row then closes failed).
    */
-  async deploy(part: DeployPart, tag: string, by: string, serverId?: string, byName = by): Promise<number> {
-    // The tag goes into a unit name: only one GitHub listed for this part, which also matches TAG.
+  async deploy(part: DeployPart, tag: string, by: string, on?: string, byName = by): Promise<number> {
+    // The tag goes into a unit name (the Agent's too): only one GitHub listed for this part, which also matches TAG.
     const release = this.#releases.find((r) => r.tag === tag && tag.startsWith(`${part}-v`));
     if (!release) throw new DeployRefused(404, `No published release ${tag}.`);
-    const server = part === 'mod' ? this.#d.hub.get(serverId ?? '') : undefined;
+    const server = part === 'mod' ? this.#d.hub.get(on ?? '') : undefined;
     if (part === 'mod' && !server) throw new DeployRefused(404, 'No such server.');
+    const agent = part === 'agent' ? this.#d.agents?.get(on ?? '') : undefined;
+    if (part === 'agent' && !agent) throw new DeployRefused(404, 'No such Agent.');
     if (this.#starting || this.#d.db.deploys(1, { running: true }).length) throw new DeployRefused(409, 'Another deploy is running.');
-    const from = this.#running(part, serverId);
+    const from = this.#running(part, on);
     if (from === tag) throw new DeployRefused(409, `${tag} is already running.`);
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
-    if (part === 'hub' && this.#d.packing()) throw new DeployRefused(409, 'A pack update is running: deploy the hub once it is done.');
+    const updating = part === 'hub' ? this.#d.updating() : null;
+    if (updating) throw new DeployRefused(409, `A ${updating} is running: deploy the hub once it is done.`);
     if (part === 'hub' && this.#d.libraryAdding()) throw new DeployRefused(409, 'A library add is running: deploy the hub once it is done.');
     if (part === 'hub' && this.#d.installing()) throw new DeployRefused(409, 'A New server install is running: deploy the hub once it is done.');
-    if (server && this.#d.packing(server.id)) throw new DeployRefused(409, `A pack update is running on ${server.name}: deploy the Mod once it is done.`);
+    const onServer = server ? this.#d.updating(server.id) : null;
+    if (server && onServer) throw new DeployRefused(409, `A ${onServer} is running on ${server.name}: deploy the Mod once it is done.`);
     if (part !== 'mod' && newestFirst(release, { tag: FLOOR[part], publishedAt: 0, assets: [] }) > 0) {
       throw new DeployRefused(409, `${tag} is older than ${FLOOR[part]}, the first release that can deploy.`);
     }
     if (server) return this.#deployMod(release, server.id, server.name, from, by, byName);
+    if (agent) return this.#deployAgent(release, agent.id, from, by);
 
     this.#starting = true;
     try {
@@ -267,7 +294,8 @@ export class Deploys {
     return this.#releases.filter((r) => r.tag.startsWith(`${part}-v`));
   }
 
-  #running(part: DeployPart, serverId?: string): string | null {
+  /** What a part runs (`on`: the Mod's server, or the Agent's id); null: unknown. */
+  #running(part: DeployPart, on?: string): string | null {
     const { root, webDir } = this.#d.config.deploys;
     if (part === 'hub') {
       try {
@@ -284,7 +312,12 @@ export class Deploys {
       } catch {}
       return this.#d.db.deploys(1, { part: 'web', outcome: 'ok' })[0]?.to ?? null;
     }
-    const v = this.#d.hub.modVersion(serverId!);
+    if (part === 'agent') {
+      // Its hello names its release (`agent-vX.Y.Z`); a bare version gets the prefix, as a Mod's does.
+      const v = this.#d.agents?.get(on!)?.version ?? null;
+      return v !== null && /^\d+\.\d+\.\d+$/.test(v) ? `agent-v${v}` : v;
+    }
+    const v = this.#d.hub.modVersion(on!);
     if (v === undefined) return null;
     return /^\d+\.\d+\.\d+$/.test(v) ? `mod-v${v}` : v;
   }
@@ -415,9 +448,10 @@ export class Deploys {
 
     let swapped = false;
     let timeout: NodeJS.Timeout | undefined;
+    const off = () => this.#d.hub.off('event', listen);
     const done = (outcome: 'ok' | 'failed', log: string) => {
-      this.#d.hub.off('event', listen);
-      this.#listeners.delete(listen);
+      off();
+      this.#listeners.delete(off);
       clearTimeout(timeout);
       if (timeout) this.#timers.delete(timeout);
       this.#finish(row, outcome, log);
@@ -432,7 +466,7 @@ export class Deploys {
       }
     };
     this.#d.hub.on('event', listen);
-    this.#listeners.add(listen);
+    this.#listeners.add(off);
     // The server may have gone down, or a countdown started, during the download: close the row, don't leave it running.
     try {
       this.#d.restarts.schedule(serverId, this.#countdownMinutes, by, byName, {
@@ -453,6 +487,66 @@ export class Deploys {
       done('failed', `no countdown: ${(err as Error).message}`);
       throw new DeployRefused(409, `${serverName} changed during the download: ${(err as Error).message}`);
     }
+    return row.id;
+  }
+
+  /**
+   * An Agent deploys itself: its `deploy` request starts its own deploy unit (the reply means started), which restarts
+   * it. Ok once it says hello again as the tag; its `deployResult` for the tag records any other end (`rolled back`:
+   * it came back on the old release; `failed`); failed when neither comes in time.
+   */
+  async #deployAgent(release: Release, agentId: string, from: string | null, by: string): Promise<number> {
+    const agents = this.#d.agents!; // it found the Agent
+    const agent = agents.get(agentId)!;
+    const name = this.#d.hub.get(agent.server)?.name ?? agent.server;
+    if (!agent.connected) throw new DeployRefused(409, `${agent.name} isn't connected.`);
+    const updating = this.#d.updating(agent.server);
+    if (updating) throw new DeployRefused(409, `A ${updating} is running on ${name}: deploy the Agent once it is done.`);
+    if (this.#d.restoring(agent.server)) throw new DeployRefused(409, `A restore is running on ${name}: deploy the Agent once it is done.`);
+    if (this.#d.restarts.pending(agent.server)) throw new DeployRefused(409, `A countdown is running on ${name}: cancel it first.`);
+    const { tag } = release;
+    let row!: DeployRow;
+    let open = true;
+    let timeout: NodeJS.Timeout | undefined;
+    const up = (id: string) => {
+      if (id === agentId && this.#running('agent', agentId) === tag) done('ok', `${agent.name} runs ${tag}`);
+    };
+    const result = (id: string, msg: Extract<AgentMsg, { type: 'deployResult' }>) => {
+      if (id !== agentId || msg.tag !== tag) return;
+      const running = this.#running('agent', agentId);
+      // Ok only when its hello named the tag, whatever its deploy says.
+      if (msg.outcome === 'ok' && running !== tag) done('failed', `${msg.log}\n${agent.name} says ok, but runs ${running ?? 'an unknown release'}`);
+      else done(msg.outcome, msg.log);
+    };
+    const off = () => {
+      agents.off('agentUp', up);
+      agents.off('deployResult', result);
+    };
+    const done = (outcome: Exclude<DeployOutcome, 'running'>, log: string) => {
+      if (!open) return;
+      open = false;
+      off();
+      this.#listeners.delete(off);
+      clearTimeout(timeout);
+      if (timeout) this.#timers.delete(timeout);
+      this.#finish(row, outcome, log);
+    };
+    this.#starting = true;
+    try {
+      row = this.#begin('agent', agentId, from, tag, by);
+      agents.on('agentUp', up);
+      agents.on('deployResult', result);
+      this.#listeners.add(off);
+      try {
+        await agents.request(agentId, { type: 'deploy', tag });
+      } catch (err) {
+        done('failed', `the Agent didn't start it: ${(err as Error).message}`);
+        throw err;
+      }
+    } finally {
+      this.#starting = false;
+    }
+    if (open) timeout = this.#later(() => done('failed', `${agent.name} didn't come back with ${tag} in time`), this.#agentTimeoutMs);
     return row.id;
   }
 }

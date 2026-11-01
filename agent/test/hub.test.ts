@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { HubClient, backoff, type HubOptions } from '../src/hub.ts';
+import { HANDSHAKE_MS } from '../../hub/src/agents.ts';
+import { HUB_WELCOME_GAP_MS, HubClient, backoff, tooFastWait, type HubOptions } from '../src/hub.ts';
 import { RconNoAnswer, RconNotSent } from '../src/rcon.ts';
 import { StatusPoller, type Reading } from '../src/status.ts';
 import { LIMITS } from '../src/wire.ts';
@@ -262,6 +263,46 @@ test('a reject is retried with backoff and logged once', async (t) => {
 
 const T0 = 1_793_475_900_000;
 const unit = (since: number, active = 'active') => ({ unit: 'factorio.service', active, sub: active === 'active' ? 'running' : 'dead', since, result: 'success' });
+
+test("the hub's welcome gap is its HANDSHAKE_MS; a too-fast retry waits what is left of it, and a twentieth more", () => {
+  assert.equal(HUB_WELCOME_GAP_MS, HANDSHAKE_MS);
+  assert.equal(tooFastWait(1000, 5000), 4250);
+  assert.equal(tooFastWait(9000, 5000), 250);
+  assert.equal(tooFastWait(null, 5000), 5250);
+});
+
+test('a hello refused as reconnecting too fast is no failure: logged once per refusal, not as a rejection, and retried once the gap has passed', async (t) => {
+  const GAP = 300;
+  const welcomes: number[] = [];
+  let refused = 0;
+  const { hub, client } = await setup(
+    t,
+    () => {
+      // The first hello is refused before any welcome (an agent that just restarted: it waits the whole gap), then
+      // every one under GAP after the last welcome, as the hub does.
+      const last = welcomes.at(-1);
+      if (refused === 0 || (last !== undefined && performance.now() - last < GAP)) {
+        refused++;
+        return { reject: 'reconnecting too fast' };
+      }
+      welcomes.push(performance.now());
+      return 'welcome';
+    },
+    { backoffMs: 10, maxBackoffMs: 10, welcomeGapMs: GAP },
+  );
+  const logged: string[] = [];
+  t.mock.method(console, 'log', (line: string) => logged.push(line));
+  client.start();
+  await eventually(() => client.connected, 3000, 'a welcome after the first refusal');
+  assert.ok(hub.conns[1]!.at - hub.conns[0]!.at >= GAP, `the first retry came ${hub.conns[1]!.at - hub.conns[0]!.at} ms after the refusal`);
+  hub.conns[1]!.socket.destroy(); // a drop: the next hello, after the 10 ms backoff, is too soon after this welcome
+  await eventually(() => welcomes.length === 2 && client.connected, 3000, 'connected again');
+  assert.equal(refused, 2);
+  assert.equal(hub.conns.length, 4, 'one retry per refusal, no hello in between');
+  assert.ok(hub.conns[3]!.at - welcomes[0]! >= GAP, `retried ${hub.conns[3]!.at - welcomes[0]!} ms after the welcome`);
+  assert.deepEqual(logged.filter((l) => l.includes('(rejected: ')), [], 'not a rejection, which the first-boot check stops at');
+  assert.equal(logged.filter((l) => l.includes('welcomed this agent under')).length, 2, logged.join('\n')); // once per change of state
+});
 
 test('started once per run of the unit, after the game hello; not again for a run already announced, even by an earlier agent', async (t) => {
   const { hub, client, root } = await setup(t);

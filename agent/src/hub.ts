@@ -32,7 +32,25 @@ export type HubOptions = {
   backoffMs?: number;
   maxBackoffMs?: number;
   random?: () => number;
+  /** How soon after its last welcome the hub welcomes the Agent connection again (`HUB_WELCOME_GAP_MS`). */
+  welcomeGapMs?: number;
 };
+
+/**
+ * The hub's `HANDSHAKE_MS`: it refuses an Agent connection's hello under 5 s after it last welcomed one for this
+ * agent (`reject` with `TOO_FAST`), and keeps the connection that welcome opened, if it is still up.
+ */
+export const HUB_WELCOME_GAP_MS = 5_000;
+const TOO_FAST = 'reconnecting too fast';
+
+/**
+ * The wait before the next hello after the hub refused one as `TOO_FAST`: what is left of `gap` since the last welcome
+ * this agent saw (`sinceWelcome` ms ago; null: none since it started, so all of it), and a twentieth of `gap` more,
+ * since the hub stamped that welcome a little before it arrived here.
+ */
+export function tooFastWait(sinceWelcome: number | null, gap: number): number {
+  return Math.max(0, gap - (sinceWelcome ?? 0)) + gap / 20;
+}
 
 /** The wait before reconnecting after `failures` closes since the last welcome: base × 2^failures up to `max`, jittered into its upper half. */
 export function backoff(failures: number, base: number, max: number, random: () => number): number {
@@ -45,6 +63,8 @@ class Link {
   readonly socket: Socket;
   readonly closed: Promise<void>;
   welcomed = false;
+  /** The hub refused its hello as `TOO_FAST`: no failure, the retry waits out the hub's gap. */
+  tooFast = false;
   #why = 'the hub closed the connection';
   #handshake: NodeJS.Timeout;
 
@@ -110,7 +130,7 @@ class Link {
  * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state and the saves (on
  * connect and on change) and host samples, and answers each request by its id. It reconnects after any close, with
  * capped exponential backoff and jitter, logging once per change of state, so with no hub reachable the agent just
- * keeps trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
+ * keeps trying; a hello the hub refuses as `reconnecting too fast` is no failure: the next waits out the hub's 5 s. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
  *
  * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
  * and the orrery mod's version, `started` once per run of the unit, then a heartbeat per `/orrery-status` answer, the
@@ -132,6 +152,9 @@ export class HubClient {
   #backoffMs: number;
   #maxBackoffMs: number;
   #random: () => number;
+  #welcomeGapMs: number;
+  /** When the Agent connection was last welcomed (`performance.now()`), null before the first. */
+  #welcomedAt: number | null = null;
   #agent: Link | null = null;
   #game: Link | null = null;
   #failures = 0;
@@ -162,6 +185,7 @@ export class HubClient {
     this.#backoffMs = o.backoffMs ?? 1000;
     this.#maxBackoffMs = o.maxBackoffMs ?? 60_000;
     this.#random = o.random ?? Math.random;
+    this.#welcomeGapMs = o.welcomeGapMs ?? HUB_WELCOME_GAP_MS;
     this.#started = readStarted(join(o.config.state, 'started.json'));
   }
 
@@ -288,6 +312,10 @@ export class HubClient {
     const r = readAgentLine(line);
     if (!link.welcomed) {
       if (r.msg?.type === 'welcome') return this.#welcomed(link);
+      if (r.msg?.type === 'reject' && r.msg.reason === TOO_FAST) {
+        link.tooFast = true;
+        return link.drop(TOO_FAST);
+      }
       return link.drop(r.msg?.type === 'reject' ? `rejected: ${r.msg.reason}` : 'the hub answered the hello with something else');
     }
     if (r.msg === null) {
@@ -315,6 +343,7 @@ export class HubClient {
   #welcomed(link: Link): void {
     link.welcome();
     this.#failures = 0;
+    this.#welcomedAt = performance.now();
     this.#log(`connected to the hub at ${this.#config.hub.host}:${this.#config.hub.port} as ${this.#version}`);
     void this.#writeConnected();
     this.#ping = setInterval(() => link.send({ type: 'ping' }), this.#pingMs);
@@ -329,6 +358,14 @@ export class HubClient {
     clearInterval(this.#ping);
     this.#closeGame('the Agent connection closed', false);
     if (this.#stopping) return;
+    if (link.tooFast) {
+      // Harmless: the hub welcomed this agent under 5 s ago (a quick reconnect). Not a failure, and not logged as a
+      // rejection, which the first-boot check would take for a refused token.
+      const since = this.#welcomedAt === null ? null : performance.now() - this.#welcomedAt;
+      this.#log(`the hub welcomed this agent under ${this.#welcomeGapMs / 1000} s ago: connecting again once that has passed`);
+      this.#retry = setTimeout(() => this.#connect(), tooFastWait(since, this.#welcomeGapMs));
+      return;
+    }
     this.#log(`no connection to the hub at ${this.#config.hub.host}:${this.#config.hub.port} (${why}): retrying`);
     this.#retry = setTimeout(() => this.#connect(), backoff(this.#failures++, this.#backoffMs, this.#maxBackoffMs, this.#random));
   }

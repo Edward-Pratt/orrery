@@ -104,7 +104,7 @@ const NEW_PLAYERS = { name: 'new players', perSecond: 1 / 10, burst: LIMITS.play
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
 const SAME = new Set(['serviceState', 'saves', 'installed']);
 const SAMPLE_MS = 10_000;
-const HANDSHAKE_MS = 5_000;
+export const HANDSHAKE_MS = 5_000;
 /** What a Mod sends but an Agent's game connection never does (docs/protocol.md): dropped from it. */
 const NOT_FROM_AGENTS = new Set<string>(['cmdLate', 'quest', 'achievement'] satisfies ModMsg['type'][]);
 /** Connections at once from one peer address, handshaken or not: an Agent connection, a game connection, two spare. */

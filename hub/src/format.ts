@@ -1,8 +1,19 @@
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
-import { sparkline } from './lag.ts';
+import { GAMES, rateOf, sparkline } from './lag.ts';
 import { countdownText } from './restarts.ts';
-import { stripCodes, truncate, type Announcement, type HubEvent, type Notice, type ServerState, type Severity, type TargetEvent } from './servers.ts';
+import {
+  stripCodes,
+  truncate,
+  type Announcement,
+  type GameMsg,
+  type HubEvent,
+  type Notice,
+  type ServerState,
+  type Severity,
+  type TargetEvent,
+} from './servers.ts';
+import type { Game } from './types.ts';
 import type { Summary } from './summary.ts';
 import { formatBytes, formatDuration } from './units.ts';
 
@@ -11,7 +22,8 @@ export type Post = { content: string } | { embeds: APIEmbed[] };
 
 export const COLORS = { green: 0x2ecc71, grey: 0x95a5a6, red: 0xe74c3c, orange: 0xe67e22, blue: 0x3498db } as const;
 
-// Discord embed limits.
+// Discord limits: a message's content, an embed's parts.
+const CONTENT = 2000;
 const TITLE = 256;
 const FIELD = 1024;
 const DESCRIPTION = 4096;
@@ -21,12 +33,58 @@ export function md(s: string): string {
   return escapeMarkdown(stripCodes(s), { heading: true, maskedLink: true, bulletedList: true, numberedList: true });
 }
 
+/**
+ * Escapes text that goes mid-line or in an embed title (a notice's detail, a save's name, a version, an error): every
+ * inline markdown and masked links, but not the line-start rules (headings, lists), which there would only put a
+ * backslash before a backup's "12.3 seconds".
+ */
+export function inline(s: string): string {
+  return escapeMarkdown(stripCodes(s), { maskedLink: true });
+}
+
 /** Embed titles render less markdown than descriptions, so they only get § codes stripped. */
 function title(s: string): string {
   return truncate(stripCodes(s), TITLE);
 }
 
 const embed = (e: APIEmbed): Post => ({ embeds: [e] });
+/** A plain-text post, cut to Discord's 2000 characters after escaping (escaping can double a 1 KiB message). */
+const plain = (s: string): Post => ({ content: truncate(s, CONTENT) });
+
+/** A chat line as the relay webhook posts it (the name is the webhook's own): escaped, then cut to Discord's 2000. */
+export function chatContent(message: string): string {
+  return truncate(md(message), CONTENT);
+}
+
+/** The most of a milestone's text a post shows (the subject only: a research, a planet, a platform's name). */
+const MILESTONE_TEXT = 200;
+
+/** A milestone's line: the mod sends its subject (`text`), the player for a landing, and a force other than `player`. */
+function milestoneText(m: Extract<GameMsg, { type: 'milestone' }>): string {
+  const what = md(truncate(m.text, MILESTONE_TEXT));
+  const force = m.force ? ` (${md(m.force)})` : '';
+  switch (m.kind) {
+    case 'research':
+      return `🔬 Research finished: **${what}**${force}`;
+    case 'rocket': // the planet it left, empty if unknown
+      return `🚀 First rocket launched${what ? ` from **${what}**` : ''}${force}`;
+    case 'platform':
+      return `🛰️ First space platform in orbit: **${what}**${force}`;
+    case 'landing':
+      return `🪐 First landing on **${what}**${m.player ? ` by **${md(m.player)}**` : ''}${force}`;
+  }
+}
+
+/** What `/link` answers: how to type the code in each game that has a server. */
+export function formatLinkHint(code: string, games: Game[]): string {
+  const how: Record<Game, string> = {
+    minecraft: `In Minecraft, type \`/discord link ${code}\``,
+    factorio: `In Factorio, type \`/orrery-link ${code}\``,
+  };
+  const lines = GAMES.filter((g) => games.includes(g)).map((g) => how[g]);
+  if (lines.length > 1) return `${lines.map((l) => `${l}.`).join(' ')} The code works for 10 minutes.`;
+  return `${lines[0] ?? how.minecraft} within 10 minutes.`; // no servers at all: Minecraft's, as before Factorio
+}
 
 const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
 
@@ -45,23 +103,25 @@ function noticeText(n: Notice): string | null {
     case 'restartCancelledDown':
       return '❎ Restart cancelled (server went down)';
     case 'restartFailed':
-      return `❌ Restart failed: ${n.error}`;
+      return `❌ Restart failed: ${inline(n.error)}`; // a factorio server's: its Agent's refusal
     case 'lag': {
+      // Only Minecraft has dimensions to name (Factorio's rate is UPS); an older Mod sends none.
+      if (n.label === 'UPS') return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}`;
       const where = n.worst ? `${n.worst.name} (DIM ${n.worst.id}) ${Math.round(n.worst.ms)} ms/tick` : 'unknown';
-      return `🐢 Lag: ${n.tps.toFixed(1)} TPS; slowest: ${where}`;
+      return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}; slowest: ${where}`;
     }
     case 'lagRecovered':
-      return `✅ TPS back to normal (${n.tps.toFixed(1)})`;
+      return `✅ ${n.label} back to normal (${n.tps.toFixed(1)})`;
     case 'backupOverdue':
-      return `⚠️ No new backup for ${n.hours} h (newest: ${n.newest})`;
+      return `⚠️ No new backup for ${n.hours} h (newest: ${inline(n.newest)})`;
     case 'backupsMissing':
       return '⚠️ No backups found';
     case 'lowDisk':
       return `⚠️ Low disk space for backups: ${formatBytes(n.free)} free (limit ${n.minFreeGB} GB)`;
     case 'backupFinished':
-      return `✅ Backup finished (${n.detail})`;
+      return `✅ Backup finished (${inline(n.detail)})`; // an Agent's detail is its own text
     case 'backupFailed':
-      return `❌ Backup failed: ${n.detail}`;
+      return `❌ Backup failed: ${inline(n.detail)}`;
     case 'packUpdateStarted':
       return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
     case 'packUpdateStep': // progress for the dashboard
@@ -88,17 +148,19 @@ function noticeText(n: Notice): string | null {
 export function formatEvent(e: HubEvent): Post | null {
   switch (e.type) {
     case 'chat':
-      return { content: `**${md(e.player)}**: ${md(e.message)}` };
+      return plain(`**${md(e.player)}**: ${md(e.message)}`);
     case 'say': // chat sent into the game: Discord's own came from its channel
-      return e.source === 'dashboard' ? { content: `**${md(e.author)}** (dashboard): ${md(e.message)}` } : null;
+      return e.source === 'dashboard' ? plain(`**${md(e.author)}** (dashboard): ${md(e.message)}`) : null;
     case 'join':
-      return { content: `➡️ **${md(e.player)}** joined` };
+      return plain(`➡️ **${md(e.player)}** joined`);
     case 'leave':
-      return { content: `⬅️ **${md(e.player)}** left` };
+      return plain(`⬅️ **${md(e.player)}** left`);
     case 'death':
-      return { content: `💀 ${md(e.message)}` };
+      return plain(`💀 ${md(e.message)}`);
     case 'achievement':
-      return { content: `🏆 **${md(e.player)}** earned **${md(e.achievement)}**` };
+      return plain(`🏆 **${md(e.player)}** earned **${md(e.achievement)}**`);
+    case 'milestone':
+      return plain(milestoneText(e));
     case 'started':
       return embed({ title: '✅ Server started', color: COLORS.green });
     case 'stopped':
@@ -121,12 +183,14 @@ export function formatEvent(e: HubEvent): Post | null {
       return formatSummary(e.name, e.summary);
     case 'connected': // may just be a reconnect after a hub restart
     case 'offline': // hub-start bookkeeping for uptime, not news
+    case 'lost': // its Agent left: a planned exit is not news, and a lost Agent is a host notice
     case 'quest': // the QuestAnnouncer turns it into questBatch announcements
     case 'link': // answered by Links, which announces a new link
     case 'unlink':
     case 'backup': // the BackupWatcher publishes it as a notice
     case 'console': // the /cmd reply shows it to whoever ran it
     case 'tps': // for the dashboard; /tps and lag notices cover Discord
+    case 'paused': // for the dashboard's card
       return null;
   }
 }
@@ -142,22 +206,31 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
     case 'memoryOk':
       return `✅ Host ${e.id}: memory back to ${e.percent}%`;
     case 'diskLow':
-      return `⚠️ Host ${e.id}: low disk on ${e.mount}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`;
+      return `⚠️ Host ${e.id}: low disk on ${inline(e.mount)}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`; // an Agent's sample names it
     case 'diskOk':
-      return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
+      return `✅ Host ${e.id}: disk on ${inline(e.mount)} back to ${formatBytes(e.free)} free`;
     case 'serviceFailed':
       return `❌ Service ${e.id} failed (${e.unit})`;
+    case 'agentLost':
+      return `⚠️ Host ${e.id}: agent ${e.name} is not connected`;
+    case 'agentBack':
+      return `✅ Host ${e.id}: agent ${e.name} is connected again`;
+    case 'eventsOff': // the Agent's words
+      return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
+    case 'eventsOn':
+      return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
     case 'deployStarted':
-      return `🚀 Deploying ${deployed(e)}: ${e.from ?? 'unknown'} → ${e.to} (by ${e.by})`;
+      // `from` can be a hello's version (a game connection's `modVersion`, an Agent's `agentVersion`).
+      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : inline(e.from)} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
       if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
-      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from ?? 'the previous release'}`;
+      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : inline(e.from)}`;
       return `❌ Deploying ${deployed(e)} ${e.to} failed`;
   }
 }
 
 /** What a deploy was of, and where: "the hub on production", "the Mod on gtnh". */
-const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod' }[e.part]} on ${e.id}`;
+const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
 
 /**
  * The alerts channel's post for an event about the host, a service or a check, naming what it is about (the channel
@@ -185,7 +258,7 @@ export function formatStatus(s: ServerState, day: number | null, week: number | 
   const fields = [
     ...(s.online
       ? [
-          { name: 'TPS', value: s.tps === null ? 'n/a' : s.tps.toFixed(1), inline: true },
+          { name: rateOf(s.game).label, value: s.tps === null ? 'n/a' : s.tps.toFixed(1), inline: true },
           { name: 'Players', value: String(s.players.length), inline: true },
         ]
       : []),
@@ -255,7 +328,7 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
     title: 'Backups',
     color: COLORS.blue,
     fields: [
-      { name: 'Newest', value: truncate(newest.name, FIELD), inline: false },
+      { name: 'Newest', value: truncate(md(newest.name), FIELD), inline: false },
       { name: 'Age', value: `${formatDuration(now - newest.mtimeMs)}`, inline: true },
       { name: 'Size', value: formatBytes(newest.size), inline: true },
       { name: 'Count', value: String(backups.length), inline: true },
@@ -268,7 +341,8 @@ export function formatBackupStatus(backups: Backup[], now: number, free: number 
 
 export function formatBackupList(backups: Backup[]): Post {
   if (!backups.length) return embed({ title: 'Backups', description: 'No backups found.', color: COLORS.orange });
-  const lines = backups.slice(0, 10).map((b) => `\`${b.name}\` ${formatBytes(b.size)}`);
+  // A name (an Agent's save's comes from the game's folder) can't end its code span early.
+  const lines = backups.slice(0, 10).map((b) => `\`${b.name.replaceAll('`', "'")}\` ${formatBytes(b.size)}`);
   return embed({
     title: `Backups: ${backups.length}, ${totalSize(backups)} total`,
     description: truncate(lines.join('\n'), DESCRIPTION),
@@ -303,19 +377,21 @@ export function formatTps(
   day: { avg: number; min: number } | null,
 ): Post {
   if (!s.online || s.tps === null) return embed({ title: title(`${s.name}: offline`), color: COLORS.red });
-  const color = s.tps >= 18 ? COLORS.green : s.tps >= 12 ? COLORS.orange : COLORS.red;
+  const { label, max } = rateOf(s.game);
+  // Bands as a share of full speed: 18 and 12 TPS of Minecraft's 20.
+  const color = s.tps >= 0.9 * max ? COLORS.green : s.tps >= 0.6 * max ? COLORS.orange : COLORS.red;
   const stat = (x: { avg: number; min: number } | null, withMin: boolean) =>
     x === null ? 'n/a' : withMin ? `${x.avg.toFixed(1)} (min ${x.min.toFixed(1)})` : x.avg.toFixed(1);
   const fields = [
     { name: 'Last hour', value: stat(hour, true), inline: true },
     { name: 'Last 24 h', value: stat(day, false), inline: true },
   ];
-  if (lastHour.length) fields.push({ name: 'Trend (1 sample/min)', value: sparkline(lastHour.slice(-60).map((x) => x.tps)), inline: false });
+  if (lastHour.length) fields.push({ name: 'Trend (1 sample/min)', value: sparkline(lastHour.slice(-60).map((x) => x.tps), max), inline: false });
   if (s.dims.length) {
     const dims = s.dims.map((d) => `${md(d.name)} (DIM ${d.id}): ${Math.round(d.ms)} ms/tick`).join('\n');
     fields.push({ name: 'Slowest dimensions', value: truncate(dims, FIELD), inline: false });
   }
-  return embed({ title: title(`${s.name}: ${s.tps.toFixed(1)} TPS`), color, fields });
+  return embed({ title: title(`${s.name}: ${s.tps.toFixed(1)} ${label}`), color, fields });
 }
 
 /** A quest post: the quests completed at once, or a batched roll-up (`count` > quests shown). */
@@ -332,23 +408,23 @@ export function formatLinked(player: string, discordId: string): Post {
   return { content: `🔗 **${md(player)}** linked to <@${discordId}>` };
 }
 
-/** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS". */
+/** The bot's custom status: one segment per server, e.g. "GTNH: 3 online · 20 TPS" (UPS for a factorio server). */
 export function formatPresence(states: ServerState[]): string {
   const part = (s: ServerState) => {
     if (!s.online) return `${stripCodes(s.name)}: offline`;
     if (s.hung) return `${stripCodes(s.name)}: not responding`;
-    return `${stripCodes(s.name)}: ${s.players.length} online${s.tps === null ? '' : ` · ${Math.round(s.tps)} TPS`}`;
+    return `${stripCodes(s.name)}: ${s.players.length} online${s.tps === null ? '' : ` · ${Math.round(s.tps)} ${rateOf(s.game).label}`}`;
   };
   return truncate(states.map(part).join(' | '), 128);
 }
 
-/** A channel topic for one server. TPS is rounded so the text (and the rate-limited edit) changes less often. */
+/** A channel topic for one server. Its rate is rounded so the text (and the rate-limited edit) changes less often. */
 export function formatTopic(s: ServerState): string {
   if (!s.online) return '🔴 Offline';
   if (s.hung) return '🟠 Not responding';
-  const tps = s.tps === null ? '' : ` · ${Math.round(s.tps)} TPS`;
+  const tps = s.tps === null ? '' : ` · ${Math.round(s.tps)} ${rateOf(s.game).label}`;
   const n = s.players.length;
-  const who = n ? `: ${s.players.join(', ')}` : '';
+  const who = n ? `: ${s.players.map(md).join(', ')}` : ''; // a topic renders markdown too
   return truncate(`🟢 Online${tps} · ${n} player${n === 1 ? '' : 's'}${who}`, 1024);
 }
 

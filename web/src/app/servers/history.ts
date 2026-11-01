@@ -9,7 +9,7 @@ import { LiveEvents, ofServer } from '../events';
 import ServerPage from './server';
 
 type Point = [number, number];
-/** The state each lifecycle event leaves a server in. */
+/** The state each lifecycle event leaves a server in: unknown once its Agent left (`lost`), as the hub records it. */
 const STATES: Partial<Record<LiveEvent['type'], UptimeState>> = {
   connected: 'up',
   started: 'up',
@@ -18,13 +18,17 @@ const STATES: Partial<Record<LiveEvent['type'], UptimeState>> = {
   stopped: 'down',
   crashed: 'down',
   offline: 'down',
+  lost: 'unknown',
 };
 /** Uptime is drawn as a level: unknown is a gap. */
 const LEVEL: Record<UptimeState, number> = { up: 1, hung: 0.5, down: 0, unknown: NaN };
 const stateOf = (level: number) => (level === 1 ? 'up' : level === 0.5 ? 'hung' : level === 0 ? 'down' : '');
 const tpsOf = (tps: number) => tps.toFixed(1);
 
-/** A server's History section: TPS, player and uptime graphs over a chosen period, extended by live events. */
+/**
+ * A server's History section: rate (TPS or UPS, "Paused" beside it while a factorio server is paused), player and
+ * uptime graphs over a chosen period, extended by live events.
+ */
 @Component({
   selector: 'app-server-history',
   imports: [HlmSkeleton, PeriodPicker, TimeSeries],
@@ -34,7 +38,12 @@ const tpsOf = (tps: number) => tps.toFixed(1);
       <div class="grid gap-4 lg:grid-cols-2">
         @for (c of charts(); track c.title) {
           <section class="rounded-xl border p-3" [attr.data-chart]="c.title">
-            <h2 class="text-sm font-semibold">{{ c.title }}</h2>
+            <h2 class="text-sm font-semibold">
+              {{ c.title }}
+              @if (c.paused) {
+                <span class="font-normal text-muted-foreground" data-paused>Paused</span>
+              }
+            </h2>
             <app-time-series [series]="c.series" [format]="c.format" [max]="c.max" [step]="c.step" />
           </section>
         }
@@ -72,16 +81,19 @@ export default class History {
       else if (event.type === 'join' || event.type === 'leave') {
         players.push([at, Math.max(0, last(players) + (event.type === 'join' ? 1 : -1))]);
       } else if (STATES[event.type]) {
-        uptime.push([at, LEVEL[STATES[event.type]!]]);
-        if (STATES[event.type] === 'down') players.push([at, 0]);
+        const state = STATES[event.type]!;
+        uptime.push([at, LEVEL[state]]);
+        if (state === 'down' || state === 'unknown') players.push([at, 0]); // `lost` clears the players too
       }
     }
     if (uptime.length) uptime.push([Date.now(), last(uptime)]); // the last state lasts until now
     const line = (name: string, points: Point[]): Series[] => [{ name, points }];
+    const { rate, paused } = this.#server.card()!;
+    const { label, max } = rate;
     return [
-      ...(h.tps ? [{ title: 'TPS', format: tpsOf, max: 20, step: false, series: line('TPS', tps) }] : []),
-      { title: 'Players', format: String, max: undefined, step: true, series: line('Players', players) },
-      { title: 'Uptime', format: stateOf, max: 1, step: true, series: line('Uptime', uptime) },
+      ...(h.tps ? [{ title: label, format: tpsOf, max, step: false, paused, series: line(label, tps) }] : []),
+      { title: 'Players', format: String, max: undefined, step: true, paused: false, series: line('Players', players) },
+      { title: 'Uptime', format: stateOf, max: 1, step: true, paused: false, series: line('Uptime', uptime) },
     ];
   });
 

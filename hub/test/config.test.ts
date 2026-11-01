@@ -65,7 +65,7 @@ test('validateConfig reports every problem at once, with where it is', async (t)
     'server "gtnh": duplicate id',
     'integrations.minecraft: "listenPort" must be a port number (1–65535)',
     'integrations.minecraft.tokens: "ghost" is not a server id',
-    'integrations.minecraft.tokens: "gtnh" must be at least 16 characters',
+    'integrations.minecraft.tokens: "gtnh" must be 16 to 256 characters',
     'integrations.discord: "guildId" must be a Discord ID (17–20 digits)',
     'integrations.discord.channels: "nope" is not a server id',
     'integrations.discord.channels: "nope" must be a Discord ID (17–20 digits)',
@@ -90,6 +90,163 @@ test('every server needs its own token when Minecraft is configured', async (t) 
     'integrations.minecraft.tokens: "two" is the same as another server\'s',
     'integrations.minecraft.tokens: server "three" has no token',
   ]);
+});
+
+const AGENT_TOKEN = 'an-agent-token-of-at-least-32-chars';
+
+/** `valid(dir)` plus a factorio server, its service and the Agent that runs it. */
+function withFactorio(dir: string) {
+  const c = valid(dir);
+  c.servers.push({ id: 'space', name: 'Space Age', game: 'factorio', service: 'factorio', lagTps: 55 });
+  return {
+    ...c,
+    integrations: {
+      ...c.integrations,
+      systemd: [{ id: 'factorio', unit: 'factorio.service' }],
+      agents: {
+        listen: { host: '100.101.102.103', port: 25584 },
+        agents: [{ id: 'factorio-vm', name: 'Factorio VM', token: AGENT_TOKEN, address: '100.90.80.70', server: 'space' } as Record<string, unknown>],
+      },
+    },
+  };
+}
+
+test('a factorio server has no folder, Backup folder, Kept paths or Mod token, and its lagTps goes up to 60 UPS', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = withFactorio(dir);
+  assert.deepEqual(validateConfig(c), []); // the token is only required of minecraft servers
+  Object.assign(c.servers[1]!, { dir, backupDir: dir, keep: ['x'], lagTps: 61 });
+  c.servers.push({ id: 'odd', name: 'Odd', game: 'terraria' });
+  c.integrations.minecraft.tokens.space = 'a-factorio-token-16';
+  c.integrations.minecraft.tokens.odd = 'a-terraria-token-16';
+  assert.deepEqual(validateConfig(c), [
+    'server "space": "lagTps" must be a number from 1 to 60',
+    'server "space": "dir" is only for minecraft servers: a factorio server has no folder on the hub\'s machine',
+    'server "space": "backupDir" is only for minecraft servers: a factorio server has no folder on the hub\'s machine',
+    'server "space": "keep" is only for minecraft servers: a factorio server has no folder on the hub\'s machine',
+    'server "odd": "game" must be minecraft or factorio',
+    'integrations.minecraft.tokens: "space" is a factorio server: only minecraft servers have a Mod token',
+  ]);
+});
+
+test('a factorio server has a service and is exactly one agent\'s server', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = withFactorio(dir);
+  delete c.servers[1]!.service;
+  assert.deepEqual(validateConfig(c), ['server "space": "service" is required for a factorio server: its Agent starts and stops it']);
+  const { agents: _, ...noAgents } = withFactorio(dir).integrations;
+  assert.deepEqual(validateConfig({ ...c, servers: withFactorio(dir).servers, integrations: noAgents }), [
+    'server "space": a factorio server must be the "server" of an agent in integrations.agents',
+  ]);
+  const two = withFactorio(dir);
+  two.integrations.agents.agents.push({ id: 'second', name: 'Second', token: `${AGENT_TOKEN}-2`, address: '100.90.80.71', server: 'space' });
+  assert.deepEqual(validateConfig(two), ['server "space": a factorio server is run by one agent only, not by "factorio-vm", "second"']);
+  // The service an Agent backs is listed like any other, linked to its server only.
+  const linked = withFactorio(dir);
+  linked.servers[0]!.service = 'factorio';
+  assert.deepEqual(validateConfig(linked), ['server "space": service "factorio" is linked to server "gtnh" already']);
+});
+
+test("an agent names a factorio server, comes from an IPv4 address and has a long, unique token; its id is its Host's", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = withFactorio(dir);
+  c.integrations.agents.agents.push(
+    { id: 'Bad_Id', name: '', token: 'short', address: 'vm.tailnet', server: 'gtnh' },
+    { id: 'oracle', name: 'Same as the hub', token: AGENT_TOKEN, address: '::1', server: 'ghost', host: { memoryMaxPercent: 101, memoryMinutes: 0.5, diskMinFreeGB: 0 } },
+    { id: 'factorio-vm', name: 'Again', token: 'a-long-enough-token', address: '100.90.80.72', server: 'space', host: 'big' },
+    { id: 'a-very-long-agent-id-of-33-chars0', name: 'Long', token: `${AGENT_TOKEN}-3`, address: '100.90.80.73', server: 'space' },
+  );
+  assert.deepEqual(validateConfig({ ...c, integrations: { ...c.integrations, host: { id: 'oracle' } } }), [
+    'agent "Bad_Id": "id" must be lower-case letters, digits and dashes, starting with a letter, at most 32 characters',
+    'agent "Bad_Id": "name" must be a non-empty string',
+    'agent "Bad_Id": "token" must be 32 to 256 characters',
+    'agent "Bad_Id": "address" must be an IPv4 address',
+    'agent "Bad_Id": "server" "gtnh" must be a factorio server',
+    'agent "oracle": "id" must differ from integrations.host.id: it is also its Host\'s id',
+    'agent "oracle": "token" is the same as another token',
+    'agent "oracle": "address" must be an IPv4 address',
+    'agent "oracle": "server" "ghost" is not a server id',
+    'agent "oracle": "memoryMaxPercent" must be a number from 1 to 100',
+    'agent "oracle": "memoryMinutes" must be a whole number of at least 1',
+    'agent "oracle": "diskMinFreeGB" must be a positive number',
+    'agent "factorio-vm": "token" must be 32 to 256 characters',
+    'agent "factorio-vm": "host" must be an object',
+    'agent "factorio-vm": duplicate id',
+    'agent "a-very-long-agent-id-of-33-chars0": "id" must be lower-case letters, digits and dashes, starting with a letter, at most 32 characters',
+    'server "space": a factorio server is run by one agent only, not by "factorio-vm", "factorio-vm", "a-very-long-agent-id-of-33-chars0"',
+  ]);
+  // Unique across every token: a Mod's too.
+  const mod = withFactorio(dir);
+  mod.integrations.minecraft.tokens.gtnh = AGENT_TOKEN;
+  assert.deepEqual(validateConfig(mod), ['agent "factorio-vm": "token" is the same as another token']);
+});
+
+test("tokens and server ids fit the wire's 256-character cap, so a hello can carry them", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { integrations: _, ...none } = valid(dir);
+  const id = (sid: string) => validateConfig({ ...none, servers: [{ ...none.servers[0], id: sid }] });
+  assert.deepEqual(id('x'.repeat(256)), []);
+  assert.deepEqual(id('x'.repeat(257)), ['servers[0]: "id" must be at most 256 characters']);
+  const mod = valid(dir);
+  mod.integrations.minecraft.tokens.gtnh = 'm'.repeat(256);
+  assert.deepEqual(validateConfig(mod), []);
+  mod.integrations.minecraft.tokens.gtnh = 'm'.repeat(257);
+  assert.deepEqual(validateConfig(mod), ['integrations.minecraft.tokens: "gtnh" must be 16 to 256 characters']);
+  const agent = withFactorio(dir);
+  agent.integrations.agents.agents[0]!.token = 'a'.repeat(256);
+  assert.deepEqual(validateConfig(agent), []);
+  agent.integrations.agents.agents[0]!.token = 'a'.repeat(257);
+  assert.deepEqual(validateConfig(agent), ['agent "factorio-vm": "token" must be 32 to 256 characters']);
+});
+
+test('the agents integration listens on an IPv4 address and a port of its own', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = withFactorio(dir);
+  const agents = (a: unknown, extra: object = {}) => validateConfig({ ...c, integrations: { ...c.integrations, agents: a, ...extra } });
+  const list = c.integrations.agents.agents;
+  assert.deepEqual(agents('x'), ['integrations: "agents" must be an object', 'server "space": a factorio server must be the "server" of an agent in integrations.agents']);
+  assert.deepEqual(agents({ agents: list }), ['integrations.agents: "listen" must be an object with "host" and "port"']);
+  assert.deepEqual(agents({ listen: { host: '100.101.102.103', port: 25584 } }), [
+    'integrations.agents: "agents" must be a list',
+    'server "space": a factorio server must be the "server" of an agent in integrations.agents',
+  ]);
+  assert.deepEqual(agents({ listen: { host: 'tailnet', port: 0 }, agents: list }), [
+    'integrations.agents.listen: "host" must be an IPv4 address',
+    'integrations.agents.listen: "port" must be a port number (1–65535)',
+  ]);
+  const web = { listenPort: 25581, publicUrl: 'https://orrery.example', clientId: ID };
+  assert.deepEqual(agents({ listen: { host: '100.101.102.103', port: 25580 }, agents: list }), [
+    'integrations.agents.listen: "port" must differ from integrations.minecraft.listenPort',
+  ]);
+  assert.deepEqual(agents({ listen: { host: '100.101.102.103', port: 25581 }, agents: list }, { web }), [
+    'integrations.agents.listen: "port" must differ from integrations.web.listenPort',
+  ]);
+});
+
+test("loadConfig defaults an agent's Host limits like the hub's own", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const c = withFactorio(dir);
+  c.integrations.agents.agents.push({ id: 'other', name: 'Other', token: `${AGENT_TOKEN}-2`, address: '100.90.80.71', server: 'more', host: { memoryMinutes: 10 } });
+  c.servers.push({ id: 'more', name: 'More', game: 'factorio', service: 'more' });
+  c.integrations.systemd.push({ id: 'more', unit: 'more.service' });
+  const path = join(dir, 'config.json');
+  await writeFile(path, JSON.stringify(c));
+  const { agents } = loadConfig(path).integrations;
+  assert.deepEqual(agents!.listen, { host: '100.101.102.103', port: 25584 });
+  assert.deepEqual(
+    agents!.agents.map((a) => a.host),
+    [
+      { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 },
+      { memoryMaxPercent: 90, memoryMinutes: 10, diskMinFreeGB: 10 },
+    ],
+  );
+  assert.equal(agents!.agents[0]!.server, 'space');
 });
 
 test('every integration is optional', async (t) => {
@@ -344,6 +501,7 @@ test('loadConfig applies each per-server default once, and keeps set values', as
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const d = await load(dir, {});
+  assert.equal(d.game, 'minecraft');
   assert.deepEqual(d.lag, { tps: 15, minutes: 2, enabled: true });
   assert.equal(d.quests, 'batched');
   assert.equal(d.backupMinFreeGB, 10);
@@ -353,6 +511,13 @@ test('loadConfig applies each per-server default once, and keeps set values', as
   assert.equal(s.quests, 'off');
   assert.equal(s.backupMinFreeGB, 3);
   assert.equal(s.backupMaxAgeHours, 26);
+  const path = join(dir, 'factorio.json');
+  const factorio = withFactorio(dir);
+  delete factorio.servers[1]!.lagTps;
+  await writeFile(path, JSON.stringify(factorio));
+  const f = loadConfig(path).servers[1]!;
+  assert.equal(f.game, 'factorio');
+  assert.deepEqual(f.lag, { tps: 50, minutes: 2, enabled: true }); // a factorio server's lag line is 50 of its 60 UPS
 });
 
 test('GitHub needs a repo; its deploy targets are absolute paths and unit names, defaulted for production', async (t) => {

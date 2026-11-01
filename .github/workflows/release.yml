@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ['hub-v*', 'mod-v*', 'web-v*']
+    tags: ['hub-v*', 'mod-v*', 'web-v*', 'agent-v*', 'factorio-v*']
 
 permissions:
   contents: write # gh release create
@@ -32,6 +32,23 @@ jobs:
       - name: Archive the dashboard build
         if: startsWith(github.ref_name, 'web-v')
         run: mkdir -p dist && tar -czf "dist/orrery-$GITHUB_REF_NAME.tar.gz" -C web-dist .
+      - uses: actions/download-artifact@v4
+        if: startsWith(github.ref_name, 'agent-v')
+        with:
+          name: agent-dist
+          path: agent-dist
+      - name: Name the agent's tarball and its checksum
+        if: startsWith(github.ref_name, 'agent-v')
+        run: | # the checksum names the bare file, so `sha256sum -c` works next to it
+          v=$(tar -xzOf agent-dist/agent-dist.tar.gz ./package.json | jq -r .version) # what the agent will report
+          [[ $v == "${GITHUB_REF_NAME#agent-v}" ]] || { echo "the agent's tarball says version $v, not $GITHUB_REF_NAME's"; exit 1; }
+          mkdir -p dist && mv agent-dist/agent-dist.tar.gz "dist/orrery-$GITHUB_REF_NAME.tar.gz"
+          cd dist && sha256sum "orrery-$GITHUB_REF_NAME.tar.gz" > "orrery-$GITHUB_REF_NAME.tar.gz.sha256"
+      - uses: actions/download-artifact@v4
+        if: startsWith(github.ref_name, 'factorio-v')
+        with:
+          name: factorio-zip
+          path: dist
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,3 +56,10 @@ jobs:
           files=()
           if [[ -d dist ]]; then files=(dist/*); fi
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md "${files[@]}"
+      # The zip is CI's (factorio-zip.sh wrote the tag's version into its info.json), already on the GitHub release.
+      # A failed upload leaves that release in place: fix forward with the next patch.
+      - name: Put the Factorio mod on the mod portal
+        if: startsWith(github.ref_name, 'factorio-v')
+        env:
+          FACTORIO_API_KEY: ${{ secrets.FACTORIO_API_KEY }} # "ModPortal: Publish Mods" and "ModPortal: Upload Mods"
+        run: bash .github/factorio-publish.sh "dist/orrery_${GITHUB_REF_NAME#factorio-v}.zip"

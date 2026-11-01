@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { APIEmbed } from 'discord.js';
 import {
+  chatContent,
   COLORS,
   formatBackupList,
   formatBackupStatus,
@@ -9,6 +10,7 @@ import {
   formatTargetEvent,
   formatLastSeen,
   formatLinked,
+  formatLinkHint,
   formatNotice,
   formatOutput,
   formatPlayers,
@@ -20,6 +22,8 @@ import {
   formatTop,
   formatTopic,
   formatTps,
+  inline,
+  md,
   TOPIC_MIN_GAP_MS,
   topicDue,
   type Post,
@@ -78,7 +82,7 @@ test('formatOutput always yields one valid code block under 2000 chars', () => {
 const first = (p: Post) => (p as { embeds: APIEmbed[] }).embeds[0];
 
 test('formatStatus is an embed with state, TPS, players and uptime', () => {
-  const base: ServerState = { id: 's', name: 'GTNH', online: true, hung: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
+  const base: ServerState = { id: 's', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
   const e = first(formatStatus(base, 1, 0.5));
   assert.equal(e.title, 'GTNH — 🟢 Online');
   assert.equal(e.color, COLORS.green);
@@ -155,6 +159,13 @@ test('formatBackupStatus and formatBackupList show count and total size', () => 
   assert.equal(first(formatBackupStatus([], now, null)).description, 'No backups found.');
 });
 
+test("an Agent's save names can't format the backup posts: escaped as the newest, kept inside their code span in the list", () => {
+  const now = 1_000_000_000_000;
+  const hostile = { name: '[x](https://e.example) `y`_z.zip', size: 1024, mtimeMs: now, kind: 'world' as const, current: true };
+  assert.equal(first(formatBackupStatus([hostile], now, null)).fields![0]!.value, '\\[x](https://e.example) \\`y\\`\\_z.zip');
+  assert.equal(first(formatBackupList([hostile])).description, "`[x](https://e.example) 'y'_z.zip` 1.0 KB");
+});
+
 test('formatSummary lays out the daily stats', () => {
   const e = first(
     formatSummary('GTNH', {
@@ -189,7 +200,7 @@ test('formatOutput truncates long emoji output without splitting an emoji', () =
   assert.ok(out.endsWith('😀\n… (truncated)\n```'));
 });
 
-const online: ServerState = { id: 'gtnh', name: 'GTNH', online: true, hung: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
+const online: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
 
 test('formatPresence has one segment per server', () => {
   assert.equal(formatPresence([online]), 'GTNH: 2 online · 20 TPS');
@@ -222,8 +233,10 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
   const s: ServerState = {
     id: 's',
     name: 'GTNH',
+    game: 'minecraft',
     online: true,
     hung: false,
+    paused: false,
     tps: 13.4,
     players: [],
     dims: [{ id: -1, name: 'Nether', ms: 72.4 }],
@@ -241,6 +254,33 @@ test('formatTps shows now, averages, a trend and the slowest dimensions', () => 
     ],
   );
   assert.equal(first(formatTps({ ...s, online: false, tps: null }, [], null, null)).title, 'GTNH: offline');
+});
+
+test("a factorio server's rate is UPS out of 60: bands, trend and wording, and no dimensions", () => {
+  const s: ServerState = { id: 'f', name: 'Space Age', game: 'factorio', online: true, hung: false, paused: false, tps: 54, players: ['Ann'], dims: [] };
+  const e = first(formatTps(s, [{ ts: 1, tps: 60 }, { ts: 2, tps: 30 }], { avg: 45, min: 30 }, null));
+  assert.equal(e.title, 'Space Age: 54.0 UPS');
+  assert.equal(e.color, COLORS.green); // 54 is 0.9 of 60
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Last hour', '45.0 (min 30.0)'],
+      ['Last 24 h', 'n/a'],
+      ['Trend (1 sample/min)', '█▅'],
+    ],
+  );
+  assert.equal(first(formatTps({ ...s, tps: 40 }, [], null, null)).color, COLORS.orange); // 20 TPS would be green on Minecraft's scale
+  assert.equal(first(formatTps({ ...s, tps: 35 }, [], null, null)).color, COLORS.red);
+  assert.deepEqual(first(formatStatus(s, null, null)).fields![0], { name: 'UPS', value: '54.0', inline: true });
+  assert.equal(formatPresence([s, online]), 'Space Age: 1 online · 54 UPS | GTNH: 2 online · 20 TPS');
+  assert.equal(formatTopic(s), '🟢 Online · 54 UPS · 1 player: Ann');
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'f' });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 41.5, label: 'UPS', worst: null }), {
+    embeds: [{ title: '🐢 Lag: 41.5 UPS', color: COLORS.orange }], // no dimensions to name
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 59.9, label: 'UPS' }), {
+    embeds: [{ title: '✅ UPS back to normal (59.9)', color: COLORS.green }],
+  });
 });
 
 test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and latest', () => {
@@ -311,13 +351,13 @@ test("formatEvent posts lag and backup notices with today's wording and severity
   const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
   const nether = { id: -1, name: 'Nether', ms: 72.4 };
   const GB = 1024 ** 3;
-  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether }), {
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, label: 'TPS', worst: nether }), {
     embeds: [{ title: '🐢 Lag: 12.3 TPS; slowest: Nether (DIM -1) 72 ms/tick', color: COLORS.orange }],
   });
-  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, worst: null }), {
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, label: 'TPS', worst: null }), {
     embeds: [{ title: '🐢 Lag: 9.0 TPS; slowest: unknown', color: COLORS.orange }],
   });
-  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9 }), {
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9, label: 'TPS' }), {
     embeds: [{ title: '✅ TPS back to normal (19.9)', color: COLORS.green }],
   });
   assert.deepEqual(post({ severity: 'warning', kind: 'backupOverdue', hours: 30, newest: 'a.zip' }), {
@@ -328,7 +368,7 @@ test("formatEvent posts lag and backup notices with today's wording and severity
     embeds: [{ title: '⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)', color: COLORS.orange }],
   });
   assert.deepEqual(post({ severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)' }), {
-    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }],
+    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }], // mid-title: no list rule, so no backslash
   });
   assert.deepEqual(post({ severity: 'problem', kind: 'backupFailed', detail: 'disk full' }), {
     embeds: [{ title: '❌ Backup failed: disk full', color: COLORS.red }],
@@ -426,4 +466,67 @@ test('deploy notices reach Discord worded and coloured by outcome', () => {
     '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
     0xe74c3c,
   ]);
+});
+
+test('chat and other plain posts are cut to 2000 characters after escaping, never splitting an emoji', () => {
+  const pipes = '|'.repeat(1024); // a full 1 KiB message that escaping doubles
+  const chat = formatEvent({ serverId: 's', type: 'chat', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(chat.content.length, 2000);
+  assert.ok(chat.content.startsWith('**Steve**: \\|\\|'));
+  const death = formatEvent({ serverId: 's', type: 'death', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(death.content.length, 2000);
+  assert.equal(chatContent('a'.repeat(3000)).length, 2000);
+  assert.equal(chatContent('**hi**'), '\\*\\*hi\\*\\*');
+  assert.equal(chatContent(`${'a'.repeat(1999)}😀`), 'a'.repeat(1999));
+});
+
+test("a milestone is posted per kind, escaped, its text capped at 200 and its force named only when it isn't the default", () => {
+  const milestone = (m: { kind: 'research' | 'rocket' | 'platform' | 'landing'; text: string; player?: string; force?: string }) =>
+    formatEvent({ serverId: 's', type: 'milestone', ...m });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Mining productivity 12' }), { content: '🔬 Research finished: **Mining productivity 12**' });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Logistics_2', force: 'team_red' }), { content: '🔬 Research finished: **Logistics\\_2** (team\\_red)' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: 'Nauvis' }), { content: '🚀 First rocket launched from **Nauvis**' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: '' }), { content: '🚀 First rocket launched' });
+  assert.deepEqual(milestone({ kind: 'platform', text: '# [Home](http://x)' }), { content: '🛰️ First space platform in orbit: **\\# \\[Home](http://x)**' });
+  assert.deepEqual(milestone({ kind: 'landing', text: 'Vulcanus', player: 'x_y', force: 'blue' }), { content: '🪐 First landing on **Vulcanus** by **x\\_y** (blue)' });
+  const long = milestone({ kind: 'research', text: 'a'.repeat(1024) }) as { content: string };
+  assert.equal(long.content, `🔬 Research finished: **${'a'.repeat(200)}**`);
+});
+
+test('the /link hint names each game that has a server, in a fixed order', () => {
+  assert.equal(formatLinkHint('ABC234', ['minecraft']), 'In Minecraft, type `/discord link ABC234` within 10 minutes.');
+  assert.equal(formatLinkHint('ABC234', ['factorio']), 'In Factorio, type `/orrery-link ABC234` within 10 minutes.');
+  assert.equal(
+    formatLinkHint('ABC234', ['factorio', 'minecraft']),
+    'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. The code works for 10 minutes.',
+  );
+});
+
+test("an Agent's text in a notice or a topic is escaped: a backup's detail, a save's name, a refusal, a mount, a version (inline: mid-line or a title), players", () => {
+  const evil = '[pay](https://evil.example) # **x** ||y|| <#1>';
+  assert.notEqual(md(evil), evil);
+  // A notice is an embed title, so its Agent text is escaped inline: masked links and every inline markup still are.
+  assert.equal(inline(evil), '\\[pay](https://evil.example) # \\*\\*x\\*\\* \\|\\|y\\|\\| <#1>');
+  assert.equal(inline('`a` _b_ ~~c~~ __d__ *e*'), '\\`a\\` \\_b\\_ \\~\\~c\\~\\~ \\_\\_d\\_\\_ \\*e\\*');
+  assert.equal(inline('12.3 seconds (1.2GB)'), '12.3 seconds (1.2GB)');
+  assert.equal(inline('1.4.0'), '1.4.0');
+  const notice = (n: Notice) => (formatEvent({ ...n, type: 'notice', serverId: 'space' }) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  assert.equal(notice({ severity: 'good', kind: 'backupFinished', detail: evil }), `✅ Backup finished (${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'backupFailed', detail: evil }), `❌ Backup failed: ${inline(evil)}`);
+  assert.equal(notice({ severity: 'warning', kind: 'backupOverdue', hours: 13, newest: evil }), `⚠️ No new backup for 13 h (newest: ${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'restartFailed', error: evil }), `❌ Restart failed: ${inline(evil)}`);
+  const target = (e: object) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  const host = { target: 'host', id: 'vm', type: 'notice' };
+  assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${inline(evil)}: 0 B free (limit 10 GB)`);
+  assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${inline(evil)} back to 0 B free`);
+  assert.equal(
+    target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: evil }),
+    `⚠️ Host vm: game events from agent Factorio VM are off: ${inline(evil)}`,
+  );
+  assert.equal(target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: 'x'.repeat(2048) })!.length, 256); // an embed title's most
+  assert.equal(target({ ...host, severity: 'good', kind: 'eventsOn', name: 'Factorio VM' }), '✅ Host vm: game events from agent Factorio VM are on again');
+  const deploy = { target: 'deploy', id: 'gtnh', type: 'notice', part: 'mod', from: evil, to: 'mod-v1.2.0' };
+  assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${inline(evil)} → mod-v1.2.0 (by web:a (1))`);
+  assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${inline(evil)}`);
+  assert.equal(formatTopic({ ...online, game: 'factorio', tps: 60, players: [evil] }), `🟢 Online · 60 UPS · 1 player: ${md(evil)}`);
 });

@@ -3,9 +3,15 @@ import { cpus, loadavg } from 'node:os';
 import { diskSpace } from './backups.ts';
 import type { HostIntegration } from './config.ts';
 import type { Db } from './db.ts';
+import { LIMITS } from './protocol.ts';
 import type { HostSample, ServerHub } from './servers.ts';
 
 const GB = 1024 ** 3;
+/**
+ * How long a mount of a Host with no mounts in config (an Agent's: its samples name them) waits after a disk notice
+ * before its next: a change meanwhile is told at the first sample after the wait, if it still holds.
+ */
+export const DISK_NOTICE_MS = 10 * 60_000;
 /** The most samples `history` returns: a longer period (over 25 hours of minutes) is averaged into this many buckets. */
 export const HISTORY_POINTS = 1500;
 
@@ -41,33 +47,42 @@ export const localHost: HostReaders = {
 };
 
 /**
- * Samples the host once a minute into the database and onto the event stream. Warns (once, then once when it
- * clears) when memory use stays at or over the limit for `memoryMinutes` samples, and when a mount runs low on
- * disk. Hub core.
+ * One host's samples: each is stored into the database and put on the event stream (`record`). Warns (once, then once
+ * when it clears) when memory use stays at or over the limit for `memoryMinutes` samples, and when a mount runs low
+ * on disk. Only the hub's own host samples itself, once a minute (`start`); other hosts' samples are reported to the
+ * hub. A Host with no mounts in config (an Agent's) watches the first `LIMITS.disks` (32) mounts its samples name, and
+ * tells each one's changes at most once per `DISK_NOTICE_MS` (10 min), so what a sample names can't flood the alerts.
+ * Hub core.
  */
 export class HostMonitor {
   #hub: Pick<ServerHub, 'publishTarget'>;
   #db: Db;
   #cfg: HostIntegration;
-  #read: HostReaders;
   #cpu: { idle: number; total: number } | undefined;
   #latest: HostSample | null = null;
   #highMemory = 0; // consecutive samples at or over the limit
   #memoryWarned = false;
-  #lowDisks = new Set<string>();
+  /** Each watched mount: whether it was last told as low, and when (the hub's clock). */
+  #disks = new Map<string, { low: boolean; at: number }>();
   #timer: NodeJS.Timeout | undefined;
 
-  constructor(hub: Pick<ServerHub, 'publishTarget'>, db: Db, cfg: HostIntegration, read: HostReaders) {
+  constructor(hub: Pick<ServerHub, 'publishTarget'>, db: Db, cfg: HostIntegration) {
     this.#hub = hub;
     this.#db = db;
     this.#cfg = cfg;
-    this.#read = read;
   }
 
-  /** The first sample comes after `intervalMs`: CPU use is measured between two readings. */
-  start(intervalMs = 60_000): void {
-    this.#cpu = this.#read.cpu();
-    this.#timer = setInterval(() => void this.#sample().catch((err) => console.error('[host] sample failed:', err)), intervalMs);
+  get id(): string {
+    return this.#cfg.id;
+  }
+
+  /** Samples the hub's own host through `read`. The first sample comes after `intervalMs`: CPU use is measured between two readings. */
+  start(read: HostReaders, intervalMs = 60_000): void {
+    this.#cpu = read.cpu();
+    this.#timer = setInterval(
+      () => void this.#sample(read).then((sample) => this.record(sample)).catch((err) => console.error('[host] sample failed:', err)),
+      intervalMs,
+    );
     this.#timer.unref();
   }
 
@@ -95,25 +110,8 @@ export class HostMonitor {
     return [...buckets.values()].map(average);
   }
 
-  async #sample(): Promise<void> {
-    const cpu = this.#read.cpu();
-    const busy = cpu.total - this.#cpu!.total - (cpu.idle - this.#cpu!.idle);
-    const elapsed = cpu.total - this.#cpu!.total;
-    this.#cpu = cpu;
-    const memory = await this.#read.memory();
-    const disks: HostSample['disks'] = [];
-    for (const mount of this.#cfg.mounts) {
-      const space = await this.#read.disk(mount);
-      if (space) disks.push({ mount, ...space });
-      else console.error(`[host] reading disk ${mount} failed`);
-    }
-    const sample: HostSample = {
-      ts: Date.now(),
-      cpu: elapsed > 0 ? busy / elapsed : 0,
-      load: this.#read.load(),
-      memory: { used: memory.total - memory.available, total: memory.total },
-      disks,
-    };
+  /** A new sample of this host: stored, streamed, then checked against the memory and disk limits. */
+  record(sample: HostSample): void {
     this.#latest = sample;
     this.#db.recordHostSample(this.#cfg.id, sample);
     const at = { target: 'host', id: this.#cfg.id, type: 'notice' } as const;
@@ -128,15 +126,71 @@ export class HostMonitor {
       this.#memoryWarned = false;
       this.#hub.publishTarget({ ...at, severity: 'good', kind: 'memoryOk', percent });
     }
-    for (const { mount, free } of disks) {
-      if (free < this.#cfg.diskMinFreeGB * GB) {
-        if (this.#lowDisks.has(mount)) continue;
-        this.#lowDisks.add(mount);
-        this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'diskLow', mount, free, minFreeGB: this.#cfg.diskMinFreeGB });
-      } else if (this.#lowDisks.delete(mount)) {
-        this.#hub.publishTarget({ ...at, severity: 'good', kind: 'diskOk', mount, free });
+    const reported = this.#cfg.mounts.length === 0; // an Agent's Host: its samples name its mounts
+    for (const { mount, free } of sample.disks) {
+      const low = free < this.#cfg.diskMinFreeGB * GB;
+      let disk = this.#disks.get(mount);
+      if (!disk) {
+        if (reported && this.#disks.size >= LIMITS.disks) continue; // the first 32 it named only
+        this.#disks.set(mount, (disk = { low: false, at: -Infinity }));
       }
+      if (low === disk.low) continue;
+      const now = Date.now();
+      if (reported && now - disk.at < DISK_NOTICE_MS) continue;
+      Object.assign(disk, { low, at: now });
+      if (low) this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'diskLow', mount, free, minFreeGB: this.#cfg.diskMinFreeGB });
+      else this.#hub.publishTarget({ ...at, severity: 'good', kind: 'diskOk', mount, free });
     }
+  }
+
+  /** A sample of the hub's own host: CPU use since the last one, its configured mounts. */
+  async #sample(read: HostReaders): Promise<HostSample> {
+    const cpu = read.cpu();
+    const busy = cpu.total - this.#cpu!.total - (cpu.idle - this.#cpu!.idle);
+    const elapsed = cpu.total - this.#cpu!.total;
+    this.#cpu = cpu;
+    const memory = await read.memory();
+    const disks: HostSample['disks'] = [];
+    for (const mount of this.#cfg.mounts) {
+      const space = await read.disk(mount);
+      if (space) disks.push({ mount, ...space });
+      else console.error(`[host] reading disk ${mount} failed`);
+    }
+    return {
+      ts: Date.now(),
+      cpu: elapsed > 0 ? busy / elapsed : 0,
+      load: read.load(),
+      memory: { used: memory.total - memory.available, total: memory.total },
+      disks,
+    };
+  }
+}
+
+/** Every Host the hub knows, a `HostMonitor` each, in the order added (the hub's own first). Hub core. */
+export class Hosts {
+  #hub: Pick<ServerHub, 'publishTarget'>;
+  #db: Db;
+  #monitors = new Map<string, HostMonitor>();
+
+  constructor(hub: Pick<ServerHub, 'publishTarget'>, db: Db) {
+    this.#hub = hub;
+    this.#db = db;
+  }
+
+  /** A monitor for a host with its own limits; ids are unique. */
+  add(cfg: HostIntegration): HostMonitor {
+    if (this.#monitors.has(cfg.id)) throw new Error(`host ${cfg.id} is already known`);
+    const monitor = new HostMonitor(this.#hub, this.#db, cfg);
+    this.#monitors.set(cfg.id, monitor);
+    return monitor;
+  }
+
+  get(id: string): HostMonitor | undefined {
+    return this.#monitors.get(id);
+  }
+
+  list(): HostMonitor[] {
+    return [...this.#monitors.values()];
   }
 }
 

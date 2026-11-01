@@ -7,7 +7,7 @@ import type { Notice, ServerHub, ServerState } from '../src/servers.ts';
 const MIN = 60_000;
 
 function setup(configs: Record<string, LagConfig> = { s: { tps: 15, minutes: 2, enabled: true } }) {
-  let state: ServerState = { id: 's', name: 'S', online: true, hung: false, tps: 20, players: [], dims: [] };
+  let state: ServerState = { id: 's', name: 'S', game: 'minecraft', online: true, hung: false, paused: false, tps: 20, players: [], dims: [] };
   const notices: Notice[] = [];
   const hub = { list: () => [state], publish: (_id: string, n: Notice) => notices.push(n) } as unknown as Pick<ServerHub, 'list' | 'publish'>;
   const db = new Db(':memory:');
@@ -28,10 +28,20 @@ test('alerts after TPS stays low for the configured minutes, then once on recove
   assert.deepEqual(notices, []); // one low minute isn't lag yet
   sample({ tps: 12.3, dims: nether });
   sample({ tps: 11, dims: nether }); // still lagging: no repeat
-  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lag', tps: 12.3, worst: nether[0] }]);
+  assert.deepEqual(notices, [{ severity: 'warning', kind: 'lag', tps: 12.3, label: 'TPS', worst: nether[0] }]);
   sample({ tps: 19.9 });
   sample({ tps: 20 });
-  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 19.9 }]);
+  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 19.9, label: 'TPS' }]);
+});
+
+test("a factorio server's lag notices are in UPS", () => {
+  const { notices, sample } = setup({ s: { tps: 50, minutes: 1, enabled: true } });
+  sample({ game: 'factorio', tps: 42 });
+  sample({ tps: 60 });
+  assert.deepEqual(notices, [
+    { severity: 'warning', kind: 'lag', tps: 42, label: 'UPS', worst: null },
+    { severity: 'good', kind: 'lagRecovered', tps: 60, label: 'UPS' },
+  ]);
 });
 
 test('a single normal sample resets the count', () => {
@@ -48,9 +58,21 @@ test('offline or hung servers are neither sampled nor judged; lag state clears s
   sample({ tps: 10 }); // lag alert
   sample({ online: false, tps: null });
   sample({ online: true, hung: true, tps: 10 });
-  sample({ hung: false, tps: 20 }); // back: no "back to normal", the outage had its own alerts
+  sample({ hung: false, paused: false, tps: 20 }); // back: no "back to normal", the outage had its own alerts
   assert.equal(notices.length, 1);
   assert.equal(db.tpsSince('s', 0).length, 3);
+});
+
+test('a paused server is neither sampled nor judged, and keeps its lag state for when it runs again', () => {
+  const { db, notices, sample } = setup({ s: { tps: 50, minutes: 2, enabled: true } });
+  sample({ game: 'factorio', tps: 40 });
+  sample({ tps: 40 }); // lag alert
+  sample({ paused: true, tps: 2 });
+  sample({ paused: true, tps: 2 });
+  assert.equal(db.tpsSince('s', 0).length, 2); // no rows while paused
+  assert.equal(notices.length, 1);
+  sample({ paused: false, tps: 60 }); // running again: its recovery is news
+  assert.deepEqual(notices.slice(1), [{ severity: 'good', kind: 'lagRecovered', tps: 60, label: 'UPS' }]);
 });
 
 test('thresholds are per server and can be switched off', () => {
@@ -64,5 +86,5 @@ test('thresholds are per server and can be switched off', () => {
 });
 
 test('sparkline scales 0–20 TPS onto eight bars', () => {
-  assert.equal(sparkline([0, 5, 10, 15, 20, 25, -1]), '▁▃▅▇██▁');
+  assert.equal(sparkline([0, 5, 10, 15, 20, 25, -1], 20), '▁▃▅▇██▁');
 });

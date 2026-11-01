@@ -1,8 +1,21 @@
-// Wire contract between the mod and the hub: one JSON object per line.
-// The message types live in types.ts (pure types, for the dashboard too); this file validates against them.
-import type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
-export type { DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+// Wire contract between the hub and what connects to it, one JSON object per line: a Mod or an Agent's game
+// connection (`parseModLine`), and an Agent connection (`parseAgentLine`).
+// The message types live in types.ts (pure types, for the dashboard and the agent too); this file validates against them.
+import type { AgentHello, AgentMsg, AgentReplyData, DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+export type {
+  AgentHello,
+  AgentMsg,
+  AgentReplyData,
+  AgentRequest,
+  DimTime,
+  Hello,
+  HubAgentMsg,
+  HubMsg,
+  ModMsg,
+  QuestDone,
+} from './types.ts';
 
+/** The Mod's protocol version; an Agent's `agentHello` announces the same number. */
 export const PROTOCOL_VERSION = 1;
 /**
  * Oldest mod protocol the hub still accepts. Policy (docs/adr/0001): the hub supports the current and the
@@ -10,70 +23,228 @@ export const PROTOCOL_VERSION = 1;
  */
 export const MIN_PROTOCOL = 1;
 
-type Kind = 'string' | 'number' | 'boolean' | 'string[]' | 'dims?' | 'quests';
+/**
+ * Field limits, the same on the Mod port and the Agent port: string lengths in characters (UTF-16 code units),
+ * lists in entries. A message with a field over its limit is invalid as a whole, but for a command's `output` and a
+ * `backup`'s `detail`, which are cut to their limits: Mods already deployed send up to 2000 lines of any length, and
+ * an exception's text as is. `text` is every string with no limit of its own (ids, tokens, versions, unit names,
+ * tags, file names).
+ */
+export const LIMITS = {
+  /** A player name; a Factorio force's too. */
+  player: 64,
+  /** Chat and death messages, a milestone's text. */
+  message: 1024,
+  players: 200,
+  /** A command's output lines, of `line` each. */
+  output: 500,
+  /** One line of output, a log or a journal. */
+  line: 1024,
+  /** A `reply`'s `data`, as serialised JSON. */
+  replyData: 256 * 1024,
+  /** The lines of a `log` or `journal` reply. */
+  logLines: 1000,
+  saves: 500,
+  mods: 500,
+  /** A backup's or update step's `detail`, a `reply`'s `error`, an `events`' `reason`. */
+  detail: 2048,
+  /** A `deployResult`'s `log`: the last 40 lines of the deploy. */
+  deployLog: 16 * 1024,
+  /** A host sample's mounts, and the files a `logs` reply lists. */
+  disks: 32,
+  logFiles: 32,
+  text: 256,
+  /**
+   * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line
+   * destroys the socket. The Agent keeps every line it sends at or under it.
+   */
+  lineBytes: 1024 * 1024,
+} as const;
 
-const SCHEMAS: Record<string, Record<string, Kind>> = {
-  hello: { protocol: 'number', serverId: 'string', token: 'string', modVersion: 'string' },
-  started: {},
-  stopping: {},
-  heartbeat: { tps: 'number', players: 'string[]', dims: 'dims?' },
-  chat: { player: 'string', message: 'string' },
-  join: { player: 'string' },
-  leave: { player: 'string' },
-  death: { player: 'string', message: 'string' },
-  achievement: { player: 'string', achievement: 'string' },
-  cmdResult: { id: 'string', output: 'string[]' },
-  cmdLate: { id: 'string', output: 'string[]' },
-  quest: { player: 'string', quests: 'quests' },
-  link: { player: 'string', uuid: 'string', code: 'string' },
-  unlink: { player: 'string' },
-  backup: { ok: 'boolean', detail: 'string' },
-};
+/** A failed check. */
+const BAD = Symbol('bad');
+/** Checks one field's value: a fresh copy of it (`undefined`: an optional field left out), or `BAD`. */
+type Check = (v: unknown) => unknown;
+/** One check per field of a message, its `type` left out. */
+type Fields<M> = { [K in Exclude<keyof M, 'type'>]-?: Check };
+/** A schema per message type, each with exactly that type's fields. */
+type Schemas<M extends { type: string }> = { [T in M['type']]: Fields<Extract<M, { type: T }>> };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const text = (v: unknown) => typeof v === 'string' && v.length > 0;
-const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
-
-function hasKind(value: unknown, kind: Kind): boolean {
-  switch (kind) {
-    case 'string[]':
-      return Array.isArray(value) && value.every((v) => typeof v === 'string');
-    case 'number':
-      return finite(value);
-    case 'boolean':
-      return typeof value === 'boolean';
-    case 'dims?': // optional: older mods don't send it
-      return (
-        value === undefined ||
-        (Array.isArray(value) &&
-          value.length <= 5 &&
-          value.every((d) => isObject(d) && finite(d.id) && text(d.name) && finite(d.ms)))
-      );
-    case 'quests':
-      return (
-        Array.isArray(value) &&
-        value.length >= 1 &&
-        value.length <= 50 &&
-        value.every((q) => isObject(q) && text(q.name) && typeof q.main === 'boolean')
-      );
-    case 'string':
-      return typeof value === 'string';
+const str =
+  (max: number = LIMITS.text, min = 0): Check =>
+  (v) =>
+    typeof v === 'string' && v.length >= min && v.length <= max ? v : BAD;
+const num: Check = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : BAD);
+const bool: Check = (v) => (typeof v === 'boolean' ? v : BAD);
+/** A string cut to `max` characters, for the fields older Mods send without a limit. */
+const clipped =
+  (max: number): Check =>
+  (v) =>
+    typeof v === 'string' ? v.slice(0, max) : BAD;
+const oneOf =
+  (...values: string[]): Check =>
+  (v) =>
+    typeof v === 'string' && values.includes(v) ? v : BAD;
+const optional =
+  (check: Check): Check =>
+  (v) =>
+    v === undefined ? undefined : check(v);
+const list =
+  (item: Check, max: number, min = 0): Check =>
+  (v) => {
+    if (!Array.isArray(v) || v.length < min || v.length > max) return BAD;
+    const out: unknown[] = [];
+    for (const x of v) {
+      const c = item(x);
+      if (c === BAD) return BAD;
+      out.push(c);
+    }
+    return out;
+  };
+/** As `list`, but entries past `max` are dropped instead of refusing the list. */
+const clippedList =
+  (item: Check, max: number): Check =>
+  (v) =>
+    Array.isArray(v) ? list(item, max)(v.slice(0, max)) : BAD;
+/** A new object holding only `fields`, each checked; optional ones left out stay out. */
+function pick(fields: Record<string, Check>, v: Record<string, unknown>): Record<string, unknown> | typeof BAD {
+  const out: Record<string, unknown> = {};
+  for (const [key, check] of Object.entries(fields)) {
+    const c = check(Object.hasOwn(v, key) ? v[key] : undefined);
+    if (c === BAD) return BAD;
+    if (c !== undefined) out[key] = c;
   }
+  return out;
 }
+const object =
+  (fields: Record<string, Check>): Check =>
+  (v) =>
+    isObject(v) ? pick(fields, v) : BAD;
+/**
+ * Any JSON value up to `max` characters serialised, as is (it came from `JSON.parse`, so it is a fresh tree). One
+ * too deeply nested to serialise again is refused, not thrown.
+ */
+const json =
+  (max: number): Check =>
+  (v) => {
+    if (v === undefined) return v;
+    try {
+      return JSON.stringify(v).length <= max ? v : BAD;
+    } catch {
+      return BAD;
+    }
+  };
 
-/** Parses one line from a mod; null for malformed JSON, unknown types, or wrong field types. */
-export function parseModLine(line: string): Hello | ModMsg | null {
-  let parsed: unknown;
+const player = str(LIMITS.player);
+const output = clippedList(clipped(LIMITS.line), LIMITS.output);
+const lines = object({ lines: list(str(LIMITS.line), LIMITS.logLines) });
+const hello = { protocol: num, serverId: str(), token: str(), modVersion: str() };
+
+/** A game connection: a Mod's on the Mod port, or an Agent's for its server on the Agent port. */
+const GAME: Schemas<Hello | ModMsg> = {
+  hello,
+  started: {},
+  stopping: {},
+  heartbeat: {
+    tps: num,
+    players: list(player, LIMITS.players),
+    dims: optional(list(object({ id: num, name: str(LIMITS.text, 1), ms: num }), 5)), // older mods don't send it
+    paused: optional(bool),
+  },
+  chat: { player, message: str(LIMITS.message) },
+  join: { player },
+  leave: { player },
+  death: { player, message: str(LIMITS.message) },
+  achievement: { player, achievement: str() },
+  cmdResult: { id: str(), output },
+  cmdLate: { id: str(), output },
+  quest: { player, quests: list(object({ name: str(LIMITS.text, 1), main: bool }), 50, 1) },
+  link: { player, uuid: str(), code: str() },
+  unlink: { player },
+  backup: { ok: bool, detail: clipped(LIMITS.detail) },
+  milestone: {
+    kind: oneOf('research', 'rocket', 'platform', 'landing'),
+    text: str(LIMITS.message),
+    player: optional(player),
+    force: optional(player),
+  },
+};
+
+const STEPS = ['prepare', 'backup', 'stop', 'swap', 'gate', 'rollback'];
+/** The first line on the Agent port (an `agentHello`, or a game connection's `hello`), and an Agent connection. */
+const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
+  agentHello: { protocol: num, agentId: str(), token: str(), agentVersion: str() },
+  hello,
+  ping: {},
+  bye: {},
+  hostSample: {
+    sample: object({
+      ts: num,
+      cpu: num,
+      load: list(num, 3),
+      memory: object({ used: num, total: num }),
+      disks: list(object({ mount: str(), free: num, total: num }), LIMITS.disks),
+    }),
+  },
+  serviceState: { unit: str(), active: str(), sub: str(), since: num, result: str() },
+  saves: {
+    saves: list(object({ name: str(), size: num, mtime: num, kind: oneOf('named', 'auto', 'world'), current: bool }), LIMITS.saves),
+    free: num,
+  },
+  installed: { factorio: str(), mods: list(object({ name: str(), version: str() }), LIMITS.mods) },
+  updateStep: { id: str(), step: oneOf(...STEPS), state: oneOf('waiting', 'running', 'done', 'failed'), detail: str(LIMITS.detail) },
+  updateDone: {
+    id: str(),
+    outcome: oneOf('ok', 'rolled back', 'failed in staging', 'failed before swap', 'failed', 'cancelled'),
+    from: str(),
+    to: str(),
+    backup: optional(str()),
+  },
+  deployResult: { tag: str(), outcome: oneOf('ok', 'failed', 'rolled back'), log: str(LIMITS.deployLog) },
+  events: { on: bool, reason: optional(str(LIMITS.detail)) },
+  reply: { id: str(), ok: bool, error: optional(str(LIMITS.detail)), data: json(LIMITS.replyData) },
+};
+
+/** The `data` of an ok `reply`, per request that answers with data. */
+const REPLY_DATA: { [K in keyof AgentReplyData]: Check } = {
+  journal: lines,
+  log: lines,
+  logs: object({ files: list(object({ name: str(), size: num, modified: num }), LIMITS.logFiles) }),
+};
+
+/** One line against `schemas`: a new object of only the schema's fields, or null. */
+function parse(line: string, schemas: Record<string, Record<string, Check>>): Record<string, unknown> | null {
+  let msg: unknown;
   try {
-    parsed = JSON.parse(line);
+    msg = JSON.parse(line);
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const msg = parsed as Record<string, unknown>;
-  if (typeof msg.type !== 'string' || !Object.hasOwn(SCHEMAS, msg.type)) return null;
-  for (const [field, kind] of Object.entries(SCHEMAS[msg.type])) {
-    if (!hasKind(msg[field], kind)) return null;
-  }
-  return msg as Hello | ModMsg;
+  if (!isObject(msg) || typeof msg.type !== 'string' || !Object.hasOwn(schemas, msg.type)) return null;
+  const fields = pick(schemas[msg.type]!, msg);
+  return fields === BAD ? null : { type: msg.type, ...fields };
+}
+
+/**
+ * Parses one line of a game connection (a Mod's, or an Agent's for its server); null for malformed JSON, unknown
+ * types, wrong field types or a field over its limit. The result is a new object holding only the schema's fields.
+ */
+export function parseModLine(line: string): Hello | ModMsg | null {
+  return parse(line, GAME) as Hello | ModMsg | null;
+}
+
+/**
+ * Parses one line on the Agent port: an `agentHello`, a game connection's `hello` (as a first line only; after it,
+ * the connection's lines go through `parseModLine`) or an Agent connection's message. Null and copies as
+ * `parseModLine`.
+ */
+export function parseAgentLine(line: string): AgentHello | Hello | AgentMsg | null {
+  return parse(line, AGENT) as AgentHello | Hello | AgentMsg | null;
+}
+
+/** An ok reply's `data` for a request of type `request`, copied; null if it isn't that request's shape or over a limit. */
+export function parseReplyData<K extends keyof AgentReplyData>(request: K, data: unknown): AgentReplyData[K] | null {
+  const v = REPLY_DATA[request](data);
+  return v === BAD ? null : (v as AgentReplyData[K]);
 }

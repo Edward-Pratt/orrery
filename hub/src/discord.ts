@@ -12,9 +12,11 @@ import {
 } from 'discord.js';
 import { basename } from 'node:path';
 import {
+  chatContent,
   formatBackupList,
   formatBackupStatus,
   formatEvent,
+  formatLinkHint,
   formatNotice,
   formatOutput,
   formatPlayers,
@@ -25,7 +27,6 @@ import {
   formatTop,
   formatTopic,
   formatTps,
-  md,
   topicDue,
   type Post,
   type TopicEdit,
@@ -33,11 +34,14 @@ import {
 import type { DiscordConfig } from './config.ts';
 import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { HubEvent, LiveEvent, ServerHub } from './servers.ts';
+import type { HubEvent, LiveEvent, ServerHub, TargetEvent } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
+import type { Game } from './types.ts';
 
 export type DiscordFrontend = {
   client: Client;
+  /** Stops it: held alerts dropped, the client destroyed. */
+  stop: () => void;
 };
 
 const WEBHOOK_NAME = 'GTNH Relay';
@@ -45,23 +49,23 @@ const CRASH_LOG_WINDOW_MS = 10 * 60_000;
 // Discord API error codes.
 const UNKNOWN_WEBHOOK = 10015;
 const MISSING_PERMISSIONS = 50013;
-const INVALID_FORM_BODY = 50035; // e.g. a webhook username containing "discord"
+const INVALID_FORM_BODY = 50035; // a field Discord won't take: a webhook username containing "discord", content too long
 
 const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
 
 // Admin commands are hidden (default_member_permissions "0") until the admin role is allowed under
 // Server Settings → Integrations; the adminRoleId check below still applies either way.
 export const COMMANDS = [
-  new SlashCommandBuilder().setName('status').setDescription('Server status, TPS and uptime'),
+  new SlashCommandBuilder().setName('status').setDescription('Server status, TPS/UPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
-  new SlashCommandBuilder().setName('tps').setDescription('TPS now, over the last hour and day, and the slowest dimensions'),
+  new SlashCommandBuilder().setName('tps').setDescription("TPS/UPS now, over the last hour and day, and a Minecraft server's slowest dimensions"),
   new SlashCommandBuilder()
     .setName('playtime')
     .setDescription("A player's playtime and when they were last seen")
-    .addStringOption((o) => o.setName('player').setDescription('Minecraft name'))
+    .addStringOption((o) => o.setName('player').setDescription('In-game name'))
     .addUserOption((o) => o.setName('user').setDescription('Or a Discord member who has linked their account')),
-  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your Minecraft name'),
-  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your Minecraft name'),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord account to your in-game name'),
+  new SlashCommandBuilder().setName('unlink').setDescription('Remove the link to your in-game name'),
   new SlashCommandBuilder()
     .setName('top')
     .setDescription('Top players by playtime')
@@ -79,7 +83,7 @@ export const COMMANDS = [
     .setName('cmd')
     .setDescription('Run a server console command (admin role only)')
     .setDefaultMemberPermissions(0)
-    .addStringOption((o) => o.setName('command').setDescription('Command, without the leading /').setRequired(true)),
+    .addStringOption((o) => o.setName('command').setDescription('The command, as typed in the server console').setRequired(true)),
   new SlashCommandBuilder()
     .setName('restart')
     .setDescription('Restart the server with an in-game countdown (admin role only)')
@@ -95,7 +99,7 @@ export const COMMANDS = [
     .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the scheduled restart')),
   new SlashCommandBuilder()
     .setName('backup')
-    .setDescription('ServerUtilities backups (admin role only)')
+    .setDescription('Backups (admin role only)')
     .setDefaultMemberPermissions(0)
     .addSubcommand((s) => s.setName('start').setDescription('Start a backup now and report when it finishes'))
     .addSubcommand((s) => s.setName('status').setDescription('Newest backup, count and total size'))
@@ -113,20 +117,156 @@ export function channelFor(e: LiveEvent, cfg: DiscordConfig): string | undefined
   return Object.hasOwn(cfg.channels, e.serverId) ? cfg.channels[e.serverId] : undefined;
 }
 
+/** How often an Agent's `agentLost`, and its `agentBack`, may each be posted to Discord: once per 10 minutes. */
+export const AGENT_ALERT_MS = 10 * 60_000;
+
+type AgentNotice = Extract<TargetEvent, { type: 'notice'; kind: 'agentLost' | 'agentBack' }>;
+
 /**
- * Posts each announced event about the host, a service or a check to the alerts channel (none: not posted). Server
- * events never come this way: they go to their own server's channel.
+ * An Agent's `agentLost` and `agentBack` on Discord (`seen` takes each; `post` puts one up): each kind at most once
+ * per `AGENT_ALERT_MS` per Agent. One that comes sooner is held and posted when its 10 minutes are up, if it is still
+ * the Agent's latest; one that would only repeat what Discord last said is not posted, so a back after a held lost is
+ * held too. A flapping Agent can't flood the alerts channel, and Discord's last word is never wrong for longer than
+ * 10 minutes; the stream and the dashboard keep every event. `stop` drops what is held.
  */
-export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId: string, message: Post) => Promise<void>): void {
-  hub.on('target', (e) => {
+export function agentAlerts(post: (e: AgentNotice) => void): { seen: (e: AgentNotice) => void; stop: () => void } {
+  type Agent = { shown: AgentNotice['kind'] | null; at: Record<AgentNotice['kind'], number>; latest: AgentNotice; timer?: NodeJS.Timeout };
+  const agents = new Map<string, Agent>(); // by host id: configured Agents only
+  const ago = (now: number, stamp: number) => (now < stamp ? Infinity : now - stamp); // a clock stepped back: long ago
+  const show = (a: Agent) => {
+    clearTimeout(a.timer);
+    a.timer = undefined;
+    const e = a.latest;
+    if (e.kind === a.shown) return; // Discord says so already
+    const now = Date.now();
+    const wait = AGENT_ALERT_MS - ago(now, a.at[e.kind]);
+    if (wait > 0) return void (a.timer = setTimeout(() => show(a), wait).unref());
+    a.shown = e.kind;
+    a.at[e.kind] = now;
+    post(e);
+  };
+  return {
+    seen: (e) => {
+      let a = agents.get(e.id);
+      if (!a) agents.set(e.id, (a = { shown: null, at: { agentLost: -Infinity, agentBack: -Infinity }, latest: e }));
+      a.latest = e;
+      show(a);
+    },
+    stop: () => {
+      for (const a of agents.values()) clearTimeout(a.timer);
+    },
+  };
+}
+
+const isAgentNotice = (e: TargetEvent): e is AgentNotice => e.type === 'notice' && (e.kind === 'agentLost' || e.kind === 'agentBack');
+
+/**
+ * Posts each announced event about the host, a service or a check to the alerts channel (none: not posted), an
+ * Agent's lost and back through `agentAlerts`. Server events never come this way: they go to their own server's
+ * channel. Returns what stops it (held alerts dropped).
+ */
+export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId: string, message: Post) => Promise<void>): () => void {
+  const send = (e: TargetEvent) => {
     const channelId = channelFor(e, cfg);
     const message = formatTargetEvent(e);
     if (!channelId || !message) return;
     post(channelId, message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
-  });
+  };
+  const agents = agentAlerts(send);
+  const listener = (e: TargetEvent) => (isAgentNotice(e) ? agents.seen(e) : send(e));
+  hub.on('target', listener);
+  return () => {
+    hub.off('target', listener);
+    agents.stop();
+  };
 }
 
+/**
+ * Who a chat line is posted as through the relay webhook, or null to post it as the bot (`formatEvent`, the name
+ * escaped). A dashboard line: `<admin> (dashboard)` with their avatar. A minecraft player: their name with their skin.
+ * A factorio player: `<name> (Factorio)`, so a line can never pass for a dashboard one or the bot, and only for a name
+ * with no whitespace or parentheses: any text can come as a name from the game's mods or the Agent, and `Edward
+ * (dashboard)` would look like the owner's line. A factorio name with "discord" or "clyde" in it, which Discord refuses
+ * as a webhook username, is posted as the bot at once: no doomed webhook call, and nothing for `refusedNames` to keep.
+ */
+export function relayAs(e: Extract<HubEvent, { type: 'chat' | 'say' }>, game: Game | undefined): { username: string; avatarURL?: string } | null {
+  if (e.type === 'say') return { username: `${e.author} (dashboard)`, avatarURL: e.avatar };
+  if (game === 'factorio') return /[\s()]|discord|clyde/i.test(e.player) ? null : { username: `${e.player} (Factorio)` };
+  return { username: e.player, avatarURL: game === 'minecraft' ? `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64` : undefined };
+}
+
+/** The most names `refusedNames` keeps: past it, the oldest is dropped (it is only tried once more). */
+export const REFUSED_KEPT = 1000;
+
 const errorCode = (err: unknown) => (err as { code?: number }).code;
+
+/** Whether Discord refused a webhook send for its username (one containing "discord", say), not for anything else. */
+export function usernameRefused(err: unknown): boolean {
+  const errors = (err as { rawError?: { errors?: unknown } }).rawError?.errors;
+  return errorCode(err) === INVALID_FORM_BODY && typeof errors === 'object' && errors !== null && Object.hasOwn(errors, 'username');
+}
+
+/**
+ * Posts a chat line through a channel's relay webhook under `username`, escaped and cut to Discord's 2000 characters.
+ * Throws what Discord answered; a name it refused is remembered in `refusedNames` (the newest `REFUSED_KEPT`), so it
+ * isn't tried again, while any other error (the content, a deleted webhook) leaves the name alone.
+ */
+export async function sendChat(
+  hook: Pick<Webhook, 'send'>,
+  refusedNames: Set<string>,
+  username: string,
+  avatarURL: string | undefined,
+  message: string,
+): Promise<void> {
+  try {
+    await hook.send({ username, avatarURL, content: chatContent(message), allowedMentions: { parse: [] } });
+  } catch (err) {
+    if (usernameRefused(err)) {
+      refusedNames.add(username);
+      if (refusedNames.size > REFUSED_KEPT) refusedNames.delete(refusedNames.values().next().value!); // a Set keeps insertion order
+    }
+    throw err;
+  }
+}
+
+/** The parts of a slash command's interaction `/backup` uses. */
+export type BackupInteraction = Pick<ChatInputCommandInteraction, 'reply' | 'deferReply' | 'editReply'> & {
+  options: Pick<ChatInputCommandInteraction['options'], 'getSubcommand'>;
+};
+
+/**
+ * `/backup` in a server's channel (its admin role already checked): `status` and `list` of the server's Backups (a
+ * factorio server's saves), or `start`, a Backup now through `ServerHub.backup` as `by`. The finished/failed notice
+ * follows in the channel, from the game's backup event.
+ */
+export async function backupCommand(
+  i: BackupInteraction,
+  hub: Pick<ServerHub, 'get' | 'backup'>,
+  stats: Pick<Stats, 'backups'>,
+  serverId: string,
+  by: string,
+): Promise<void> {
+  const b = (await stats.backups(serverId))!;
+  if (!b.configured) {
+    await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const sub = i.options.getSubcommand();
+  if (sub === 'status') {
+    await i.reply(formatBackupStatus(b.backups, Date.now(), b.free));
+  } else if (sub === 'list') {
+    await i.reply(formatBackupList(b.backups));
+  } else {
+    await i.deferReply();
+    try {
+      const output = await hub.backup(serverId, by);
+      // A Mod answers with its command's output; an Agent's save has none.
+      await i.editReply(hub.get(serverId)?.game === 'factorio' ? '💾 Saving: the notice follows here once the save is written.' : formatOutput(output));
+    } catch (err) {
+      await i.editReply(`❌ ${(err as Error).message}`);
+    }
+  }
+}
 
 export async function startDiscord(
   hub: ServerHub,
@@ -161,27 +301,17 @@ export async function startDiscord(
     post(serverId, message).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
   };
 
-  // Game chat (the player's name and skin) and dashboard lines (the admin's name and avatar, marked) go through the
-  // channel's webhook; falls back to the bot.
+  // Game chat and dashboard lines go through the channel's webhook, under the name `relayAs` gives; falls back to the bot.
   async function relayChat(e: Extract<HubEvent, { type: 'chat' | 'say' }>): Promise<void> {
-    const [username, avatarURL] =
-      e.type === 'chat'
-        ? [e.player, `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64`]
-        : [`${e.author} (dashboard)`, e.avatar];
+    const as = relayAs(e, hub.get(e.serverId)?.game);
     const hook = webhooks.get(e.serverId);
-    if (hook && !refusedNames.has(username)) {
+    if (hook && as && !refusedNames.has(as.username)) {
       try {
-        await hook.send({
-          username,
-          avatarURL,
-          content: md(e.message),
-          allowedMentions: { parse: [] },
-        });
+        await sendChat(hook, refusedNames, as.username, as.avatarURL, e.message);
         return;
       } catch (err) {
-        // A deleted webhook is forgotten; a refused name is remembered, so neither is retried per message.
+        // A deleted webhook is forgotten (and a refused name remembered, by sendChat), so neither is retried per message.
         if (errorCode(err) === UNKNOWN_WEBHOOK) webhooks.delete(e.serverId);
-        if (errorCode(err) === INVALID_FORM_BODY) refusedNames.add(username);
         console.warn(`[discord] webhook send failed, posting as the bot: ${(err as Error).message}`);
       }
     }
@@ -214,14 +344,14 @@ export async function startDiscord(
     else postSafe(e.serverId, message);
   });
 
-  postTargets(hub, cfg, postTo);
+  const stopTargets = postTargets(hub, cfg, postTo);
 
   client.on(Events.MessageCreate, (m) => {
     const serverId = serverByChannel.get(m.channelId);
     if (!serverId || !shouldRelay(m)) return;
     const text = [m.cleanContent, ...m.attachments.map((a) => a.url)].join(' ');
-    // Linked people appear in game under their Minecraft name.
-    hub.say(serverId, stats.linkedPlayer(m.author.id) ?? m.member?.displayName ?? m.author.username, text, 'discord');
+    // Linked people appear in game under their name in that server's game.
+    hub.say(serverId, stats.linkedPlayer(serverId, m.author.id) ?? m.member?.displayName ?? m.author.username, text, 'discord');
   });
 
   client.on(Events.InteractionCreate, (i) => {
@@ -253,7 +383,8 @@ export async function startDiscord(
     }
     if (i.commandName === 'link') {
       const code = links.issue(i.user.id, i.user.username);
-      await i.reply({ content: `In game, type \`/discord link ${code}\` within 10 minutes.`, flags: MessageFlags.Ephemeral });
+      const games = [...new Set(hub.list().map((s) => s.game))];
+      await i.reply({ content: formatLinkHint(code, games), flags: MessageFlags.Ephemeral });
       return;
     }
     if (i.commandName === 'unlink') {
@@ -265,7 +396,7 @@ export async function startDiscord(
       const user = i.options.getUser('user');
       const p = stats.playtime(serverId, user ? { discordId: user.id } : { player: i.options.getString('player') ?? undefined }, now)!;
       if (!p.found) {
-        const content = user ? `${user.username} hasn't linked a Minecraft account (use /link).` : 'Give a player name or a Discord user.';
+        const content = user ? `${user.username} hasn't linked an in-game name here (use /link).` : 'Give a player name or a Discord user.';
         await i.reply({ content, flags: MessageFlags.Ephemeral });
         return;
       }
@@ -309,25 +440,7 @@ export async function startDiscord(
       }
       await i.reply({ content: reply, flags: MessageFlags.Ephemeral });
     } else if (i.commandName === 'backup') {
-      const b = (await stats.backups(serverId))!;
-      if (!b.configured) {
-        await i.reply({ content: 'Set "dir" (or "backupDir") for this server in config.json.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-      const sub = i.options.getSubcommand();
-      if (sub === 'status') {
-        await i.reply(formatBackupStatus(b.backups, Date.now(), b.free));
-      } else if (sub === 'list') {
-        await i.reply(formatBackupList(b.backups));
-      } else {
-        await i.deferReply();
-        try {
-          // The "finished"/"failed" notice follows in the channel, from the mod's backup event.
-          await i.editReply(formatOutput(await hub.runCommand(serverId, 'backup start', audit)));
-        } catch (err) {
-          await i.editReply(`❌ ${(err as Error).message}`);
-        }
-      }
+      await backupCommand(i, hub, stats, serverId, audit);
     }
   }
 
@@ -383,5 +496,9 @@ export async function startDiscord(
   await client.login(token);
   return {
     client,
+    stop: () => {
+      stopTargets();
+      void client.destroy();
+    },
   };
 }

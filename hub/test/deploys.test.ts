@@ -100,6 +100,7 @@ function world(t: TestContext, { servers, restore }: Setup = {}) {
   const gtnh: ServerSettings = {
     id: 'gtnh',
     name: 'GTNH',
+    game: 'minecraft',
     dir: serverDir,
     backupDir: join(serverDir, 'backups'),
     backupMinFreeGB: 10,
@@ -193,6 +194,17 @@ test('releases per part, newest first, without drafts, prereleases or foreign ta
   assert.equal(a.error, null);
   assert.equal(a.newerAfterDays, 14);
   assert.deepEqual(a.history, []);
+});
+
+test('a factorio server gets no Mod row', async (t) => {
+  const w = world(t, {
+    servers: (dir) => [
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'space', name: 'Space', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched' },
+    ],
+  });
+  const s = await start(t, w);
+  assert.deepEqual((await s.get()).mod.servers, [{ id: 'gtnh', name: 'GTNH', running: null }]);
 });
 
 test('the hub runs the release `current` points at, the dashboard its stamp, a Mod its hello', async (t) => {
@@ -466,9 +478,9 @@ test('cancelling the countdown leaves the old jar and no part file', async (t) =
 test('Mod deploy refusals: unknown server, no folder, no Mod token, a countdown running; a failed download is 502', async (t) => {
   const w = world(t, {
     servers: (dir) => [
-      { id: 'gtnh', name: 'GTNH', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
-      { id: 'bare', name: 'Bare', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
-      { id: 'vanilla', name: 'Vanilla', dir, backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'bare', name: 'Bare', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
+      { id: 'vanilla', name: 'Vanilla', game: 'minecraft', dir, backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
     ],
   });
   w.config.integrations.minecraft!.tokens.bare = 'another-token-0123456';

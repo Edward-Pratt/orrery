@@ -4,7 +4,8 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import type { HostHistory, HostNow, HostSample } from '@hub/api';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
-import { catchError, filter, of, switchMap } from 'rxjs';
+import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
+import { catchError, combineLatest, filter, of, switchMap } from 'rxjs';
 import { PeriodPicker, type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
@@ -25,12 +26,20 @@ const under = (share: number, [warn, down]: readonly [number, number]): Health =
 type Tile = { key: string; label: string; value: string; detail: string; share: number | null; health: Health };
 
 const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 : 0)} GB`;
+const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts > a.ts) ? b : a);
 
 @Component({
   selector: 'app-host',
-  imports: [DatePipe, HlmSkeleton, PeriodPicker, Releases, TimeSeries],
+  imports: [DatePipe, HlmSkeleton, HlmToggleGroupImports, PeriodPicker, Releases, TimeSeries],
   template: `
     <h1 class="mb-4 text-lg font-semibold">Host {{ id() }}</h1>
+    @if (hosts().length > 1) {
+      <hlm-toggle-group class="mb-4" type="single" variant="outline" [value]="id()" (valueChange)="choose($any($event) || id())" aria-label="Host" data-hosts>
+        @for (h of hosts(); track h.id) {
+          <button hlmToggleGroupItem [value]="h.id" [attr.data-host]="h.id">{{ h.id }}</button>
+        }
+      </hlm-toggle-group>
+    }
     @if (tiles(); as list) {
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-tiles>
         @for (t of list; track t.key) {
@@ -48,7 +57,9 @@ const formatGb = (bytes: number) => `${(bytes / GB).toFixed(bytes < 10 * GB ? 1 
       </div>
       <p class="mt-3 text-xs text-muted-foreground">Sampled at {{ sample()!.ts | date: 'HH:mm' }}; updates every minute.</p>
     } @else if (loaded()) {
-      <p class="text-muted-foreground">No sample yet: the first comes a minute after the hub starts.</p>
+      <p class="text-muted-foreground" data-no-sample>
+        {{ own() ? 'No sample yet: the first comes a minute after the hub starts.' : 'No sample yet: its Agent sends one each minute once it is connected.' }}
+      </p>
     } @else {
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-skeleton>
         @for (i of [1, 2, 3, 4]; track i) {
@@ -74,8 +85,13 @@ export default class Host {
   protected readonly bars = { ok: 'bg-status-ok', warn: 'bg-status-warn', down: 'bg-status-down' };
   // ponytail: Releases live on the Host page, so they need the host integration on too.
   protected readonly on = toSignal(inject(Integrations).on$);
+  /** Every host with its latest sample, the hub's own first; a picker shows when there is more than one. */
+  readonly hosts = signal<HostNow[]>([]);
+  /** The host shown: the hub's own until another is chosen. */
   readonly id = signal('');
-  readonly sample = signal<HostSample | null>(null);
+  readonly sample = computed(() => this.hosts().find((h) => h.id === this.id())?.sample ?? null);
+  /** Whether the host shown is the hub's own (listed first; the others are Agents'). */
+  protected readonly own = computed(() => (this.hosts()[0]?.id ?? '') === this.id());
   /** The first answer is in (a skeleton shows until then). */
   readonly loaded = signal(false);
   /** A tile each for CPU, load, memory and every disk, from the latest sample. */
@@ -120,25 +136,36 @@ export default class Host {
 
   constructor() {
     const http = inject(HttpClient);
-    http.get<HostNow>('/api/host').subscribe({ error: () => this.loaded.set(true), next: (now) => {
-      this.id.set(now.id);
-      if (!this.sample() || (now.sample && now.sample.ts > this.sample()!.ts)) this.sample.set(now.sample);
+    http.get<HostNow[]>('/api/hosts').subscribe({ error: () => this.loaded.set(true), next: (list) => {
+      // A live sample may have come first.
+      this.hosts.update((known) => list.map((h) => ({ id: h.id, sample: newer(known.find((k) => k.id === h.id)?.sample ?? null, h.sample) })));
+      if (!this.id() && list.length) this.id.set(list[0].id);
       this.loaded.set(true);
     } });
     // A newer choice drops a period still loading.
-    toObservable(this.hours)
+    combineLatest([toObservable(this.id), toObservable(this.hours)])
       .pipe(
-        switchMap((hours) => http.get<HostHistory>(`/api/host/samples?hours=${hours}`).pipe(catchError(() => of([])))),
+        filter(([id]) => id !== ''),
+        switchMap(([id, hours]) => http.get<HostHistory>(`/api/hosts/${encodeURIComponent(id)}/samples?hours=${hours}`).pipe(catchError(() => of([])))),
         takeUntilDestroyed(),
       )
       .subscribe((history) => this.history.set(history));
-    // The replay brings the latest sample, then a new one arrives each minute.
+    // The replay brings each host's latest sample, then a new one arrives each minute.
     inject(LiveEvents)
       .all$.pipe(filter(ofTarget('host')), takeUntilDestroyed())
       .subscribe(({ event }) => {
         if (event.type !== 'sample') return;
-        this.sample.set(event.sample);
-        this.history.update((h) => (h.length && h.at(-1)!.ts >= event.sample.ts ? h : [...h, event.sample]));
+        const { id, sample } = event;
+        this.hosts.update((list) => (list.some((h) => h.id === id) ? list.map((h) => (h.id === id ? { id, sample } : h)) : [...list, { id, sample }]));
+        if (id !== this.id()) return;
+        this.history.update((h) => (h.length && h.at(-1)!.ts >= sample.ts ? h : [...h, sample]));
       });
+  }
+
+  /** Shows another host: its graphs are fetched afresh. */
+  protected choose(id: string): void {
+    if (id === this.id()) return;
+    this.history.set([]);
+    this.id.set(id);
   }
 }

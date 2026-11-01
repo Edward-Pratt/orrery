@@ -7,15 +7,18 @@ import type {
   BackupsAnswer,
   DeployPart,
   DeployRow,
+  FactorioMod,
   Release,
   HistoryAnswer,
   HostSample,
   FeedEvent,
+  Game,
   LogFile,
   PackOutcome,
   PackStepState,
   Period,
   PlaytimeAnswer,
+  Rate,
   ServiceStatus,
   StatusAnswer,
   TpsAnswer,
@@ -28,6 +31,8 @@ export type {
   DeployOutcome,
   DeployPart,
   DeployRow,
+  FactorioMod,
+  Game,
   HistoryAnswer,
   HostSample,
   HubEvent,
@@ -35,14 +40,18 @@ export type {
   LibraryAdd,
   Lifecycle,
   LogFile,
+  MilestoneKind,
   Notice,
   PackFinished,
   PackOutcome,
   PackStep,
   PackStepState,
+  Paused,
   Period,
   PlaytimeAnswer,
+  Rate,
   Release,
+  SaveKind,
   ServerState,
   ServiceStatus,
   ServiceVerb,
@@ -74,20 +83,24 @@ export type Integrations = {
   host: boolean;
   systemd: boolean;
   github: boolean;
+  agents: boolean;
   library: boolean;
   newServer: boolean;
 };
 
 /**
- * `GET /api/host` (only with the host integration): the host's id and its latest sample, null until the first (a
- * minute after the hub starts). Each new sample is also a `sample` event on the stream.
+ * `GET /api/hosts` (with the host or agents integration): every Host, the hub's own first, then each Agent's (`id`:
+ * the Agent's), each with its id and latest sample, null until the first (for the hub's own, a minute after the hub
+ * starts; for an Agent's, its first `hostSample`). Each new sample is also a `sample` event on the stream, with the
+ * host's id. `GET /api/host` is the hub's own alone, only with the host integration (kept for one release).
  */
 export type HostNow = { id: string; sample: HostSample | null };
 
 /**
- * `GET /api/host/samples[?hours=1–2160]`: the host's samples over the last `hours` (default 24), oldest first. Up to
- * 25 hours they are the raw minutes; a longer period is at most `HISTORY_POINTS` (1500, `host.ts`) equal time buckets,
- * each the average of its samples (`ts` too; a mount over the samples that have it).
+ * `GET /api/hosts/:id/samples[?hours=1–2160]` (404 unknown id): the host's samples over the last `hours` (default
+ * 24), oldest first. Up to 25 hours they are the raw minutes; a longer period is at most `HISTORY_POINTS` (1500,
+ * `host.ts`) equal time buckets, each the average of its samples (`ts` too; a mount over the samples that have it).
+ * `GET /api/host/samples` is the hub's own (kept for one release).
  */
 export type HostHistory = HostSample[];
 
@@ -95,54 +108,70 @@ export type HostHistory = HostSample[];
 
 /**
  * A part's releases: the one `running` (the hub: `dev` from a plain checkout; the dashboard: null if unknown; a Mod:
- * `mod-v` + the version its hello reported, as is when that isn't a release, null if it never connected), the
- * `latest` published one (null: none), and every published one, newest first.
+ * `mod-v` + the version its hello reported, as is when that isn't a release, null if it never connected; an Agent:
+ * `agentVersion` from its latest `agentHello`, null if it never connected), the `latest` published one (null: none),
+ * and every published one, newest first.
  */
 export type PartReleases = { running: string | null; latest: string | null; releases: Release[] };
 
 /**
  * `GET /api/deploys[?before=id]` (only with the GitHub integration): what each part runs against what GitHub has
- * published (drafts and prereleases left out), each server's Mod, when GitHub was last asked (`checkedAt`, null: not
- * yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the deploy history, newest first, with
- * whether `older` ones remain (`before` is a row's `id`). Changes come as `deployStarted`/`deployFinished` notices.
+ * published (drafts and prereleases left out), each minecraft server's Mod, each Agent (`agent.hosts`, by its id and
+ * name, with the factorio `server` it runs, from `agents[].server`; none without the agents integration), when GitHub
+ * was last asked (`checkedAt`, null: not yet) and why that failed (`error`), `newerAfterDays`, and a batch (50) of the
+ * deploy history, newest first, with whether `older` ones remain (`before` is a row's `id`). Changes come as
+ * `deployStarted`/`deployFinished` notices.
  */
 export type DeploysAnswer = {
   hub: PartReleases;
   web: PartReleases;
   mod: { latest: string | null; releases: Release[]; servers: { id: string; name: string; running: string | null }[] };
+  agent: { latest: string | null; releases: Release[]; hosts: { id: string; name: string; server: string; running: string | null }[] };
   checkedAt: number | null;
   error: string | null;
   newerAfterDays: number;
   history: DeployRow[];
   older: boolean;
-  /** The servers a pack update runs on: no Mod deploy onto them, and no hub deploy, meanwhile. */
+  /**
+   * The servers a pack update or a game update runs on: no Mod or Agent deploy onto them, and no hub deploy,
+   * meanwhile.
+   */
   packing: string[];
 };
 
 /**
- * `POST /api/deploys`: deploys a published release (`server`: the Mod's server). Answers 202 with the history row's
- * `id`; the outcome follows as a `deployFinished` notice. 404 for a tag GitHub didn't list or an unknown server, 409
- * when refused (another deploy runs, the tag is the one running, a restore runs, below the first release that can
- * deploy, a server with no folder, no Mod or a countdown running), 502 if systemctl or the download fails. Audited.
- * `POST /api/deploys/check` asks GitHub again and answers like `GET /api/deploys`.
+ * `POST /api/deploys`: deploys a published release (`server`: the Mod's server; `host`: the Agent's id, for an
+ * `agent` release). Answers 202 with the history row's `id`; the outcome follows as a `deployFinished` notice. 404
+ * for a tag GitHub didn't list, an unknown server or Agent, 409 when refused (another deploy runs, the tag is the one
+ * running, a restore runs, below the first release that can deploy, a server with no folder, no Mod or a countdown
+ * running; an Agent not connected, or an update, a restore or a countdown on its server), 502 if systemctl or the
+ * download fails. Audited. `POST /api/deploys/check` asks GitHub again and answers like `GET /api/deploys`.
  */
-export type DeployRequest = { part: DeployPart; tag: string; server?: string };
+export type DeployRequest = { part: DeployPart; tag: string; server?: string; host?: string };
 export type DeployAnswer = { id: number };
 
-/** `GET /api/services/:id/logs`: its last 200 journal lines, oldest first. 404 for an unlisted id, 502 if journalctl fails. */
+/**
+ * `GET /api/services/:id/logs`: its last 200 journal lines, oldest first (a service an Agent runs: the last 200 lines
+ * of its log file, from the Agent). 404 for an unlisted id, 502 if journalctl fails or the Agent can't answer.
+ */
 export type ServiceLogs = { lines: string[] };
 
 /**
  * The answer to `POST /api/services/:id/start`, `/stop` and `/restart` (no body; audited as the admin). The action
  * doesn't wait for systemd: the new state follows as `state` events. Stopping or restarting a service whose linked
  * server has players online first counts down in game (the server card's `restart`, cancelled like a restart): `at`
- * is when it will run, null if it ran at once. 404 for an unlisted id, 409 if a countdown is already running on the
- * server, 502 if systemctl fails.
+ * is when it will run, null if it ran at once. A service an Agent runs is acted on by that Agent (`serviceAct`). 404
+ * for an unlisted id, 409 if a countdown is already running on the server, 502 if systemctl fails or the Agent can't
+ * answer.
  */
 export type ServiceActionAnswer = { at: number | null };
 
-/** What a server has; chat, TPS and quests only for a Minecraft server with the mod (a token configured). */
-export type Features = { chat: boolean; tps: boolean; quests: boolean };
+/**
+ * What a server has: chat, the rate (`tps`) and the console for a Minecraft server with the Mod (a token configured)
+ * and for a factorio server; quests for a Minecraft server with the Mod only; game updates (`update`, the Game tab)
+ * for a factorio server only.
+ */
+export type Features = { chat: boolean; tps: boolean; quests: boolean; console: boolean; update: boolean };
 
 /** A countdown restart (or, with `stop`, a countdown stop of its service) in progress: when it fires and who scheduled it. */
 export type PendingRestart = { at: number; by: string; stop: boolean };
@@ -152,13 +181,17 @@ export type PendingRestart = { at: number; by: string; stop: boolean };
  * is in a lag alert (the rule and `lagTps`/`lagMinutes` thresholds of Discord's lag notice; refetch on the `lag` and
  * `lagRecovered` notices). `service` is the systemd service it runs as: its id and active state (null until the hub
  * has read it); the whole field is null with no linked service or with systemd off (refetch on that service's
- * `state` events).
+ * `state` events). `rate` is its game's: what `tps` is called and its full speed (TPS 20 or UPS 60).
  */
 export type ServerCard = {
   id: string;
   name: string;
+  game: Game;
+  rate: Rate;
   online: boolean;
   hung: boolean;
+  /** A factorio server is paused (nobody on, or an admin's pause): show "Paused", not its rate. A change comes as a `paused` event. */
+  paused: boolean;
   tps: number | null;
   players: string[];
   /** Share of the last 24 h the server was up (0–1), null if unknown. */
@@ -187,21 +220,24 @@ export type ServerDetail = {
   backups: BackupsAnswer;
   /** Whether the server can have a pack: a folder, a linked service and a Mod token. Only then are there pack routes. */
   pack: boolean;
-  /** Whether the server has a folder, so its logs can be read (`GET /api/servers/:id/logs`). */
+  /** Whether the server's logs can be read (`GET /api/servers/:id/logs`): it has a folder, or an Agent runs it. */
   logs: boolean;
 };
 
 /**
  * `GET /api/servers/:id/logs`: the server folder's readable logs, newest first: the files directly in `logs/`
  * (`*.log`, `*.log.gz`) and its crash reports (`crash-reports/*.txt`, `hs_err_pid*.log`). Symlinks and folders are
- * left out. 404 for an unknown server or one without a folder. Not audited.
+ * left out. A server an Agent runs: the files the Agent serves (`factorio-current.log`, `factorio-previous.log`,
+ * `agent.log`), newest first, and no crash reports; 502 if the Agent can't answer. 404 for an unknown server or one
+ * with neither a folder nor an Agent. Not audited.
  */
 export type ServerLogFiles = LogFile[];
 
 /**
  * `GET /api/servers/:id/logs/:name`: the last 1000 lines of one listed file, oldest first, a `.gz` decompressed (the
  * shape of `ServiceLogs`). The name must be one the listing holds right now: anything else (`..`, a slash, a symlink)
- * is 404, as is an unknown server or one without a folder. 502 if the file can't be read (e.g. a broken `.gz`).
+ * is 404, as is an unknown server or one with neither a folder nor an Agent. 502 if the file can't be read (e.g. a
+ * broken `.gz`) or the Agent can't answer.
  */
 export type ServerLog = { lines: string[] };
 
@@ -224,7 +260,8 @@ export type AuditLog = { entries: AuditRow[]; older: boolean };
 /**
  * The `data` of each `GET /api/events` message (JSON); the message's SSE `id` is its event id. A server's events
  * have `serverId`; the host's, a service's and a check's have `target` and `id` instead. `tps` events come from
- * heartbeats when TPS moved by 0.1 or more; a replay holds only each online server's latest. `at` is when the hub saw
+ * heartbeats when TPS moved by 0.1 or more, and `paused` ones when a factorio server's heartbeat changed its `paused`;
+ * a replay holds only each online server's latest of each. `at` is when the hub saw
  * the event (epoch ms), the same in a replay. A `say` (chat sent into the game) has its `source`: `discord` or `dashboard`.
  */
 export type LiveEvent = FeedEvent;
@@ -237,7 +274,11 @@ export type LiveEvent = FeedEvent;
 /** `POST /api/servers/:id/chat`: said in game as the admin (their Minecraft name if linked). 204. */
 export type ChatRequest = { message: string };
 
-/** `POST /api/servers/:id/command`: a console command, answered with `CommandOutput`; later output comes as `console` events. */
+/**
+ * `POST /api/servers/:id/command`: a console command, answered with `CommandOutput`; later output comes as `console`
+ * events. 400 for an empty one, and for a factorio server's over 256 characters (its Agent runs no longer one; the
+ * answer's text says so).
+ */
 export type CommandRequest = { command: string };
 
 /** `POST /api/servers/:id/restart`: a countdown restart in 0–60 whole minutes. 204; cancel with `POST …/restart/cancel`. */
@@ -246,13 +287,17 @@ export type RestartRequest = { minutes: number };
 /**
  * `POST /api/servers/:id/restore` (only with systemd): puts the named backup (one of the server's listed ones) back over
  * its world with `deploy/restore-backup.sh`, keeping the current world as a pre-restore copy; answered with the
- * script's output (`CommandOutput`: its next steps). Only while the server's linked service is stopped (inactive or
- * failed), else 409, as without a linked service or with a restore already running; 404 for an unknown server or
- * backup; 502 with the script's error output if it fails. Every attempt is audited.
+ * script's output (`CommandOutput`: its next steps). A factorio server's Agent instead copies the named save as the
+ * newest, which its next start loads (nothing is overwritten). Only while the server's linked service is stopped
+ * (inactive or failed), else 409, as without a linked service or with a restore already running; 404 for an unknown
+ * server or backup; 502 with the script's error output (or the Agent's error) if it fails. Every attempt is audited.
  */
 export type RestoreRequest = { name: string };
 
-/** The answer to a command, to `POST /api/servers/:id/backup` and to a restore. */
+/**
+ * The answer to a command, to `POST /api/servers/:id/backup` (a Mod's `backup start` output; a factorio server's save
+ * has none) and to a restore (the script's output; an Agent's restore, one line).
+ */
 export type CommandOutput = { output: string[] };
 
 /**
@@ -490,3 +535,53 @@ export type RunningInstall = { id: string; name: string; by: string; started: nu
  * /api/servers/pending/:id` discards one, folder, Java link and all (404 unknown, 409 once it is in config). Audited.
  */
 export type PendingServers = { pending: PendingServer[]; installing: RunningInstall | null };
+
+/**
+ * Game updates (a factorio server only; others 404): moving it to another Factorio version or set of mods, with the
+ * Pack update's steps (`PackStepState`, the `packUpdate*` notices) and history rows (`PackUpdateRow`: `from` and `to`
+ * like "2.1.24 · 5 mods", the mod changes in `changes`). The routes are registered before the online check, so they
+ * answer for a stopped server too. Actions are audited as the admin.
+ */
+/**
+ * `GET /api/servers/:id/game`: what the server runs (`installed`, as its Agent last reported it: the Factorio version
+ * and every enabled mod, `base` and the game's own included; null until it has), the history (newest first), the
+ * running update, and why an update can't start now (`blocked`, null: it can).
+ */
+export type GameState = {
+  installed: { factorio: string; mods: FactorioMod[] } | null;
+  history: PackUpdateRow[];
+  running: RunningGameUpdate | null;
+  blocked: string | null;
+};
+/** The game update running now: from and to (as in its history row), who started it, every step in order; `cancellable` before the swap. */
+export type RunningGameUpdate = { id: number; from: string; to: string; by: string; started: number; steps: PackStepState[]; cancellable: boolean };
+/** A mod picked for a game update by its portal name: a version, or null for the newest that fits the Factorio version. */
+export type GameModPick = { name: string; version: string | null };
+/**
+ * `POST /api/servers/:id/game/catalog` and `POST …/game/update`: the Factorio version to run and the portal mods to
+ * have (the game's own mods, like `base`, come with it). A mod left out is removed.
+ */
+export type GameUpdateRequest = { factorio: string; mods: GameModPick[] };
+/** A Factorio release on offer: the latest headless one of each channel. */
+export type FactorioRelease = { version: string; channel: 'stable' | 'experimental' };
+/**
+ * A mod as the catalog resolved it: its title, the version it picked, every release that fits the Factorio version
+ * (newest first), and the mod whose required dependency added it (`requiredBy`, null: picked).
+ */
+export type CatalogMod = { name: string; title: string; version: string; releases: string[]; requiredBy: string | null };
+/** A dependency the catalog can't meet: the mod that has it, the dependency as the portal writes it ("flib >= 0.16"), and why. */
+export type UnresolvedDependency = { mod: string; dependency: string; reason: string };
+/**
+ * The answer to `POST /api/servers/:id/game/catalog`: the Factorio releases on offer, the picked mods with every
+ * required dependency resolved transitively (honouring `base` limits and `!` incompatibilities; optional ones left
+ * out), what it can't resolve (an update can't start while any remain) and what the update would change ("Added:
+ * flib 0.16.2"). 404 for a picked mod the portal doesn't have, 502 if the portal can't be read.
+ */
+export type GameCatalog = { versions: FactorioRelease[]; mods: CatalogMod[]; unresolved: UnresolvedDependency[]; changes: string[] };
+/**
+ * `POST /api/servers/:id/game/update` (a `GameUpdateRequest`): starts a game update, answered 202 with its history
+ * row's `id`; steps follow as `packUpdateStep` notices, the end as `packUpdateFinished`. 400 for bad input, 409 with
+ * unresolved dependencies, nothing to change, its Agent not connected, or while an update, a restore, an Agent deploy
+ * or a countdown runs on the server. `POST …/game/update/cancel`: only before the swap (else 409).
+ */
+export type GameUpdateAnswer = { id: number };

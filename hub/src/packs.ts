@@ -55,7 +55,7 @@ export type PacksOptions = {
 };
 
 export type PacksDeps = {
-  hub: Pick<ServerHub, 'get' | 'on' | 'off' | 'publish' | 'publishTarget' | 'audit' | 'runCommand'>;
+  hub: Pick<ServerHub, 'get' | 'on' | 'off' | 'publish' | 'publishTarget' | 'audit' | 'backup'>;
   db: Db;
   services: Pick<Services, 'ofServer' | 'act' | 'read' | 'environment'>;
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
@@ -896,7 +896,7 @@ export class Packs {
   async #backup(job: Job, s: ServerSettings): Promise<string | null> {
     const done = this.#wait(s.id, (e) => (e.type === 'backup' ? e : undefined), this.#o.backupMs);
     try {
-      await this.#d.hub.runCommand(s.id, 'backup start', job.actor);
+      await this.#d.hub.backup(s.id, job.actor);
       const e = await done.done;
       if (!e) throw new Error(`No backup within ${formatDuration(this.#o.backupMs)}.`);
       if (!e.ok) throw new Error(`The backup failed: ${e.detail}`);

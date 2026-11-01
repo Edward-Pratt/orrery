@@ -64,7 +64,7 @@ const newestFirst = (a: Release, b: Release) => {
   return y[0]! - x[0]! || y[1]! - x[1]! || y[2]! - x[2]!;
 };
 /** The first hub and dashboard releases that can deploy: an older one would take the deploy flow away. */
-export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0' } as const;
+export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0', agent: 'agent-v1.0.0' } as const;
 /** A renamed Mod release's builds, one per Minecraft target: `orrery-<mc>-<version>.jar`. */
 const MOD_BUILD = /^orrery-(.+)-(\d+\.\d+\.\d+)\.jar$/;
 /** The Minecraft version of a server without a pack (or whose pack isn't in the library). */
@@ -205,8 +205,13 @@ export class Deploys {
       mod: {
         latest: mod[0]?.tag ?? null,
         releases: mod,
-        servers: this.#d.hub.list().map((s) => ({ id: s.id, name: s.name, running: this.#running('mod', s.id) })),
+        // Only a minecraft server runs the Mod.
+        servers: this.#d.hub
+          .list()
+          .filter((s) => s.game === 'minecraft')
+          .map((s) => ({ id: s.id, name: s.name, running: this.#running('mod', s.id) })),
       },
+      agent: { latest: null, releases: [], hosts: [] }, // Agent deploys aren't built yet
       checkedAt: this.#checkedAt,
       error: this.#error,
       newerAfterDays: this.#d.config.newerAfterDays,

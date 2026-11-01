@@ -9,19 +9,22 @@ import { FETCH } from './events';
 import { dialogButton, fakeEvents, settle } from './testing';
 
 const ALEX: Me = { id: '5', username: 'alex', avatar: null };
-const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, library: false, newServer: false };
+const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, agents: false, library: false, newServer: false };
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
   name: id.toUpperCase(),
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: null,
-  features: { chat: true, tps: true, quests: false },
+  features: { chat: true, tps: true, quests: false, console: true, update: false },
   packUpdate: null,
   ...more,
 });
@@ -29,7 +32,7 @@ const service = (id: string, state: string, sub = 'x'): ServiceStatus => ({ id, 
 const check = (id: string, up: boolean | null): CheckStatus => ({ id, url: 'http://x', up, ms: 1, error: up === false ? 'HTTP 500' : null, checkedAt: 1, service: null });
 
 /** Opens the shell logged in, answering what the attention strip fetches. */
-async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer) {
+async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer, on: Partial<Integrations> = {}) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
@@ -39,7 +42,7 @@ async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks:
   await settle();
   backend.expectOne('/api/me').flush(ALEX);
   await settle();
-  backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys }));
+  backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys, ...on }));
   await settle();
   if (deploys) backend.expectOne('/api/deploys').flush(deploys);
   backend.expectOne('/api/servers').flush(cards);
@@ -70,6 +73,7 @@ const deploys = (daysAgo: number): DeploysAnswer => ({
   },
   web: { running: null, latest: null, releases: [] },
   mod: { latest: null, releases: [], servers: [] },
+  agent: { latest: null, releases: [], hosts: [] },
   checkedAt: Date.now(),
   error: null,
   newerAfterDays: 14,
@@ -96,6 +100,35 @@ describe('the attention strip', () => {
     ]);
     expect(lines()).toEqual(['CRASHED is offline: its service failed Start', 'NOMOD is offline: its service runs, the mod is not connected Restart']);
     expect(el.querySelector('[data-attention]')).not.toBeNull();
+  });
+
+  it("says a factorio server whose service runs is offline because its Agent isn't connected or RCON doesn't answer", async () => {
+    const factorio = { game: 'factorio', rate: { label: 'UPS', max: 60 } } as const;
+    const { lines } = await open([
+      card('space', { ...factorio, online: false, service: { id: 'factorio', state: 'active' } }),
+      card('moon', { ...factorio, online: false, service: { id: 'moon', state: 'inactive' } }),
+    ]);
+    expect(lines()).toEqual(["SPACE is offline: its service runs, but its Agent is not connected or RCON doesn't answer Restart"]);
+  });
+
+  it('fetches the cards on a hub with Agents and no Minecraft, so a factorio server has its items', async () => {
+    const { lines } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 }, online: false, service: { id: 'factorio', state: 'active' } })], [], [], undefined, {
+      minecraft: false,
+      agents: true,
+    });
+    expect(lines()).toEqual(["SPACE is offline: its service runs, but its Agent is not connected or RCON doesn't answer Restart"]);
+  });
+
+  it("fetches the cards again when a server's Agent left (lost), clearing its item once it is back", async () => {
+    const lost = card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 }, online: false, service: { id: 'factorio', state: 'active' } });
+    const { events, lines, refetch } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    expect(lines()).toEqual([]);
+    events.push(1, { serverId: 'space', type: 'lost' });
+    await refetch([lost]);
+    expect(lines()).toHaveLength(1);
+    events.push(2, { serverId: 'space', type: 'connected' });
+    await refetch([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    expect(lines()).toEqual([]);
   });
 
   it('shows a server with no linked service whenever it is offline', async () => {
@@ -211,5 +244,12 @@ describe('the attention strip', () => {
     events.push(1, { serverId: 'gtnh', type: 'notice', severity: 'good', kind: 'backupFinished', detail: 'done' });
     await render();
     expect(lines()).toEqual([]);
+  });
+
+  it("says a factorio server is saving while a save started here runs", async () => {
+    const { lines, render } = await open([card('space', { game: 'factorio', rate: { label: 'UPS', max: 60 } })]);
+    TestBed.inject(BackupProgress).begin('space', 'backup');
+    await render();
+    expect(lines()).toEqual(['SPACE is saving']);
   });
 });

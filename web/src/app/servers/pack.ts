@@ -10,16 +10,14 @@ import type {
   EditRequest,
   Extra,
   LibraryState,
-  PackFinished,
   PackRuntimeRequest,
   PackState,
-  PackStep,
   PackUpdateAnswer,
   PackUpdateRequest,
   RunningPackUpdate,
 } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLoaderCircle, lucideLock, lucidePackage, lucidePlus, lucideX } from '@ng-icons/lucide';
+import { lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLock, lucidePackage, lucidePlus } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmInput } from '@spartan-ng/helm/input';
@@ -28,20 +26,11 @@ import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { catchError, debounceTime, defer, EMPTY, filter, firstValueFrom, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
-import { formatBytes, formatDuration } from '../units';
+import { formatBytes } from '../units';
 import { Uploader } from '../uploads';
 import ServerPage from './server';
+import { failedPrep, UpdateHistory, UpdateSteps } from './update-steps';
 
-const STEP_LABELS: Record<PackStep, string> = { prepare: 'Prepare', backup: 'Backup', stop: 'Stop', swap: 'Swap', gate: 'Health gate', rollback: 'Rollback' };
-const RESULT: Record<PackFinished | 'running', string> = {
-  running: 'text-muted-foreground',
-  ok: 'text-status-ok',
-  'rolled back': 'text-status-down',
-  failed: 'text-status-down',
-  'failed before swap': 'text-status-down',
-  'failed in staging': 'text-muted-foreground',
-  cancelled: 'text-muted-foreground',
-};
 const FLOW =
   'The pack is prepared while the server runs; then a backup, a 5-minute countdown if players are online, the swap, and up to 10 minutes for the Mod to say hello, or it rolls back.';
 const PENDING_TOAST = 'Saved: changes pending, not on the server until you apply them.';
@@ -57,8 +46,8 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
  */
 @Component({
   selector: 'app-server-pack',
-  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner],
-  viewProviders: [provideIcons({ lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLoaderCircle, lucideLock, lucidePackage, lucidePlus, lucideX })],
+  imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner, UpdateHistory, UpdateSteps],
+  viewProviders: [provideIcons({ lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLock, lucidePackage, lucidePlus })],
   template: `
     @if (state(); as p) {
       <div class="flex max-w-4xl flex-col gap-8">
@@ -136,44 +125,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           }
 
           @if (running(); as r) {
-            <section class="rounded-xl border bg-card p-5" data-updating>
-              <h2 class="font-semibold">Updating to {{ r.name }} {{ r.version }}</h2>
-              <p class="mb-4 text-sm text-muted-foreground">Started by {{ r.by }} at {{ r.started | date: 'HH:mm' }}. You can leave this page.</p>
-              <ol class="flex flex-col gap-3">
-                @for (s of r.steps; track s.step; let i = $index) {
-                  <li class="flex gap-3" [attr.data-step]="s.step" [attr.data-state]="s.state">
-                    <span
-                      class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-xs"
-                      [class]="s.state === 'done' ? 'bg-status-ok text-white' : s.state === 'failed' ? 'bg-status-down text-white' : s.state === 'running' ? 'text-brand' : 'border text-muted-foreground'"
-                    >
-                      @switch (s.state) {
-                        @case ('done') {
-                          <ng-icon name="lucideCheck" />
-                        }
-                        @case ('failed') {
-                          <ng-icon name="lucideX" />
-                        }
-                        @case ('running') {
-                          <ng-icon name="lucideLoaderCircle" class="animate-spin" />
-                        }
-                        @default {
-                          {{ i + 1 }}
-                        }
-                      }
-                    </span>
-                    <div class="min-w-0 flex-1 text-sm" [class.text-muted-foreground]="s.state === 'waiting'">
-                      <p class="font-medium">{{ stepLabels[s.step] }}</p>
-                      @if (s.detail) {
-                        <p class="text-muted-foreground" data-detail>{{ s.detail }}</p>
-                      }
-                      @if (s.state === 'running' && r.cancellable) {
-                        <button hlmBtn size="sm" variant="outline" class="mt-2" [disabled]="busy()" (click)="cancel()" data-cancel>Cancel update</button>
-                      }
-                    </div>
-                  </li>
-                }
-              </ol>
-            </section>
+            <app-update-steps [title]="'Updating to ' + r.name + ' ' + r.version" [update]="r" [busy]="busy()" (cancel)="cancel()" />
           } @else {
             <section class="rounded-xl border bg-card p-5" data-summary>
               @if (done(); as d) {
@@ -364,43 +316,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           </div>
         </section>
 
-        <section data-history>
-          <h2 class="mb-2 text-base font-semibold">History</h2>
-          @if (p.history.length) {
-            <table class="w-full text-left text-sm">
-              <thead class="text-muted-foreground">
-                <tr>
-                  <th class="py-1 pr-4 font-normal">When</th>
-                  <th class="pr-4 font-normal">Version</th>
-                  <th class="pr-4 font-normal">Result</th>
-                  <th class="hidden pr-4 font-normal sm:table-cell" data-by-column>By</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (h of p.history; track h.id) {
-                  <tr class="border-t align-top" [attr.data-update-row]="h.id">
-                    <td class="py-1.5 pr-4 whitespace-nowrap">{{ h.started | date: 'd MMM, HH:mm' }}</td>
-                    <td class="pr-4">
-                      {{ h.from === h.to ? h.to : h.from + ' → ' + h.to }}
-                      @if (h.changes) {
-                        <span class="block text-xs text-muted-foreground">changes applied: {{ h.changes.join(', ') }}</span>
-                      }
-                    </td>
-                    <td class="pr-4" [class]="result[h.outcome]">
-                      {{ h.outcome }}
-                      @if (h.finished) {
-                        <span class="text-xs text-muted-foreground">{{ took(h.finished - h.started) }}</span>
-                      }
-                    </td>
-                    <td class="hidden pr-4 sm:table-cell">{{ h.by }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          } @else {
-            <p class="text-sm text-muted-foreground" data-no-history>No pack updates yet.</p>
-          }
-        </section>
+        <app-update-history [rows]="p.history" empty="No pack updates yet." changesPrefix="changes applied: " />
       </div>
     } @else if (missing(); as why) {
       <p class="text-muted-foreground">{{ why }}</p>
@@ -486,8 +402,6 @@ export default class Pack {
   readonly #uploader = inject(Uploader);
   readonly #feedback = inject(Feedback);
   readonly #base = `/api/servers/${encodeURIComponent(this.#server.id)}/pack`;
-  protected readonly stepLabels = STEP_LABELS;
-  protected readonly result = RESULT;
   protected readonly flow = FLOW;
   protected readonly bytes = formatBytes;
   protected readonly groups = [
@@ -535,10 +449,7 @@ export default class Pack {
     return this.state()?.blocked ?? (card && !card.online ? `${card.name} is offline: an update needs it running, for the backup.` : null);
   });
   /** The latest update, when it failed while preparing: its cause, for the red box. */
-  protected readonly failedPrep = computed(() => {
-    const last = this.state()?.history[0];
-    return last?.outcome === 'failed in staging' ? { to: last.to, why: last.log.split('\n').filter((l) => !/^\w+: (done|failed)/.test(l)).at(-1) ?? '' } : null;
-  });
+  protected readonly failedPrep = computed(() => failedPrep(this.state()?.history ?? []));
   protected readonly sheetTitle = computed(() => {
     const s = this.sheet();
     if (s?.kind === 'update') return 'Update pack';
@@ -608,7 +519,6 @@ export default class Pack {
 
   protected isUrl = (s: string) => /^https:\/\//.test(s);
   protected runtimeLabel = (name: string | null) => (name ? (this.library()?.runtimes.find((r) => r.name === name)?.label ?? name) : 'System java');
-  protected took = (ms: number) => formatDuration(ms);
 
   /** The library's versions and runtimes, to pick from. */
   #fetchLibrary(): void {

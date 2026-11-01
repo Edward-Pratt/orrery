@@ -69,9 +69,10 @@ export async function backupStats(dir: string): Promise<BackupStats | null> {
 }
 
 /**
- * Warns when backups stop appearing in a backup folder, and when its disk runs low; turns the mod's backup events
- * (ServerUtilities' own "done"/"failed" log lines) into finished/failed notices. Hub core: notices go on the hub's
- * event stream; `list` and `free` are injected so tests needn't touch disk.
+ * Warns when backups stop appearing (in a backup folder, or among an Agent's saves), and when their disk runs low;
+ * turns the game's backup events (ServerUtilities' own "done"/"failed" log lines, an Agent's save written or not)
+ * into finished/failed notices. Hub core: notices go on the hub's event stream; `list` and `free` (each server's
+ * Backup source) are injected so tests needn't touch disk.
  */
 export class BackupWatcher {
   #hub: Pick<ServerHub, 'on' | 'publish'>;
@@ -100,15 +101,20 @@ export class BackupWatcher {
 
   /**
    * Every 10 minutes: warn once if the newest backup is older than `maxAgeHours` (when set), and once if free
-   * space is under `minFreeGB`. Each re-arms when the problem clears.
+   * space is under `minFreeGB`. Each re-arms when the problem clears. `played`, for a server an Agent runs: whether
+   * anyone played since a time (its newest save's). Its Agent saves only after play, so no save is overdue while
+   * nobody has played since the newest one, nor while none is known yet (Factorio can't start without one, and an
+   * Agent that hasn't pushed its saves since the hub started is away, which has its own notices).
    */
-  watchdog(serverId: string, limits: { maxAgeHours?: number; minFreeGB: number }): void {
+  watchdog(serverId: string, limits: { maxAgeHours?: number; minFreeGB: number; played?: (since: number) => boolean }): void {
     clearInterval(this.#watchdogs.get(serverId));
     const check = async () => {
       if (limits.maxAgeHours !== undefined) {
         const newest = (await this.#list(serverId))[0];
         const age = newest ? Date.now() - newest.mtimeMs : Infinity;
-        if (age <= limits.maxAgeHours * HOUR) {
+        // None is due from an Agent while nobody has played since its newest save (or before it pushed any).
+        const due = !limits.played || (newest !== undefined && limits.played(newest.mtimeMs));
+        if (!due || age <= limits.maxAgeHours * HOUR) {
           this.#overdue.delete(serverId);
         } else if (!this.#overdue.has(serverId)) {
           this.#overdue.add(serverId);

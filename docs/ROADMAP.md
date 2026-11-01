@@ -150,6 +150,38 @@ the Logs tab against `gtnh`'s folder.
 | 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
 | 5 | Packs v2: the pack library (chunked uploads, GitHub Actions artifacts), Java runtimes, New server with `add-server.sh`, the Mod renamed `orrery`: #134 · Map: #123 · Layout: `docs/adr/0003-host-directory-layout.md` | hub + web + mod + deploy (no protocol bump) | L | #90; staging set up for its smoke test |
 
+## Factorio through an Agent — release 1 built (not yet cut), release 2 not started
+
+Notes: `docs/notes/factorio-agent.md` (the design, the build plan M0 to M8 and the smoke checks; local until the owner
+commits a cleaned copy, because the repo is public and the notes name the friend's VM details) · Decision:
+`docs/adr/0004-remote-hosts-through-an-agent.md`. One Factorio 2.1 Space Age server on a friend's Oracle Linux 9
+aarch64 VM, reached over his Tailscale tailnet. An **Agent** (`agent/`) on the VM dials out to the hub (Agent port
+25584) and runs Factorio, in Podman, for it; a control-only Factorio mod (`factorio/`, `orrery` on the mod portal)
+reports chat and events to the Agent. Hub, dashboard, Agent and Factorio mod are released separately, in that order
+(`docs/adr/0001`). Split into two releases on 2026-10-31.
+
+**Release 1 — built on the branch `factorio-agent`, to review and cut:**
+
+| Milestone | Where | Size |
+|---|---|---|
+| M1: Factorio in Podman on the VM by `deploy/setup-agent-host.sh`; the Agent's `check`; the `agent-v*` and `factorio-v*` release lines, the mod put on the mod portal by `release.yml` | deploy + agent + factorio + repo | L |
+| M2: the Agent port and connection (address check, 1 MiB line cap, rate limit, agent-lost rules); status with UPS and Paused; the VM as a second Host | hub + agent + web | L |
+| M3: chat both ways with Discord and the dashboard; join, leave and death with cause; every research and each force's first rocket, platform and landing; `/link` shared with Minecraft | hub + agent + factorio + web | L |
+| M4: start, stop and restart with countdowns; console and logs | hub + agent + web | M |
+| M5: saves as Backups (on request, every 6 h after play), and restore | hub + agent + web | M |
+
+Without release 2, the Factorio version changes by re-running the setup with `--factorio`, mods are added by hand, and
+the Agent updates by re-running the setup at the new `agent-v` tag; the dashboard has no Game tab and no Agent rows
+under Releases. A local end-to-end loop (hub, Agent and a headless server) passed its ten scenarios; real players,
+Discord, Podman, real systemd timeouts and the tailnet are checked only by the smoke tests in the notes, after the cut.
+
+**Release 2 — not started:**
+
+| Milestone | Where | Size |
+|---|---|---|
+| M6: game updates: the Factorio version and portal mods picked in the Game tab, with their dependencies; backup, countdown stop, swap, health gate and rollback, like a pack update | hub + agent + web | L |
+| M7: Agent deploys from the dashboard (`agent-v*` assets, rollback if the Agent won't reconnect); `deploy/deploy-agent.sh` is built already, nothing starts it yet | hub + agent + web | M |
+
 ## Later / if needed
 
 - More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).
@@ -159,4 +191,4 @@ the Logs tab against `gtnh`'s folder.
 - Cross-server chat and a network-wide `/status` (multi-server already works in the hub).
 - Moderation: mute the bridge for a player, a word filter for Discord → game.
 - Grafana/InfluxDB export of hub stats (TPS, players, uptime).
-- A hub on a different machine from the game servers (TLS, and rethinking the localhost-only port).
+- Agents beyond the Factorio release: a Minecraft server run through an Agent, more than one server per Agent, Agents that only report a Host, and a staging Agent.

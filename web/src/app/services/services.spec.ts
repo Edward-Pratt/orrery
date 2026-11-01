@@ -10,7 +10,7 @@ import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
 import Services from './services';
 
-const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, library: false, newServer: false };
+const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, agents: false, library: false, newServer: false };
 const svc = (id: string, state: string | null, checks: string[] = []): ServiceStatus => ({ id, unit: `${id}.service`, state, sub: state, checks });
 const GRAFANA = svc('grafana', 'active', ['grafana']);
 const CADDY = svc('caddy', 'inactive');
@@ -18,15 +18,18 @@ const check = (id: string, over: Partial<CheckStatus> = {}): CheckStatus => ({ i
 const CARD: ServerCard = {
   id: 'creative',
   name: 'Creative',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: { id: 'mc', state: 'active' },
-  features: { chat: true, tps: true, quests: false },
+  features: { chat: true, tps: true, quests: false, console: true, update: false },
   packUpdate: null,
 };
 
@@ -52,7 +55,7 @@ async function setup(on: Integrations = ALL, data: { services?: ServiceStatus[];
   await settle();
   if (on.systemd) backend.expectOne('/api/services').flush(data.services ?? [GRAFANA, CADDY]);
   if (on.checks) backend.expectOne('/api/checks').flush(data.checks ?? [check('grafana'), check('api', { up: false, ms: null, error: 'timeout' })]);
-  if (on.minecraft) backend.expectOne('/api/servers').flush(data.cards ?? []);
+  if (on.minecraft || on.agents) backend.expectOne('/api/servers').flush(data.cards ?? []);
   const el = fixture.nativeElement as HTMLElement;
   const render = async () => (await settle(), fixture.detectChanges(), await fixture.whenStable(), await settle());
   await render();
@@ -149,6 +152,12 @@ describe('services page', () => {
     backend.expectOne('/api/services/caddy/start').flush('systemctl failed', { status: 502, statusText: 'Bad Gateway' });
     await render();
     expect(toasts()[0]).toContain('Start of caddy.service failed: systemctl failed');
+  });
+
+  it('links a service to the factorio server it runs on a hub with Agents and no Minecraft', async () => {
+    const space = { ...CARD, id: 'space', name: 'Space', game: 'factorio', rate: { label: 'UPS', max: 60 }, service: { id: 'mc', state: 'active' } } as const;
+    const { row, text } = await setup({ ...ALL, minecraft: false, agents: true }, { services: [svc('mc', 'active')], cards: [space] });
+    expect(text(row('mc').querySelector('[data-runs]'))).toBe('runs Space →');
   });
 
   it('links a service that runs a server to it, with the server actions', async () => {

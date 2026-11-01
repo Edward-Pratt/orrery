@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { execRestore } from '../src/restore.ts';
+import { AGENT_RESTORE_MS, agentRestore, execRestore } from '../src/restore.ts';
 
 const hasZip = ['zip', 'unzip'].every((cmd) => {
   try {
@@ -53,4 +53,13 @@ test("the real script's refusal rejects with its error output, without the promp
     message: 'restore-backup: gtnh.service is running; stop it first: sudo systemctl stop gtnh.service',
   });
   assert.equal(readFileSync(join(dir, 'World', 'level.dat'), 'utf8'), 'old');
+});
+
+test("an Agent's restore waits up to 10 minutes for its reply, not the other requests' 30 s: it copies the whole save", async () => {
+  const calls: unknown[][] = [];
+  const agents = { request: async (...args: unknown[]) => void calls.push(args) } as unknown as Parameters<typeof agentRestore>[0];
+  const source = agentRestore(agents, 'vm', async () => []);
+  assert.match(await source.run('world.zip', 'factorio.service'), /world\.zip is copied as the newest save/);
+  assert.equal(AGENT_RESTORE_MS, 10 * 60_000);
+  assert.deepEqual(calls, [['vm', { type: 'restore', name: 'world.zip' }, { timeoutMs: AGENT_RESTORE_MS }]]);
 });

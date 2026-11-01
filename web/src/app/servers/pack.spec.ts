@@ -12,15 +12,18 @@ import routes from './routes';
 const CARD: ServerCard = {
   id: 'gtnh',
   name: 'GTNH',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 20,
   players: ['Steve', 'Alex', 'Kestrel'],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: { id: 'gtnh', state: 'active' },
-  features: { chat: true, tps: true, quests: true },
+  features: { chat: true, tps: true, quests: true, console: true, update: false },
   packUpdate: { running: false, rolledBack: null },
 };
 const DETAIL = { card: CARD, service: null, top: { day: [], week: [], all: [] }, backups: { configured: false }, pack: true } as unknown as ServerDetail;

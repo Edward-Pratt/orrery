@@ -2,6 +2,8 @@
 hub/node_modules/
 hub/config.json
 hub/*.db*
+# agent
+agent/node_modules/
 # nightly hub.db copies (hold Discord ID <-> player links)
 hub/db-backups/
 .env

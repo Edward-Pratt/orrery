@@ -38,10 +38,10 @@ import type {
 } from './api.ts';
 import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
-import type { HostMonitor } from './host.ts';
+import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
-import type { LagMonitor } from './lag.ts';
+import { rateOf, type LagMonitor } from './lag.ts';
 import { LibraryRefused, type Library } from './library.ts';
 import type { LiveFeed } from './live.ts';
 import { PackRefused, startScripts, type Packs } from './packs.ts';
@@ -49,7 +49,7 @@ import { UploadRefused, type Uploads } from './uploads.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
-import { mcText, type FeedEvent, type ServerHub, type ServerState } from './servers.ts';
+import { CommandRefused, mcText, type FeedEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
@@ -117,11 +117,11 @@ export type WebDeps = {
   lag: LagMonitor;
   /** Only with the checks integration. */
   checks?: Checks;
-  /** Only with the host integration. */
-  host?: HostMonitor;
+  /** Only with the host or agents integration: the hub's own Host and each Agent's. */
+  hosts?: Hosts;
   /** Only with the systemd integration. */
   services?: Services;
-  /** Only with the systemd integration and a restore runner. */
+  /** Only with the systemd integration, and a server with a restore source: a folder and the restore script, or an Agent. */
   restores?: Restores;
   /** Only with the GitHub integration. */
   deploys?: Deploys;
@@ -136,23 +136,30 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, host, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
+  // A factorio server is run by an Agent (its `server`); only those have game updates.
+  const agentServed = (id: string) => Boolean(integrations.agents?.agents.some((a) => a.server === id));
+  // Chat, a rate (from heartbeats) and the console come over a game connection: the Mod's, or an Agent's.
+  const connects = (id: string) => hasMod(id) || agentServed(id);
   const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
     const linked = services?.ofServer(s.id);
     return {
       id: s.id,
       name: s.name,
+      game: s.game,
+      rate: rateOf(s.game),
       online: s.online,
       hung: s.hung,
-      tps: hasMod(s.id) ? s.tps : null,
+      paused: s.paused,
+      tps: connects(s.id) ? s.tps : null,
       players: s.players,
       uptimeDay: status.uptimeDay,
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: hasMod(s.id), tps: hasMod(s.id), quests: hasMod(s.id) },
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: false }, // game updates (the Game tab) arrive with M6, in release 2
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -269,6 +276,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       host: !!integrations.host,
       systemd: !!integrations.systemd,
       github: !!integrations.github,
+      agents: !!integrations.agents,
       library: !!library,
       newServer,
     } satisfies Integrations),
@@ -323,13 +331,23 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       });
     }
   }
-  const hostId = integrations.host?.id;
-  if (host && hostId) {
-    app.get('/host', (c) => c.json({ id: hostId, sample: host.latest() } satisfies HostNow));
-    app.get('/host/samples', (c) => {
-      const hours = hoursOf(c);
-      return hours ? c.json(host.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+  const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
+  const history = (h: HostMonitor, c: Context) => {
+    const hours = hoursOf(c);
+    return hours ? c.json(h.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+  };
+  if (hosts?.list().length) {
+    app.get('/hosts', (c) => c.json(hosts.list().map(now) satisfies HostNow[]));
+    app.get('/hosts/:id/samples', (c) => {
+      const h = hosts.get(c.req.param('id'));
+      return h ? history(h, c) : c.notFound();
     });
+  }
+  const host = integrations.host && hosts?.get(integrations.host.id);
+  if (host) {
+    // ponytail: the hub's own host, for a dashboard older than `/hosts`; drop a release after.
+    app.get('/host', (c) => c.json(now(host)));
+    app.get('/host/samples', (c) => history(host, c));
   }
   if (newServer) {
     // Before `/servers/:id`: "pending" isn't a server id.
@@ -347,7 +365,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       card: card(state, status),
       service: services?.ofServer(id) ?? null,
       status,
-      tps: hasMod(id) ? stats.tps(id)! : null,
+      tps: connects(id) ? stats.tps(id)! : null,
       top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
       backups: (await stats.backups(id))!,
       pack: packs?.has(id) ?? false,
@@ -356,8 +374,12 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   });
   // Reads, so not audited. A file is only ever one of the listing's names, never a path from the request.
   app.get('/servers/:id/logs', async (c) => {
-    const files = await stats.logs(c.req.param('id'));
-    return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+    try {
+      const files = await stats.logs(c.req.param('id'));
+      return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+    } catch (err) {
+      return c.text(`Listing the logs failed: ${(err as Error).message}`, 502); // an Agent's, which can't answer
+    }
   });
   app.get('/servers/:id/logs/:name', async (c) => {
     const name = c.req.param('name');
@@ -374,7 +396,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const hours = hoursOf(c);
     if (!hours) return c.text(BAD_HOURS, 400);
     const asOf = live.lastId; // read first: an event after it may or may not be in the history, so it is replayed
-    return c.json({ ...stats.history(id, hours, hasMod(id))!, asOf } satisfies ServerHistory);
+    return c.json({ ...stats.history(id, hours, connects(id))!, asOf } satisfies ServerHistory);
   });
   app.get('/servers/:id/players/:name', (c) => {
     const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });
@@ -527,9 +549,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const id = c.req.param('id');
     const user = c.get('user');
     const message = c.get('body').message;
-    // Linked people appear in game under their Minecraft name, as from Discord; Discord shows the admin's avatar.
+    // Linked people appear in game under their name in that server's game, as from Discord; Discord shows the admin's avatar.
     const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : undefined;
-    const author = stats.linkedPlayer(user.id) ?? user.username;
+    const author = stats.linkedPlayer(id, user.id) ?? user.username;
     if (typeof message !== 'string' || !hub.say(id, author, message, 'dashboard', avatar)) {
       return c.text('Give a message', 400);
     }
@@ -543,13 +565,20 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'empty command') return c.text('Give a command', 400);
+      if (err instanceof CommandRefused) return c.text(message, 400);
       return c.text(message, 502); // timed out, or the server went away
     }
   };
   // Output that comes later (spark's profiler link) goes on the event stream.
   app.post('/servers/:id/command', (c) => run(c, c.get('body').command));
-  // The finished/failed notice follows on the event stream, from the mod's backup event.
-  app.post('/servers/:id/backup', (c) => run(c, 'backup start'));
+  // A Mod's `backup start`, or a factorio server's save; the finished/failed notice follows on the event stream.
+  app.post('/servers/:id/backup', async (c) => {
+    try {
+      return c.json({ output: await hub.backup(c.req.param('id'), actor(c.get('user'))) } satisfies CommandOutput);
+    } catch (err) {
+      return c.text((err as Error).message, 502); // timed out, or the server went away
+    }
+  });
   app.post('/servers/:id/restart', (c) => {
     const id = c.req.param('id');
     if (restarts.pending(id)) return c.text('A restart is already scheduled: cancel it first.', 409);

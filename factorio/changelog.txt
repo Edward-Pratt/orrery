@@ -1,0 +1,8 @@
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+  Features:
+    - Chat both ways between the server and orrery (Discord and the dashboard), with Discord text kept from rendering as rich text.
+    - Join, leave and death events, with the cause of death.
+    - Every research finished in labs, infinite levels included, and firsts per force: first rocket, first space platform, first landing on each planet.
+    - /orrery-link and /orrery-unlink, to link a Factorio name to a Discord account.
+    - Console commands for the orrery agent over RCON: status, save, notices, replies, and a hello over UDP with the last event's number.

@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { DeploysAnswer, HostSample, Integrations, Release } from '@hub/api';
+import type { DeploysAnswer, HostNow, HostSample, Integrations, Release } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { dialog, dialogButton, fakeEvents, settle } from '../testing';
@@ -18,9 +18,9 @@ const SAMPLE: HostSample = {
 };
 const EARLIER: HostSample = { ...SAMPLE, ts: 0, cpu: 0.5, disks: [...SAMPLE.disks, { mount: '/data', free: 1 * GB, total: 2 * GB }] };
 
-const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, library: false, newServer: false };
+const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: true, systemd: false, github: false, agents: false, library: false, newServer: false };
 
-async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
+async function setup(sample: HostSample = SAMPLE, answer = true, on = ON, others: HostNow[] = []) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [
@@ -35,7 +35,10 @@ async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
   const render = async () => (await settle(), await fixture.whenStable());
   await render();
   backend.expectOne('/api/integrations').flush(on);
-  if (answer) backend.expectOne('/api/host').flush({ id: 'oracle', sample });
+  if (answer) {
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample }, ...others]);
+    await render(); // its graphs are asked for once the host is known
+  }
   const el = fixture.nativeElement as HTMLElement;
   const tiles = () => [...el.querySelectorAll('[data-tile]')].map((t) => `${t.getAttribute('data-tile')}:${t.getAttribute('data-state')}`);
   const text = (sel: string) => el.querySelector(sel)?.textContent?.trim();
@@ -51,7 +54,7 @@ async function setup(sample: HostSample = SAMPLE, answer = true, on = ON) {
 describe('host page', () => {
   it('shows a tile for CPU, load, memory and each disk, then updates them from each live sample', async () => {
     const { events, backend, render, text, tiles } = await setup({ ...SAMPLE, disks: [...SAMPLE.disks, { mount: '/data', free: 30 * GB, total: 100 * GB }] });
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(text('h1')).toBe('Host oracle');
     expect(tiles()).toEqual(['cpu:ok', 'load:ok', 'memory:ok', 'disk:/:ok', 'disk:/data:ok']);
@@ -72,7 +75,7 @@ describe('host page', () => {
   it('warns amber, then red, past a threshold; a disk when under 20%, then 10%, free', async () => {
     const low = { ...SAMPLE, cpu: 0.97, disks: [{ mount: '/', free: 15 * GB, total: 100 * GB }, { mount: '/data', free: 5 * GB, total: 100 * GB }, { mount: '/big', free: 90 * GB, total: 100 * GB }] };
     const { backend, render, tiles } = await setup(low);
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(tiles()).toEqual(['cpu:down', 'load:ok', 'memory:ok', 'disk:/:warn', 'disk:/data:down', 'disk:/big:ok']);
   });
@@ -80,15 +83,15 @@ describe('host page', () => {
   it('shows skeleton tiles until the first answer', async () => {
     const { el, backend, render } = await setup(SAMPLE, false);
     expect(el.querySelector('[data-skeleton]')).not.toBeNull();
-    backend.expectOne('/api/host').flush({ id: 'oracle', sample: SAMPLE });
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample: SAMPLE }]);
     await render();
     expect(el.querySelector('[data-skeleton]')).toBeNull();
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
   });
 
   it('graphs the last 24 hours, then the chosen period, a series per mount', async () => {
     const { backend, render, chart, period } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([EARLIER, SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([EARLIER, SAMPLE]);
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[0, 0.5], [1, 0.25]]]]);
     expect(chart('Load')).toEqual([['1 min', [[0, 0.5], [1, 0.5]]]]);
@@ -101,24 +104,85 @@ describe('host page', () => {
     // A slow long period is dropped when a shorter one is chosen before it answers.
     period('90 d');
     await render();
-    const slow = backend.expectOne('/api/host/samples?hours=2160');
+    const slow = backend.expectOne('/api/hosts/oracle/samples?hours=2160');
     period('1 h');
     await render();
     expect(slow.cancelled).toBe(true);
-    backend.expectOne('/api/host/samples?hours=1').flush([SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=1').flush([SAMPLE]);
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[1, 0.25]]]]);
   });
 
   it('appends each live sample to the graph without fetching again', async () => {
     const { events, backend, render, chart } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([EARLIER, SAMPLE]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([EARLIER, SAMPLE]);
     await render();
     events.push(1, { target: 'host', id: 'oracle', type: 'sample', sample: SAMPLE }); // the replay's latest: already drawn
     events.push(2, { target: 'host', id: 'oracle', type: 'sample', sample: { ...SAMPLE, ts: 2, cpu: 1 } });
     await render();
     expect(chart('CPU')).toEqual([['CPU', [[0, 0.5], [1, 0.25], [2, 1]]]]);
     backend.verify();
+  });
+
+  it('shows no host picker with one host', async () => {
+    const { el, backend, render } = await setup();
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
+    await render();
+    expect(el.querySelector('[data-hosts]')).toBeNull();
+  });
+
+  it("picks a host when there is more than one: the hub's own first, then another's tiles and graphs", async () => {
+    const VM: HostNow = { id: 'vm', sample: { ...SAMPLE, cpu: 0.75, disks: [{ mount: '/srv', free: 5 * GB, total: 100 * GB }] } };
+    const { el, events, backend, render, text, tiles, chart, period } = await setup(SAMPLE, true, ON, [VM]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([SAMPLE]);
+    await render();
+    expect([...el.querySelectorAll('[data-host]')].map((b) => b.textContent?.trim())).toEqual(['oracle', 'vm']);
+    expect(text('h1')).toBe('Host oracle');
+    expect(text('[data-value=cpu]')).toBe('25%');
+
+    // Another host's live sample changes nothing shown.
+    events.push(1, { target: 'host', id: 'vm', type: 'sample', sample: { ...VM.sample!, ts: 2, cpu: 0.5 } });
+    await render();
+    expect(text('[data-value=cpu]')).toBe('25%');
+    expect(chart('CPU')).toEqual([['CPU', [[1, 0.25]]]]);
+
+    el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
+    await render();
+    expect(text('h1')).toBe('Host vm');
+    expect(text('[data-value=cpu]')).toBe('50%'); // its newest, from the stream
+    expect(tiles()).toEqual(['cpu:ok', 'load:ok', 'memory:ok', 'disk:/srv:down']);
+    expect(chart('CPU')).toEqual([['CPU', []]]); // none of oracle's while vm's load
+    backend.expectOne('/api/hosts/vm/samples?hours=24').flush([VM.sample!]);
+    await render();
+    expect(chart('CPU')).toEqual([['CPU', [[1, 0.75]]]]);
+    period('1 h');
+    await render();
+    backend.expectOne('/api/hosts/vm/samples?hours=1').flush([]);
+    backend.verify();
+  });
+});
+
+describe('host page without a sample yet', () => {
+  it("says the hub's own first sample comes a minute after the hub starts, an Agent's once it is connected", async () => {
+    const events = fakeEvents();
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    });
+    const fixture = TestBed.createComponent(Host);
+    const backend = TestBed.inject(HttpTestingController);
+    const render = async () => (await settle(), await fixture.whenStable());
+    await render();
+    backend.expectOne('/api/integrations').flush(ON);
+    backend.expectOne('/api/hosts').flush([{ id: 'oracle', sample: null }, { id: 'vm', sample: null }]);
+    await render();
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
+    await render();
+    const el = fixture.nativeElement as HTMLElement;
+    const said = () => el.querySelector('[data-no-sample]')?.textContent?.trim();
+    expect(said()).toBe('No sample yet: the first comes a minute after the hub starts.');
+    el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
+    await render();
+    expect(said()).toBe('No sample yet: its Agent sends one each minute once it is connected.');
   });
 });
 
@@ -128,6 +192,7 @@ const ANSWER: DeploysAnswer = {
   hub: { running: 'hub-v2.5.0', latest: 'hub-v2.6.0', releases: [rel('hub-v2.6.0'), rel('hub-v2.5.0'), rel('hub-v2.4.0')] },
   web: { running: 'web-v0.5.0', latest: 'web-v0.5.0', releases: [rel('web-v0.5.0'), rel('web-v0.4.1')] },
   mod: { latest: 'mod-v1.4.0', releases: [rel('mod-v1.4.0'), rel('mod-v1.3.0')], servers: [{ id: 'gtnh', name: 'GTNH', running: 'mod-v1.3.0' }] },
+  agent: { latest: null, releases: [], hosts: [] },
   checkedAt: Date.now(),
   error: null,
   newerAfterDays: 14,
@@ -138,8 +203,8 @@ const ANSWER: DeploysAnswer = {
 
 describe('host page releases', () => {
   async function releases(answer: DeploysAnswer = ANSWER) {
-    const h = await setup(SAMPLE, true, { ...ON, github: true, library: false });
-    h.backend.expectOne('/api/host/samples?hours=24').flush([]);
+    const h = await setup(SAMPLE, true, { ...ON, github: true, agents: false, library: false });
+    h.backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await h.render();
     h.backend.expectOne('/api/deploys').flush(answer);
     await h.render();
@@ -247,13 +312,81 @@ describe('host page releases', () => {
     expect(row('mod:gtnh').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
     expect(row('mod:gtnh').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running on GTNH.');
     expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
-    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack update is running.');
+    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack or game update is running.');
     expect(row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
+  });
+
+  it("still deploys from a hub below release 1: no /api/hosts, and an answer with no agent part", async () => {
+    const h = await setup(SAMPLE, false, { ...ON, github: true, agents: false, library: false });
+    h.backend.expectOne('/api/hosts').flush('Not Found', { status: 404, statusText: 'Not Found' }); // it serves /api/host
+    await h.render();
+    const { agent: _, ...older } = ANSWER;
+    h.backend.expectOne('/api/deploys').flush(older);
+    await h.render();
+    const row = (key: string) => h.el.querySelector<HTMLElement>(`[data-row="${key}"]`)!;
+    expect([...h.el.querySelectorAll('[data-row]')].map((r) => r.getAttribute('data-row'))).toEqual(['hub', 'web', 'mod:gtnh']);
+    expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false); // rolled forward from here
+    // Or the dashboard back, to one that reads the older hub's API.
+    row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.click();
+    await h.render();
+    const select = row('web').querySelector<HTMLSelectElement>('[data-pick]')!;
+    select.value = 'web-v0.4.1';
+    select.dispatchEvent(new Event('change'));
+    await h.render();
+    row('web').querySelector<HTMLButtonElement>('[data-next]')!.click();
+    await h.render();
+    dialogButton('ok').click();
+    await h.render();
+    expect(h.backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys').request.body).toEqual({ part: 'web', tag: 'web-v0.4.1' });
+  });
+
+  const AGENTS: DeploysAnswer = {
+    ...ANSWER,
+    agent: {
+      latest: 'agent-v1.1.0',
+      releases: [rel('agent-v1.1.0'), rel('agent-v1.0.0')],
+      hosts: [
+        { id: 'vm', name: 'Friend VM', server: 'space', running: 'agent-v1.0.0' },
+        { id: 'pi', name: 'Pi', server: 'tiny', running: null },
+      ],
+    },
+  };
+
+  it("shows a row per Host's Agent; its Deploy names the Agent and posts its part with the Host", async () => {
+    const { row, rowText, deploy, backend, render } = await releases(AGENTS);
+    const shown = (key: string) => ['[data-running]', '[data-latest]', '[data-newer]'].map((sel) => row(key).querySelector(sel)?.textContent?.trim());
+    expect(shown('agent:vm')).toEqual(['agent-v1.0.0', 'agent-v1.1.0', 'newer available']);
+    expect(shown('agent:pi')).toEqual(['unknown', 'agent-v1.1.0', undefined]); // never connected
+    expect(rowText('agent:vm')).toContain('Agent on Friend VM');
+    const select = await deploy('agent:vm');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['agent-v1.1.0', 'agent-v1.0.0 (running)']);
+    expect(dialog()!.textContent).toContain('Deploy Agent on Friend VM v1.0.0 → v1.1.0?');
+    dialogButton('ok').click();
+    await render();
+    const req = backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys');
+    expect(req.request.body).toEqual({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' });
+  });
+
+  it("no Agent deploy while a game update runs on its server; another Host's Agent can deploy", async () => {
+    const { row } = await releases({ ...AGENTS, packing: ['space'] });
+    expect(row('agent:vm').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true);
+    expect(row('agent:vm').querySelector('[data-why]')?.textContent?.trim()).toBe('A game update is running on space.');
+    expect(row('agent:pi').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
+    expect(row('hub').querySelector('[data-why]')?.textContent?.trim()).toBe('A pack or game update is running.');
+  });
+
+  it("a running Agent deploy spins on its own Host's row, and the history names the Agent", async () => {
+    const running = { id: 3, part: 'agent' as const, target: 'vm', from: 'agent-v1.0.0', to: 'agent-v1.1.0', by: 'web:alex (5)', started: 1, finished: null, outcome: 'running' as const, log: '' };
+    const { rowText, row, el } = await releases({ ...AGENTS, history: [running, ...ANSWER.history] });
+    expect(rowText('agent:vm')).toContain('deploying agent-v1.1.0');
+    expect(row('agent:pi').querySelector('[data-deploying]')).toBeNull();
+    expect(row('agent:pi').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(true); // one deploy at a time
+    expect(el.querySelector('[data-deploy-row="3"]')!.textContent).toContain('Agent on vm: agent-v1.0.0 → agent-v1.1.0');
   });
 
   it('has no section with the GitHub integration off', async () => {
     const { el, backend, render } = await setup();
-    backend.expectOne('/api/host/samples?hours=24').flush([]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
     await render();
     expect(el.querySelector('[data-releases]')).toBeNull();
     backend.verify();

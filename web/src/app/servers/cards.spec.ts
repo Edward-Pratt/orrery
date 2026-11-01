@@ -12,15 +12,18 @@ import Cards from './cards';
 const GTNH: ServerCard = {
   id: 'gtnh',
   name: 'GTNH',
+  game: 'minecraft',
+  rate: { label: 'TPS', max: 20 },
   online: true,
   hung: false,
+  paused: false,
   tps: 19.5,
   players: [],
   uptimeDay: 1,
   restart: null,
   lagging: false,
   service: { id: 'gtnh-svc', state: 'active' },
-  features: { chat: true, tps: true, quests: true },
+  features: { chat: true, tps: true, quests: true, console: true, update: false },
   packUpdate: null,
 };
 const SITE: ServerCard = {
@@ -30,7 +33,7 @@ const SITE: ServerCard = {
   tps: null,
   online: false,
   service: null,
-  features: { chat: false, tps: false, quests: false },
+  features: { chat: false, tps: false, quests: false, console: false, update: false },
 };
 
 @Component({ imports: [HlmToaster, Cards], template: `<hlm-toaster /><app-cards />` })
@@ -95,6 +98,53 @@ describe('server rows', () => {
     const { text } = await setup();
     expect(text('gtnh', 'tps')).toBe('19.5');
     expect(text('site', 'tps')).toBeUndefined();
+  });
+
+  it("labels a factorio server's rate UPS", async () => {
+    const { el, text } = await setup([GTNH, { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 58.24 }]);
+    expect(el.querySelector('[data-server=gtnh] dt')?.textContent).toBe('TPS');
+    expect(el.querySelector('[data-server=space] dt')?.textContent).toBe('UPS');
+    expect(text('space', 'tps')).toBe('58.2');
+  });
+
+  it("shows Paused for a paused factorio server's rate, and its UPS again once it is not", async () => {
+    const SPACE: ServerCard = { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 60, paused: true };
+    const { el, text, change } = await setup([GTNH, SPACE]);
+    expect(el.querySelector('[data-server=space] dt')?.textContent).toBe('UPS');
+    expect(text('space', 'tps')).toBe('Paused');
+    expect(text('space', 'state')).toBe('Online'); // paused is still up
+    expect(text('gtnh', 'tps')).toBe('19.5');
+    await change([GTNH, { ...SPACE, paused: false, tps: 59.5 }]);
+    expect(text('space', 'tps')).toBe('59.5');
+  });
+
+  it("fetches the cards again when a factorio server's paused changes, with no join or leave", async () => {
+    const SPACE: ServerCard = { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 60 };
+    const { events, text, refetch } = await setup([SPACE]);
+    expect(text('space', 'tps')).toBe('60.0');
+    events.push(1, { serverId: 'space', type: 'paused', paused: true }); // an admin's pause, say
+    await refetch([{ ...SPACE, paused: true }]);
+    expect(text('space', 'tps')).toBe('Paused');
+    events.push(2, { serverId: 'space', type: 'paused', paused: false });
+    await refetch([SPACE]);
+    expect(text('space', 'tps')).toBe('60.0');
+  });
+
+  it("fetches the cards again when a factorio server's Agent left (lost), which clears its players and rate", async () => {
+    const SPACE: ServerCard = { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 60, players: ['alice'] };
+    const { events, text, refetch } = await setup([SPACE]);
+    expect(text('space', 'players')).toBe('1');
+    events.push(1, { serverId: 'space', type: 'lost' });
+    await refetch([{ ...SPACE, online: false, tps: null, players: [] }]);
+    expect(text('space', 'state')).toBe('Offline');
+    expect(text('space', 'players')).toBe('0');
+    expect(text('space', 'tps')).toBe('–');
+  });
+
+  it('links the Console only for a server with the console feature', async () => {
+    const { actions } = await setup([GTNH, { ...GTNH, id: 'quiet', features: { ...GTNH.features, console: false } }]);
+    expect(actions('gtnh')).toEqual(['restart', 'console', 'more']);
+    expect(actions('quiet')).toEqual(['restart', 'more']);
   });
 
   it('offers the actions its state allows', async () => {
@@ -192,7 +242,7 @@ describe('server rows', () => {
     events.push(2, { serverId: 'gtnh', type: 'join', player: 'Steve' });
     await refetch([{ ...GTNH, players: ['Steve'] }, SITE]);
     expect(text('gtnh', 'players')).toBe('1');
-    events.push(3, { serverId: 'gtnh', type: 'notice', severity: 'warning', kind: 'lag', tps: 10, worst: null });
+    events.push(3, { serverId: 'gtnh', type: 'notice', severity: 'warning', kind: 'lag', tps: 10, label: 'TPS', worst: null });
     await refetch([{ ...GTNH, lagging: true }, SITE]);
     expect(text('gtnh', 'state')).toBe('Lagging');
     events.push(4, { target: 'service', id: 'gtnh-svc', type: 'state', state: 'inactive', sub: 'dead' });

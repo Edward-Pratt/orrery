@@ -21,6 +21,7 @@ import type {
   GameCatalog,
   GameState,
   GameUpdateAnswer,
+  ModBrowse,
   Me,
   NewServerAnswer,
   PendingServers,
@@ -570,6 +571,21 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       game(c, async (sid, user) => ({ id: await gameUpdates.update(sid, await jsonBody(c.req), actor(user), user.username) }) satisfies GameUpdateAnswer, 202),
     );
     app.post('/servers/:id/game/update/cancel', (c) => game(c, async (sid, user) => gameUpdates.cancel(sid, actor(user), user.username)));
+    // The mod browser: reads of the mod portal, through the hub (the dashboard never talks to it).
+    app.get('/servers/:id/game/mods', (c) => game(c, async (sid) => (await gameUpdates.browse(sid, c.req.query())) satisfies ModBrowse));
+    app.get('/servers/:id/game/mods/:name/thumbnail', async (c) => {
+      const id = c.req.param('id');
+      if (!gameUpdates.has(id)) return c.notFound();
+      try {
+        const image = await gameUpdates.thumbnail(id, c.req.param('name'));
+        if (!image) return c.text('No thumbnail.', 404, { 'cache-control': 'private, max-age=3600' });
+        // A checked PNG only, never sniffed as anything else; by name, so not immutable: a mod can change its thumbnail.
+        return c.body(image, 200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    });
   }
   // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
   app.post('/servers/:id/*', async (c, next) => {

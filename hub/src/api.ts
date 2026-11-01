@@ -586,3 +586,31 @@ export type GameCatalog = { versions: FactorioRelease[]; mods: CatalogMod[]; unr
  * or a countdown runs on the server. `POST …/game/update/cancel`: only before the swap (else 409).
  */
 export type GameUpdateAnswer = { id: number };
+/** How the mod browser sorts: most downloaded first, newest release first, or by name (the title it shows, case aside). */
+export type PortalSort = 'downloads' | 'updated' | 'name';
+/** A portal category: its id (`mod-packs`) and title ("Mod packs"). */
+export type PortalCategory = { id: string; title: string };
+/**
+ * A mod on the portal as the browser shows it: name, title, owner, summary (plain text, cut), downloads, its newest
+ * release for the line (`version`, `updated` epoch ms or null), category id or null, whether it needs Space Age, and
+ * its portal page (built by the hub). Every string is the portal's, checked and cut by the hub: show it as text.
+ */
+export type PortalListing = {
+  name: string;
+  title: string;
+  owner: string;
+  summary: string;
+  downloads: number;
+  version: string;
+  updated: number | null;
+  category: string | null;
+  spaceAge: boolean;
+  page: string;
+};
+/**
+ * `GET /api/servers/:id/game/mods?factorio=&q=&category=&sort=&page=`: one page (24) of the portal's mods for the
+ * Factorio version's line, deprecated ones left out, with how many match and the categories to filter by. 400 for a
+ * bad parameter, 502 if the portal can't be read. `GET …/game/mods/:name/thumbnail`: the mod's thumbnail, a PNG
+ * (404 when it has none).
+ */
+export type ModBrowse = { line: string; total: number; mods: PortalListing[]; categories: PortalCategory[] };

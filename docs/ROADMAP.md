@@ -191,6 +191,15 @@ adding a mod and its dependency, a gate failure rolled back to the pre-update sa
 restart during an update, and an Agent deploy through the real `deploy-agent.sh`. The real portal, ARM64 build,
 Podman and polkit are not in it: they are left to the smoke checks in the notes, after the cut.
 
+## Game tab: the mod browser — building on `fa/mod-browser`, not yet cut
+
+Notes: `docs/notes/mod-browser.md`. A Browse view in the Update game sheet: the mod portal's mods for the picked
+Factorio line, searched, filtered by category, sorted, with thumbnails, summaries and download counts, and Add, which
+puts a mod in the update with its required dependencies (a portal mod pack's mods too). The hub reads the portal and
+serves the thumbnails; the dashboard never talks to it. With it, a release on both channels reads as stable, and "What
+changes" says when the server runs the picks already. To cut as `hub-v2.16.0` (deployed first), then `web-v0.14.0`;
+no Agent, mod or protocol change.
+
 ## Later / if needed
 
 - More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).

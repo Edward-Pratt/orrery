@@ -307,6 +307,36 @@ test('restore writes the copy under a name that is no save, and refuses if the s
   assert.deepEqual(await readdir(w.saves), ['world.zip'], 'no copy and no partial file left');
 });
 
+test("start removes a partial copy left by a restore the agent's exit cut short, before the first listing, and nothing else", async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const w = await world(t);
+  t.after(() => w.s.stop());
+  // The agent exited during a restore (process.exit skips its finally): its partial copy stays, hidden from the list.
+  const left = `.restored-${stamp(T0 - HOUR)}-world.zip.partial`;
+  const kept = [
+    'world.zip',
+    `restored-${stamp(T0 - 2 * HOUR)}-world.zip`,
+    '.other.partial', // not a restore's
+    `.restored-${stamp(T0)}-world.zip`, // no .partial
+    `.restored-${stamp(T0)}-\u001b]0;x\u0007.zip.partial`, // not printable: no restore makes it
+  ];
+  for (const name of kept) await file(w.saves, name, T0 - 3 * HOUR);
+  await file(w.saves, left, T0 - HOUR, 'half a world');
+  // The container's link with that shape, to a file outside saves/: neither it nor what it points at is removed.
+  await file(w.dir, 'outside.zip', T0);
+  const linked = `.restored-${stamp(T0)}-evil.zip.partial`;
+  await symlink(join(w.dir, 'outside.zip'), join(w.saves, linked));
+  await mkdir(join(w.saves, `.restored-${stamp(T0)}-folder.zip.partial`));
+
+  w.s.start();
+  await eventually(() => w.pushed.length === 1, 2000, 'the first list');
+  const now = await readdir(w.saves);
+  assert.ok(!now.includes(left), 'the partial copy is removed');
+  assert.deepEqual(now.sort(), [...kept, linked, `.restored-${stamp(T0)}-folder.zip.partial`].sort(), 'nothing else is');
+  assert.equal(await readFile(join(w.dir, 'outside.zip'), 'utf8'), 'outside.zip');
+  assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] removed ${left}, left by a restore the agent's exit cut short`]);
+});
+
 test('a save that never appears times out after the bounded wait; one that keeps changing too', async (t) => {
   const w = await world(t, { waitMs: 300 });
   w.write = async () => {}; // the mod says ok, but no file comes

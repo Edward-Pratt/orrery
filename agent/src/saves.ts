@@ -29,6 +29,9 @@ const HEAD_MAX = 1024 * 1024;
 /** The agent's own saves: `orrery-<time>.zip`, or before an update `orrery-pre-update-<from>-<time>.zip`. */
 const NAMED = /^orrery-(?:pre-update-\d+\.\d+\.\d+-)?\d{8}T\d{6}Z\.zip$/;
 
+/** A restore's copy while it is written (`restore`): `.restored-<time>-<name>.partial`, the name a listed save. */
+const PARTIAL = /^\.restored-\d{8}T\d{6}Z-.+\.zip\.partial$/;
+
 /** What kind of save a file is, by its name: the agent's (`named`), Factorio's autosave (`auto`), or anything else (`world`). */
 export const kindOf = (name: string): SaveKind => (NAMED.test(name) ? 'named' : name.startsWith('_autosave') ? 'auto' : 'world');
 
@@ -109,6 +112,7 @@ function saved(reply: string, name: string): boolean {
  * - `restore`: copies a listed save, only while the unit is stopped, from its open handle to a new
  *   `restored-<time>-<name>` (never over a file) whose time is 2 s past every other file's, so the next start loads it;
  *   written under a name that is no save, and given its own name only once whole and the unit is still stopped.
+ *   `start` removes such a partial copy that an exit during a restore left behind, before the first listing.
  */
 export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResult] }> {
   #o: Required<SavesOptions>;
@@ -131,7 +135,9 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   start(): void {
     if (!this.#stopped) return;
     this.#stopped = false;
-    void this.#loop();
+    void this.#sweep().then(() => {
+      if (!this.#stopped) void this.#loop();
+    });
   }
 
   stop(): void {
@@ -300,6 +306,27 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
     console.log(`[saves] restored ${printable(name)} as ${printable(copy)}: the next start loads it`);
     await this.prune();
     await this.refresh();
+  }
+
+  /**
+   * Removes every partial copy a restore left when the agent exited during it (a restart or a crash: `process.exit`
+   * skips its `finally`). No restore of this agent runs yet, and one started later takes a new name. Such a file is
+   * no save, so neither the list nor pruning would ever see it.
+   */
+  async #sweep(): Promise<void> {
+    await this.#within(async (base, dev) => {
+      for (const name of await readdir(base)) {
+        if (!PARTIAL.test(name) || printable(name) !== name) continue;
+        const st = await lstat(`${base}/${name}`).catch(() => null);
+        if (!st?.isFile() || st.dev !== dev) continue;
+        try {
+          await unlink(`${base}/${name}`);
+          console.log(`[saves] removed ${name}, left by a restore the agent's exit cut short`);
+        } catch (err) {
+          console.error(`[saves] can't remove ${name}: ${printable((err as Error).message)}`);
+        }
+      }
+    }).catch((err: Error) => console.error(`[saves] can't look for partial restores: ${printable(err.message)}`));
   }
 
   async #loop(): Promise<void> {

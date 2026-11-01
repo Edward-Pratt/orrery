@@ -380,7 +380,8 @@ settings_ok() {
     const ok = s.visibility.public === false && s.visibility.lan === false && s.require_user_verification === true &&
       s.auto_pause === true && s.autosave_interval === 10 && s.autosave_slots === 5 && s.non_blocking_saving === false &&
       s.allow_commands === "admins-only" && /setup-agent-host\.sh/.test(s._comment) &&
-      /^[A-Za-z0-9]{20,}$/.test(s.game_password) && !["username", "password", "token"].some((k) => k in s);
+      /^[A-Za-z0-9]{20,}$/.test(s.game_password) && !["username", "password", "token"].some((k) => k in s) &&
+      s.name === "orrery Factorio" && s.description === "";
     process.exit(ok ? 0 : 1);' "$1"
 }
 canon() { node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))))' "$1"; }
@@ -443,6 +444,22 @@ check 'writes config.ini with the read-only data and the writable /srv/factorio'
   grep -qx "read-data=/opt/factorio/current/data" "$R/srv/factorio/config/config.ini" &&
   grep -qx "write-data=/srv/factorio" "$R/srv/factorio/config/config.ini"'
 check 'writes server-settings.json: private, verified users, auto-pause, a game password, no factorio.com credentials, the _comment' 'settings_ok "$R/srv/factorio/config/server-settings.json"'
+# Factorio 2.1.24 refuses to host ("Key \"name\" not found in property tree at ROOT", then the same for description)
+# without these keys of its data/server-settings.example.json; the others it needs none of (DS1, and a real
+# --start-server with this file). Every key written is one of the example's, so a misspelt one shows here.
+check 'server-settings.json has the keys Factorio needs to host (name, description), and only keys it knows' '
+  node -e "
+    const s = JSON.parse(require(\"fs\").readFileSync(process.argv[1], \"utf8\"));
+    const known = [\"name\", \"description\", \"tags\", \"max_players\", \"visibility\", \"username\", \"password\", \"token\",
+      \"game_password\", \"require_user_verification\", \"max_upload_in_kilobytes_per_second\", \"max_upload_slots\",
+      \"minimum_latency_in_ticks\", \"max_heartbeats_per_second\", \"ignore_player_limit_for_returning_players\",
+      \"allow_commands\", \"autosave_interval\", \"autosave_slots\", \"afk_autokick_interval\", \"auto_pause\",
+      \"auto_pause_when_players_connect\", \"only_admins_can_pause_the_game\", \"autosave_only_on_server\",
+      \"non_blocking_saving\", \"minimum_segment_size\", \"minimum_segment_size_peer_count\", \"maximum_segment_size\",
+      \"maximum_segment_size_peer_count\"];
+    const ok = typeof s.name === \"string\" && s.name !== \"\" && typeof s.description === \"string\" &&
+      Object.keys(s).every((k) => k.startsWith(\"_comment\") || known.includes(k));
+    process.exit(ok ? 0 : 1);" "$R/srv/factorio/config/server-settings.json"'
 check 'writes the admin list and the mod list' '
   [[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\"]" ]] &&
   [[ $(node -e "console.log(JSON.parse(require(\"fs\").readFileSync(process.argv[1])).mods.map((m) => m.name + (m.enabled ? \"\" : \"-off\")).join(\" \"))" "$R/srv/factorio/mods/mod-list.json") == "base space-age quality elevated-rails recycler orrery" ]]'

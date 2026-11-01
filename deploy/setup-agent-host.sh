@@ -35,13 +35,15 @@
 # refuses to overwrite one without it. Config files are written only when missing or still its own previous default
 # (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
 # game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
-# factorio's), never on the terminal, in an argv or in a trace. Everything else but that report is written only when it
-# differs, so a second run finishes a half-failed one. On a re-run the Quadlet file, then Factorio's current link and
-# image.json switch, one right after another and after every download and check (Factorio's --version runs in the image
-# the Quadlet file gets); the agent's current link switches last, once its deploy/ files passed the Quadlet dry run and
-# its config and units are written. So a re-run that stops on its way (a failed download or check) leaves the server on
-# the release and the image it had, and the agent on its release. A first install points Factorio's current at its
-# release first: the world is made from it, and no unit exists yet.
+# factorio's), never on the terminal, in an argv or in a trace. Its name is the fixed "orrery Factorio" and its
+# description empty: Factorio refuses to host without both keys, and an unlisted server shows them nowhere else.
+# Everything else but that report is written only when it differs, so a second run finishes a half-failed one. On a
+# re-run the Quadlet file, then Factorio's current link and image.json switch, one right after another and after every
+# download and check (Factorio's --version runs in the image the Quadlet file gets); the agent's current link switches
+# last, once its deploy/ files passed the Quadlet dry run and its config and units are written. So a re-run that stops
+# on its way (a failed download or check) leaves the server on the release and the image it had, and the agent on its
+# release. A first install points Factorio's current at its release first: the world is made from it, and no unit exists
+# yet.
 # Root never writes inside factorio's trees: those writes run as factorio, and every write goes to a new temp file in the
 # target's folder, then a rename, so a link left there steers nothing.
 # SETUP_ROOT exists for deploy/test-setup-agent-host.sh only: it prefixes every path the script reads or writes (/etc,
@@ -442,6 +444,8 @@ fi
 config factorio "$settings" << EOF
 {
   "_comment": "Written by orrery deploy/setup-agent-host.sh, and kept on a re-run once edited. A private server: not listed, joined with its game_password (random, kept on a re-run); no factorio.com username, password or token.",
+  "name": "orrery Factorio",
+  "description": "",
   "game_password": "$game_pw",
   "visibility": { "public": false, "lan": false },
   "require_user_verification": true,

@@ -9,6 +9,17 @@ import { Feedback } from '../feedback';
 import { dialog, dialogButton, fakeEvents, settle, until } from '../testing';
 import routes from './routes';
 
+/**
+ * The one request `match` picks, once it has been sent: a request the page sends after a debounce or a lazy chunk
+ * may not be there yet when its view shows, so `expectOne` right away would fail on a slow machine.
+ */
+async function sent(backend: HttpTestingController, match: Parameters<HttpTestingController['match']>[0], step: () => Promise<unknown>) {
+  let found: ReturnType<HttpTestingController['match']> = [];
+  await until(() => (found = backend.match(match)).length > 0, step);
+  expect(found.length).toBe(1);
+  return found[0]!;
+}
+
 const CARD: ServerCard = {
   id: 'space',
   name: 'Space',
@@ -103,7 +114,7 @@ async function setup(state: GameState = STATE, card: ServerCard = CARD) {
   };
   /** Answers the catalog request the sheet just made, checking what it asked. */
   const catalog = async (answer: GameCatalog, mods?: { name: string; version: string | null }[], factorio = '2.1.24') => {
-    const req = backend.expectOne('/api/servers/space/game/catalog');
+    const req = await sent(backend, '/api/servers/space/game/catalog', render);
     expect(req.request.method).toBe('POST');
     if (mods) expect(req.request.body).toEqual({ factorio, mods });
     req.flush(answer);
@@ -244,7 +255,7 @@ describe('server game tab', () => {
     expect(text(q('[data-sheet] [hlmSheetTitle]'))).toBe('Browse mods');
     expect(q('[data-update-view]').hidden).toBe(true);
     expect(document.activeElement).toBe(q('[data-browse-search]'));
-    const read = backend.expectOne((r) => r.url === '/api/servers/space/game/mods');
+    const read = await sent(backend, (r) => r.url === '/api/servers/space/game/mods', render);
     expect(read.request.urlWithParams).toBe('/api/servers/space/game/mods?factorio=2.1.25&sort=downloads&page=1');
     const pack = { name: 'se-pack', title: 'SE pack', owner: 'Earendel', summary: '', downloads: 9, version: '0.7.3', updated: null, category: 'mod-packs', spaceAge: false, page: 'https://mods.factorio.com/mod/se-pack' };
     read.flush({ line: '2.1', total: 2, mods: [pack, { ...pack, name: 'flib', title: 'Flib', category: null }], categories: [{ id: 'mod-packs', title: 'Mod packs' }] } satisfies ModBrowse);
@@ -280,7 +291,7 @@ describe('server game tab', () => {
     // Review the update goes back too.
     q('[data-browse]').click();
     await until(() => !!document.querySelector('[data-browse-review]'), () => render());
-    backend.expectOne((r) => r.url === '/api/servers/space/game/mods').flush({ line: '2.1', total: 0, mods: [], categories: [] } satisfies ModBrowse);
+    (await sent(backend, (r) => r.url === '/api/servers/space/game/mods', render)).flush({ line: '2.1', total: 0, mods: [], categories: [] } satisfies ModBrowse);
     await render();
     q('[data-browse-review]').click();
     await render();
@@ -307,7 +318,7 @@ describe('server game tab', () => {
     q('[data-browse]').click();
     await until(() => !!document.querySelector('[data-browse-search]'), () => render());
     const listing = { name: 'RateCalculator', title: 'Rate Calculator', owner: '', summary: '', downloads: 9, version: '3.3.3', updated: null, category: null, spaceAge: false, page: 'https://mods.factorio.com/mod/RateCalculator' };
-    backend.expectOne((r) => r.url === '/api/servers/space/game/mods').flush({ line: '2.1', total: 1, mods: [listing], categories: [] } satisfies ModBrowse);
+    (await sent(backend, (r) => r.url === '/api/servers/space/game/mods', render)).flush({ line: '2.1', total: 1, mods: [listing], categories: [] } satisfies ModBrowse);
     await render();
     const button = q<HTMLButtonElement>('[data-listing=RateCalculator] [data-add-mod]');
     expect(text(button)).toBe('Add back');

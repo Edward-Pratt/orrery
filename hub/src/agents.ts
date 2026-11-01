@@ -258,8 +258,9 @@ function readLines(socket: Socket, max: number, onLine: (line: string) => void):
  * that Agent is refused, the live one kept; a refused one gets its `reject`, then is closed within 2 s whatever the
  * peer does. A second Agent connection replaces the first. An Agent with no line for 20 s, or whose
  * connection closes without `bye`, is lost: its server is `lost`, and one `agentLost` host notice goes out, then
- * `agentBack` when it connects again; after `bye` the server is `lost` with nothing posted. Its host samples go to its
- * Host's monitor (`Hosts`, by the Agent's id), at most one per 10 s, stamped with the hub's clock.
+ * `agentBack` when it connects again; after `bye` the server is `lost` with nothing posted. Its `events` post an
+ * `eventsOff` or `eventsOn` host notice only on a change. Its host samples go to its Host's monitor (`Hosts`, by the
+ * Agent's id), at most one per 10 s, stamped with the hub's clock.
  */
 export class Agents extends EventEmitter<AgentEvents> {
   #hub: Pick<ServerHub, 'attach' | 'agentUp' | 'agentDown' | 'publishTarget' | 'get'>;

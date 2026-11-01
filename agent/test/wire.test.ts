@@ -5,11 +5,8 @@ import { LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, outputLines,
 
 test('the constants are the hub contract: the protocol version and every field limit; the line cap is 1 MiB', () => {
   assert.equal(PROTOCOL_VERSION, hub.PROTOCOL_VERSION);
-  const { lineBytes, ...limits } = LIMITS;
-  const { lineBytes: _, ...hubLimits } = hub.LIMITS;
-  assert.deepEqual(limits, hubLimits);
-  // The owner's decision (2026-10-31): 1 MiB per line on the Agent port; hub/src/protocol.ts at 32ef6e4 still says 64 KiB.
-  assert.equal(lineBytes, 1024 * 1024);
+  assert.deepEqual(LIMITS, hub.LIMITS, 'every limit, the line cap included');
+  assert.equal(LIMITS.lineBytes, 1024 * 1024, "the owner's decision (2026-10-31): 1 MiB per line on the Agent port");
 });
 
 test('the line reader splits lines across chunks and bytes, UTF-8 included, and skips blank lines', () => {

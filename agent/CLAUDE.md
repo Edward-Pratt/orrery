@@ -134,7 +134,7 @@ reject, a reset or nothing; `eventually` polls a condition.
   one save at a time, an RCON timeout still waiting for the file, one never sent failing at once.
 - `test/status.test.ts` (UPS, paused from players, `tick_paused` and Δtick, untrusted replies (a name with a control character dropped), `auto_pause` from
   symlinks and FIFOs, the poller's `status`, `stalled` and `down`), `test/host.test.ts` (a real sample the hub accepts),
-  `test/config.test.ts`, `test/wire.test.ts` (the constants against the hub's; `printable`, also in command output and log lines); `test/rcon.test.ts` also covers
+  `test/config.test.ts`, `test/wire.test.ts` (every constant against the hub's, the line cap included; `printable`, also in command output and log lines); `test/rcon.test.ts` also covers
   `RconSession` (one connection, in order, a new one after a timeout or a closed server; the commands queued behind a
   timed-out one run once on the new connection, the timed-out one never sent again).
 

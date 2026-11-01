@@ -1,7 +1,7 @@
 import { constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { Agents } from './agents.ts';
+import { AGENT_FLOOR, beforeAgentFloor, type Agents } from './agents.ts';
 import type { Environment, GithubIntegration, ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
 import type { RestartScheduler } from './restarts.ts';
@@ -65,8 +65,11 @@ const newestFirst = (a: Release, b: Release) => {
   const [x, y] = [version(a.tag), version(b.tag)];
   return y[0]! - x[0]! || y[1]! - x[1]! || y[2]! - x[2]!;
 };
-/** The first hub, dashboard and Agent releases that can deploy: an older one would take the deploy flow away. */
-export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0', agent: 'agent-v1.0.0' } as const;
+/**
+ * The first hub, dashboard and Agent releases that can deploy: an older one would take the deploy flow away
+ * (`agent-v1.0.0` has no `deploy` handler: an Agent on it updates by a setup re-run).
+ */
+export const FLOOR = { hub: 'hub-v2.6.0', web: 'web-v0.5.0', agent: AGENT_FLOOR } as const;
 /** A renamed Mod release's builds, one per Minecraft target: `orrery-<mc>-<version>.jar`. */
 const MOD_BUILD = /^orrery-(.+)-(\d+\.\d+\.\d+)\.jar$/;
 /** The Minecraft version of a server without a pack (or whose pack isn't in the library). */
@@ -524,6 +527,10 @@ export class Deploys {
     if (updating) throw new DeployRefused(409, `A ${updating} is running on ${name}: deploy the Agent once it is done.`);
     if (this.#d.restoring(agent.server)) throw new DeployRefused(409, `A restore is running on ${name}: deploy the Agent once it is done.`);
     if (this.#d.restarts.pending(agent.server)) throw new DeployRefused(409, `A countdown is running on ${name}: cancel it first.`);
+    // A release from before the Agent's deploys refuses `deploy`: say what works instead of failing a row.
+    if (beforeAgentFloor(from)) {
+      throw new DeployRefused(409, `${agent.name} runs ${from}, which can't deploy itself: the friend re-runs setup-agent-host.sh at ${FLOOR.agent} or later.`);
+    }
     const { tag } = release;
     let row!: DeployRow;
     let open = true; // the row; its listeners stay on until the result

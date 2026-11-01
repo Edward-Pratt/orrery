@@ -10,7 +10,9 @@ import { fitsLine, GameUpdates, redact } from '../src/game-updates.ts';
 import { LIMITS } from '../src/protocol.ts';
 import { Packs, type PacksDeps } from '../src/packs.ts';
 import type { Notice } from '../src/types.ts';
-import { ACCOUNT, ACTOR, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, ready, rel, SHA256, sha, signed } from './fake-agent.ts';
+import { beforeAgentFloor } from '../src/agents.ts';
+import { ACCOUNT, ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, ready, rel, SHA256, sha, signed } from './fake-agent.ts';
+import { fakeMod } from './fake-mod.ts';
 
 const kinds = (notices: Notice[]) => notices.filter((n) => n.kind !== 'packUpdateStep').map((n) => n.kind);
 const webAudit = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('web:') && e.action.startsWith('game')).map((e) => [e.action, e.details]);
@@ -21,6 +23,33 @@ test('redact takes query strings and credentials out of what the Agent says', ()
     'GET https://dl-mod.factorio.com/files/ab/x.zip failed; dl-mod.factorio.com/y.zip also; username=[redacted]&token=[redacted]',
   );
   assert.equal(redact('Staged: 3 mods, 41 MB'), 'Staged: 3 mods, 41 MB');
+});
+
+test("an Agent on release 1's agent-v1.0.0 never says what it runs: the Game tab says it has no game updates, and names the setup re-run", async (t) => {
+  assert.deepEqual(
+    ['agent-v1.0.0', '1.0.0', 'agent-v0.9.0', 'agent-v1.1.0', 'agent-v2.0.0', 'agent-v0.0.0', 'dev', null].map(beforeAgentFloor),
+    [true, true, true, false, false, false, false, false],
+  );
+  const h = await gameHub(t);
+  const hello = async (agentVersion: string) => {
+    const agent = fakeMod(h.agentPort);
+    t.after(() => agent.socket.destroy());
+    agent.send({ type: 'agentHello', protocol: 1, agentId: 'vm', token: AGENT_TOKEN, agentVersion });
+    assert.deepEqual(await agent.next(), { type: 'welcome' });
+    return agent;
+  };
+  const old = await hello('agent-v1.0.0');
+  await eventually(async () => (await h.game()).blocked !== "Space Age's Agent isn't connected.");
+  const blocked = "Space Age's Agent runs agent-v1.0.0, which has no game updates: the friend re-runs setup-agent-host.sh at agent-v1.1.0 or later.";
+  assert.equal((await h.game()).blocked, blocked);
+  const res = await h.req('POST', '/api/servers/space/game/update', PICK);
+  assert.deepEqual([res.status, await res.text()], [409, blocked]);
+  old.socket.destroy();
+  await eventually(async () => (await h.game()).blocked === "Space Age's Agent isn't connected.");
+
+  // The dev loop's agent (the repo's agent-v0.0.0) has game updates: it just hasn't said yet.
+  await hello('agent-v0.0.0');
+  await eventually(async () => (await h.game()).blocked === "Space Age's Agent hasn't said what it runs yet.");
 });
 
 test('a game update: the hub resolves it, the Agent gets signed links only, the hub stops the server and resumes the Agent, which ends it', async (t) => {

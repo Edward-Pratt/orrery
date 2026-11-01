@@ -16,9 +16,19 @@ const release = (tag: string, publishedAt: number): GitHubRelease => ({
   publishedAt,
   assets: [`orrery-${tag}.tar.gz`, `orrery-${tag}.tar.gz.sha256`],
 });
-/** GitHub's releases: Agent ones (one below the floor), the Factorio mod's (never deployed here) and a hub one. */
+/**
+ * GitHub's releases: Agent ones (two below the floor: agent-v1.0.0, release 1's, has no deploy handler), the Factorio
+ * mod's (never deployed here) and a hub one.
+ */
 const github: GitHub = {
-  releases: async () => [release('agent-v1.1.0', 2), release('agent-v1.2.0', 3), release('agent-v0.9.0', 1), release('factorio-v1.0.0', 3), release('hub-v2.7.0', 3)],
+  releases: async () => [
+    release('agent-v1.1.0', 2),
+    release('agent-v1.2.0', 3),
+    release('agent-v1.0.0', 1),
+    release('agent-v0.9.0', 1),
+    release('factorio-v1.0.0', 3),
+    release('hub-v2.7.0', 3),
+  ],
   download: async () => assert.fail('an Agent downloads its own release'),
 };
 const TAG = 'agent-v1.2.0';
@@ -82,7 +92,7 @@ test("the deploys answer lists each Agent with the release its hello named, and 
   const h = await deployHub(t);
   const before = await h.answer();
   assert.deepEqual(before.agent.hosts, [{ id: 'vm', name: 'Factorio VM', server: 'space', running: null }]); // never connected
-  assert.deepEqual(before.agent.releases.map((r) => r.tag), ['agent-v1.2.0', 'agent-v1.1.0', 'agent-v0.9.0']);
+  assert.deepEqual(before.agent.releases.map((r) => r.tag), ['agent-v1.2.0', 'agent-v1.1.0', 'agent-v1.0.0', 'agent-v0.9.0']);
   assert.equal(before.agent.latest, TAG);
   assert.ok(![...before.hub.releases, ...before.web.releases, ...before.mod.releases].some((r) => r.tag.startsWith('factorio-')));
   await connected(h);
@@ -286,6 +296,22 @@ test("an Agent that doesn't take the deploy answers 502 and closes the row faile
   assert.deepEqual((await h.rows()).map((row) => [row.outcome, row.log]), [['failed', "the Agent didn't start it: deploy is not supported by this agent"]]);
 });
 
+test("an Agent on release 1's agent-v1.0.0, which can't deploy itself, is refused up front with the setup re-run; the repo's agent-v0.0.0 deploys", async (t) => {
+  const h = await deployHub(t);
+  const old = await connected(h, { version: 'agent-v1.0.0' });
+  assert.deepEqual(await h.refused({ part: 'agent', tag: TAG, host: 'vm' }), [
+    409,
+    "Factorio VM runs agent-v1.0.0, which can't deploy itself: the friend re-runs setup-agent-host.sh at agent-v1.1.0 or later.",
+  ]);
+  assert.deepEqual(await h.rows(), [], 'no row');
+  assert.deepEqual(h.notices, [], 'nothing announced');
+  old.agent.socket.destroy();
+
+  // The dev loop's agent (the repo's own version, never a release) deploys as any other.
+  const dev = await connected(h, { version: 'agent-v0.0.0' });
+  await started(h, dev);
+});
+
 test('Agent deploy refusals: an unknown host, no host, a tag of another part, below the floor, the running tag, an Agent not connected', async (t) => {
   const h = await deployHub(t);
   assert.deepEqual(await h.refused({ part: 'agent', tag: TAG, host: 'nope' }), [404, 'No such Agent.']);
@@ -296,7 +322,9 @@ test('Agent deploy refusals: an unknown host, no host, a tag of another part, be
   assert.deepEqual(await h.refused({ part: 'agent', tag: 'hub-v2.7.0', host: 'vm' }), [404, 'No published release hub-v2.7.0.']);
   assert.deepEqual(await h.refused({ part: 'agent', tag: TAG, host: 'vm' }), [409, "Factorio VM isn't connected."]);
   await connected(h);
-  assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v0.9.0', host: 'vm' }), [409, 'agent-v0.9.0 is older than agent-v1.0.0, the first release that can deploy.']);
+  assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v0.9.0', host: 'vm' }), [409, 'agent-v0.9.0 is older than agent-v1.1.0, the first release that can deploy.']);
+  // Release 1's agent has no deploy handler: going back to it would strand the Host until a setup re-run.
+  assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v1.0.0', host: 'vm' }), [409, 'agent-v1.0.0 is older than agent-v1.1.0, the first release that can deploy.']);
   assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' }), [409, 'agent-v1.1.0 is already running.']);
   assert.deepEqual(await h.rows(), []);
 });

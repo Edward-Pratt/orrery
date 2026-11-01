@@ -115,7 +115,7 @@ its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, teste
 (`.github/factorio-zip.sh`, refusing a version that isn't `factorio/changelog.txt`'s top section), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
 `FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
-place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
+place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` / `agent-v1.1.0` and later deploy (`FLOOR` in
 `hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
 `install-web.sh` and `add-server.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
 
@@ -124,7 +124,7 @@ Factorio mod. The Factorio server ships in two releases (the owner's decision of
 **Release 1**: the Agent connection, status with UPS and paused, the VM as a second Host, chat, events, milestones and
 linking, the console and logs, start, stop and restart with countdowns, and saves as Backups with restore. **Release 2**:
 game updates and agent deploys from the dashboard. So in release 1 nothing is deployed to the Agent's Host from the
-dashboard: the dashboard has no Game tab and no Agent rows under Releases (`FLOOR` already holds `agent-v1.0.0`), the
+dashboard: the dashboard has no Game tab and no Agent rows under Releases (release 2's `FLOOR` holds `agent-v1.1.0`, as `agent-v1.0.0` has no `deploy` handler: the dashboard refuses to deploy from or to it, naming the setup re-run), the
 friend re-runs `setup-agent-host.sh` as root at the new `agent-v` tag (it updates the agent, its units and its polkit
 file; `--factorio <version>` changes the Factorio version), and mods, a new `orrery` release included, are put in
 `/srv/factorio/mods` by hand. The mod must reach the portal in release 1, as players download it when they join, so

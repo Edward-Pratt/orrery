@@ -165,7 +165,7 @@ function gameUpdateText(n: Extract<Notice, { kind: 'packUpdateStarted' | 'packUp
     case 'failed in staging':
       return `⚠️ Game update to ${n.to} failed while preparing: the server wasn't touched`;
     case 'cancelled':
-      return `❎ Game update to ${n.to} cancelled: the server wasn't touched`;
+      return `❎ Game update to ${n.to} cancelled before the swap: nothing was changed`;
   }
 }
 

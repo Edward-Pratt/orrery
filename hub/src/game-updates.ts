@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AgentRefused, type Agents } from './agents.ts';
+import { AGENT_FLOOR, AgentRefused, beforeAgentFloor, type Agents } from './agents.ts';
 import type { GameCatalog, GameModPick, GameState, GameUpdateRequest } from './api.ts';
 import type { ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
@@ -572,8 +572,13 @@ export class GameUpdates {
   #blocked(serverId: string, starting = false): string | null {
     const name = this.#name(serverId);
     if (this.#jobs.has(serverId) || (!starting && this.#starting.has(serverId))) return `A game update is running on ${name}.`;
-    if (!this.#d.agents.get(this.#agentOf.get(serverId)!)?.connected) return `${name}'s Agent isn't connected.`;
-    if (!this.#installed.has(serverId)) return `${name}'s Agent hasn't said what it runs yet.`;
+    const agent = this.#d.agents.get(this.#agentOf.get(serverId)!);
+    if (!agent?.connected) return `${name}'s Agent isn't connected.`;
+    if (!this.#installed.has(serverId)) {
+      // A release-1 Agent never says: it has no game updates.
+      if (beforeAgentFloor(agent.version)) return `${name}'s Agent runs ${agent.version}, which has no game updates: the friend re-runs setup-agent-host.sh at ${AGENT_FLOOR} or later.`;
+      return `${name}'s Agent hasn't said what it runs yet.`;
+    }
     if (this.#d.restoring(serverId)) return `A restore is running on ${name}.`;
     const deploy = this.#d.deploying(this.#agentOf.get(serverId)!);
     if (deploy === 'hub') return 'A hub deploy is running.';

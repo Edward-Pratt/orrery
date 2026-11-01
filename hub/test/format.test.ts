@@ -421,7 +421,7 @@ test("a factorio server's update is a game update, and the Agent's pre-update sa
     `❌ Game update to ${to} rolled back: ${from} is running again. Pre-update save: orrery-pre-update\\_\\*x\\*\\_.zip`,
   );
   assert.equal(title({ ...done, severity: 'problem', outcome: 'failed before swap' }), `❌ Game update to ${to} failed after the stop, before anything changed: ${from} is starting again`);
-  assert.equal(title({ ...done, severity: 'info', outcome: 'cancelled' }), `❎ Game update to ${to} cancelled: the server wasn't touched`);
+  assert.equal(title({ ...done, severity: 'info', outcome: 'cancelled' }), `❎ Game update to ${to} cancelled before the swap: nothing was changed`);
   assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
 
   // `from` is the version the Agent reported, and the save's name the game folder's: inline() only, so a name with a

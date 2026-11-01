@@ -52,6 +52,26 @@ const WITH_DATA = new Set<string>(['journal', 'logs', 'log'] satisfies (keyof Ag
 /** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
 
+/**
+ * The first Agent release with game updates and its own deploys (release 2, `docs/ROADMAP.md`): `agent-v1.0.0` has
+ * neither, and updates only by the friend re-running `setup-agent-host.sh` at a newer `agent-v` tag.
+ */
+export const AGENT_FLOOR = 'agent-v1.1.0';
+
+/**
+ * Whether an Agent's release (its hello's `agentVersion`, `agent-vX.Y.Z` or a bare version) is older than
+ * `AGENT_FLOOR`. `agent-v0.0.0` is the repo's own version (the dev loop, which has both) and is not; nor is anything
+ * that isn't a version.
+ */
+export function beforeAgentFloor(version: string | null): boolean {
+  const m = version === null ? null : /^(?:agent-v)?(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!m) return false;
+  const v = m.slice(1).map(Number);
+  if (v.every((n) => n === 0)) return false;
+  const floor = AGENT_FLOOR.slice('agent-v'.length).split('.').map(Number);
+  return v[0]! - floor[0]! < 0 || (v[0] === floor[0] && (v[1]! - floor[1]! < 0 || (v[1] === floor[1] && v[2]! < floor[2]!)));
+}
+
 type Waiting = { request: AgentRequest['type']; resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
 type Budgets = ReturnType<typeof connBudgets>;
 type Conn = { socket: Socket; bye: boolean; silence: NodeJS.Timeout; pending: Map<string, Waiting>; budgets: Budgets };

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Agents } from './agents.ts';
+import { AgentRefused, type Agents } from './agents.ts';
 import type { GameCatalog, GameModPick, GameState, GameUpdateRequest } from './api.ts';
 import type { ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
@@ -46,6 +46,16 @@ const HISTORY = 50;
 const LOG_LINES = 40;
 /** How often the countdown's detail goes on the stream. */
 const TICK_MS = 1_000;
+/** Who cancels a countdown the update's own end made pointless (`RestartScheduler.cancel`). */
+const ENDED_BY = 'hub:game-update';
+
+/**
+ * Whether an `update` request fits on one line of the Agent port, its newline counted: so it fits however a side
+ * counts `LIMITS.lineBytes`. Longer, the Agent's line reader would drop the connection.
+ */
+export function fitsLine(msg: unknown): boolean {
+  return Buffer.byteLength(JSON.stringify(msg)) + 1 <= LIMITS.lineBytes;
+}
 
 /**
  * Text from the Agent with every URL's query string, any other `?key=value` and every `token=`, `secure=` and
@@ -240,17 +250,23 @@ export class GameUpdates {
       if (plan.unresolved.length) {
         throw new GameRefused(409, `Unmet dependencies: ${plan.unresolved.map((u) => `${u.mod} needs ${u.dependency}: ${u.reason}`).join(' ')}`);
       }
+      // The Agent's own rules, checked before anything is asked or written: it refuses an update breaking them.
+      if (!plan.mods.some((m) => m.name === 'orrery')) throw new GameRefused(409, "The mods must include orrery: the Agent's health gate reads it.");
+      if (plan.mods.length > LIMITS.mods) throw new GameRefused(409, `More than ${LIMITS.mods} mods: the Agent takes at most that many.`);
       if (!plan.changes.length && req.factorio === installed.factorio) throw new GameRefused(409, `Nothing to change: ${name} runs ${plan.from} already.`);
       const sha256 = await this.#d.catalog.sha256(req.factorio);
       if (!sha256) throw new GameRefused(400, `factorio.com lists no headless build of Factorio ${req.factorio} for the Agent's machine.`);
       // Right before the update: the signed links are short-lived.
       const mods: FactorioModDownload[] = [];
       for (const m of plan.mods) mods.push({ name: m.name, version: m.version, sha1: m.sha1, url: await this.#d.catalog.link(m.downloadUrl) });
+      const factorio: FactorioDownload = { version: req.factorio, url: this.#d.catalog.download(req.factorio), sha256 };
+      const update = randomUUID();
+      if (!fitsLine({ type: 'update', factorio, mods, id: update })) throw new GameRefused(409, `The update is over the Agent port's ${LIMITS.lineBytes}-byte line: pick fewer mods.`);
       const now = this.#blocked(serverId, true); // things may have changed while the portal answered
       if (now) throw new GameRefused(409, now);
       const job: Job = {
         id: 0,
-        update: randomUUID(),
+        update,
         serverId,
         agentId: this.#agentOf.get(serverId)!,
         name,
@@ -276,7 +292,7 @@ export class GameUpdates {
       this.#jobs.set(serverId, job);
       this.#d.hub.audit(by, 'game update', serverId, `${job.from} → ${job.to}${plan.changes.length ? `: ${plan.changes.join(', ')}` : ''}`);
       this.#d.hub.publish(serverId, { severity: 'info', kind: 'packUpdateStarted', from: job.from, to: job.to, by: byName });
-      void this.#begin(job, { version: req.factorio, url: this.#d.catalog.download(req.factorio), sha256 }, mods);
+      void this.#begin(job, factorio, mods);
       return job.id;
     } finally {
       this.#starting.delete(serverId);
@@ -304,8 +320,10 @@ export class GameUpdates {
   // The update itself.
 
   /**
-   * The update's mods and what it changes: the mod diff, by portal mods (the game's own come with its version, enabled
-   * as they are); from and to count every enabled mod.
+   * The update's mods and what it changes: the mod diff, by portal mods. The game's own come with its version, each
+   * kept enabled or disabled as the Agent's `mod-list.json` has it, so dependencies are resolved against those enabled
+   * in the latest `installed` (one new in the target release is enabled too, unseen before the swap: the gate catches
+   * a clash with it). From and to count every enabled mod.
    */
   async #plan(req: GameUpdateRequest, installed: Installed): Promise<Plan> {
     const gameMods = new Set(installed.mods.filter((m) => GAME_MODS.has(m.name)).map((m) => m.name));
@@ -330,7 +348,9 @@ export class GameUpdates {
     } catch (err) {
       if (this.#closed || this.#jobs.get(job.serverId) !== job) return;
       this.#step(job, 'prepare', 'failed', redact((err as Error).message));
-      this.#tellCancel(job.agentId); // without an answer in time, it may have started all the same
+      // Without an answer in time, or cut off, it may have started all the same; refused, it never took it (and a
+      // cancel would hit whatever update it does run).
+      if (!(err instanceof AgentRefused)) this.#tellCancel(job.agentId);
       this.#end(job, 'failed in staging');
     }
   }
@@ -380,15 +400,22 @@ export class GameUpdates {
     this.#finished(serverId, msg.outcome, late.from, late.to, finished - late.started, backup ?? null);
   }
 
-  /** The hub's step: stops the server (with the countdown when players are on), then tells the Agent to go on. */
+  /**
+   * The hub's step: stops the server (with the countdown when players are on), then tells the Agent to go on. An
+   * update that ends meanwhile (its `updateDone`) drops it: `#end` cancels the countdown, the waits end, and a server
+   * the hub stopped starts again.
+   */
   async #stop(job: Job): Promise<void> {
     job.stopping = true;
     job.window = null;
     this.#arm(job); // off while the hub stops: its own waits are bounded
     const service = this.#d.services.ofServer(job.serverId)!; // a factorio server has one, an Agent's
+    /** Its end came first (`#end`, which never runs once the hub closes). */
+    const ended = () => this.#jobs.get(job.serverId) !== job;
     let stopped = false;
     try {
       const unit = (await this.#d.services.read(service.id))?.state;
+      if (this.#closed || ended()) return;
       if (unit === 'inactive' || unit === 'failed') this.#step(job, 'stop', 'done', 'Already stopped');
       else {
         this.#step(job, 'stop', 'running', 'Stopping');
@@ -402,29 +429,39 @@ export class GameUpdates {
           countdown.stop();
           throw err;
         }
-        stopped = true;
-        if (at === null) countdown.stop();
-        else {
+        if (at === null) {
+          stopped = true;
+          countdown.stop();
+        } else if (ended()) {
+          // It ended while the countdown was being set up: no stop now.
+          countdown.stop();
+          if (!this.#closed) this.#d.restarts.cancel(job.serverId, ENDED_BY, 'the hub');
+          return;
+        } else {
           job.window = 'countdown';
           const players = this.#d.hub.get(job.serverId)?.players.length ?? 0;
           const tick = this.#ticker(() => this.#step(job, 'stop', 'running', `${plural(players, 'player')} online: stopping in ${clock(at! - Date.now())}`));
           const how = await countdown.done;
           tick();
           job.window = null;
-          if (how === 'cancelled') {
-            stopped = false;
-            return await this.#countdownCancelled(job);
-          }
+          stopped = how !== 'cancelled';
+          if (this.#closed) return;
+          if (ended()) return await this.#startAgain(job, service.id, stopped);
+          if (how === 'cancelled') return await this.#countdownCancelled(job);
           if (how === undefined) throw new Error("The countdown didn't end in time.");
         }
-        await this.#inactive(service.id);
+        await this.#inactive(service.id, ended);
+        if (this.#closed) return;
+        if (ended()) return await this.#startAgain(job, service.id, stopped);
         this.#step(job, 'stop', 'done', at === null ? 'Stopped' : 'Stopped after the countdown');
       }
       job.resumed = true;
       this.#arm(job);
       await this.#d.agents.request(job.agentId, { type: 'updateResume' });
     } catch (err) {
-      if (this.#closed || this.#jobs.get(job.serverId) !== job) return;
+      if (this.#closed) return;
+      // Ended first: the Agent's end stands; a server it was never told to swap starts again.
+      if (ended()) return job.resumed ? undefined : await this.#startAgain(job, service.id, stopped);
       const why = redact((err as Error).message);
       if (job.resumed) this.#log(job, `The Agent didn't take the go-ahead: ${why}`);
       else this.#step(job, 'stop', 'failed', why);
@@ -433,6 +470,11 @@ export class GameUpdates {
       if (stopped) await this.#d.services.act(service.id, 'start', job.actor, job.byName).catch(() => {});
       this.#end(job, stopped ? 'failed before swap' : 'failed in staging');
     }
+  }
+
+  /** The update ended while the hub stopped its server: one it did stop starts again, as nothing was swapped. */
+  async #startAgain(job: Job, serviceId: string, stopped: boolean): Promise<void> {
+    if (stopped) await this.#d.services.act(serviceId, 'start', job.actor, job.byName).catch(() => {});
   }
 
   async #countdownCancelled(job: Job): Promise<void> {
@@ -484,6 +526,8 @@ export class GameUpdates {
     if (this.#closed) return;
     clearTimeout(job.quiet);
     this.#jobs.delete(job.serverId);
+    // Ended during the hub's countdown (its `updateDone`): no stop now, and `#stop` sees the countdown cancelled.
+    if (job.stopping && !job.resumed && job.window === 'countdown') this.#d.restarts.cancel(job.serverId, ENDED_BY, 'the hub');
     if (!fromAgent) this.#late.set(job.serverId, { row: job.id, update: job.update, from: job.from, to: job.to, started: job.started });
     if (outcome === 'cancelled') this.#log(job, 'Cancelled before the swap.');
     const finished = Date.now();
@@ -544,10 +588,11 @@ export class GameUpdates {
     return this.#d.servers.find((s) => s.id === serverId)?.name ?? serverId;
   }
 
-  /** Polls the unit until it is stopped. */
-  async #inactive(serviceId: string): Promise<void> {
+  /** Polls the unit until it is stopped, or `ended` says the update is over. */
+  async #inactive(serviceId: string, ended: () => boolean): Promise<void> {
     const end = Date.now() + this.#o.stopMs;
     for (;;) {
+      if (ended()) return;
       const state = (await this.#d.services.read(serviceId))?.state;
       if (state === 'inactive' || state === 'failed') return;
       if (Date.now() > end) throw new Error(`The service didn't stop within ${formatDuration(this.#o.stopMs)}.`);

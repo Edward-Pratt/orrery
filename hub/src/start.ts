@@ -62,7 +62,7 @@ export type HubDeps = {
   portal?: PortalFetch;
   /**
    * `FACTORIO_USERNAME` and `FACTORIO_TOKEN`: the mods' download links are asked with them, of mods.factorio.com only.
-   * Without them a game update with mods is refused at that step; everything else works.
+   * Without them a game update is refused at that step (each has mods: `orrery` at least); everything else works.
    */
   factorioAccount?: FactorioAccount;
   /** Shorter game update timings, for tests. */

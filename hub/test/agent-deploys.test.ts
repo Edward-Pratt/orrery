@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { AuditLog, DeploysAnswer, GameState, LiveEvent, ServerDetail, TargetEvent } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
-import type { GitHub, GitHubRelease } from '../src/deploys.ts';
+import { AGENT_DEPLOY_MS, type GitHub, type GitHubRelease } from '../src/deploys.ts';
 import type { AgentsOptions } from '../src/agents.ts';
 import { ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, PICK } from './fake-agent.ts';
 import { fakeMod } from './fake-mod.ts';
@@ -339,4 +340,26 @@ test('an Agent deploy left running by a hub that stopped is closed as interrupte
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual((await h.rows()).map((r) => r.outcome), ['failed']);
   assert.equal((await h.answer()).agent.hosts[0]!.running, TAG);
+});
+
+test("the hub waits for an Agent deploy longer than its deploy unit may run (the unit's TimeoutStartSec)", () => {
+  const unit = readFileSync(new URL('../../deploy/orrery-agent-deploy@.service', import.meta.url), 'utf8');
+  const m = /^TimeoutStartSec=(\d+)min$/m.exec(unit);
+  assert.ok(m, 'the unit names its TimeoutStartSec in minutes');
+  assert.ok(AGENT_DEPLOY_MS > Number(m[1]) * 60_000, `${AGENT_DEPLOY_MS} ms is not over ${m[1]} min`);
+});
+
+test('a deployResult is taken once: the Agent resending it (until its write went out) changes nothing more', async (t) => {
+  const h = await deployHub(t, deployConfig(t), 10_000);
+  const a = await connected(h);
+  await started(h, a);
+  for (let i = 0; i < 3; i++) a.agent.send({ type: 'deployResult', tag: TAG, outcome: 'failed', log: "can't download orrery-agent-v1.2.0.tar.gz" }); // before any restart
+  await eventually(async () => (await h.rows())[0]!.outcome === 'failed');
+  await new Promise((r) => setTimeout(r, 50));
+  a.agent.send({ type: 'deployResult', tag: TAG, outcome: 'ok', log: 'later' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await h.rows()).map((r) => [r.outcome, r.log]), [['failed', "can't download orrery-agent-v1.2.0.tar.gz"]]);
+  const finished = h.notices.filter((n) => n.type === 'notice' && n.kind === 'deployFinished');
+  assert.equal(finished.length, 1);
+  assert.equal((await h.game()).blocked, null);
 });

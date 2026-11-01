@@ -108,6 +108,14 @@ export type DeploysDeps = {
   dbCopies: string;
 };
 
+/**
+ * How long the hub waits for an Agent's deploy: for the tag's `agentHello` or its `deployResult` after the `deploy`
+ * reply, and for that result after the hello (20 min). Longer than its deploy unit may run (`TimeoutStartSec=15min`
+ * in `deploy/orrery-agent-deploy@.service`), so the hub never stops waiting, and lets other work start on the Agent,
+ * while the unit still runs.
+ */
+export const AGENT_DEPLOY_MS = 20 * 60_000;
+
 /** Shortened in tests. */
 export type DeploysOptions = { pollMs?: number; watchMs?: number; modTimeoutMs?: number; agentTimeoutMs?: number; countdownMinutes?: number };
 
@@ -141,7 +149,7 @@ export class Deploys {
 
   constructor(
     deps: DeploysDeps,
-    { pollMs = 3_600_000, watchMs = 5_000, modTimeoutMs = 10 * 60_000, agentTimeoutMs = 10 * 60_000, countdownMinutes = 5 }: DeploysOptions = {},
+    { pollMs = 3_600_000, watchMs = 5_000, modTimeoutMs = 10 * 60_000, agentTimeoutMs = AGENT_DEPLOY_MS, countdownMinutes = 5 }: DeploysOptions = {},
   ) {
     this.#d = deps;
     this.#pollMs = pollMs;

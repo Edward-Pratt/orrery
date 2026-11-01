@@ -186,18 +186,19 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `logs` | `id` | lists the log files it serves (`factorio-current.log`, `factorio-previous.log`, `agent.log`) | `{ files: { name, size, modified }[] }` |
 | `log` | `id`, `name` | the last 1000 lines of a listed file; any other name is an error | `{ lines }` |
 | `restore` | `id`, `name` | copies a listed save as the newest file (`restored-<time>-<name>`), only while the unit is inactive; the next start loads it | — |
-| `update` | `id`, `factorio` (`{ version, url, sha256 }`), `mods` (`{ name, version, sha1, url }[]`) | validates it, checks every hash itself, then starts the update: `reply` means accepted; its steps follow as `updateStep` with this `id` | — |
+| `update` | `id`, `factorio` (`{ version, url, sha256 }`), `mods` (`{ name, version, sha1, url }[]`) | checks it and starts the update: `reply` means it passed the Agent's checks and started; the hashes are checked during `prepare` (a mismatch fails it); its steps follow as `updateStep` with this `id` | — |
 | `updateResume` | `id` | the update running continues after the hub's stop (the unit is inactive) | — |
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 
 The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
 deploys (both below). Release 1's Agent has no handler for these requests: it answers each with a `reply`
-`ok: false` (the hub ends that update `failed in staging`, or that deploy `failed`, with its error), and sends no
+`ok: false` (the hub ends that update `failed in staging`, with no `updateCancel`, or that deploy `failed`, with its error), and sends no
 `installed`, so the hub never offers it an update.
 
 The Agent treats every request as untrusted: it never runs a path or argv it was sent, checks names against its
-own listings, and refuses an `update` whose versions, names or URLs fail its checks (see `agent/CLAUDE.md`).
+own listings, and refuses an `update` whose versions, names or URLs fail its checks, or whose `mods` lack `orrery`
+(see `agent/CLAUDE.md`).
 
 ### Game updates
 
@@ -206,9 +207,12 @@ Agent carries it out. In order:
 
 1. The hub sends `update` with a fresh `id`, U: `factorio` (`url`: `https://www.factorio.com/get-download/<version>/headless/linux-arm64`,
    `sha256` from factorio.com's list) and `mods`, every portal mod the server is to have (the game's own, like
-   `base`, come with its version; a mod left out is removed), each with its portal `sha1` and a signed link on
-   `https://dl-mod.factorio.com` whose only query key is `secure`, resolved right before. No credential is ever in
-   it. The `reply` says whether the Agent took it; then every `updateStep` and the `updateDone` carry U.
+   `base`, come with its version: see below; a mod left out is removed), each with its portal `sha1` and a signed
+   link on `https://dl-mod.factorio.com` whose only query key is `secure`, resolved right before. No credential is
+   ever in it. `mods` always holds `orrery` (the gate reads its `/orrery-status`), at most 500 mods, and the line,
+   its newline counted, fits the 1 MiB cap: the hub refuses (409) an update breaking one of these before it resolves
+   any link, opens a row or sends anything. The `reply` says the request passed the Agent's checks and the update
+   started (the hashes are checked during `prepare`); then every `updateStep` and the `updateDone` carry U.
 2. The Agent prepares (`prepare`) and saves (`backup`; a stopped server: none, and it names the newest save), then
    sends `updateStep` `stop` `waiting` and waits. Its `stop` step is only ever `waiting`: the stop is the hub's.
 3. The hub stops the unit (`serviceAct` `stop`, after the usual 5-minute countdown in game while players are on;
@@ -216,6 +220,14 @@ Agent carries it out. In order:
    sends `updateResume`.
 4. The Agent swaps (`swap`), starts the unit and gates it (`gate`), rolls back if that fails (`rollback`), sends
    `installed`, then `updateDone` (`backup`: the pre-update save).
+
+The game's own mods (`base`, `elevated-rails`, `quality`, `recycler`, `space-age`: what a release ships in its
+`data/`, `core` aside) are never in `mods`. The Agent keeps each one enabled or disabled as the server's current
+`mod-list.json` has it, and enables one that is new in the target release (in its `data/` but not in that
+`mod-list.json`). The hub resolves the dependencies against the game's own mods enabled in the Agent's latest
+`installed` (a required one that isn't enabled is unmet; a `!` one is refused while it is enabled), the same set
+`to` counts. A game mod new in the target release is enabled too, but neither side sees it before the swap: it is in
+neither the resolution nor `to`, and the gate catches a mod that can't load with it.
 
 While a step runs, the Agent sends its `updateStep` again at least every 60 s, the same one when nothing changed (and
 a step at most once a second unless its state changes).
@@ -231,15 +243,20 @@ game's own mods enabled in that `installed` plus every mod in the update's `mods
 update an Agent runs at a time. `updateCancel` is taken only before the swap (else `ok: false`); it never starts or
 stops the unit, and the Agent ends the update with `updateDone` `cancelled`. The hub sends it when Cancel is pressed
 while the Agent prepares, when the countdown is cancelled, when it gives up before the swap (it stopped the server:
-it starts it again), and, on the Agent's next `agentHello`, for an update the hub closed before its swap while the
-Agent was away or the hub restarted. An Agent with no update running answers it `ok: false`. The hub gives up an
+it starts it again), when its `update` got no `reply` in time or the connection dropped first (the Agent may have
+started it), and, on the Agent's next `agentHello`, for an update the hub closed before its swap while the
+Agent was away or the hub restarted. An `update` answered `ok: false` never took: the hub sends no `updateCancel`
+for it, which would hit whatever update the Agent does run. An Agent with no update running answers it `ok: false`.
+An update that ends (its `updateDone`) while the hub still stops the server drops that stop: the hub cancels the
+countdown, stops waiting, starts the server again if it had stopped it, and sends no `updateResume`. The hub gives up an
 update 15 minutes after the Agent's latest `updateStep` with U, or its own latest request for it (while the hub itself
 stops the server, it doesn't count). An `updateDone` with U that comes after the hub closed the update is still
 recorded on it. After a hub restart the hub no longer knows U: it takes the `id` of the first `updateStep` the Agent
 sends (on connecting, before it reads anything from the hub, the Agent sends a running update's latest step again),
 else that of the next `updateDone`. When the Agent answers the reconnect's `updateCancel` `ok: false` without such a
 step first, nothing runs there and no later `updateDone` is recorded on that row. The Agent takes an `update` only
-once the last one's `updateDone` is sent, so a new update ends the wait for the last one's.
+once the last one's `updateDone` is sent, so a new update ends the wait for the last one's. The Agent sends
+`updateDone` again on each connect until its write went out; the hub takes an update's end once and ignores a repeat.
 
 ### Agent deploys
 
@@ -262,9 +279,12 @@ The Agent deploys itself; the hub picks the release and records the outcome. In 
 Until that `deployResult` the deploy runs, for the hub, even once recorded `ok`: its unit holds the Agent's deploy
 lock, so the hub starts no other deploy (of any part; a second `deploy` would find the lock taken and report
 nothing), and no game update or restore on its server. The hub gives a deploy up as `failed` when neither the tag's
-`agentHello` nor its `deployResult` comes within 10 minutes, stops waiting for the result of one recorded `ok` 10
-minutes after that hello, and closes one a hub restart interrupted as `failed`. A `deployResult` for no deploy
-running, of another tag, a second one, or one after the hub gave the deploy up or restarted, is ignored.
+`agentHello` nor its `deployResult` comes within 20 minutes, stops waiting for the result of one recorded `ok` 20
+minutes after that hello, and closes one a hub restart interrupted as `failed`. 20 minutes is longer than the deploy
+unit may run (`TimeoutStartSec=15min` in `deploy/orrery-agent-deploy@.service`), so the hub never lets other work
+start while the unit still runs. The Agent sends `deployResult` again on each connect until its write went out; a
+`deployResult` for no deploy running, of another tag, a second one (such a repeat), or one after the hub gave the
+deploy up or restarted, is ignored.
 
 ### Liveness
 

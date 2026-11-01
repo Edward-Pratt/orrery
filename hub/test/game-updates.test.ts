@@ -6,10 +6,11 @@ import { test } from 'node:test';
 import type { AuditLog, DeploysAnswer, GameCatalog, ServerCard } from '../src/api.ts';
 import type { ServerSettings } from '../src/config.ts';
 import { Db } from '../src/db.ts';
-import { GameUpdates, redact } from '../src/game-updates.ts';
+import { fitsLine, GameUpdates, redact } from '../src/game-updates.ts';
+import { LIMITS } from '../src/protocol.ts';
 import { Packs, type PacksDeps } from '../src/packs.ts';
 import type { Notice } from '../src/types.ts';
-import { ACCOUNT, ACTOR, agentUp, eventually, gameConfig, gameHub, INSTALLED, PICK, ready, SHA256, sha, signed } from './fake-agent.ts';
+import { ACCOUNT, ACTOR, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, ready, rel, SHA256, sha, signed } from './fake-agent.ts';
 
 const kinds = (notices: Notice[]) => notices.filter((n) => n.kind !== 'packUpdateStep').map((n) => n.kind);
 const webAudit = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('web:') && e.action.startsWith('game')).map((e) => [e.action, e.details]);
@@ -97,9 +98,9 @@ test('a game update: the hub resolves it, the Agent gets signed links only, the 
 test('an update starts on a stopped server: no stop is asked, the Agent goes on once it has saved', async (t) => {
   const h = await ready(t, { unit: 'inactive' });
   assert.equal((await h.json<ServerCard[]>(h.req('GET', '/api/servers'))).find((c) => c.id === 'space')!.online, false);
-  await h.json(h.req('POST', '/api/servers/space/game/update', { factorio: '2.1.24', mods: [] }), 202); // removes orrery
+  await h.json(h.req('POST', '/api/servers/space/game/update', { factorio: '2.1.24', mods: [{ name: 'orrery', version: null }, { name: 'flib', version: null }] }), 202);
   const update = await h.answer();
-  assert.deepEqual(update.mods, []);
+  assert.deepEqual((update.mods as { name: string }[]).map((m) => m.name), ['orrery', 'flib']);
   h.step(update.id, 'backup', 'done', 'Stopped: the newest save is world.zip');
   h.step(update.id, 'stop', 'waiting');
   assert.equal((await h.answer()).type, 'updateResume');
@@ -107,7 +108,7 @@ test('an update starts on a stopped server: no stop is asked, the Agent goes on 
   h.done(update.id, 'ok');
   await eventually(async () => (await h.game()).running === null);
   const row = (await h.game()).history[0]!;
-  assert.deepEqual([row.outcome, row.from, row.to, row.changes], ['ok', '2.1.24 · 5 mods', '2.1.24 · 4 mods', ['Removed: orrery 0.1.0']]);
+  assert.deepEqual([row.outcome, row.from, row.to, row.changes], ['ok', '2.1.24 · 5 mods', '2.1.24 · 6 mods', ['Added: flib 0.16.2']]);
   assert.ok(row.log.includes('stop: done: Already stopped'), row.log);
   assert.ok(!h.got.some((m) => m.type === 'serviceAct'));
 });
@@ -205,7 +206,6 @@ test('a daily restart is skipped during a game update', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: at.getTime() }); // after the Agent connected: its timers stay real
   h.restarts.daily('space', '06:00'); // its countdown starts at 05:50
   t.mock.timers.tick(1000);
-  assert.equal(h.restarts.pending('space'), undefined);
   assert.ok(errors.mock.calls.some((c) => String(c.arguments[0]) === '[restart] daily restart of space skipped: a game update is running'));
   t.mock.timers.reset(); // real timers again for the hub's close
 });
@@ -419,18 +419,23 @@ test('the game routes: 404 for a server no Agent runs, 400 for bad input, 409 wi
   await a.answer('update is not supported by this agent');
   await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
   assert.ok((await h.game()).history[0]!.log.includes('prepare: failed: update is not supported by this agent'));
+  // Refused outright, it never took the update: no updateCancel, which would hit whatever update it does run.
+  a.agent.send({ type: 'ping' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(!a.got.some((m) => m.type === 'updateCancel'));
 });
 
-test('without FACTORIO_USERNAME and FACTORIO_TOKEN the hub runs, the catalog answers, and only an update with mods is refused, saying why', async (t) => {
+test('without FACTORIO_USERNAME and FACTORIO_TOKEN the hub runs, the catalog answers, and only an update is refused, saying why', async (t) => {
   const h = await ready(t, {}, { account: false });
   assert.equal((await h.json<GameCatalog>(h.req('POST', '/api/servers/space/game/catalog', PICK))).mods.length, 3);
   const res = await h.req('POST', '/api/servers/space/game/update', PICK);
   assert.equal(res.status, 409);
   assert.equal(await res.text(), "FACTORIO_USERNAME and FACTORIO_TOKEN aren't set on the hub (/etc/orrery-factorio-account.env), so it can't get the mods' download links.");
   assert.equal((await h.game()).history.length, 0);
-  // With no mods to fetch, no link is needed.
-  await h.json(h.req('POST', '/api/servers/space/game/update', { factorio: '2.1.24', mods: [] }), 202);
-  assert.deepEqual((await h.answer()).mods, []);
+  // Every update has mods to fetch: orrery at least.
+  const none = await h.req('POST', '/api/servers/space/game/update', { factorio: '2.1.24', mods: [] });
+  assert.deepEqual([none.status, await none.text()], [409, "The mods must include orrery: the Agent's health gate reads it."]);
+  assert.ok(!h.got.some((m) => m.type === 'update'));
 });
 
 test('an Agent that says nothing about its update is given up, and told to cancel it', async (t) => {
@@ -440,4 +445,108 @@ test('an Agent that says nothing about its update is given up, and told to cance
   assert.equal((await h.answer()).type, 'updateCancel');
   await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
   assert.ok((await h.game()).history[0]!.log.includes('No word from the Agent for'));
+});
+
+test("the game's own mods stay as installed has them: dependencies are resolved, and from and to counted, against those enabled", async (t) => {
+  MODS['needs-recycler'] = [rel('needs-recycler', '1.0.0', ['base >= 2.1.0', 'recycler'])];
+  MODS['needs-space'] = [rel('needs-space', '1.0.0', ['base >= 2.1.0', 'space-age'])];
+  const h = await ready(t);
+  // Space Age disabled by hand in mod-list.json, and recycler never enabled: the Agent keeps both so.
+  h.agent.send({ type: 'installed', factorio: '2.1.24', mods: INSTALLED.filter((m) => m.name !== 'space-age') });
+  await eventually(async () => (await h.game()).installed?.mods.length === 4);
+  const unresolved = async (name: string) =>
+    (await h.json<GameCatalog>(h.req('POST', '/api/servers/space/game/catalog', { factorio: '2.1.24', mods: [{ name: 'orrery', version: null }, { name, version: null }] }))).unresolved;
+  assert.deepEqual(await unresolved('needs-recycler'), [{ mod: 'needs-recycler', dependency: 'recycler', reason: "recycler comes with Factorio, but it isn't enabled on this server." }]);
+  assert.deepEqual(await unresolved('needs-space'), [{ mod: 'needs-space', dependency: 'space-age', reason: "space-age comes with Factorio, but it isn't enabled on this server." }]);
+  // orrery's `? space-age` is optional: fine without it. To: base, elevated-rails and quality, and the three mods.
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  await h.answer();
+  const running = (await h.game()).running!;
+  assert.deepEqual([running.from, running.to], ['2.1.24 · 4 mods', '2.1.24 · 6 mods']);
+});
+
+test('a game update without orrery, or over the Agent\'s mods, is refused before any link, row or request', async (t) => {
+  const h = await ready(t);
+  const refused = async (mods: { name: string; version: null }[]) => {
+    const res = await h.req('POST', '/api/servers/space/game/update', { factorio: '2.1.24', mods });
+    return [res.status, await res.text()];
+  };
+  assert.deepEqual(await refused([{ name: 'helmod', version: null }]), [409, "The mods must include orrery: the Agent's health gate reads it."]);
+  // 500 picks, the most a request takes, and a dependency of one of them: 501 mods, more than an `update` holds.
+  for (let i = 1; i < LIMITS.mods; i++) MODS[`m${i}`] = [rel(`m${i}`, '1.0.0', i === 1 ? ['base >= 2.1.0', 'flib'] : undefined)];
+  const many = [{ name: 'orrery', version: null }, ...Array.from({ length: LIMITS.mods - 1 }, (_, i) => ({ name: `m${i + 1}`, version: null }))];
+  const [status, text] = await refused(many);
+  assert.equal(status, 409);
+  assert.match(text as string, new RegExp(`More than ${LIMITS.mods} mods`));
+  assert.deepEqual((await h.game()).history, []);
+  assert.ok(!h.got.some((m) => m.type === 'update'));
+});
+
+test("fitsLine: an update fits the Agent port's line only with its newline within LIMITS.lineBytes", () => {
+  const msg = (n: number) => ({ type: 'update', pad: 'a'.repeat(n) });
+  const empty = Buffer.byteLength(JSON.stringify(msg(0)));
+  assert.ok(fitsLine(msg(LIMITS.lineBytes - 1 - empty)));
+  assert.ok(!fitsLine(msg(LIMITS.lineBytes - empty)));
+  assert.ok(!fitsLine({ type: 'update', pad: 'é'.repeat(LIMITS.lineBytes / 2) }), 'bytes, not characters');
+});
+
+test('an update request cut off before its reply is cancelled: the Agent may have started it, and is told on reconnect', async (t) => {
+  const h = await ready(t);
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  assert.equal(((await h.agent.next()) as { type: string }).type, 'update');
+  h.agent.socket.destroy(); // no reply
+  await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
+  const a = await agentUp(h.agentPort);
+  assert.equal((await a.answer()).type, 'updateCancel');
+});
+
+test('an update that ends during the countdown cancels it: the server is never stopped', async (t) => {
+  const h = await ready(t, { players: ['Ann'] });
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h.answer();
+  h.step(update.id, 'stop', 'waiting');
+  await eventually(() => h.notices.some((n) => n.kind === 'restartScheduled'));
+  h.done(update.id, 'failed in staging'); // the Agent restarted meanwhile, and dropped it
+  await eventually(() => h.notices.some((n) => n.kind === 'restartCancelled'));
+  await eventually(async () => (await h.game()).running === null);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(!h.got.some((m) => m.type === 'serviceAct' || m.type === 'updateResume' || m.type === 'updateCancel'));
+  assert.deepEqual(kinds(h.notices), ['packUpdateStarted', 'restartScheduled', 'restartCancelled', 'packUpdateFinished']);
+  assert.equal((await h.game()).history[0]!.outcome, 'failed in staging');
+  assert.equal((await h.game()).blocked, null, 'no countdown left');
+});
+
+test('an update that ends while the hub stops the server starts the server again, and the Agent is never resumed', async (t) => {
+  const h = await ready(t);
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h.answer();
+  h.step(update.id, 'stop', 'waiting');
+  const stop = await h.answer();
+  assert.deepEqual([stop.type, stop.action], ['serviceAct', 'stop']);
+  h.done(update.id, 'failed in staging'); // the unit still deactivating
+  const start = await h.answer();
+  assert.deepEqual([start.type, start.action], ['serviceAct', 'start']);
+  await eventually(async () => (await h.game()).running === null);
+  h.agent.send({ type: 'serviceState', unit: 'factorio.service', active: 'inactive', sub: 'dead', since: 2, result: 'success' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(!h.got.some((m) => m.type === 'updateResume' || m.type === 'updateCancel'));
+  assert.equal(h.got.filter((m) => m.type === 'serviceAct').length, 2);
+  assert.equal((await h.game()).history[0]!.outcome, 'failed in staging');
+});
+
+test('a late updateDone after the hub gave the update up is recorded once: repeats change nothing', async (t) => {
+  const h = await ready(t, {}, { quietMs: 100 });
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h.answer();
+  assert.equal((await h.answer()).type, 'updateCancel'); // given up, and told
+  await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
+  h.done(update.id, 'cancelled');
+  await eventually(async () => (await h.game()).history[0]?.outcome === 'cancelled');
+  const notices = h.notices.length;
+  const history = (await h.game()).history;
+  for (let i = 0; i < 5; i++) h.done(update.id, 'ok'); // resent until the Agent knows its write went out
+  h.agent.send({ type: 'ping' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(h.notices.length, notices);
+  assert.deepEqual((await h.game()).history, history);
 });

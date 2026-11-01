@@ -20,7 +20,7 @@ import { failedPrep, PACK_STEPS, UpdateHistory, UpdateSteps } from './update-ste
  * mod portal, so never picked; a game update brings them with the version.
  */
 const GAME_MODS = new Set(['base', 'elevated-rails', 'quality', 'recycler', 'space-age']);
-/** The orrery mod: the Agent reads the server's status through it, so an update without it always rolls back. */
+/** The orrery mod: the Agent reads the server's status through it, so the hub refuses an update without it. */
 const ORRERY = 'orrery';
 const STEPS: Record<PackStep, string> = { ...PACK_STEPS, backup: 'Save' };
 const FLOW =

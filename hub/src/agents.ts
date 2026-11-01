@@ -114,6 +114,9 @@ const END_MS = 2_000;
 const LOG_MS = 60_000;
 const ignore = () => {};
 
+/** A request the Agent answered with `ok: false`: it got it and said no (not a timeout or a dropped connection). */
+export class AgentRefused extends Error {}
+
 /** How long ago `stamp` was by the hub's clock, `now`: as long ago as can be if the clock has stepped back past it. */
 const ago = (now: number, stamp: number) => (now < stamp ? Infinity : now - stamp);
 
@@ -353,8 +356,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   /**
    * Sends a request to a connected Agent, with a fresh id (or `id`: an `update`'s, which its steps carry), and
    * resolves with its reply: the checked `data` for the requests that answer with data. Rejects when the Agent isn't
-   * connected, refuses (with its `error`), doesn't answer in 30 s, leaves first, or answers with data that isn't the
-   * request's.
+   * connected, refuses (`AgentRefused`, with its `error`), doesn't answer in 30 s, leaves first, or answers with data
+   * that isn't the request's.
    */
   request<C extends AgentCall>(agentId: string, call: C, id: string = randomUUID()): Promise<AgentAnswer<C['type']>> {
     const conn = this.#conns.get(agentId);
@@ -527,7 +530,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     if (!waiting) return; // late or unknown
     conn.pending.delete(msg.id);
     clearTimeout(waiting.timer);
-    if (!msg.ok) return waiting.reject(new Error(msg.error ?? `${waiting.request} refused`));
+    if (!msg.ok) return waiting.reject(new AgentRefused(msg.error ?? `${waiting.request} refused`));
     if (!WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
     const data = parseReplyData(waiting.request as keyof AgentReplyData, msg.data);
     if (data === null) return waiting.reject(new Error(`the agent's ${waiting.request} reply is malformed`));

@@ -97,8 +97,12 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
     requests: [] as string[],
     sent: [] as AgentMsg[],
     connected: true,
+    /** Whether a delivered message's write succeeds (false: it failed, as on a connection that just dropped). */
+    written: true,
     /** The latest `installed`, as `HubClient` keeps it: the fake Factorio's last answer. */
     installed: null as InstalledMsg | null,
+    /** A deploy unit of the agent that hasn't ended (`Deploys.idle` rejects): null for none. */
+    deploying: null as string | null,
     /** Versions the fake Factorio won't run (it crashes at start). */
     broken: new Set<string>(),
     statuses: 0,
@@ -168,9 +172,17 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
       w.sent.push(msg);
       return true;
     },
+    deliver: async (msg) => {
+      if (!w.connected) return false;
+      w.sent.push(msg);
+      return w.written;
+    },
     gameUp: () => w.connected && unit.state.active === 'active' && game !== null,
     connected: () => w.connected,
     installed: () => w.installed,
+    idle: async () => {
+      if (w.deploying) throw new Error(`a deploy is running (${w.deploying})`);
+    },
     http: (url, signal) => w.http(url, signal),
     decompress: (file) => createReadStream(file), // the test tarballs are plain tar
     arch: 'x64',
@@ -310,6 +322,57 @@ test("a hash that differs from factorio.com's list, or the mod portal's, fails p
   assert.match((await w.step('prepare', 'failed')).detail, /doesn't match factorio\.com's sha256/);
   assert.deepEqual(await readdir(join(w.install, '.incoming')), []);
   assert.equal(await exists(join(w.install, 'releases/2.1.25')), false);
+});
+
+test('an update is refused while a deploy of the agent runs, before anything is written; not once it ended', async (t) => {
+  const w = await world(t);
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.start();
+  w.deploying = 'orrery-agent-deploy@agent-v1.2.5.service is active';
+  await assert.rejects(w.u.update(w.request('2.1.25', [['orrery', '0.2.0']])), /^Error: a deploy is running \(orrery-agent-deploy@agent-v1\.2\.5\.service is active\)$/);
+  assert.equal(w.u.busy, false);
+  assert.equal(await exists(join(w.state, 'update.json')), false);
+  assert.deepEqual([w.requests, w.sent], [[], []]);
+  w.deploying = null;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.u.cancel();
+  assert.equal((await w.done()).outcome, 'cancelled');
+});
+
+test("an updateDone whose write failed stays pending: update.json kept, sent again on each connect until a write succeeds, refusing a new update meanwhile", async (t) => {
+  const w = await world(t);
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  w.written = false; // the connection drops as the updateDone goes out
+  await w.u.cancel();
+  const done = await w.done();
+  assert.equal(done.outcome, 'cancelled');
+  await sleep(50);
+  assert.equal(JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).outcome, 'cancelled', 'kept');
+  await assert.rejects(w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2')), /the update u1 has not been reported yet/);
+
+  w.u.connected(); // a reconnect whose write fails too
+  await eventually(() => w.sent.filter((m) => m.type === 'updateDone').length === 2, 2000, 'sent again');
+  await sleep(50);
+  assert.ok(await exists(join(w.state, 'update.json')));
+
+  w.written = true;
+  w.u.connected();
+  await until(async () => !(await exists(join(w.state, 'update.json'))), 2000, 'update.json removed once a write succeeded');
+  const dones = w.sent.filter((m) => m.type === 'updateDone');
+  assert.equal(dones.length, 3);
+  for (const d of dones) assert.deepEqual(d, done, 'the same each time: the hub ignores a repeat');
+  w.u.connected();
+  await sleep(50);
+  assert.equal(w.sent.filter((m) => m.type === 'updateDone').length, 3, 'not again once written');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2'));
+  await eventually(() => w.steps().find((m) => m.id === 'u2' && m.step === 'stop'), 5000, "u2's stop");
+  await w.u.cancel();
+  await eventually(() => w.sent.find((m) => m.type === 'updateDone' && m.id === 'u2'), 5000, "u2's updateDone");
 });
 
 test('a binary needing a newer glibc than the image fails at prepare', async (t) => {

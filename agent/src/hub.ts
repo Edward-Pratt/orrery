@@ -44,6 +44,9 @@ export function backoff(failures: number, base: number, max: number, random: () 
   return full / 2 + (full / 2) * random();
 }
 
+/** How long `deliver` waits for its write to go out before it counts as not delivered (it goes again on a connect). */
+const DELIVER_MS = 30_000;
+
 /** One TCP connection to the hub's Agent port: its hello sent on connect, lines read under the cap, lines sent under it. */
 class Link {
   readonly socket: Socket;
@@ -86,15 +89,18 @@ class Link {
     clearTimeout(this.#handshake);
   }
 
-  /** Sends one line, if it fits the cap (`encode` trims what it can); a message that can't fit is logged, not sent. */
-  send(msg: OutMsg, then?: () => void): void {
-    if (!this.socket.writable) return then?.();
+  /**
+   * Sends one line, if it fits the cap (`encode` trims what it can); a message that can't fit is logged, not sent.
+   * `then` gets whether the write succeeded (false: not writable, too big, or the write failed).
+   */
+  send(msg: OutMsg, then?: (written: boolean) => void): void {
+    if (!this.socket.writable) return then?.(false);
     const line = encode(msg);
     if (line === null) {
       console.error(`[hub] a ${msg.type} over ${LIMITS.lineBytes} bytes was not sent`);
-      return then?.();
+      return then?.(false);
     }
-    this.socket.write(line, () => then?.());
+    this.socket.write(line, (err) => then?.(!err));
   }
 
   /** Closes after what was sent is flushed. */
@@ -275,6 +281,23 @@ export class HubClient {
     if (!this.connected || this.#stopping) return false;
     this.#agent!.send(msg);
     return true;
+  }
+
+  /**
+   * An outcome the hub must not miss (a game update's `updateDone`, `deployResult`): resolves true once its write on
+   * the Agent connection succeeded, false while it isn't up, when the write failed, or when it hasn't gone out within
+   * `DELIVER_MS` (a hub that stopped reading). The caller keeps it until true, and sends it again on the next connect
+   * (the hub ignores a repeat).
+   */
+  deliver(msg: AgentMsg): Promise<boolean> {
+    if (!this.connected || this.#stopping) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), DELIVER_MS).unref();
+      this.#agent!.send(msg, (written) => {
+        clearTimeout(timer);
+        resolve(written);
+      });
+    });
   }
 
   /** A save's outcome, as the game connection's `backup` (dropped while it isn't up, like a Mod's). */

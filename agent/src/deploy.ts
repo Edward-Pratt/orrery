@@ -84,8 +84,8 @@ export type DeploysOptions = {
   version: string;
   /** Whether a game update runs: a deploy is refused then. */
   busy: () => boolean;
-  /** `deployResult` on the Agent connection: false while it isn't up. */
-  send: (msg: DeployResultMsg) => boolean;
+  /** `deployResult` on the Agent connection (`HubClient.deliver`): true once its write succeeded. */
+  send: (msg: DeployResultMsg) => Promise<boolean>;
   run?: Systemctl;
   /** How often `deploy-status.json` is looked at. */
   pollMs?: number;
@@ -95,11 +95,12 @@ export type DeploysOptions = {
  * The agent's deploys. `deploy(tag)`: a well-formed tag only, refused for the release running, while a game update
  * runs, and while a deploy unit (any tag's) hasn't ended (deploy-agent.sh would exit before writing its status, so the
  * hub would never hear its end), then `systemctl start --no-block -- orrery-agent-deploy@<tag>.service` (resolves once
- * systemd took the job: the reply means started). The outcome: every `pollMs` (and on each connect, `connected`) `<root>/deploy-status.json` is read; one
- * not sent yet goes out as `deployResult` once its unit has ended (systemctl show: no longer activating, active,
- * reloading or deactivating, as the script still prunes after writing it), and is recorded in `<state>/deploy.json`
- * only once the Agent connection took it. It is polled, not read once at connect: the script writes it after the
- * restarted agent connected, and a deploy that failed before its restart never restarts the agent at all.
+ * systemd took the job: the reply means started). The outcome: every `pollMs` (and on each connect, `connected`)
+ * `<root>/deploy-status.json` is read; one not sent yet goes out as `deployResult` once its unit has ended (systemctl
+ * show: no longer activating, active, reloading or deactivating, as the script still prunes after writing it), and is
+ * recorded in `<state>/deploy.json` only once its write on the Agent connection succeeded (until then it goes again on
+ * each connect and poll). It is polled, not read once at connect: the script writes it after the restarted agent
+ * connected, and a deploy that failed before its restart never restarts the agent at all.
  */
 export class Deploys {
   #o: Required<DeploysOptions>;
@@ -124,8 +125,8 @@ export class Deploys {
     if (!isTag(tag)) throw new Error(`${JSON.stringify(tag)} is not an agent-vX.Y.Z tag`);
     if (tag === this.#o.version) throw new Error(`${tag} is already running`);
     if (this.#o.busy()) throw new Error('a game update is running');
-    const live = await this.#live();
-    if (live) throw new Error(`a deploy is running (${live})`);
+    await this.idle();
+    if (this.#o.busy()) throw new Error('a game update is running'); // one began while the units were listed
     const unit = deployUnit(tag);
     try {
       await this.#o.run(deployArgs(tag));
@@ -175,7 +176,8 @@ export class Deploys {
     } catch (err) {
       return this.#once(`[deploy] can't read ${unit}: ${(err as Error).message.trim()}`);
     }
-    if (RUNNING.has(active) || !this.#o.send(status.msg)) return; // the script is finishing, or no hub: later
+    if (RUNNING.has(active)) return; // the script is finishing: later
+    if (!(await this.#o.send(status.msg))) return; // no hub, or the write failed: again on the next connect or poll
     this.#sent = status.key;
     this.#logged = '';
     console.log(`[deploy] ${status.msg.tag}: ${status.msg.outcome}, sent to the hub`);
@@ -185,6 +187,16 @@ export class Deploys {
     } catch (err) {
       console.error(`[deploy] can't write ${this.#file}: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Resolves while no deploy unit of any tag is activating, active, reloading or deactivating; else rejects with "a
+   * deploy is running (<unit> is <state>)", and when the units can't be listed. A deploy, a game update and a restore
+   * each wait for this: the deploy restarts the agent, which would cut the other short.
+   */
+  async idle(): Promise<void> {
+    const live = await this.#live();
+    if (live) throw new Error(`a deploy is running (${live})`);
   }
 
   /** A deploy unit that hasn't ended, any tag's, as `<unit> is <state>`; null if none. */

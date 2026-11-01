@@ -62,7 +62,12 @@ function run(): void {
       logs: () => logs.list(),
       log: ({ name }) => logs.log(name),
       journal: ({ unit }) => logs.journal(unit),
-      restore: ({ name }) => (updates.busy ? Promise.reject(new Error('a game update is running')) : saves.restore(name)),
+      // Neither during a game update nor during a deploy, whose restart of the agent would cut it short.
+      restore: async ({ name }) => {
+        if (updates.busy) throw new Error('a game update is running');
+        await deploys.idle();
+        return saves.restore(name);
+      },
       update: (req) => updates.update(req),
       // Their request ids are their own (docs/protocol.md): each acts on the one update running.
       updateResume: () => updates.resume(),
@@ -78,11 +83,13 @@ function run(): void {
     unit: service,
     saves,
     send: (msg) => hub.send(msg),
+    deliver: (msg) => hub.deliver(msg),
     gameUp: () => hub.gameUp,
     connected: () => hub.connected,
     installed: () => hub.latestInstalled,
+    idle: () => deploys.idle(),
   });
-  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.send(msg) });
+  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.deliver(msg) });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,

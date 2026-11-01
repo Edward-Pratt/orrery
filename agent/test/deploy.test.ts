@@ -49,6 +49,8 @@ async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
     state,
     active: 'inactive',
     connected: true,
+    /** Whether a send's write succeeds (false: it failed, as on a connection that just dropped). */
+    written: true,
     units: '',
     lists: [] as string[][],
     calls: [] as string[][],
@@ -60,7 +62,7 @@ async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
         state,
         version: 'agent-v1.2.2',
         busy: () => false,
-        send: (msg) => w.connected && (w.sent.push(msg), true),
+        send: async (msg) => w.connected && (w.sent.push(msg), w.written),
         run: async (args) => {
           if (args[0] === 'list-units') return (w.lists.push(args), w.units);
           w.calls.push(args);
@@ -113,6 +115,30 @@ test('deploy is refused while a game update runs, and systemctl never runs', asy
   busy = false;
   await w.deploys.deploy('agent-v1.2.3');
   assert.equal(w.calls.length, 1);
+
+  // A game update that began while the deploy units were being listed (it set busy, then waits on idle itself).
+  const racing = await setup(t, {
+    busy: () => busy,
+    run: async (args) => {
+      if (args[0] === 'list-units') busy = true;
+      else racing.calls.push(args);
+      return '';
+    },
+  });
+  busy = false;
+  await assert.rejects(racing.deploys.deploy('agent-v1.2.3'), /a game update is running/);
+  assert.deepEqual(racing.calls, []);
+});
+
+test('idle, which a game update and a restore wait for: rejects while a deploy unit of any tag has not ended, and when they cannot be listed', async (t) => {
+  const w = await setup(t);
+  await w.deploys.idle();
+  w.units = 'orrery-agent-deploy@agent-v1.2.3.service loaded deactivating stop Deploy orrery agent agent-v1.2.3\n';
+  await assert.rejects(w.deploys.idle(), /^Error: a deploy is running \(orrery-agent-deploy@agent-v1\.2\.3\.service is deactivating\)$/);
+  w.units = 'orrery-agent-deploy@agent-v1.2.3.service loaded failed failed Deploy orrery agent agent-v1.2.3\n';
+  await w.deploys.idle();
+  const failing = await setup(t, { run: async () => Promise.reject(new Error('Failed to connect to bus\n')) });
+  await assert.rejects(failing.deploys.idle(), /^Error: can't tell whether a deploy is running: Failed to connect to bus$/);
 });
 
 test('deploy is refused for the release running, and while a deploy unit of any tag has not ended; systemctl start never runs', async (t) => {
@@ -144,7 +170,7 @@ test('the hub\'s deploy through HubClient: systemctl through execFile (no shell)
   const systemctl = await fakeSystemctl(t);
   const hub = await fakeHub();
   const root = await mkdtemp(join(tmpdir(), 'orrery-deploy-'));
-  const deploys = new Deploys({ root, state: join(root, 'state'), version: 'agent-v1.2.2', busy: () => false, send: () => false });
+  const deploys = new Deploys({ root, state: join(root, 'state'), version: 'agent-v1.2.2', busy: () => false, send: async () => false });
   const client = new HubClient({
     config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: SERVER, token: TOKEN, root, state: join(root, 'state') },
     version: 'agent-v1.2.2',
@@ -203,10 +229,18 @@ test('deployResult: the status deploy-agent.sh writes, once its unit has ended, 
   await w.deploys.check();
   assert.deepEqual(w.sent, []);
   w.connected = true;
+  // Its write fails (the connection dropped as it went out): not recorded, so it goes again, then once only.
+  const result = { type: 'deployResult', tag: 'agent-v1.2.3', outcome: 'ok', log: 'deploying agent-v1.2.3\nagent-v1.2.3 connected' };
+  w.written = false;
+  await w.deploys.check();
+  assert.deepEqual(w.sent, [result]);
+  assert.equal(existsSync(join(w.state, 'deploy.json')), false, 'not recorded as sent');
+  w.written = true;
+  w.sent = [];
   w.deploys.connected();
   await w.deploys.check();
   await w.deploys.check();
-  assert.deepEqual(w.sent, [{ type: 'deployResult', tag: 'agent-v1.2.3', outcome: 'ok', log: 'deploying agent-v1.2.3\nagent-v1.2.3 connected' }]);
+  assert.deepEqual(w.sent, [result]);
   assert.match(await readFile(join(w.state, 'deploy.json'), 'utf8'), /^\{"sent":"\[\\"agent-v1\.2\.3\\",\\"\d{4}-\d\d-\d\dT[\d:.]+Z\\"\]"\}\n$/);
 
   // A restarted agent: the outcome it already sent isn't sent again.
@@ -303,7 +337,7 @@ test('polled: an outcome written after the agent connected goes out on its own; 
     state: join(root, 'state'),
     version: 'agent-v1.2.3',
     busy: () => false,
-    send: (msg) => client.send(msg),
+    send: (msg) => client.deliver(msg),
     run: async () => `ActiveState=${active}\n`,
     pollMs: 10,
   });

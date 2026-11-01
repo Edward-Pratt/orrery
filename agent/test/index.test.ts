@@ -37,7 +37,8 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
   await writeFile(
     join(dir, 'bin', 'systemctl'),
     // A deploy unit has ended (its oneshot is inactive); orrery-agent.service can't be read; every other unit runs.
-    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in *orrery-agent-deploy@*) echo ActiveState=inactive; exit 0;; *orrery-agent.service) exit 1;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
+    // list-units prints `<dir>/units` (none: no deploy unit known).
+    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in list-units*) cat "${dir}/units" 2>/dev/null; exit 0;; *orrery-agent-deploy@*) echo ActiveState=inactive; exit 0;; *orrery-agent.service) exit 1;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
   );
   await chmod(join(dir, 'bin', 'systemctl'), 0o755);
   const env = {
@@ -131,6 +132,51 @@ test('deploy: starts its own deploy unit (the reply means started), and reports 
   const [code] = await once(child, 'exit');
   assert.equal(code, 0, out);
   assert.deepEqual(agent.invalid, []);
+});
+
+test('restore and update are refused while a deploy unit of the agent runs (its restart would cut them short); not once it ended', async (t) => {
+  const rcon = await fakeRcon(status);
+  const hub = await fakeHub();
+  t.after(async () => {
+    await rcon.close();
+    await hub.close();
+  });
+  const { dir, env } = await world(t, rcon.port, hub.port);
+  const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => child.kill('SIGKILL'));
+  const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
+  await eventually(() => agent.lines.some((m) => m.type === 'serviceState'), 5000, 'serviceState');
+  const ask = async (msg: Record<string, unknown>) => {
+    agent.send(msg);
+    return eventually(() => agent.lines.find((m) => m.type === 'reply' && m.id === msg.id), 5000, `the reply to ${msg.id as string}`);
+  };
+  const update = (id: string) => ({
+    type: 'update',
+    id,
+    factorio: { version: '2.1.25', url: 'https://www.factorio.com/get-download/2.1.25/headless/linux64', sha256: 'a'.repeat(64) },
+    mods: [{ name: 'orrery', version: '0.2.0', sha1: 'b'.repeat(40), url: 'https://dl-mod.factorio.com/files/orrery_0.2.0.zip?secure=x' }],
+  });
+
+  for (const active of ['activating', 'active', 'reloading', 'deactivating']) {
+    await writeFile(join(dir, 'units'), `orrery-agent-deploy@agent-v1.2.5.service loaded ${active} start Deploy orrery agent agent-v1.2.5\n`);
+    const error = `a deploy is running (orrery-agent-deploy@agent-v1.2.5.service is ${active})`;
+    assert.deepEqual(await ask({ type: 'restore', id: `r-${active}`, name: 'world.zip' }), { type: 'reply', id: `r-${active}`, ok: false, error });
+    assert.deepEqual(await ask(update(`u-${active}`)), { type: 'reply', id: `u-${active}`, ok: false, error });
+  }
+
+  // Ended (failed): no longer the reason. The restore meets the running server, the update a Host with no release.
+  await writeFile(join(dir, 'units'), 'orrery-agent-deploy@agent-v1.2.5.service loaded failed failed Deploy orrery agent agent-v1.2.5\n');
+  const restore = await ask({ type: 'restore', id: 'r-ended', name: 'world.zip' });
+  assert.equal(restore.ok, false);
+  assert.doesNotMatch(String(restore.error), /deploy/);
+  const updated = await ask(update('u-ended'));
+  assert.equal(updated.ok, false);
+  assert.match(String(updated.error), /does not point at a release/);
+  assert.doesNotMatch(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^start/m, 'nothing started');
+  assert.deepEqual(agent.invalid, []);
+  child.kill('SIGTERM'); // and wait for its exit, so it writes no more into the folder the test removes
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
 });
 
 test('with no hub reachable the agent keeps running, logs that once, and connects when the hub comes up', async (t) => {

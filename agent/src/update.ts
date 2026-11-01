@@ -107,12 +107,19 @@ export type UpdatesOptions = {
   saves: Pick<Saves, 'preUpdate' | 'list' | 'hold' | 'release' | 'restore'>;
   /** Sends on the Agent connection; false while it isn't up. */
   send: (msg: AgentMsg) => boolean;
+  /** `updateDone` on the Agent connection (`HubClient.deliver`): true once its write succeeded. */
+  deliver: (msg: AgentMsg) => Promise<boolean>;
   /** Whether the game connection is up (the gate's last condition). */
   gameUp: () => boolean;
   /** Whether the Agent connection is up: a rollback's gate asks for the game connection only then. */
   connected: () => boolean;
   /** The latest `installed` (`HubClient`'s, kept across restarts): an update's `from` and `to` are named from it. */
   installed: () => InstalledMsg | null;
+  /**
+   * Rejects while one of the agent's own deploys runs (`Deploys.idle`): its restart of the agent would cut the update
+   * short, so an `update` is refused then, with that error.
+   */
+  idle: () => Promise<void>;
   http?: Http;
   /** A tarball's bytes, decompressed (`xz -dc`). */
   decompress?: (file: string) => AsyncIterable<Buffer>;
@@ -372,7 +379,7 @@ function readJob(raw: unknown): Job | null {
  * before it acts, so a restart of the agent ends an update before the swap as failed and rolls one back from the swap
  * on. Steps go out as `updateStep` (one per step per second at most, unless the state changes; the latest again on
  * each connect; a running one again after `BEAT_MS` without one), the end as `updateDone` (`from` and `to`: `labels`),
- * kept until the Agent connection takes it. No detail carries a query string.
+ * kept until its write on the Agent connection succeeded, and sent again on each connect until then. No detail carries a query string.
  */
 export class Updates {
   #o: Required<UpdatesOptions>;
@@ -474,14 +481,15 @@ export class Updates {
 
   /**
    * The hub's `update`: checked, then started; resolves once accepted (the reply), the steps follow. Refused while
-   * another runs, or one's `updateDone` waits to be sent.
+   * another runs, one's `updateDone` waits to be sent, or a deploy of the agent runs (`idle`).
    */
   async update(req: Request<'update'>): Promise<void> {
     if (this.#running) throw new Error(`the update ${this.#running.job.id} is running`);
     if (this.#starting) throw new Error('another update is being checked');
     if (this.#done) throw new Error(`the update ${this.#done.id} has not been reported yet`);
-    this.#starting = true;
+    this.#starting = true; // before the deploy check: a deploy is refused from here on (busy)
     try {
+      await this.#o.idle();
       checkUpdate(req, this.#o.arch);
       const previous = await this.#current();
       const fromVersion = previous.slice('releases/'.length);
@@ -854,11 +862,18 @@ export class Updates {
     return job.backup ? { ...msg, backup: job.backup } : msg;
   }
 
-  /** The pending `updateDone`, if the Agent connection takes it now: then `update.json` goes. */
+  /**
+   * The pending `updateDone`, sent if the Agent connection is up: only once its write succeeded is it done with, and
+   * `update.json` goes. Until then it stays pending, and goes again on each connect (the hub ignores a repeat).
+   */
   #flush(): void {
-    if (!this.#done || !this.#o.send(this.#done)) return;
-    this.#done = null;
-    this.#removing = rm(this.#file, { force: true }).catch((err: Error) => console.error(`[update] can't remove ${this.#file}: ${reason(err)}`));
+    const msg = this.#done;
+    if (!msg) return;
+    void this.#o.deliver(msg).then((written) => {
+      if (!written || this.#done !== msg) return;
+      this.#done = null;
+      this.#removing = rm(this.#file, { force: true }).catch((err: Error) => console.error(`[update] can't remove ${this.#file}: ${reason(err)}`));
+    });
   }
 
   /**

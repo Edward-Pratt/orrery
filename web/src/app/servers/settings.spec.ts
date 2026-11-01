@@ -132,6 +132,20 @@ describe('server settings tab', () => {
     await type('[data-field=name]', ' padded');
     expect(q('[data-field=name]').getAttribute('aria-describedby')).toBe('err-name');
     expect(save().disabled).toBe(true);
+    // 26 two-byte letters: 26 characters, but 52 bytes, past what Factorio keeps.
+    await type('[data-field=name]', 'Ü'.repeat(26));
+    expect(text(q('[data-error=name]'))).toBe('Name: Factorio keeps only the first 50 bytes, so at most 50 plain letters (fewer with accents or emoji).');
+    expect(save().disabled).toBe(true);
+    await type('[data-field=name]', 'Ü'.repeat(25));
+    expect(q('[data-error=name]')).toBeNull();
+  });
+
+  it('a long name the file already has is no error; clearing the description applies now', async () => {
+    const { q, text, type, save } = await setup({ ...STATE, settings: { ...VALUES, name: 'n'.repeat(60), description: 'Ours' } });
+    expect(q('[data-error=name]')).toBeNull();
+    await type('[data-field=description]', '');
+    expect(text(q('[data-applies]'))).toBe('Applies now: Description.');
+    expect(save().disabled).toBe(false);
   });
 
   it('says what applies now and what at the next restart, then sends every field and the password only when changed', async () => {
@@ -241,12 +255,22 @@ describe('server settings tab', () => {
     expect(q('[data-restart]')).toBeNull();
   });
 
-  it("an older Agent's deploy text leaves nothing editable; a disconnected one shows the last report read-only", async () => {
+  it("an older Agent's deploy text, and an Agent that hasn't reported, show no values; a disconnected one shows the last report read-only", async () => {
     const old = "This server's Agent runs agent-v1.1.1, which can't change game settings. Deploy agent-v1.2.0 or later from the Host page (Releases).";
-    const a = await setup({ ...STATE, settings: null, blocked: old });
+    const none = { ...STATE, settings: null, admins: [] };
+    const a = await setup({ ...none, blocked: old });
     expect(a.text(a.q('[data-old-agent]'))).toBe(old);
-    expect(a.q<HTMLFieldSetElement>('[data-card=server]').disabled).toBe(true);
+    expect(a.q('[data-card]'), 'no made-up values').toBeNull();
     expect(a.q('[data-save]')).toBeNull();
+    TestBed.resetTestingModule();
+    const unheard = await setup({ ...none, blocked: "Space's Agent hasn't reported its game settings yet." });
+    expect(unheard.text(unheard.q('[data-read-only]'))).toBe("Space's Agent hasn't reported its game settings yet.");
+    expect(unheard.q('[data-card]')).toBeNull();
+    expect(unheard.q('[data-footer]')).toBeNull();
+    TestBed.resetTestingModule();
+    const away = await setup({ ...none, blocked: "The Agent isn't connected." });
+    expect(away.text(away.q('[data-read-only]'))).toBe("The Agent isn't connected.");
+    expect(away.q('[data-card]')).toBeNull();
     TestBed.resetTestingModule();
     const b = await setup({ ...STATE, blocked: "The Agent isn't connected." });
     expect(b.text(b.q('[data-read-only]'))).toBe("The Agent isn't connected. The fields show its last report.");

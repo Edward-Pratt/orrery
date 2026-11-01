@@ -56,6 +56,8 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const PASSWORD = /^[\x21-\x7e]{1,64}$/;
 const ADMIN = /^[A-Za-z0-9_.-]{1,60}$/;
 const ADMIN_RULE = 'Names are 1 to 60 letters, digits, _, . or -.';
+/** Factorio 2.1.24 keeps no more of a server's name (UTF-8): the hub and the Agent refuse a longer new one (GAME_SETTINGS.nameBytes). */
+const NAME_BYTES = 50;
 const NEEDS_PASSWORD = 'Without the account check a game password is needed.';
 const COMMANDS: { value: AllowCommands; label: string }[] = [
   { value: 'false', label: 'Off' },
@@ -111,7 +113,7 @@ export function generatePassword(): string {
         @if (old()) {
           <p class="rounded-lg border px-3 py-2" data-old-agent>{{ s.blocked }}</p>
         } @else if (readOnly()) {
-          <p class="rounded-lg border px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }} The fields show its last report.</p>
+          <p class="rounded-lg border px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
         }
         @if (s.pending.length) {
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-status-warn/40 bg-status-warn/10 px-3 py-2" data-pending>
@@ -133,6 +135,7 @@ export function generatePassword(): string {
           <p class="rounded-lg bg-status-warn/10 px-3 py-2" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
         }
 
+        @if (!unreported()) {
         <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="server">
           <legend class="px-1 font-semibold">Server</legend>
           <label class="flex flex-col gap-1">
@@ -327,9 +330,10 @@ export function generatePassword(): string {
             }
           </form>
         </fieldset>
+        }
       </div>
 
-      @if (!old()) {
+      @if (!old() && !unreported()) {
         <footer class="sticky bottom-0 -mx-4 flex max-w-3xl flex-col gap-2 border-t bg-background/95 px-4 py-3 text-sm backdrop-blur md:mx-0 md:px-0" data-footer>
           @if (dirty()) {
             <p data-applies>{{ applies() }}</p>
@@ -378,6 +382,14 @@ export default class Settings {
   protected readonly restarting = signal(false);
   readonly #reload = new Subject<void>();
 
+  /**
+   * No values to show: an Agent too old to report its settings, or one that hasn't yet (a restarted hub has none).
+   * Only the hub's reason shows then, never values made up as the server's.
+   */
+  protected readonly unreported = computed(() => {
+    const s = this.state();
+    return s !== null && s.settings === null && s.problem === null;
+  });
   /** What the Agent last reported, or setup's defaults while the file can't be read. */
   protected readonly saved = computed<Form>(() => {
     const s = this.state();
@@ -406,6 +418,7 @@ export default class Settings {
     const f = this.form();
     const out: Record<string, string> = {};
     if (f.name !== f.name.trim() || !f.name || f.name.length > 100 || CONTROL.test(f.name)) out['name'] = 'Name: 1 to 100 characters on one line, with no space at either end.';
+    else if (this.changed('name') && new TextEncoder().encode(f.name).length > NAME_BYTES) out['name'] = `Name: Factorio keeps only the first ${NAME_BYTES} bytes, so at most ${NAME_BYTES} plain letters (fewer with accents or emoji).`;
     if (f.description.length > 256 || CONTROL.test(f.description)) out['description'] = 'Description: at most 256 characters on one line.';
     for (const [k, [min, max]] of Object.entries(RANGES) as [Key, [number, number]][]) {
       const v = f[k] as number;
@@ -422,7 +435,7 @@ export default class Settings {
   protected readonly applies = computed(() => {
     const keys = this.changes();
     if (this.stopped()) return `Applies when the server starts: ${this.labels(keys)}.`;
-    const later = keys.filter((k) => AT_RESTART.has(k) || (k === 'description' && this.form().description === ''));
+    const later = keys.filter((k) => AT_RESTART.has(k));
     const now = keys.filter((k) => !later.includes(k));
     return [now.length ? `Applies now: ${this.labels(now)}.` : '', later.length ? `At the next restart: ${this.labels(later)}.` : ''].filter(Boolean).join(' ');
   });

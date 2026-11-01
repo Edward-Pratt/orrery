@@ -30,6 +30,13 @@ export const LOG_LINES = 40;
 /** A oneshot deploy unit's states while its script runs, as hub/src/deploys.ts reads deploy-hub.sh's. */
 const RUNNING = new Set(['activating', 'active', 'reloading', 'deactivating']);
 
+/**
+ * Every instance of the deploy unit systemd knows, one per line, `<unit> <load> <active> <sub> <description>`
+ * (`--plain`: no bullets), so a deploy of any tag still running is seen. Reading units needs no polkit.
+ */
+export const LIST_ARGS: readonly string[] = ['list-units', '--all', '--plain', '--no-legend', '--full', '--', 'orrery-agent-deploy@*.service'];
+const UNIT = /^orrery-agent-deploy@agent-v\d+\.\d+\.\d+\.service$/;
+
 /** The status file holds 40 lines of log; more than this can't be the script's (cut short, it fails to parse). */
 const STATUS_BYTES = 1024 * 1024;
 
@@ -73,6 +80,8 @@ export type DeploysOptions = {
   root: string;
   /** The agent's bookkeeping, `<root>/state`: `deploy.json`, the last outcome the hub took. */
   state: string;
+  /** This release, `agent-vX.Y.Z`: a deploy of it is refused. */
+  version: string;
   /** Whether a game update runs: a deploy is refused then. */
   busy: () => boolean;
   /** `deployResult` on the Agent connection: false while it isn't up. */
@@ -83,9 +92,10 @@ export type DeploysOptions = {
 };
 
 /**
- * The agent's deploys. `deploy(tag)`: a well-formed tag only, refused while a game update runs, then
- * `systemctl start --no-block -- orrery-agent-deploy@<tag>.service` (resolves once systemd took the job: the reply means
- * started). The outcome: every `pollMs` (and on each connect, `connected`) `<root>/deploy-status.json` is read; one
+ * The agent's deploys. `deploy(tag)`: a well-formed tag only, refused for the release running, while a game update
+ * runs, and while a deploy unit (any tag's) hasn't ended (deploy-agent.sh would exit before writing its status, so the
+ * hub would never hear its end), then `systemctl start --no-block -- orrery-agent-deploy@<tag>.service` (resolves once
+ * systemd took the job: the reply means started). The outcome: every `pollMs` (and on each connect, `connected`) `<root>/deploy-status.json` is read; one
  * not sent yet goes out as `deployResult` once its unit has ended (systemctl show: no longer activating, active,
  * reloading or deactivating, as the script still prunes after writing it), and is recorded in `<state>/deploy.json`
  * only once the Agent connection took it. It is polled, not read once at connect: the script writes it after the
@@ -112,7 +122,10 @@ export class Deploys {
   /** The hub's `deploy`: starts the deploy unit for `tag`, nothing from the request but the checked tag in its name. */
   async deploy(tag: string): Promise<void> {
     if (!isTag(tag)) throw new Error(`${JSON.stringify(tag)} is not an agent-vX.Y.Z tag`);
+    if (tag === this.#o.version) throw new Error(`${tag} is already running`);
     if (this.#o.busy()) throw new Error('a game update is running');
+    const live = await this.#live();
+    if (live) throw new Error(`a deploy is running (${live})`);
     const unit = deployUnit(tag);
     try {
       await this.#o.run(deployArgs(tag));
@@ -172,6 +185,21 @@ export class Deploys {
     } catch (err) {
       console.error(`[deploy] can't write ${this.#file}: ${(err as Error).message}`);
     }
+  }
+
+  /** A deploy unit that hasn't ended, any tag's, as `<unit> is <state>`; null if none. */
+  async #live(): Promise<string | null> {
+    let out: string;
+    try {
+      out = await this.#o.run([...LIST_ARGS]);
+    } catch (err) {
+      throw new Error(`can't tell whether a deploy is running: ${(err as Error).message.trim()}`);
+    }
+    for (const line of out.split('\n')) {
+      const [unit = '', , active = ''] = line.replace(/^\s*[●*]?\s*/, '').split(/\s+/); // a bullet, should one show
+      if (UNIT.test(unit) && RUNNING.has(active)) return `${unit} is ${active}`;
+    }
+    return null;
   }
 
   /** The key `deploy.json` records (read once); null if none. */

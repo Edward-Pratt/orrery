@@ -6,6 +6,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { parseAgentLine } from '../../hub/src/protocol.ts';
 import type { AgentMsg, ServiceVerb } from '../../hub/src/types.ts';
 import { HubClient } from '../src/hub.ts';
@@ -14,7 +15,8 @@ import { Saves } from '../src/saves.ts';
 import type { UnitState } from '../src/service.ts';
 import type { Status } from '../src/status.ts';
 import { compareGlibc, glibcNeed, Refused, unpack, unxz } from '../src/unpack.ts';
-import { ALLOWED_HOSTS, checkUpdate, Updates, type Http, type UpdatesOptions } from '../src/update.ts';
+import { GAME_MODS as HUB_GAME_MODS } from '../../hub/src/factorio.ts';
+import { ALLOWED_HOSTS, GAME_MODS, checkUpdate, installedOf, labels, Updates, type Http, type InstalledMsg, type UpdatesOptions } from '../src/update.ts';
 import type { Request } from '../src/wire.ts';
 import { eventually, fakeHub } from './fake-hub.ts';
 import { fakeElf, OWN_MODS, releaseTar, tar, type Entry } from './fake-release.ts';
@@ -95,6 +97,8 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
     requests: [] as string[],
     sent: [] as AgentMsg[],
     connected: true,
+    /** The latest `installed`, as `HubClient` keeps it: the fake Factorio's last answer. */
+    installed: null as InstalledMsg | null,
     /** Versions the fake Factorio won't run (it crashes at start). */
     broken: new Set<string>(),
     statuses: 0,
@@ -164,7 +168,9 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
       w.sent.push(msg);
       return true;
     },
-    gameUp: () => unit.state.active === 'active' && game !== null,
+    gameUp: () => w.connected && unit.state.active === 'active' && game !== null,
+    connected: () => w.connected,
+    installed: () => w.installed,
     http: (url, signal) => w.http(url, signal),
     decompress: (file) => createReadStream(file), // the test tarballs are plain tar
     arch: 'x64',
@@ -209,6 +215,7 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
         if (s) {
           w.statuses++;
           w.u.status(s);
+          w.installed = installedOf(s);
         }
       })
       .catch(() => (game = null));
@@ -342,7 +349,7 @@ test('an update while the server runs: a pre-update save, the hub stops it, the 
   await w.u.start();
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2'], ['Squeak Through', '1.8.2']]));
   await assert.rejects(w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2')), /the update u1 is running/);
-  await assert.rejects(w.u.resume('u1'), /is not waiting for the server to stop/);
+  await assert.rejects(w.u.resume(), /is not waiting for the server to stop/);
 
   await w.step('stop', 'waiting');
   const prepared = await w.step('prepare', 'done');
@@ -357,9 +364,10 @@ test('an update while the server runs: a pre-update save, the hub stops it, the 
   // The hub's stop, with its countdown, then updateResume. Factorio writes its settings as it stops.
   await w.unit.act('stop');
   await writeFile(join(w.data, 'mods/mod-settings.dat'), 'startup settings v2');
-  await w.u.resume('u1');
+  await w.u.resume();
   const done = await w.done();
-  assert.deepEqual(done, { type: 'updateDone', id: 'u1', outcome: 'ok', from: '2.1.24 · 1 mod', to: '2.1.25 · 3 mods', backup: done.backup });
+  // Counted as the hub counts them: every enabled mod, the game's own (base, space-age) included.
+  assert.deepEqual(done, { type: 'updateDone', id: 'u1', outcome: 'ok', from: '2.1.24 · 3 mods', to: '2.1.25 · 5 mods', backup: done.backup });
   assert.match(done.backup!, /^orrery-pre-update-2\.1\.24-\d{8}T\d{6}Z\.zip$/);
   assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.25');
   assert.deepEqual((await readdir(join(w.data, 'mods'))).sort(), ['Squeak Through_1.8.2.zip', 'flib_0.16.2.zip', 'mod-list.json', 'mod-settings.dat', 'orrery_0.2.0.zip']);
@@ -369,8 +377,10 @@ test('an update while the server runs: a pre-update save, the hub stops it, the 
   assert.deepEqual(w.unit.calls, ['stop', 'start'], 'the hub stopped it; the agent started it');
   assert.deepEqual(
     w.steps().filter((m) => m.state !== 'running').map((m) => `${m.step} ${m.state}`),
-    ['prepare done', 'backup done', 'stop waiting', 'stop done', 'swap done', 'gate done'],
+    ['prepare done', 'backup done', 'stop waiting', 'swap done', 'gate done'],
   );
+  assert.deepEqual(new Set(w.steps().filter((m) => m.step === 'stop').map((m) => m.state)), new Set(['waiting']), "the stop is the hub's: its step is only ever waiting");
+  assert.ok(w.steps().some((m) => m.step === 'swap' && m.state === 'running' && m.detail === 'Checking that the server is stopped'));
   assert.deepEqual((await readdir(join(w.install, 'releases'))).sort(), ['2.1.23', '2.1.24', '2.1.25'], 'the newest 3 releases kept');
   assert.deepEqual(await readdir(join(w.install, '.incoming')), []);
   assert.deepEqual(await readdir(join(w.data, '.incoming')), []);
@@ -389,7 +399,7 @@ test('a gate failure rolls back to the old release, mods.prev with its mod-setti
   await w.unit.act('stop');
   // Factorio saves into the world it loaded as it stops: newer than the pre-update save.
   await writeFile(join(w.data, 'saves/world.zip'), 'the world, saved at the stop');
-  await w.u.resume('u1');
+  await w.u.resume();
   const done = await w.done();
   assert.equal(done.outcome, 'rolled back');
   assert.match((await w.step('gate', 'failed')).detail, /^Not up within \d+ s: no \/orrery-status answer$/);
@@ -417,7 +427,7 @@ test('a restart of the agent mid-swap rolls back from state/update.json', async 
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']]));
   await w.step('stop', 'waiting');
   await w.unit.act('stop');
-  await w.u.resume('u1');
+  await w.u.resume();
   await eventually(() => w.unit.calls.includes('start') || null, 3000, 'the swap to start the server');
   assert.equal(JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase, 'gate');
   assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.25', 'swapped');
@@ -442,7 +452,7 @@ test('a restart of the agent mid-swap rolls back from state/update.json', async 
   w.connected = false;
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u2'));
   await until(async () => JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase === 'stop', 5000, 'u2 at its stop');
-  await w.u.cancel('u2');
+  await w.u.cancel();
   await until(async () => JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase === 'done', 3000, 'u2 done');
   assert.equal(w.sent.length, before, 'nothing sent while not connected');
   w.connected = true;
@@ -601,10 +611,9 @@ test('updateCancel before the swap cleans .incoming; after it, it is refused', a
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']]));
   await until(async () => (await readdir(join(w.data, '.incoming'))).includes('flib_0.16.2.zip'), 3000, 'the download under way');
   assert.ok(await exists(join(w.data, 'mods.next/orrery_0.2.0.zip')), 'orrery staged');
-  await assert.rejects(w.u.cancel('nope'), /no update nope is running/);
-  await w.u.cancel('u1');
+  await w.u.cancel();
   const done = await w.done();
-  assert.deepEqual(done, { type: 'updateDone', id: 'u1', outcome: 'cancelled', from: '2.1.24 · 1 mod', to: '2.1.25 · 2 mods' });
+  assert.deepEqual(done, { type: 'updateDone', id: 'u1', outcome: 'cancelled', from: '2.1.24 · 3 mods', to: '2.1.25 · 4 mods' });
   assert.equal((await w.step('prepare', 'failed')).detail, 'Cancelled by the hub');
   assert.deepEqual(await readdir(join(w.data, '.incoming')), [], "the data folder's .incoming is clean");
   assert.deepEqual(await readdir(join(w.install, '.incoming')), [], "the install folder's .incoming is clean");
@@ -618,18 +627,35 @@ test('updateCancel before the swap cleans .incoming; after it, it is refused', a
   w.routes.set(modUrl('flib', '0.16.2'), async () => new Response(new Uint8Array(zip('flib', '0.16.2'))));
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u2'));
   await w.step('stop', 'waiting');
-  await w.u.cancel('u2');
+  await w.u.cancel();
   assert.equal((await w.done()).outcome, 'cancelled');
   assert.equal(await exists(join(w.data, 'mods.next')), false);
+  assert.deepEqual(w.unit.calls, []);
+  assert.ok(!w.steps().some((m) => m.step === 'stop' && m.state !== 'waiting'), "the stop is the hub's: its end is not a step");
+
+  // Cancelled after updateResume, while the agent checks the stop (the hub giving up): it never starts or stops the
+  // unit, as the hub starts a server it stopped itself.
+  w.sent.length = 0;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u2b'));
+  await w.step('stop', 'waiting');
+  w.unit.state = { ...w.unit.state, active: 'deactivating', sub: 'stop-sigterm' };
+  await w.u.resume();
+  await w.step('swap', 'running');
+  await w.u.cancel();
+  w.unit.state = { ...w.unit.state, active: 'inactive', sub: 'dead' };
+  assert.equal((await w.done()).outcome, 'cancelled');
+  assert.deepEqual(w.unit.calls, [], 'a cancel never starts or stops the unit');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  await w.unit.act('start');
 
   w.sent.length = 0;
   w.broken.add('2.1.25');
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u3'));
   await w.step('stop', 'waiting');
   await w.unit.act('stop');
-  await w.u.resume('u3');
+  await w.u.resume();
   await w.step('gate', 'running');
-  await assert.rejects(w.u.cancel('u3'), /past the swap: too late to cancel/);
+  await assert.rejects(w.u.cancel(), /past the swap: too late to cancel/);
   assert.equal((await w.done()).outcome, 'rolled back');
 });
 
@@ -642,13 +668,42 @@ test('an update on a stopped server keeps the newest save for a rollback', async
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
   assert.equal((await w.step('backup', 'done')).detail, 'The server is stopped: no save made; a rollback loads world.zip, the newest');
   await w.step('stop', 'waiting');
-  await w.u.resume('u1');
+  await w.u.resume();
   const done = await w.done();
   assert.equal(done.outcome, 'ok');
   assert.equal(done.backup, 'world.zip');
-  assert.equal(done.from, '2.1.24 · 1 mod');
+  assert.equal(done.from, '2.1.24 · 3 mods');
+  assert.equal(done.to, '2.1.25 · 3 mods');
   assert.deepEqual(w.unit.calls, ['start']);
   assert.deepEqual((await w.saves.list()).saves.map((s) => s.name), ['world.zip'], 'no save made');
+});
+
+test("updateDone's from and to as the hub names its row: every enabled mod, the game's own included, from the latest installed", async (t) => {
+  assert.deepEqual([...GAME_MODS].sort(), [...HUB_GAME_MODS].sort(), "the hub's list of the game's own mods");
+  // docs/protocol.md's example, and a server with its game mods partly off.
+  const mods = (...names: string[]) => names.map((name) => ({ name, version: '1.0.0' }));
+  const req = (n: number): Request<'update'> => ({
+    type: 'update',
+    id: 'u',
+    factorio: { version: '2.1.25', url: '', sha256: '' },
+    mods: Array.from({ length: n }, (_, i) => ({ name: `m${i}`, version: '1.0.0', sha1: '', url: '' })),
+  });
+  assert.deepEqual(labels({ factorio: '2.1.24', mods: mods('base', 'elevated-rails', 'quality', 'space-age', 'orrery') }, '2.1.24', req(2)), { from: '2.1.24 · 5 mods', to: '2.1.25 · 6 mods' });
+  assert.deepEqual(labels({ factorio: '2.1.24', mods: mods('base') }, '2.1.24', req(1)), { from: '2.1.24 · 1 mod', to: '2.1.25 · 2 mods' });
+  assert.deepEqual(labels(null, '2.1.24', req(1)), { from: '2.1.24', to: '2.1.25' }, 'nothing to count yet');
+
+  // A restarted agent with its server stopped: no /orrery-status answer, but the installed it kept names the from.
+  const w = await world(t);
+  await w.unit.act('stop');
+  w.restart();
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.mod('flib', '0.16.2');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']]));
+  await w.step('stop', 'waiting');
+  await w.u.cancel();
+  const done = await w.done();
+  assert.deepEqual([done.from, done.to], ['2.1.24 · 3 mods', '2.1.25 · 4 mods']);
 });
 
 test('steps go out at most once per second per step unless their state changes, and again on connect', async (t) => {
@@ -682,7 +737,7 @@ test('steps go out at most once per second per step unless their state changes, 
   w.sent.length = 0;
   w.u.connected();
   assert.deepEqual(w.sent, [latest], 'the latest step again on connect');
-  await w.u.cancel('u1');
+  await w.u.cancel();
   await w.done();
 });
 
@@ -726,6 +781,53 @@ test('HubClient sends installed on connect and on change, and update messages on
   assert.deepEqual(conn!.invalid, []);
 });
 
+test('installed is kept in state/installed.json: a restarted agent sends it on connect with its server stopped, never twice the same', async (t) => {
+  const hub = await fakeHub();
+  t.after(() => hub.close());
+  const dir = await mkdtemp(join(tmpdir(), 'orrery-installed-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const state = join(dir, 'state');
+  const file = join(state, 'installed.json');
+  const make = () =>
+    new HubClient({
+      config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: {} as never, token: 't'.repeat(32), root: dir, state },
+      version: 'agent-v0.0.0',
+      backoffMs: 10,
+    });
+  const mods = [{ name: 'base', version: '2.1.24' }, { name: 'orrery', version: '0.1.0' }];
+  const first = make();
+  first.installed({ factorio: '2.1.24', mods });
+  first.installed({ factorio: '2.1.25', mods });
+  await until(async () => JSON.parse(await readFile(file, 'utf8')).factorio === '2.1.25', 2000, 'the newest kept');
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { factorio: '2.1.25', mods });
+  await first.stop();
+
+  // A new agent on the same Host, its server stopped: no /orrery-status answer, yet the hub hears what it runs.
+  const again = make();
+  t.after(() => again.stop());
+  again.start();
+  const conn = (await eventually(() => hub.of('agentHello')[0]))!;
+  await eventually(() => conn.lines.some((l) => l.type === 'installed'));
+  again.installed({ factorio: '2.1.25', mods: mods.map((m) => ({ ...m })) }); // the server's first answer: the same
+  await sleep(50);
+  assert.deepEqual(conn.lines.filter((l) => l.type === 'installed'), [{ type: 'installed', factorio: '2.1.25', mods }], 'once');
+  assert.deepEqual(conn.invalid, []);
+  await again.stop();
+
+  // A file that isn't one (not JSON, another shape, a field over the hub's limit) is never sent.
+  for (const bad of ['not json', 'null', JSON.stringify({ factorio: 1, mods: [] }), JSON.stringify({ factorio: '2.1.25', mods: [{ name: 'x'.repeat(257), version: '1.0.0' }] })]) {
+    await writeFile(file, bad);
+    const n = hub.of('agentHello').length;
+    const c = make();
+    c.start();
+    const other = (await eventually(() => hub.of('agentHello')[n]))!;
+    await eventually(() => c.connected);
+    await sleep(30);
+    await c.stop();
+    assert.deepEqual(other.lines.filter((l) => l.type === 'installed'), [], bad);
+  }
+});
+
 test('a .tar.xz unpacks through xz -dc; what is not xz fails', async (t) => {
   const xz = spawnSync('xz', ['--version']);
   if (xz.error) return t.skip('no xz here (setup installs it on the Host)');
@@ -738,4 +840,155 @@ test('a .tar.xz unpacks through xz -dc; what is not xz fails', async (t) => {
   assert.equal(await glibcNeed(join(dir, 'release/bin/x64/factorio')), '2.38');
   await writeFile(join(dir, 'plain.tar.xz'), releaseTar('2.1.25'));
   await assert.rejects(unpack(unxz(join(dir, 'plain.tar.xz')), join(dir, 'other')), /xz could not unpack it/);
+});
+
+test("the hub's updateResume and updateCancel carry request ids of their own: each acts on the one update running", async (t) => {
+  const w = await world(t);
+  const hub = await fakeHub();
+  t.after(() => hub.close());
+  // The handlers as src/index.ts has them.
+  const client = new HubClient({
+    config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: {} as never, token: 't'.repeat(32), root: w.dir, state: w.state },
+    version: 'agent-v0.0.0',
+    handlers: { update: (req) => w.u.update(req), updateResume: () => w.u.resume(), updateCancel: () => w.u.cancel() },
+    backoffMs: 10,
+  });
+  t.after(() => client.stop());
+  client.start();
+  const conn = (await eventually(() => hub.of('agentHello')[0]))!;
+  await eventually(() => client.connected);
+  const reply = (id: string) => eventually(() => conn.lines.find((l) => l.type === 'reply' && l.id === id), 3000, `the reply to ${id}`);
+
+  conn.send({ type: 'updateResume', id: 'r1' });
+  conn.send({ type: 'updateCancel', id: 'r2' });
+  assert.deepEqual(await reply('r1'), { type: 'reply', id: 'r1', ok: false, error: 'no update is running' });
+  assert.deepEqual(await reply('r2'), { type: 'reply', id: 'r2', ok: false, error: 'no update is running' });
+
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  conn.send(w.request('2.1.25', [['orrery', '0.2.0']], 'U1'));
+  assert.equal((await reply('U1')).ok, true);
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  conn.send({ type: 'updateResume', id: 'r3' }); // a fresh id, not U1
+  assert.deepEqual(await reply('r3'), { type: 'reply', id: 'r3', ok: true });
+  assert.deepEqual([(await w.done()).id, (await w.done()).outcome], ['U1', 'ok']);
+
+  w.sent.length = 0;
+  conn.send(w.request('2.1.25', [['orrery', '0.2.0']], 'U2'));
+  await w.step('stop', 'waiting');
+  conn.send({ type: 'updateCancel', id: 'r4' });
+  assert.deepEqual(await reply('r4'), { type: 'reply', id: 'r4', ok: true });
+  assert.deepEqual([(await w.done()).id, (await w.done()).outcome], ['U2', 'cancelled']);
+  assert.deepEqual(conn.invalid, []);
+});
+
+test('a download that gets no byte for the stall time fails prepare with a clear step error; one over its cap is refused before it is read', async (t) => {
+  const w = await world(t, { stallMs: 100 });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.mod('flib', '0.16.2');
+  const mods: [string, string][] = [['orrery', '0.2.0'], ['flib', '0.16.2']];
+  /** An answer that never comes: aborted with the request, as fetch's is. */
+  const silent: Http = (_url, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+  const failed = async () => {
+    const done = await w.done();
+    const step = await w.step('prepare', 'failed');
+    w.sent.length = 0;
+    return [done.outcome, step.detail];
+  };
+
+  // factorio.com's sha256 list never answers.
+  const sums = w.routes.get(SUMS)!;
+  w.routes.set(SUMS, silent);
+  await w.u.update(w.request('2.1.25', mods));
+  assert.deepEqual(await failed(), ['failed in staging', 'No data from https://www.factorio.com/download/sha256sums/ for 0.1 s: the download was stopped']);
+  w.routes.set(SUMS, sums);
+
+  // The game's signed link says it is over the 1 GiB cap: refused before anything is written.
+  let created = false;
+  w.routes.set(signedGame('2.1.25'), async () => {
+    created = (await readdir(join(w.install, '.incoming'))).length > 0;
+    return new Response(new Uint8Array(10), { headers: { 'content-length': String(2 * 1024 ** 3) } });
+  });
+  await w.u.update(w.request('2.1.25', mods, 'u2'));
+  assert.deepEqual(await failed(), ['failed in staging', `https://dl.factorio.com/releases/${tarball('2.1.25')} is over 1073.7 MB`]);
+  assert.equal(created, false);
+  assert.deepEqual(await readdir(join(w.install, '.incoming')), []);
+  w.offer('2.1.25');
+
+  // flib's download sends a little, then nothing.
+  w.routes.set(modUrl('flib', '0.16.2'), async (_url, signal) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array(1000));
+        signal.addEventListener('abort', () => c.error(signal.reason));
+      },
+    });
+    return new Response(body);
+  });
+  await w.u.update(w.request('2.1.25', mods, 'u3'));
+  assert.deepEqual(await failed(), ['failed in staging', 'No data from https://dl-mod.factorio.com/files/flib_0.16.2.zip for 0.1 s: the download was stopped']);
+  assert.deepEqual(await readdir(join(w.data, '.incoming')), []);
+  assert.equal(await exists(join(w.data, 'mods.next')), false);
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  assert.deepEqual(w.unit.calls, []);
+});
+
+test('a running step goes out again when none went for the beat time (the hub gives an update up after 15 minutes without a word); stop waiting never', async (t) => {
+  const w = await world(t, { beatMs: 50, stepMs: 20, gateMs: 500 });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.broken.add('2.1.25'); // the gate waits its whole time
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await sleep(300);
+  assert.equal(w.steps().filter((m) => m.step === 'stop').length, 1, 'stop waiting once: it asks the hub to stop the server');
+  await w.unit.act('stop');
+  await w.u.resume();
+  assert.equal((await w.done()).outcome, 'rolled back');
+  const gate = w.steps().filter((m) => m.step === 'gate' && m.state === 'running');
+  assert.ok(gate.length >= 4, `the gate's running step went out ${gate.length} times in 500 ms`);
+  assert.ok(gate.every((m) => m.detail === gate[0]!.detail), 'the same step, as it is');
+  for (const m of w.sent) assert.ok(parseAgentLine(JSON.stringify(m)), `the hub takes ${JSON.stringify(m)}`);
+  const n = w.sent.length;
+  await sleep(200);
+  assert.equal(w.sent.length, n, 'nothing once it ended');
+});
+
+test('with the hub unreachable, a rollback whose old server answers with its version and mods is rolled back, not failed', async (t) => {
+  const w = await world(t, { gateMs: 300 });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  // The hub goes away right after its go-ahead: the new server's gate still needs the game connection, the rollback's
+  // only while the Agent connection is up.
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  await w.u.resume();
+  w.connected = false;
+  await until(async () => JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase === 'done', 5000, 'u1 done');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  w.connected = true;
+  w.u.connected();
+  // Rolled back (2.1.25 itself runs: only the game connection was missing), and not failed (the old one ran).
+  assert.equal((await w.done()).outcome, 'rolled back');
+  await until(async () => !(await exists(join(w.state, 'update.json'))), 2000, 'update.json removed once reported');
+
+  // The agent restarts mid-swap with no hub to reach: its recovery rollback ends rolled back too.
+  w.sent.length = 0;
+  w.unit.hang = true;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2'));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  await w.u.resume();
+  await eventually(() => w.unit.calls.at(-1) === 'start' || null, 3000, 'the swap to start the server');
+  w.unit.hang = false;
+  w.connected = false;
+  await w.restart().start();
+  assert.equal(JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).outcome, 'rolled back');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  w.connected = true;
+  w.u.connected();
+  assert.deepEqual([(await w.done()).id, (await w.done()).outcome], ['u2', 'rolled back']);
 });

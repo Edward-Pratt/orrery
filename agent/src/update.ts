@@ -52,9 +52,33 @@ export const GATE_MS = 5 * 60 * 1000;
 export const STOP_WAIT_MS = 5 * 60 * 1000;
 /** An `updateStep` per step at most this often, unless its state changes. */
 export const STEP_MS = 1000;
+/**
+ * A running step goes out again after this long without one (a long unpack, save, gate or rollback), so the hub, which
+ * gives an update up after 15 minutes without a word, hears it is alive.
+ */
+export const BEAT_MS = 60_000;
+/** A download that gets no byte for this long (its answer, or its body) is stopped: prepare fails. */
+export const STALL_MS = 60_000;
 
 /** The `installed` message's fields. */
 export type InstalledMsg = Omit<Extract<AgentMsg, { type: 'installed' }>, 'type'>;
+
+/** The game's own mods, as the hub counts them in an update's `to` (`GAME_MODS` in hub/src/factorio.ts; a test compares). */
+export const GAME_MODS: readonly string[] = ['base', 'elevated-rails', 'quality', 'recycler', 'space-age'];
+
+/**
+ * `updateDone`'s `from` and `to`, as the hub names its row (docs/protocol.md, "Game updates"): "2.1.24 · 5 mods",
+ * every enabled mod counted, the game's own included. `from`: the latest `installed`; `to`: the update's version, with
+ * the game's own mods enabled in that `installed` and the update's mods. With no `installed` yet: the bare versions
+ * (`from` the release `current` points at).
+ */
+export function labels(installed: InstalledMsg | null, current: string, req: Request<'update'>): { from: string; to: string } {
+  if (!installed) return { from: current, to: req.factorio.version };
+  const game = installed.mods.filter((m) => GAME_MODS.includes(m.name)).length;
+  return { from: label(installed.factorio, installed.mods.length), to: label(req.factorio.version, game + req.mods.length) };
+}
+/** Within the hub's 256 characters for a string even for an absurd version. */
+const label = (version: string, n: number) => cut(`${version} · ${n} mod${n === 1 ? '' : 's'}`, LIMITS.text);
 /** What `/orrery-status` says runs: the game's version and every enabled mod (`base` and the game's own included), by name. */
 export const installedOf = (s: Status): InstalledMsg => ({
   factorio: s.version,
@@ -85,6 +109,10 @@ export type UpdatesOptions = {
   send: (msg: AgentMsg) => boolean;
   /** Whether the game connection is up (the gate's last condition). */
   gameUp: () => boolean;
+  /** Whether the Agent connection is up: a rollback's gate asks for the game connection only then. */
+  connected: () => boolean;
+  /** The latest `installed` (`HubClient`'s, kept across restarts): an update's `from` and `to` are named from it. */
+  installed: () => InstalledMsg | null;
   http?: Http;
   /** A tarball's bytes, decompressed (`xz -dc`). */
   decompress?: (file: string) => AsyncIterable<Buffer>;
@@ -95,6 +123,8 @@ export type UpdatesOptions = {
   /** Between looks at the gate and at a stopping unit. */
   pollMs?: number;
   stepMs?: number;
+  beatMs?: number;
+  stallMs?: number;
   /** A clock that only goes forward (ms), for the step throttle. */
   clock?: () => number;
 };
@@ -113,8 +143,10 @@ type Job = {
   mods: FactorioMod[];
   /** The gate's mod set: the release's own mods (`base`, …) and `mods`, by name; known once prepare has the release. */
   expect: Record<string, string> | null;
-  /** What ran before: its version, its mods as `/orrery-status` last said (null: not known), and how many are portal mods. */
-  from: { factorio: string; mods: Record<string, string> | null; count: number | null };
+  /** What ran before: its version, and its mods as `/orrery-status` last said (null: not known). */
+  from: { factorio: string; mods: Record<string, string> | null };
+  /** `updateDone`'s `from` and `to` (`labels`). */
+  label: { from: string; to: string };
   /** `current`'s target before the update, `releases/X.Y.Z`. */
   previous: string;
   /** The save a rollback loads: the pre-update save, or the newest one when the server was stopped. */
@@ -138,6 +170,8 @@ type Running = {
   pending: StepMsg | null;
   sent: Map<PackStep, { state: PackStepState['state']; at: number }>;
   later: NodeJS.Timeout | undefined;
+  /** Sends a running step again once none went out for `beatMs`. */
+  beat: NodeJS.Timeout | undefined;
 };
 
 /** A step that failed, with the detail it fails with. */
@@ -156,6 +190,30 @@ const there = (path: string) => lstat(path).then(
   () => false,
 );
 const stopped = (s: UnitState) => s.active === 'inactive' || s.active === 'failed';
+const count = (mods: Record<string, string>) => Object.keys(mods).length;
+
+/**
+ * A download's abort: the update's own (a cancel), or `ms` without a byte (a stall, `stalled`). Armed from the request
+ * on, so an answer that never comes stalls too; `alive` after each answer and chunk, `end` once done.
+ */
+function watch(update: AbortSignal, ms: number) {
+  const stall = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const w = {
+    signal: AbortSignal.any([update, stall.signal]),
+    get stalled() {
+      return stall.signal.aborted;
+    },
+    alive() {
+      clearTimeout(timer);
+      timer = setTimeout(() => stall.abort(), ms);
+    },
+    end: () => clearTimeout(timer),
+  };
+  w.alive();
+  return w;
+}
+type Watch = ReturnType<typeof watch>;
 const newestFirst = (a: string, b: string) => {
   const [x, y] = [a.split('.').map(Number), b.split('.').map(Number)];
   return y[0]! - x[0]! || y[1]! - x[1]! || y[2]! - x[2]!;
@@ -278,7 +336,8 @@ function readJob(raw: unknown): Job | null {
     typeof from.factorio === 'string' &&
     VERSION.test(from.factorio) &&
     record(from.mods) &&
-    (from.count === null || Number.isSafeInteger(from.count)) &&
+    isObject(raw.label) &&
+    [raw.label.from, raw.label.to].every((l) => typeof l === 'string' && l.length > 0 && l.length <= LIMITS.text) &&
     typeof raw.previous === 'string' &&
     RELEASE.test(raw.previous) &&
     (raw.backup === null || (typeof raw.backup === 'string' && raw.backup.length <= LIMITS.text && /^[^/\0]+\.zip$/.test(raw.backup))) &&
@@ -296,19 +355,24 @@ function readJob(raw: unknown): Job | null {
  *    `<install>/.incoming/` (only when the release isn't there yet), checked, unpacked (`unpack`) and its binary's
  *    glibc need checked against the image's (`image.json`) before it becomes `<install>/releases/<ver>/`; the mods
  *    downloaded to `<data>/.incoming/`, checked and staged in `<data>/mods.next/` with a `mod-list.json` and
- *    `mod-settings.dat` carried over. Downloads follow redirects only to `ALLOWED_HOSTS`, at most 5, with caps.
+ *    `mod-settings.dat` carried over. Downloads follow redirects only to `ALLOWED_HOSTS`, at most 5, with caps, and
+ *    stop after `STALL_MS` without a byte.
  * 2. backup: a pre-update save while the server runs, else the newest save; held from pruning until the end.
- * 3. stop: `waiting` until the hub stopped the server (`updateResume`, then the unit must be stopped) or cancelled it.
- * 4. swap: `current` flipped to the new release, `mods` to `mods.prev`, `mods.next` to `mods`, the unit started.
+ * 3. stop, the hub's: `waiting` (its only state that goes out) until the hub stopped the server (`updateResume`) or
+ *    cancelled the update (`updateCancel`, which never starts or stops the unit).
+ * 4. swap: the unit checked stopped, `current` flipped to the new release, `mods` to `mods.prev`, `mods.next` to
+ *    `mods`, the unit started.
  * 5. gate, 5 minutes at most: `/orrery-status` with the new version and exactly the expected mods, and the game
  *    connection up.
  * 6. rollback, when the swap or the gate failed: the old `current`, `mods.prev` back (its `mod-settings.dat` with it),
- *    the backup copied as the newest save, started and gated again: `rolled back`, or `failed`.
+ *    the backup copied as the newest save, started and gated again (the game connection only while the Agent
+ *    connection is up): `rolled back`, or `failed`.
  *
  * `<state>/update.json` (the agent's own folder: a file of that name under `<data>` is never read) records each phase
  * before it acts, so a restart of the agent ends an update before the swap as failed and rolls one back from the swap
  * on. Steps go out as `updateStep` (one per step per second at most, unless the state changes; the latest again on
- * each connect), the end as `updateDone`, kept until the Agent connection takes it. No detail carries a query string.
+ * each connect; a running one again after `BEAT_MS` without one), the end as `updateDone` (`from` and `to`: `labels`),
+ * kept until the Agent connection takes it. No detail carries a query string.
  */
 export class Updates {
   #o: Required<UpdatesOptions>;
@@ -331,6 +395,8 @@ export class Updates {
       stopWaitMs: STOP_WAIT_MS,
       pollMs: 1000,
       stepMs: STEP_MS,
+      beatMs: BEAT_MS,
+      stallMs: STALL_MS,
       clock: () => performance.now(),
       ...options,
     };
@@ -387,9 +453,10 @@ export class Updates {
     await this.#finish(r, await this.#rollback(r));
   }
 
-  /** Stops the step throttle's timer (the agent exits; `update.json` stays for the next start). */
+  /** Stops the step throttle's timers (the agent exits; `update.json` stays for the next start). */
   stop(): void {
     clearTimeout(this.#running?.later);
+    clearTimeout(this.#running?.beat);
   }
 
   /** Each `/orrery-status` answer: the gate's evidence, and the next update's `from`. */
@@ -419,15 +486,14 @@ export class Updates {
       const previous = await this.#current();
       const fromVersion = previous.slice('releases/'.length);
       const known = this.#known?.version === fromVersion ? this.#known.mods : null;
-      const own = await ownMods(join(this.#o.install, previous)).catch(() => null);
-      const count = known && own ? Object.keys(known).filter((n) => !Object.hasOwn(own, n)).length : null;
       await this.#removing;
       const job: Job = {
         id: req.id,
         factorio: req.factorio.version,
         mods: req.mods.map(({ name, version }) => ({ name, version })),
         expect: null,
-        from: { factorio: fromVersion, mods: known, count },
+        from: { factorio: fromVersion, mods: known },
+        label: labels(this.#o.installed(), fromVersion, req),
         previous,
         backup: null,
         phase: 'prepare',
@@ -435,7 +501,7 @@ export class Updates {
         resumed: false,
       };
       await this.#save(job);
-      console.log(`[update] ${job.id}: from ${this.#label(job, 'from')} to ${this.#label(job, 'to')}`);
+      console.log(`[update] ${job.id}: from ${job.label.from} to ${job.label.to}`);
       void this.#run(this.#begin(job), req);
     } catch (err) {
       throw new Error(reason(err));
@@ -444,26 +510,32 @@ export class Updates {
     }
   }
 
-  /** The hub's `updateResume`: it stopped the server for the update waiting in its stop step. */
-  async resume(id: string): Promise<void> {
+  /**
+   * The hub's `updateResume`: it stopped the server for the update waiting in its stop step. Its request id is its
+   * own (docs/protocol.md): it acts on the one update running.
+   */
+  async resume(): Promise<void> {
     const r = this.#running;
-    if (!r || r.job.id !== id) throw new Error(`no update ${id} is running`);
-    if (!r.wake) throw new Error(`the update ${id} is not waiting for the server to stop`);
+    if (!r) throw new Error('no update is running');
+    if (!r.wake) throw new Error(`the update ${r.job.id} is not waiting for the server to stop`);
     r.wake('resume');
   }
 
-  /** The hub's `updateCancel`: only before the swap; the downloads stop and `.incoming` is cleaned. */
-  async cancel(id: string): Promise<void> {
+  /**
+   * The hub's `updateCancel`, with a request id of its own, on the one update running: only before the swap; the
+   * downloads stop and `.incoming` is cleaned. It never starts or stops the unit: a server the hub stopped, it starts.
+   */
+  async cancel(): Promise<void> {
     const r = this.#running;
-    if (!r || r.job.id !== id) throw new Error(`no update ${id} is running`);
-    if (!BEFORE_SWAP.includes(r.job.phase)) throw new Error(`the update ${id} is past the swap: too late to cancel`);
+    if (!r) throw new Error('no update is running');
+    if (!BEFORE_SWAP.includes(r.job.phase)) throw new Error(`the update ${r.job.id} is past the swap: too late to cancel`);
     r.cancelled = true;
     r.abort.abort();
     r.wake?.('cancel');
   }
 
   #begin(job: Job): Running {
-    const r: Running = { job, abort: new AbortController(), wake: null, cancelled: false, current: null, pending: null, sent: new Map(), later: undefined };
+    const r: Running = { job, abort: new AbortController(), wake: null, cancelled: false, current: null, pending: null, sent: new Map(), later: undefined, beat: undefined };
     this.#running = r;
     return r;
   }
@@ -479,12 +551,17 @@ export class Updates {
       this.#check(r);
       step = 'stop';
       await this.#stop(r);
+      // The stop is the hub's: the swap starts by checking that it is done.
+      step = 'swap';
+      this.#step(r, 'swap', 'running', 'Checking that the server is stopped');
+      await this.#stopped();
+      this.#check(r);
       job.phase = 'swap'; // at once: no cancel from here on
     } catch (err) {
       this.#step(r, step, 'failed', r.cancelled ? 'Cancelled by the hub' : reason(err));
       if (!r.cancelled && !(err instanceof Fail)) console.error(`[update] ${job.id}: ${reason(err)}`);
       await this.#clean();
-      if (job.resumed) await this.#startOld();
+      if (job.resumed && !r.cancelled) await this.#startOld(); // a cancel never starts the unit: the hub does
       return this.#finish(r, r.cancelled ? 'cancelled' : job.resumed ? 'failed before swap' : 'failed in staging');
     }
     let outcome: PackFinished;
@@ -659,6 +736,7 @@ export class Updates {
     this.#step(r, 'backup', 'done', job.backup ? `The server is stopped: no save made; a rollback loads ${job.backup}, the newest` : 'The server is stopped and has no saves');
   }
 
+  /** The stop step, the hub's: `waiting` until its `updateResume` (it stopped the server) or `updateCancel`. */
   async #stop(r: Running): Promise<void> {
     const { job } = r;
     job.phase = 'stop';
@@ -672,10 +750,6 @@ export class Updates {
     if (how === 'cancel') throw new Cancelled('cancelled');
     job.resumed = true;
     await this.#save(job);
-    this.#step(r, 'stop', 'running', 'Checking that the server is stopped');
-    await this.#stopped();
-    this.#check(r);
-    this.#step(r, 'stop', 'done', 'The server is stopped');
   }
 
   async #swap(r: Running): Promise<void> {
@@ -696,18 +770,23 @@ export class Updates {
     this.#step(r, 'swap', 'done', `Factorio ${job.factorio} and ${plural(job.mods.length, 'mod')} in place${settings ? ', with mod-settings.dat' : ''}; the server is starting`);
   }
 
-  /** Resolves with the gate's detail once `/orrery-status` says `version` with exactly `mods` (unless null) and the game connection is up. */
-  async #gate(version: string, mods: Record<string, string> | null): Promise<string> {
+  /**
+   * Resolves with the gate's detail once `/orrery-status` says `version` with exactly `mods` (unless null) and the
+   * game connection is up. A rollback's (`back`) asks for the game connection only while the Agent connection is up:
+   * the old server ran with the hub before, so with the hub unreachable its RCON answer is enough.
+   */
+  async #gate(version: string, mods: Record<string, string> | null, back = false): Promise<string> {
     const until = performance.now() + this.#o.gateMs;
     let why = 'no /orrery-status answer';
     for (;;) {
       const s = this.#latest;
       if (s) {
         const diff = mods && differences(mods, s.mods);
+        const game = this.#o.gameUp();
         if (s.version !== version) why = `/orrery-status says Factorio ${s.version}, not ${version}`;
         else if (diff) why = `/orrery-status lists other mods: ${diff}`;
-        else if (!this.#o.gameUp()) why = 'the game connection to the hub is not up';
-        else return `Factorio ${version} answers with ${mods ? `exactly its ${plural(Object.keys(mods).length, 'mod')}` : 'its mods'}, and the game connection is up`;
+        else if (!game && (!back || this.#o.connected())) why = 'the game connection to the hub is not up';
+        else return `Factorio ${version} answers with ${mods ? `exactly its ${plural(count(mods), 'mod')}` : 'its mods'}, ${game ? 'and the game connection is up' : 'with the hub unreachable'}`;
       }
       if (performance.now() >= until) throw new Fail(`Not up within ${Math.round(this.#o.gateMs / 1000)} s: ${why}`);
       await sleep(this.#o.pollMs);
@@ -744,7 +823,7 @@ export class Updates {
       }
       await this.#o.unit.act('start');
       this.#step(r, 'rollback', 'running', `Back on Factorio ${back}${save}: waiting for it to come up`);
-      await this.#gate(back, job.from.mods);
+      await this.#gate(back, job.from.mods, true);
       this.#step(r, 'rollback', 'done', `Back on Factorio ${back} with its mods${save}`);
       return 'rolled back';
     } catch (err) {
@@ -756,6 +835,7 @@ export class Updates {
   async #finish(r: Running, outcome: PackFinished): Promise<void> {
     const { job } = r;
     clearTimeout(r.later);
+    clearTimeout(r.beat);
     job.phase = 'done';
     job.outcome = outcome;
     await this.#save(job).catch((err: Error) => console.error(`[update] can't write ${this.#file}: ${reason(err)}`));
@@ -770,14 +850,8 @@ export class Updates {
 
   #doneMsg(job: Job): Extract<AgentMsg, { type: 'updateDone' }> {
     const outcome = job.outcome ?? 'failed';
-    const msg = { type: 'updateDone', id: job.id, outcome, from: this.#label(job, 'from'), to: this.#label(job, 'to') } as const;
+    const msg = { type: 'updateDone', id: job.id, outcome, from: job.label.from, to: job.label.to } as const;
     return job.backup ? { ...msg, backup: job.backup } : msg;
-  }
-
-  /** "2.1.24 · 5 mods", as a game update's history row names each side; its portal mods only. */
-  #label(job: Job, side: 'from' | 'to'): string {
-    if (side === 'to') return `${job.factorio} · ${plural(job.mods.length, 'mod')}`;
-    return job.from.count === null ? job.from.factorio : `${job.from.factorio} · ${plural(job.from.count, 'mod')}`;
   }
 
   /** The pending `updateDone`, if the Agent connection takes it now: then `update.json` goes. */
@@ -787,10 +861,14 @@ export class Updates {
     this.#removing = rm(this.#file, { force: true }).catch((err: Error) => console.error(`[update] can't remove ${this.#file}: ${reason(err)}`));
   }
 
-  /** An `updateStep`, cut and redacted, and logged. */
+  /**
+   * An `updateStep`, cut and redacted, and logged. The stop is the hub's (docs/protocol.md, "Game updates"): of the
+   * `stop` step only `waiting` goes out, and how it ended (a cancel, a restart of the agent) is only logged.
+   */
   #step(r: Running, step: PackStep, state: PackStepState['state'], detail: string): void {
     const msg: StepMsg = { type: 'updateStep', id: r.job.id, step, state, detail: cut(redact(detail), LIMITS.detail) };
     console.log(`[update] ${r.job.id}: ${step} ${state}: ${msg.detail}`);
+    if (step === 'stop' && state !== 'waiting') return;
     this.#emit(r, msg);
   }
 
@@ -823,6 +901,17 @@ export class Updates {
     r.pending = null;
     r.sent.set(msg.step, { state: msg.state, at: this.#o.clock() });
     this.#o.send(msg);
+    clearTimeout(r.beat);
+    r.beat = setTimeout(() => this.#beat(r), this.#o.beatMs).unref();
+  }
+
+  /**
+   * No step went out for `beatMs`: a running one goes again, as it is (through the throttle). Never a `waiting` one,
+   * which asks the hub to stop the server (and the hub doesn't count its own stop as the agent's silence).
+   */
+  #beat(r: Running): void {
+    r.beat = undefined;
+    if (this.#running === r && r.current?.state === 'running') this.#emit(r, r.current);
   }
 
   /** Waits until the unit is inactive or failed, 5 minutes at most. */
@@ -903,18 +992,21 @@ export class Updates {
 
   /**
    * A GET, following redirects itself (5 at most), each only to an allowed https host: `url` is the hub's (checked
-   * too) or, `ours`, one of the agent's own (the hash lists). Anything but 200 at the end fails.
+   * too) or, `ours`, one of the agent's own (the hash lists). Anything but 200 at the end fails, and so does a 200 whose
+   * `Content-Length` is over `cap`; so does an answer that doesn't come within the stall time (`w`).
    */
-  async #get(r: Running, url: string, ours: boolean): Promise<{ res: Response; at: URL }> {
+  async #get(r: Running, url: string, ours: boolean, w: Watch, cap: number): Promise<{ res: Response; at: URL }> {
     let at = ours ? new URL(url) : allowedUrl(url, 'the download');
     for (let hop = 0; ; hop++) {
       let res: Response;
       try {
-        res = await this.#o.http(at.href, r.abort.signal);
+        res = await this.#o.http(at.href, w.signal);
       } catch (err) {
         if (r.abort.signal.aborted) throw new Cancelled('cancelled');
+        if (w.stalled) throw this.#stalled(at);
         throw new Fail(`Can't download ${bare(at)}: ${reason((err as Error).cause ?? err)}`);
       }
+      w.alive();
       if (res.status >= 300 && res.status < 400) {
         await res.body?.cancel().catch(() => {});
         const location = res.headers.get('location');
@@ -937,52 +1029,75 @@ export class Updates {
         await res.body?.cancel().catch(() => {});
         throw new Fail(`${bare(at)} answered HTTP ${res.status}`);
       }
+      if (Number(res.headers.get('content-length')) > cap) {
+        await res.body?.cancel().catch(() => {});
+        throw new Fail(`${bare(at)} is over ${mb(cap)}`);
+      }
       return { res, at };
     }
   }
 
+  /** The step error for a download that got no byte for the stall time. */
+  #stalled(at: URL): Fail {
+    return new Fail(`No data from ${bare(at)} for ${this.#o.stallMs / 1000} s: the download was stopped`);
+  }
+
   /** One of the agent's own URLs as text, 16 MiB at most. */
   async #text(r: Running, url: string): Promise<string> {
-    const { res, at } = await this.#get(r, url, true);
-    const parts: Buffer[] = [];
-    let size = 0;
+    const w = watch(r.abort.signal, this.#o.stallMs);
     try {
-      for await (const chunk of res.body ?? []) {
-        size += chunk.length;
-        if (size > META_MAX) throw new Fail(`${bare(at)} is over ${mb(META_MAX)}`);
-        parts.push(Buffer.from(chunk));
+      const { res, at } = await this.#get(r, url, true, w, META_MAX);
+      const parts: Buffer[] = [];
+      let size = 0;
+      try {
+        for await (const chunk of res.body ?? []) {
+          w.alive();
+          size += chunk.length;
+          if (size > META_MAX) throw new Fail(`${bare(at)} is over ${mb(META_MAX)}`);
+          parts.push(Buffer.from(chunk));
+        }
+      } catch (err) {
+        if (r.abort.signal.aborted) throw new Cancelled('cancelled');
+        if (err instanceof Fail) throw err;
+        if (w.stalled) throw this.#stalled(at);
+        throw new Fail(`Can't read ${bare(at)}: ${reason(err)}`);
       }
-    } catch (err) {
-      if (r.abort.signal.aborted) throw new Cancelled('cancelled');
-      if (err instanceof Fail) throw err;
-      throw new Fail(`Can't read ${bare(at)}: ${reason(err)}`);
+      return Buffer.concat(parts).toString('utf8');
+    } finally {
+      w.end();
     }
-    return Buffer.concat(parts).toString('utf8');
   }
 
   /** The hub's `url` into `<dir>/<name>` (a new file), `cap` bytes at most; resolves with its hash in hex. */
   async #download(r: Running, url: string, dir: string, name: string, algo: 'sha1' | 'sha256', cap: number, progress: (got: number) => string): Promise<string> {
-    const { res, at } = await this.#get(r, url, false);
-    const file = `${dir}/${name}`;
-    const fh = await create(file);
-    const hash = createHash(algo);
-    let got = 0;
+    const w = watch(r.abort.signal, this.#o.stallMs);
     try {
-      for await (const chunk of res.body ?? []) {
-        got += chunk.length;
-        if (got > cap) throw new Fail(`${bare(at)} is over ${mb(cap)}`);
-        hash.update(chunk);
-        await writeAll(fh, chunk);
-        this.#progress(r, progress(got));
+      const { res, at } = await this.#get(r, url, false, w, cap);
+      const file = `${dir}/${name}`;
+      const fh = await create(file);
+      const hash = createHash(algo);
+      let got = 0;
+      try {
+        for await (const chunk of res.body ?? []) {
+          w.alive();
+          got += chunk.length;
+          if (got > cap) throw new Fail(`${bare(at)} is over ${mb(cap)}`);
+          hash.update(chunk);
+          await writeAll(fh, chunk);
+          this.#progress(r, progress(got));
+        }
+      } catch (err) {
+        await fh.close();
+        await rm(file, { force: true });
+        if (r.abort.signal.aborted) throw new Cancelled('cancelled');
+        if (err instanceof Fail) throw err;
+        if (w.stalled) throw this.#stalled(at);
+        throw new Fail(`Can't download ${bare(at)}: ${reason(err)}`);
       }
-    } catch (err) {
       await fh.close();
-      await rm(file, { force: true });
-      if (r.abort.signal.aborted) throw new Cancelled('cancelled');
-      if (err instanceof Fail) throw err;
-      throw new Fail(`Can't download ${bare(at)}: ${reason(err)}`);
+      return hash.digest('hex');
+    } finally {
+      w.end();
     }
-    await fh.close();
-    return hash.digest('hex');
   }
 }

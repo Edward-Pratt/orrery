@@ -64,8 +64,9 @@ function run(): void {
       journal: ({ unit }) => logs.journal(unit),
       restore: ({ name }) => (updates.busy ? Promise.reject(new Error('a game update is running')) : saves.restore(name)),
       update: (req) => updates.update(req),
-      updateResume: ({ id }) => updates.resume(id),
-      updateCancel: ({ id }) => updates.cancel(id),
+      // Their request ids are their own (docs/protocol.md): each acts on the one update running.
+      updateResume: () => updates.resume(),
+      updateCancel: () => updates.cancel(),
       deploy: ({ tag }) => deploys.deploy(tag),
     },
   });
@@ -78,8 +79,10 @@ function run(): void {
     saves,
     send: (msg) => hub.send(msg),
     gameUp: () => hub.gameUp,
+    connected: () => hub.connected,
+    installed: () => hub.latestInstalled,
   });
-  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, busy: () => updates.busy, send: (msg) => hub.send(msg) });
+  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.send(msg) });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,

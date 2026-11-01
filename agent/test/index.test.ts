@@ -118,9 +118,13 @@ test('deploy: starts its own deploy unit (the reply means started), and reports 
   assert.deepEqual(result, { type: 'deployResult', tag: 'agent-v1.2.4', outcome: 'rolled back', log: log.split('\n').slice(-40).join('\n') });
   assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^show --property=ActiveState -- orrery-agent-deploy@agent-v1\.2\.4\.service$/m);
 
+  agent.send({ type: 'deploy', id: 'd0', tag: 'agent-v0.0.0' });
+  assert.deepEqual(await eventually(() => agent.lines.find((m) => m.id === 'd0'), 5000, 'the reply'), { type: 'reply', id: 'd0', ok: false, error: 'agent-v0.0.0 is already running' });
   agent.send({ type: 'deploy', id: 'd1', tag: 'agent-v1.2.5' });
   assert.deepEqual(await eventually(() => agent.lines.find((m) => m.id === 'd1'), 5000, 'the reply'), { type: 'reply', id: 'd1', ok: true });
-  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^start --no-block -- orrery-agent-deploy@agent-v1\.2\.5\.service$/m);
+  // Before it starts one, it asks systemd for any deploy unit still running.
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^list-units --all --plain --no-legend --full -- orrery-agent-deploy@\*\.service\nstart --no-block -- orrery-agent-deploy@agent-v1\.2\.5\.service$/m);
+  assert.doesNotMatch(await readFile(join(dir, 'systemctl.log'), 'utf8'), /orrery-agent-deploy@agent-v0\.0\.0/);
   assert.equal(agent.lines.filter((m) => m.type === 'deployResult').length, 1, 'once');
   child.kill('SIGTERM');
   const [code] = await once(child, 'exit');

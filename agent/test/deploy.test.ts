@@ -36,7 +36,10 @@ async function scriptStatus(root: string, s: { tag: string; from: string; outcom
   await rename(join(root, '.deploy-status.json.tmp'), join(root, DEPLOY_STATUS));
 }
 
-/** A Deploys on a temp agent folder, with a fake systemctl: `show` says `active` for the deploy unit, the rest is recorded. */
+/**
+ * A Deploys (running agent-v1.2.2) on a temp agent folder, with a fake systemctl: `show` says `active` for the deploy
+ * unit, `list-units` prints `units` (and is recorded apart, in `lists`), the rest is recorded.
+ */
 async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'orrery-deploy-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -46,6 +49,8 @@ async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
     state,
     active: 'inactive',
     connected: true,
+    units: '',
+    lists: [] as string[][],
     calls: [] as string[][],
     sent: [] as DeployResultMsg[],
     deploys: null as unknown as Deploys,
@@ -53,9 +58,11 @@ async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
       new Deploys({
         root,
         state,
+        version: 'agent-v1.2.2',
         busy: () => false,
         send: (msg) => w.connected && (w.sent.push(msg), true),
         run: async (args) => {
+          if (args[0] === 'list-units') return (w.lists.push(args), w.units);
           w.calls.push(args);
           return args[0] === 'show' ? `ActiveState=${w.active}\n` : '';
         },
@@ -108,11 +115,36 @@ test('deploy is refused while a game update runs, and systemctl never runs', asy
   assert.equal(w.calls.length, 1);
 });
 
+test('deploy is refused for the release running, and while a deploy unit of any tag has not ended; systemctl start never runs', async (t) => {
+  const w = await setup(t);
+  await assert.rejects(w.deploys.deploy('agent-v1.2.2'), /^Error: agent-v1\.2\.2 is already running$/);
+  assert.deepEqual([w.calls, w.lists], [[], []]);
+
+  // deploy-agent.sh holds its lock (or is gating, or pruning): another deploy would exit before writing its status.
+  w.units = '● orrery-agent-deploy@agent-v1.2.3.service loaded active start Deploy orrery agent agent-v1.2.3\n';
+  await assert.rejects(w.deploys.deploy('agent-v1.2.4'), /a deploy is running \(orrery-agent-deploy@agent-v1\.2\.3\.service is active\)/, 'with a bullet');
+  for (const active of ['activating', 'active', 'reloading', 'deactivating']) {
+    w.units = `orrery-agent-deploy@agent-v1.0.0.service loaded inactive dead Deploy orrery agent agent-v1.0.0\norrery-agent-deploy@agent-v1.2.3.service loaded ${active} start Deploy orrery agent agent-v1.2.3\n`;
+    await assert.rejects(w.deploys.deploy('agent-v1.2.4'), new RegExp(`^Error: a deploy is running \\(orrery-agent-deploy@agent-v1\\.2\\.3\\.service is ${active}\\)$`));
+  }
+  assert.deepEqual(w.calls, [], 'never started');
+  assert.deepEqual(w.lists.at(-1), ['list-units', '--all', '--plain', '--no-legend', '--full', '--', 'orrery-agent-deploy@*.service']);
+
+  // Ended ones (failed: deploy-agent.sh exits 1 for failed and rolled back) don't stop the next.
+  w.units = 'orrery-agent-deploy@agent-v1.2.3.service loaded failed failed Deploy orrery agent agent-v1.2.3\nunrelated.service loaded active running x\n';
+  await w.deploys.deploy('agent-v1.2.4');
+  assert.deepEqual(w.calls, [['start', '--no-block', '--', 'orrery-agent-deploy@agent-v1.2.4.service']]);
+
+  // systemctl can't list them: refused, not guessed.
+  const failing = await setup(t, { run: async (args) => (args[0] === 'list-units' ? Promise.reject(new Error('Failed to connect to bus\n')) : '') });
+  await assert.rejects(failing.deploys.deploy('agent-v1.2.4'), /^Error: can't tell whether a deploy is running: Failed to connect to bus$/);
+});
+
 test('the hub\'s deploy through HubClient: systemctl through execFile (no shell), exactly that argv; a polkit refusal answered ok: false', async (t) => {
   const systemctl = await fakeSystemctl(t);
   const hub = await fakeHub();
   const root = await mkdtemp(join(tmpdir(), 'orrery-deploy-'));
-  const deploys = new Deploys({ root, state: join(root, 'state'), busy: () => false, send: () => false });
+  const deploys = new Deploys({ root, state: join(root, 'state'), version: 'agent-v1.2.2', busy: () => false, send: () => false });
   const client = new HubClient({
     config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: SERVER, token: TOKEN, root, state: join(root, 'state') },
     version: 'agent-v1.2.2',
@@ -134,6 +166,14 @@ test('the hub\'s deploy through HubClient: systemctl through execFile (no shell)
 
   agent.send({ type: 'deploy', id: 'd2', tag: 'agent-v1.2.3; reboot' });
   assert.deepEqual(await reply('d2'), { type: 'reply', id: 'd2', ok: false, error: '"agent-v1.2.3; reboot" is not an agent-vX.Y.Z tag' });
+
+  // The one just started still runs (the fake systemctl lists it): the next is refused, and so is the running release.
+  await systemctl.units(['orrery-agent-deploy@agent-v1.2.3.service loaded activating start Deploy orrery agent agent-v1.2.3']);
+  agent.send({ type: 'deploy', id: 'd4', tag: 'agent-v1.2.4' });
+  agent.send({ type: 'deploy', id: 'd5', tag: 'agent-v1.2.2' });
+  assert.deepEqual(await reply('d4'), { type: 'reply', id: 'd4', ok: false, error: 'a deploy is running (orrery-agent-deploy@agent-v1.2.3.service is activating)' });
+  assert.deepEqual(await reply('d5'), { type: 'reply', id: 'd5', ok: false, error: 'agent-v1.2.2 is already running' });
+  await systemctl.units([]);
 
   await systemctl.refuse(true);
   agent.send({ type: 'deploy', id: 'd3', tag: 'agent-v1.2.4' });
@@ -183,6 +223,21 @@ test('deployResult: the status deploy-agent.sh writes, once its unit has ended, 
   await scriptStatus(w.root, { tag: 'agent-v1.2.3', from: 'agent-v1.2.2', outcome: 'failed', excerpt: "can't download orrery-agent-v1.2.3.tar.gz" });
   await w.deploys.check();
   assert.deepEqual(w.sent.slice(1), [{ type: 'deployResult', tag: 'agent-v1.2.3', outcome: 'failed', log: "can't download orrery-agent-v1.2.3.tar.gz" }]);
+});
+
+test('a deploy that failed before any restart (its download) is reported by the agent that started it, once its unit has failed', async (t) => {
+  const w = await setup(t);
+  w.deploys.start();
+  await w.deploys.deploy('agent-v1.2.3');
+  w.active = 'activating';
+  // deploy-agent.sh's fetch failed: finish failed writes the status, then the script exits 1 and its unit is failed.
+  await scriptStatus(w.root, { tag: 'agent-v1.2.3', from: 'agent-v1.2.2', outcome: 'failed', excerpt: "can't download orrery-agent-v1.2.3.tar.gz" });
+  await sleep(50);
+  assert.deepEqual(w.sent, [], 'not while its unit runs');
+  w.active = 'failed';
+  await eventually(() => w.sent.length > 0, 2000, 'the deployResult');
+  await sleep(50);
+  assert.deepEqual(w.sent, [{ type: 'deployResult', tag: 'agent-v1.2.3', outcome: 'failed', log: "can't download orrery-agent-v1.2.3.tar.gz" }]);
 });
 
 test('each outcome deploy-agent.sh writes maps to the same deployResult outcome, which the hub takes', async (t) => {
@@ -246,6 +301,7 @@ test('polled: an outcome written after the agent connected goes out on its own; 
   const deploys: Deploys = new Deploys({
     root,
     state: join(root, 'state'),
+    version: 'agent-v1.2.3',
     busy: () => false,
     send: (msg) => client.send(msg),
     run: async () => `ActiveState=${active}\n`,

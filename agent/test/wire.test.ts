@@ -8,6 +8,9 @@ test('the constants are the hub contract: the protocol version and every field l
   const { lineBytes, ...limits } = LIMITS;
   const { lineBytes: _, ...hubLimits } = hub.LIMITS;
   assert.deepEqual(limits, hubLimits);
+  // An update's URLs have their own limit: a signed dl-mod.factorio.com link is longer than `text`.
+  assert.equal(LIMITS.url, hub.LIMITS.url);
+  assert.equal(LIMITS.url, 2048);
   // The owner's decision (2026-10-31): 1 MiB per line on the Agent port; hub/src/protocol.ts at 32ef6e4 still says 64 KiB.
   assert.equal(lineBytes, 1024 * 1024);
 });
@@ -61,6 +64,16 @@ test('requests are checked against their documented fields and limits, and copie
   assert.deepEqual(readAgentLine(JSON.stringify(update)), {
     msg: { ...update, factorio: { version: '2.1.25', url: 'https://dl.factorio.com/x', sha256: 'ab' } },
   });
+  // A signed link up to LIMITS.url (2048) is taken, for the game and each mod; one character more refuses the update.
+  const link = (n: number) => `https://dl-mod.factorio.com/files/x.zip?secure=${'s'.repeat(n - 'https://dl-mod.factorio.com/files/x.zip?secure='.length)}`;
+  for (const [factorio, mod] of [[2048, 2048], [256, 2048], [2048, 256]]) {
+    const long = { ...update, factorio: { ...update.factorio, url: link(factorio!) }, mods: [{ ...update.mods[0]!, url: link(mod!) }] };
+    assert.deepEqual(readAgentLine(JSON.stringify(long)), { msg: { ...long, factorio: { version: '2.1.25', url: link(factorio!), sha256: 'ab' } } });
+  }
+  for (const [factorio, mod] of [[2049, 256], [256, 2049]]) {
+    const long = { ...update, factorio: { ...update.factorio, url: link(factorio!) }, mods: [{ ...update.mods[0]!, url: link(mod!) }] };
+    assert.deepEqual(readAgentLine(JSON.stringify(long)), { msg: null, id: 'u1', why: 'invalid update' });
+  }
   const mods = Array.from({ length: LIMITS.mods + 1 }, () => update.mods[0]);
   assert.deepEqual(readAgentLine(JSON.stringify({ ...update, mods })), { msg: null, id: 'u1', why: 'invalid update' });
   assert.deepEqual(readAgentLine('{"type":"deploy","id":"d1"}'), { msg: null, id: 'd1', why: 'invalid deploy' });

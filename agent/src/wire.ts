@@ -21,6 +21,8 @@ export const LIMITS = {
   deployLog: 16 * 1024,
   disks: 32,
   logFiles: 32,
+  /** An `update`'s download URLs (`factorio.url`, `mods[].url`): a mod's signed link is longer than `text`. */
+  url: 2048,
   text: 256,
   /** Bytes in one line on the Agent port, its `\n` included, either way: the hub destroys a socket that sends more. */
   lineBytes: 1024 * 1024,
@@ -153,8 +155,8 @@ const AGENT: Schemas<HubAgentMsg> = {
   restore: { id, name: str() },
   update: {
     id,
-    factorio: object({ version: str(), url: str(), sha256: str() }),
-    mods: list(object({ name: str(), version: str(), sha1: str(), url: str() }), LIMITS.mods),
+    factorio: object({ version: str(), url: str(LIMITS.url), sha256: str() }),
+    mods: list(object({ name: str(), version: str(), sha1: str(), url: str(LIMITS.url) }), LIMITS.mods),
   },
   updateResume: { id },
   updateCancel: { id },

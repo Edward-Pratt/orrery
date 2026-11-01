@@ -146,8 +146,11 @@ export class HubClient {
   #reading: Reading | null = null;
   #service: UnitState | null = null;
   #saves: SavesMsg | null = null;
-  #installed: InstalledMsg | null = null;
-  #installedKey = '';
+  /** What the server runs, as `/orrery-status` last said, kept in `<state>/installed.json` across restarts. */
+  #installed: InstalledMsg | null;
+  #installedKey: string;
+  /** Writes of `installed.json`, one after another (they share a temp file). */
+  #saving: Promise<void> = Promise.resolve();
   #runs = new RunWatch();
   /** The change time of the run whose end the hub was told (or is being told): no game connection until the next run. */
   #ended: number | null = null;
@@ -171,11 +174,18 @@ export class HubClient {
     this.#maxBackoffMs = o.maxBackoffMs ?? 60_000;
     this.#random = o.random ?? Math.random;
     this.#started = readStarted(join(o.config.state, 'started.json'));
+    this.#installed = readInstalled(join(o.config.state, INSTALLED));
+    this.#installedKey = this.#installed ? JSON.stringify(this.#installed) : '';
   }
 
   /** Whether the Agent connection is up: welcomed and not closed. */
   get connected(): boolean {
     return this.#agent?.welcomed === true;
+  }
+
+  /** The latest `installed`, sent or to be sent, kept across restarts (a game update's `from` and `to`); null before one. */
+  get latestInstalled(): InstalledMsg | null {
+    return this.#installed;
   }
 
   /** Whether the game connection is up: welcomed and not closed (a game update's health gate). */
@@ -243,7 +253,8 @@ export class HubClient {
 
   /**
    * What the server runs, as `/orrery-status` last said: sent when it changed and on every connect (never the same
-   * twice in a row, so each answer costs the hub nothing).
+   * twice in a row, so each answer costs the hub nothing). Kept in `<state>/installed.json`, so a restarted agent
+   * sends it on connect while the server is stopped too.
    */
   installed(msg: InstalledMsg): void {
     const key = JSON.stringify(msg);
@@ -251,6 +262,11 @@ export class HubClient {
     this.#installedKey = key;
     this.#installed = msg;
     if (this.connected) this.#agent!.send({ type: 'installed', ...msg });
+    const file = join(this.#config.state, INSTALLED);
+    this.#saving = this.#saving
+      .then(() => mkdir(this.#config.state, { recursive: true }))
+      .then(() => writeAtomic(file, key + '\n'))
+      .catch((err: Error) => console.error(`[hub] can't write ${file}: ${err.message}`));
   }
 
   /** A message on the Agent connection (a game update's `updateStep`, `updateDone`; `deployResult`): false while it isn't up. */
@@ -469,6 +485,29 @@ export async function writeAtomic(file: string, content: string): Promise<void> 
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, content);
   await rename(tmp, file);
+}
+
+/** `installed`'s file in the agent's state folder. */
+const INSTALLED = 'installed.json';
+
+/**
+ * What the server ran last, from `<state>/installed.json` (the agent's own folder), as `installed` sends it: checked
+ * against the hub's limits and copied field by field; null if none or not that.
+ */
+function readInstalled(file: string): InstalledMsg | null {
+  const text = (v: unknown): v is string => typeof v === 'string' && v.length <= LIMITS.text;
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { factorio?: unknown; mods?: unknown };
+    if (!text(raw.factorio) || !Array.isArray(raw.mods) || raw.mods.length > LIMITS.mods) return null;
+    const mods: InstalledMsg['mods'] = [];
+    for (const m of raw.mods as { name?: unknown; version?: unknown }[]) {
+      if (typeof m !== 'object' || m === null || !text(m.name) || !text(m.version)) return null;
+      mods.push({ name: m.name, version: m.version });
+    }
+    return { factorio: raw.factorio, mods };
+  } catch {
+    return null;
+  }
 }
 
 /** The run last announced with `started`, from `<state>/started.json` (the agent's own folder); null if none. */

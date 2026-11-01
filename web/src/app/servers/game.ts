@@ -128,7 +128,9 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             }
           } @error {
             <!-- a deploy replaced the build under this open page, so the browser's chunk is gone -->
-            <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
+            @if (browsing()) {
+              <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
+            }
           }
           <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing()" data-update-view>
             <label
@@ -424,14 +426,16 @@ export default class Game {
   }
 
   /**
-   * Adds a portal mod by name (typed, or from the Browse view) at the newest version that fits; the catalog says if
-   * the portal has no such mod, and adds its required dependencies.
+   * Adds a portal mod by name (typed, or from the Browse view) at the newest version that fits; one the server runs
+   * (removed here, then added back) comes back at the version it runs. The catalog says if the portal has no such mod,
+   * and adds its required dependencies.
    */
   protected add(name = this.adding().trim()): void {
     if (!name) return;
     if (GAME_MODS.has(name)) return this.addError.set(`${name} comes with Factorio.`);
     if (this.picks().some((p) => p.name === name)) return this.addError.set(`${name} is in the list already.`);
-    this.picks.update((picks) => [...picks, { name, version: null }]);
+    const version = this.state()?.installed?.mods.find((m) => m.name === name)?.version ?? null;
+    this.picks.update((picks) => [...picks, { name, version }]);
     if (name === this.adding().trim()) this.adding.set('');
     this.addError.set(null);
     this.#ask();

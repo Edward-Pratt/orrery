@@ -148,22 +148,42 @@ describe('mod browser', () => {
     );
     const button = (name: string) => row(name).querySelector<HTMLButtonElement>('[data-add-mod]')!;
     expect(text(button('orrery'))).toBe('Installed');
-    expect(button('orrery').disabled).toBe(true);
+    expect(button('orrery').getAttribute('aria-disabled')).toBe('true');
     expect(text(button('squeak-through-2'))).toBe('Added');
-    expect(button('squeak-through-2').disabled).toBe(true);
+    expect(button('squeak-through-2').getAttribute('aria-disabled')).toBe('true');
     expect(text(button('stdlib'))).toBe('Required by squeak-through-2');
-    expect(button('stdlib').disabled).toBe(true);
+    expect(button('stdlib').getAttribute('aria-disabled')).toBe('true');
+    expect(button('stdlib').getAttribute('aria-label')).toBeNull();
     expect(text(button('RateCalculator'))).toBe('Add back');
+    expect(button('RateCalculator').getAttribute('aria-label')).toBe('Add back RATECALCULATOR');
+    expect(button('RateCalculator').getAttribute('aria-disabled')).toBeNull();
     expect(text(button('bigger-belts'))).toBe('Add');
     expect(button('bigger-belts').getAttribute('aria-label')).toBe('Add BIGGER-BELTS');
     expect(row('base')).toBeNull(); // the game's own: never picked
+    button('orrery').click(); // not addable: nothing goes to the sheet
+    button('stdlib').click();
     button('bigger-belts').click();
     button('RateCalculator').click();
     expect(added).toEqual(['bigger-belts', 'RateCalculator']);
   });
 
+  it('keeps the focus on the button when Add makes it Added, so a keyboard stays in the list', async () => {
+    const { fixture, read, answer, row, text, render } = await setup();
+    await answer(read().req, browse([listing('flib'), listing('bigger-belts')]));
+    const button = row('bigger-belts').querySelector<HTMLButtonElement>('[data-add-mod]')!;
+    button.focus();
+    button.click();
+    fixture.componentRef.setInput('picks', ['orrery', 'bigger-belts']); // the sheet put it in the picks
+    await render();
+    expect(row('bigger-belts').querySelector('[data-add-mod]')).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(text(button)).toBe('Added');
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+  });
+
   it('counts the changes in the footer, and Review the update goes back', async () => {
     const { fixture, q, text, render, backs } = await setup({ status: { ...STATUS, checking: true, changes: null } });
+    expect(q('[data-browse-changes]').getAttribute('aria-live')).toBe('polite'); // a mod pack's dependencies arriving is heard
     expect(text(q('[data-browse-changes]'))).toBe('Checking with the mod portal…');
     fixture.componentRef.setInput('status', { ...STATUS, changes: 10 });
     await render();
@@ -207,6 +227,42 @@ describe('mod browser', () => {
     expect(text(q('[data-browse-count]'))).toBe('Showing 30 of 30');
     expect(q('[data-browse-more]')).toBeNull();
     expect(q('[data-browse-more-error]')).toBeNull();
+  });
+
+  it('does nothing on Load more while a new search waits or its page 1 loads, so two queries never share the list', async () => {
+    const { read, reads, answer, set, render, q, all, text } = await setup();
+    await answer(read().req, browse(page(1, 24), 5771));
+    await set('[data-browse-search]', 'squeak', 'input');
+    expect(q('[data-browse-more]').getAttribute('aria-disabled')).toBe('true');
+    q('[data-browse-more]').click(); // within the typing wait
+    await render();
+    expect(reads()).toEqual([]);
+    await render(SEARCH_WAIT_MS);
+    const first = read();
+    expect(first.query).toBe('factorio=2.1.24&q=squeak&sort=downloads&page=1');
+    q('[data-browse-more]').click(); // while page 1 of the search loads
+    await render();
+    expect(first.req.cancelled).toBe(false);
+    expect(reads()).toEqual([]); // no page 2 asked
+    await answer(first.req, browse(page(100, 24), 30));
+    expect(all('[data-listing]').map((r) => r.getAttribute('data-listing'))).toEqual(page(100, 24).map((m) => m.name));
+    expect(text(q('[data-browse-count]'))).toBe('Showing 24 of 30');
+    expect(q('[data-browse-more]').getAttribute('aria-disabled')).toBeNull();
+    q('[data-browse-more]').click();
+    await render();
+    expect(read().query).toBe('factorio=2.1.24&q=squeak&sort=downloads&page=2');
+  });
+
+  it('drops a row a later page repeats, as when the hub read the portal again between pages', async () => {
+    const { read, answer, q, all, render } = await setup();
+    await answer(read().req, browse(page(1, 24), 48));
+    q('[data-browse-more]').click();
+    await render();
+    // The list moved by one: mod-24 is on page 2 now, mod-25 slipped onto page 1 unseen.
+    await answer(read().req, browse([listing('mod-24'), ...page(26, 23)], 48));
+    const names = all('[data-listing]').map((r) => r.getAttribute('data-listing'));
+    expect(names).toHaveLength(47);
+    expect(new Set(names).size).toBe(47);
   });
 
   it('says when nothing matches, and Clear search asks again without the query', async () => {

@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import { DeferBlockState, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { CatalogMod, GameCatalog, GameState, ModBrowse, Notice, PackUpdateRow, RunningGameUpdate, ServerCard, ServerDetail, TargetEvent } from '@hub/api';
@@ -284,6 +284,53 @@ describe('server game tab', () => {
     await render();
     q('[data-browse-review]').click();
     await render();
+    expect(q('[data-update-view]').hidden).toBe(false);
+  });
+
+  it('puts a mod the server runs back at the version it runs, typed or from Browse: Remove then Add back changes nothing', async () => {
+    const { q, text, open, catalog, type, render, backend, go } = await setup();
+    await open();
+    q('[data-pick=RateCalculator] [data-remove]').click();
+    await render();
+    const without = PICKS.filter((p) => p.name !== 'RateCalculator');
+    await catalog({ ...SAME, mods: SAME.mods.slice(0, 2), changes: ['Removed: RateCalculator 3.3.2'] }, without);
+    await type('[data-add-name]', 'RateCalculator');
+    q('[data-add]').click();
+    await render();
+    await catalog(SAME, [...without, { name: 'RateCalculator', version: '3.3.2' }]);
+    expect(q<HTMLSelectElement>('[data-pick=RateCalculator] [data-version]').value).toBe('3.3.2');
+    expect(go().disabled).toBe(true); // what it runs: nothing to change
+    // From Browse, the same.
+    q('[data-pick=RateCalculator] [data-remove]').click();
+    await render();
+    await catalog({ ...SAME, mods: SAME.mods.slice(0, 2), changes: ['Removed: RateCalculator 3.3.2'] }, without);
+    q('[data-browse]').click();
+    await until(() => !!document.querySelector('[data-browse-search]'), () => render());
+    const listing = { name: 'RateCalculator', title: 'Rate Calculator', owner: '', summary: '', downloads: 9, version: '3.3.3', updated: null, category: null, spaceAge: false, page: 'https://mods.factorio.com/mod/RateCalculator' };
+    backend.expectOne((r) => r.url === '/api/servers/space/game/mods').flush({ line: '2.1', total: 1, mods: [listing], categories: [] } satisfies ModBrowse);
+    await render();
+    const button = q<HTMLButtonElement>('[data-listing=RateCalculator] [data-add-mod]');
+    expect(text(button)).toBe('Add back');
+    button.click();
+    await render();
+    await catalog(SAME, [...without, { name: 'RateCalculator', version: '3.3.2' }]);
+    expect(text(button)).toBe('Installed');
+  });
+
+  it("says to reload only in the Browse view when its chunk failed to load, never in the update view", async () => {
+    const { harness, q, open, render } = await setup();
+    await open();
+    const blocks = await harness.fixture.getDeferBlocks();
+    expect(blocks).toHaveLength(1);
+    await blocks[0]!.render(DeferBlockState.Error);
+    await render();
+    expect(document.querySelector('[data-stale]')).toBeNull(); // the update view, as it was
+    q('[data-browse]').click();
+    await render();
+    expect(document.querySelector('[data-stale]')).not.toBeNull();
+    q('[data-browse-back]').click();
+    await render();
+    expect(document.querySelector('[data-stale]')).toBeNull();
     expect(q('[data-update-view]').hidden).toBe(false);
   });
 

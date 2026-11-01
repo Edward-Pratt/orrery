@@ -151,18 +151,24 @@ type Load = { page: number; wait: number };
                     }
                     <div class="mt-2 flex items-center gap-1">
                       @let s = standing(m.name);
-                      @if (s.kind === 'add' || s.kind === 'removed') {
-                        <button hlmBtn variant="outline" size="sm" [attr.aria-label]="(s.kind === 'add' ? 'Add ' : 'Add back ') + m.title" (click)="add.emit(m.name)" data-add-mod>
-                          <ng-icon name="lucidePlus" aria-hidden="true" /> {{ s.kind === 'add' ? 'Add' : 'Add back' }}
-                        </button>
-                      } @else {
-                        <button hlmBtn variant="outline" size="sm" disabled data-add-mod>
-                          @if (s.kind !== 'required') {
-                            <ng-icon name="lucideCheck" aria-hidden="true" />
-                          }
-                          {{ s.kind === 'installed' ? 'Installed' : s.kind === 'added' ? 'Added' : 'Required by ' + s.by }}
-                        </button>
-                      }
+                      <!-- one button whatever its standing, aria-disabled, so the focus stays on it when Add flips it to Added -->
+                      <button
+                        hlmBtn
+                        variant="outline"
+                        size="sm"
+                        class="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+                        [attr.aria-disabled]="addable(s) ? null : true"
+                        [attr.aria-label]="s.kind === 'add' ? 'Add ' + m.title : s.kind === 'removed' ? 'Add back ' + m.title : null"
+                        (click)="addable(s) && add.emit(m.name)"
+                        data-add-mod
+                      >
+                        @if (addable(s)) {
+                          <ng-icon name="lucidePlus" aria-hidden="true" />
+                        } @else if (s.kind !== 'required') {
+                          <ng-icon name="lucideCheck" aria-hidden="true" />
+                        }
+                        {{ label(s) }}
+                      </button>
                       <a
                         hlmBtn
                         variant="ghost"
@@ -195,7 +201,7 @@ type Load = { page: number; wait: number };
               hlmBtn
               variant="outline"
               class="aria-disabled:pointer-events-none aria-disabled:opacity-50"
-              [attr.aria-disabled]="loading() === 'more' || null"
+              [attr.aria-disabled]="busy() || null"
               (click)="more()"
               data-browse-more
             >
@@ -210,7 +216,7 @@ type Load = { page: number; wait: number };
     </div>
 
     <div class="sticky bottom-0 mt-auto flex flex-wrap items-center justify-between gap-2 border-t bg-popover px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-browse-footer>
-      <p class="flex min-w-0 items-center gap-2" data-browse-changes>
+      <p class="flex min-w-0 items-center gap-2" aria-live="polite" data-browse-changes>
         @if (status().checking) {
           <hlm-spinner /> <span class="text-muted-foreground">Checking with the mod portal…</span>
         } @else if (status().error) {
@@ -260,9 +266,13 @@ export class ModBrowser implements OnInit {
   /** The mods whose thumbnail the hub didn't serve: a placeholder instead. */
   protected readonly noThumb = signal<ReadonlySet<string>>(new Set());
   readonly #loads = new Subject<Load>();
+  /** A page-1 read is asked for but not answered yet (typing's wait included): Load more waits for it. */
+  readonly #firstAsked = signal(false);
   private readonly search = viewChild.required<ElementRef<HTMLInputElement>>('search');
 
   /** A failed Load more: its button says Retry, under the reason. */
+  /** A read is asked for or running, so Load more would mix two queries or pages: it does nothing meanwhile. */
+  protected readonly busy = computed(() => this.loading() !== null || this.#firstAsked());
   protected readonly moreFailed = computed(() => (this.error()?.page ?? 0) > 1);
   protected readonly line = computed(() => this.factorio().split('.').slice(0, 2).join('.'));
   protected readonly emptyText = computed(() => {
@@ -292,11 +302,17 @@ export class ModBrowser implements OnInit {
       )
       .subscribe(({ page, answer, message }) => {
         this.loading.set(null);
+        if (page === 1) this.#firstAsked.set(false);
         if (!answer) {
           if (page === 1) this.rows.set(null);
           return this.error.set({ page, message: message! });
         }
-        this.rows.update((rows) => (page === 1 ? answer.mods : [...(rows ?? []), ...answer.mods]));
+        // The hub reads the portal's list again now and then, so a later page can repeat a row already shown: dropped.
+        this.rows.update((rows) => {
+          if (page === 1 || !rows) return answer.mods;
+          const shown = new Set(rows.map((m) => m.name));
+          return [...rows, ...answer.mods.filter((m) => !shown.has(m.name))];
+        });
         this.total.set(answer.total);
         this.categories.set(answer.categories);
         this.#page.set(page);
@@ -305,7 +321,13 @@ export class ModBrowser implements OnInit {
   }
 
   ngOnInit(): void {
-    this.#loads.next({ page: 1, wait: 0 });
+    this.#first(0);
+  }
+
+  /** Asks page 1 again, for the query as set now. */
+  #first(wait: number): void {
+    this.#firstAsked.set(true);
+    this.#loads.next({ page: 1, wait });
   }
 
   /** The query for a page: empty search and category left out. */
@@ -324,6 +346,10 @@ export class ModBrowser implements OnInit {
     this.noThumb.update((s) => new Set([...s, name]));
   }
 
+  protected addable = (s: Standing) => s.kind === 'add' || s.kind === 'removed';
+  protected label = (s: Standing) =>
+    ({ add: 'Add', removed: 'Add back', installed: 'Installed', added: 'Added', required: `Required by ${s.by}` })[s.kind];
+
   /** What the mod is to the update, in the order the rows' buttons say it. */
   protected standing = (name: string): Standing => {
     const picked = this.#picked().has(name);
@@ -338,31 +364,31 @@ export class ModBrowser implements OnInit {
 
   protected setQuery(q: string): void {
     this.q.set(q);
-    this.#loads.next({ page: 1, wait: SEARCH_WAIT_MS });
+    this.#first(SEARCH_WAIT_MS);
   }
 
   protected setCategory(category: string): void {
     this.category.set(category);
-    this.#loads.next({ page: 1, wait: 0 });
+    this.#first(0);
   }
 
   protected setSort(sort: PortalSort): void {
     this.sort.set(sort);
-    this.#loads.next({ page: 1, wait: 0 });
+    this.#first(0);
   }
 
   protected clearSearch(): void {
     this.q.set('');
-    this.#loads.next({ page: 1, wait: 0 });
+    this.#first(0);
     this.search().nativeElement.focus();
   }
 
   protected retry(): void {
-    this.#loads.next({ page: 1, wait: 0 });
+    this.#first(0);
   }
 
   protected more(): void {
-    if (this.loading() === 'more') return;
+    if (this.busy()) return;
     this.#loads.next({ page: this.#page() + 1, wait: 0 });
   }
 }

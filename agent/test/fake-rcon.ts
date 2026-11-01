@@ -1,4 +1,5 @@
 import { createServer, type AddressInfo, type Socket } from 'node:net';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { AUTH, AUTH_RESPONSE, EXEC, RESPONSE, decode, encode, type Packet } from '../src/rcon.ts';
 
 export const PASSWORD = 'rcon-test-password';
@@ -70,3 +71,55 @@ export async function fakeRcon(
  * fakes of `/orrery-save` write their save under this name.
  */
 export const savedAs = (name: string): string => `${name.replace(/\.[^.]*$/, '')}.zip`;
+
+const ALLOW_WORDS: Record<string, string> = { true: 'Yes', false: 'No', 'admins-only': 'Admins only' };
+const minutes = (v: string) => `${v} minute${v === '1' ? '' : 's'}`;
+
+/**
+ * Factorio 2.1.24's answers to the built-ins the game settings use, as seen on a real headless server: `/config set
+ * <option> [value]` (each option's change line; no value clears the description or removes the password), and
+ * `/promote <name>` and `/demote <name>`, which answer nothing and rewrite `adminlist` at once, the name lowercased.
+ * Undefined for any other command.
+ */
+export function factorioConfig(command: string, adminlist: string): string | undefined {
+  const set = /^\/config set ([a-z-]+)(?: (.*))?$/.exec(command);
+  if (set) {
+    const [, option, v] = set as unknown as [string, string, string | undefined];
+    switch (option) {
+      case 'name':
+        return `Server name changed to: ${v}`;
+      case 'description':
+        return v === undefined ? 'Server description cleared.' : `Server description set to: ${v}`;
+      case 'max-players':
+        return v === '0' ? 'Player limit removed.' : `Maximum number of players changed to ${v}.`;
+      case 'password':
+        return v === undefined ? 'Server password removed.' : 'Server password changed.';
+      case 'require-user-verification':
+        return `User verification has been ${v === 'true' ? 'enabled' : 'disabled'}.`;
+      case 'autosave-interval':
+        return v === '0' ? 'Autosave is now disabled.' : `Autosave interval changed to ${minutes(v!)}.`;
+      case 'afk-auto-kick':
+        return v === '0' ? 'AFK auto kick is now disabled.' : `AFK auto-kick changed to ${minutes(v!)}.`;
+      case 'auto-pause-when-players-connect':
+        return `Auto pause when players connect set to: ${v}.`;
+      case 'only-admins-can-pause':
+        return `Only admins can pause set to: ${v}.`;
+      case 'allow-commands':
+        return `Allow Lua commands set to ${ALLOW_WORDS[v!]}.`;
+      default:
+        return `Unknown config: ${option}`;
+    }
+  }
+  const admin = /^\/(promote|demote) (\S+)$/.exec(command);
+  if (!admin) return undefined;
+  let list: string[] = [];
+  try {
+    list = JSON.parse(readFileSync(adminlist, 'utf8')) as string[];
+  } catch {}
+  const name = admin[2]!.toLowerCase();
+  if (admin[1] === 'promote' && list.includes(name)) return `${name} is already in the admin list and will be promoted upon joining the game.`;
+  if (admin[1] === 'demote' && !list.includes(name)) return `${name} is not in the admin list.`;
+  list = admin[1] === 'promote' ? [...list, name] : list.filter((n) => n !== name);
+  writeFileSync(adminlist, JSON.stringify(list, null, 2) + '\n');
+  return '';
+}

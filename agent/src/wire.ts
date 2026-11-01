@@ -193,6 +193,11 @@ const settingsFields = {
   only_admins_can_pause_the_game: bool,
   allow_commands: oneOf('true', 'false', 'admins-only'),
 } satisfies Fields<GameSettingsFields>;
+/**
+ * Whether `value` passes the hub's rule for one game settings field (`settings.ts` reads server-settings.json by these
+ * rules, so what it reports is what the hub takes).
+ */
+export const settingsFieldOk = (key: keyof GameSettingsFields, value: unknown): boolean => settingsFields[key](value) !== BAD;
 /** Left out: keep the file's; null: remove it; else a password by the rule. */
 const gamePassword: Check = (v) => (v === undefined || v === null ? v : matching(GAME_SETTINGS.password)(v));
 

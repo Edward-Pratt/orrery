@@ -112,8 +112,13 @@ export function reading(status: Status, at: number, autoPause: boolean, prev: Pr
 export type PollerOptions = {
   port: number;
   password: string;
-  /** The server's `server-settings.json`, for `auto_pause`. */
+  /** The server's `server-settings.json`, for `auto_pause` when `autoPause` doesn't know it. */
   settings: string;
+  /**
+   * `auto_pause` as the running server started with it (`GameSettings.autoPause`): the file can hold a value saved
+   * since, which applies only at the next start. Null, or left out: read from the file.
+   */
+  autoPause?: () => boolean | null;
   host?: string;
   intervalMs?: number;
   /** For connecting and for each command; under the interval. */
@@ -142,7 +147,7 @@ export class StatusPoller extends EventEmitter<{ status: [Reading, Status]; stal
 
   constructor(options: PollerOptions) {
     super();
-    this.#o = { host: '127.0.0.1', intervalMs: 5000, timeoutMs: 4000, now: () => performance.now(), ...options };
+    this.#o = { host: '127.0.0.1', intervalMs: 5000, timeoutMs: 4000, now: () => performance.now(), autoPause: () => null, ...options };
   }
 
   /** The players online at the latest answer; none once RCON is gone. */
@@ -195,7 +200,7 @@ export class StatusPoller extends EventEmitter<{ status: [Reading, Status]; stal
       return this.#change('down', (err as Error).message);
     }
     if (!status) return this.#change('stalled', '/orrery-status gave no status (is the orrery mod loaded?)');
-    const r = reading(status, at, await readAutoPause(o.settings), this.#prev);
+    const r = reading(status, at, o.autoPause() ?? (await readAutoPause(o.settings)), this.#prev);
     if (this.#stopped) return;
     this.#prev = { tick: status.tick, at };
     this.#players = r.players;

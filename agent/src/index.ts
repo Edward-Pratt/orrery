@@ -12,6 +12,7 @@ import { HubClient } from './hub.ts';
 import { AGENT_LOG, AgentLog, Logs, logTo } from './logs.ts';
 import { RconSession } from './rcon.ts';
 import { Saves } from './saves.ts';
+import { GameSettings } from './settings.ts';
 import { ServiceWatch } from './service.ts';
 import { StatusPoller } from './status.ts';
 import { Updates, installedOf } from './update.ts';
@@ -56,6 +57,7 @@ function run(): void {
     welcomed: () => {
       updates.connected();
       deploys.connected();
+      void settings.refresh();
     },
     handlers: {
       serviceAct: ({ action }) => service.act(action),
@@ -73,6 +75,7 @@ function run(): void {
       updateResume: () => updates.resume(),
       updateCancel: () => updates.cancel(),
       deploy: ({ tag }) => deploys.deploy(tag),
+      settingsSet: (req) => settings.set(req),
     },
   });
   const updates: Updates = new Updates({
@@ -90,10 +93,24 @@ function run(): void {
     idle: () => deploys.idle(),
   });
   const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.deliver(msg) });
+  const settings: GameSettings = new GameSettings({
+    config: join(data, 'config'),
+    state: config.state,
+    log: join(data, 'factorio-current.log'),
+    unit: service,
+    run,
+    // Neither during a game update, which swaps the server's files, nor during a deploy, whose restart cuts it short.
+    ready: async () => {
+      if (updates.busy) throw new Error('a game update is running');
+      await deploys.idle();
+    },
+    push: (report) => hub.settings(report),
+  });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,
     settings: join(config.server.data, 'config', 'server-settings.json'),
+    autoPause: () => settings.autoPause,
   });
   const events = new GameEvents({
     port: config.server.agentUdpPort,
@@ -106,11 +123,13 @@ function run(): void {
   service.on('change', (s) => {
     hub.service(s);
     events.service(s);
+    settings.service(s);
   });
   service.on('stopping', () => hub.stopping());
   status.on('status', (r, s) => {
     hub.status(r);
     events.rconUp();
+    settings.rconUp();
     saves.played(r.players.length > 0);
     updates.status(s);
     hub.installed(installedOf(s));
@@ -135,6 +154,7 @@ function run(): void {
   saves.start();
   void updates.start();
   deploys.start();
+  void settings.start();
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -148,6 +168,7 @@ function run(): void {
     saves.stop();
     updates.stop();
     deploys.stop();
+    settings.stop();
     commands.close();
     void hub.stop().then(() => process.exit(0));
   };

@@ -256,6 +256,87 @@ test('on a hub restart an update past its swap is not cancelled: the Agent\'s la
   assert.ok(!a.got.some((m) => m.type === 'updateCancel'));
 });
 
+test('after a hub restart the end recorded is the update the Agent echoes: refused with none echoed, no stray end lands on the row', async (t) => {
+  const cfg = gameConfig(t);
+  const h1 = await ready(t, {}, { cfg });
+  await h1.json(h1.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h1.answer();
+  h1.step(update.id, 'prepare', 'running', 'Downloading');
+  await eventually(async () => (await h1.game()).running?.steps[0]?.detail === 'Downloading');
+  await h1.close();
+
+  // Nothing runs there: it echoes no step, and refuses the cancel.
+  const h = await gameHub(t, { cfg });
+  const a = await agentUp(h.agentPort);
+  a.agent.socket.setNoDelay(true); // the refusal goes out alone, not held back to share a packet with the stray end
+  assert.equal((await a.answer('no update is running')).type, 'updateCancel');
+  await new Promise((r) => setTimeout(r, 20)); // the refusal heard
+  a.done('another-update', 'ok'); // a stray end, later
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await h.game()).history[0]!.outcome, 'failed');
+});
+
+test('after a hub restart an update the Agent echoes in a step is the one whose end goes on the row; another is ignored', async (t) => {
+  const cfg = gameConfig(t);
+  const h1 = await ready(t, {}, { cfg });
+  await h1.json(h1.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h1.answer();
+  h1.step(update.id, 'prepare', 'running', 'Downloading');
+  await eventually(async () => (await h1.game()).running?.steps[0]?.detail === 'Downloading');
+  await h1.close();
+
+  const h = await gameHub(t, { cfg });
+  const a = await agentUp(h.agentPort);
+  a.step(update.id, 'prepare', 'running', 'Downloading'); // its latest again, as it connects
+  assert.equal((await a.answer('too late to cancel')).type, 'updateCancel');
+  a.done('another-update', 'ok');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await h.game()).history[0]!.outcome, 'failed');
+  a.done(update.id, 'failed in staging');
+  await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
+});
+
+test("a new update ends the wait for the last one's end: a repeated end of the new one never lands on the old row", async (t) => {
+  const cfg = gameConfig(t);
+  const h1 = await ready(t, {}, { cfg });
+  const { id: old } = await h1.json<{ id: number }>(h1.req('POST', '/api/servers/space/game/update', PICK), 202);
+  await h1.answer();
+  await h1.close();
+
+  const h = await gameHub(t, { cfg });
+  const a = await agentUp(h.agentPort);
+  assert.equal((await a.answer()).type, 'updateCancel'); // taken, but its end never comes
+  await eventually(async () => (await h.game()).blocked === null);
+  const { id } = await h.json<{ id: number }>(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await a.answer();
+  a.done(update.id, 'ok');
+  await eventually(async () => (await h.game()).running === null);
+  a.done(update.id, 'ok'); // once more
+  await new Promise((r) => setTimeout(r, 50));
+  const history = (await h.game()).history;
+  assert.deepEqual(
+    history.map((r) => [r.id, r.outcome]),
+    [
+      [id, 'ok'],
+      [old, 'failed'],
+    ],
+  );
+});
+
+test('the quiet give-up counts from the Agent\'s latest step: an update it keeps reporting on runs past it', async (t) => {
+  const h = await ready(t, {}, { quietMs: 200 });
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h.answer();
+  for (let i = 0; i < 12; i++) {
+    h.step(update.id, 'prepare', 'running', `Downloading: ${i * 10} MiB`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.notEqual((await h.game()).running, null); // 600 ms, three times its quiet time
+  assert.ok(!h.got.some((m) => m.type === 'updateCancel'));
+  await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
+  assert.ok((await h.game()).history[0]!.log.includes('No word from the Agent for'));
+});
+
 test("Packs.start closes only pack updates; a game update's row is left to GameUpdates, which closes it as interrupted", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'hub-sweep-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -264,8 +345,12 @@ test("Packs.start closes only pack updates; a game update's row is left to GameU
   const row = { changes: null, by: 'alex', started: 1 };
   const pack = db.startPackUpdate('gtnh', { from: '2.7.4', to: '2.7.5', ...row });
   const game = db.startPackUpdate('space', { from: '2.1.24 · 5 mods', to: '2.1.24 · 7 mods', ...row });
+  // A Minecraft server that lost its folder (so has no packs now), and one gone from config: closed as before.
+  db.startPackUpdate('bare', { from: '2.7.4', to: '2.7.5', ...row });
+  db.startPackUpdate('gone', { from: '2.7.4', to: '2.7.5', ...row });
   const servers = [
     { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched', service: 'gtnh' },
+    { id: 'bare', name: 'Bare', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched', service: 'gtnh' },
     { id: 'space', name: 'Space Age', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched', service: 'factorio' },
   ] satisfies ServerSettings[];
   const hub = { on: () => {}, off: () => {} } as unknown as PacksDeps['hub'];
@@ -276,6 +361,7 @@ test("Packs.start closes only pack updates; a game update's row is left to GameU
   const outcome = (server: string) => db.packUpdates(server, 1)[0]!;
   assert.equal(outcome('gtnh').id, pack);
   assert.equal(outcome('gtnh').outcome, 'failed');
+  assert.deepEqual([outcome('bare').outcome, outcome('gone').outcome], ['failed', 'failed']);
   assert.deepEqual([outcome('space').id, outcome('space').outcome], [game, 'running']);
 
   const agents = { list: () => [{ id: 'vm', server: 'space' }], on: () => {} } as unknown as ConstructorParameters<typeof GameUpdates>[0]['agents'];

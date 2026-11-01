@@ -133,6 +133,11 @@ export class Deploys {
   #timers = new Set<NodeJS.Timeout>();
   /** Takes each listener of a running Mod or Agent deploy off again. */
   #listeners = new Set<() => void>();
+  /**
+   * Each Agent whose deploy runs, by its tag: from the row's start until its `deployResult` (or its time is up), so
+   * also after its hello closed the row ok, while its deploy unit still gates and may roll back.
+   */
+  #agentDeploys = new Map<string, string>();
 
   constructor(
     deps: DeploysDeps,
@@ -202,9 +207,9 @@ export class Deploys {
     return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'mod' && r.target === serverId);
   }
 
-  /** Whether an Agent's deploy runs (a game update of its server must wait for it). */
+  /** Whether an Agent's deploy runs, until its `deployResult` (a game update or a restore of its server must wait for it). */
   agentBusy(agentId: string): boolean {
-    return this.#d.db.deploys(HISTORY, { running: true }).some((r) => r.part === 'agent' && r.target === agentId);
+    return this.#agentDeploys.has(agentId);
   }
 
   /** What runs against what is published, and the history newest first, 50 rows older than `before`. */
@@ -257,6 +262,11 @@ export class Deploys {
     const agent = part === 'agent' ? this.#d.agents?.get(on ?? '') : undefined;
     if (part === 'agent' && !agent) throw new DeployRefused(404, 'No such Agent.');
     if (this.#starting || this.#d.db.deploys(1, { running: true }).length) throw new DeployRefused(409, 'Another deploy is running.');
+    // One at a time still: an Agent's deploy unit runs on after its hello closed the row, holding its deploy lock.
+    const [finishing, finishingTag] = [...this.#agentDeploys][0] ?? [];
+    if (finishing !== undefined) {
+      throw new DeployRefused(409, `${this.#d.agents?.get(finishing)?.name ?? finishing}'s deploy of ${finishingTag} hasn't reported its end yet: deploy once it has.`);
+    }
     const from = this.#running(part, on);
     if (from === tag) throw new DeployRefused(409, `${tag} is already running.`);
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
@@ -493,7 +503,9 @@ export class Deploys {
   /**
    * An Agent deploys itself: its `deploy` request starts its own deploy unit (the reply means started), which restarts
    * it. Ok once it says hello again as the tag; its `deployResult` for the tag records any other end (`rolled back`:
-   * it came back on the old release; `failed`); failed when neither comes in time.
+   * it came back on the old release; `failed`), also after that hello closed the row ok (the unit's gate failed after
+   * it), once; failed when neither comes in time. The Agent is busy until its result, or `agentTimeoutMs` after that
+   * hello.
    */
   async #deployAgent(release: Release, agentId: string, from: string | null, by: string): Promise<number> {
     const agents = this.#d.agents!; // it found the Agent
@@ -506,34 +518,51 @@ export class Deploys {
     if (this.#d.restarts.pending(agent.server)) throw new DeployRefused(409, `A countdown is running on ${name}: cancel it first.`);
     const { tag } = release;
     let row!: DeployRow;
-    let open = true;
+    let open = true; // the row; its listeners stay on until the result
     let timeout: NodeJS.Timeout | undefined;
+    const arm = (fn: () => void) => {
+      clearTimeout(timeout);
+      if (timeout) this.#timers.delete(timeout);
+      timeout = this.#later(fn, this.#agentTimeoutMs);
+    };
     const up = (id: string) => {
-      if (id === agentId && this.#running('agent', agentId) === tag) done('ok', `${agent.name} runs ${tag}`);
+      if (!open || id !== agentId || this.#running('agent', agentId) !== tag) return;
+      open = false;
+      this.#finish(row, 'ok', `${agent.name} runs ${tag}`);
+      arm(stop); // its unit gates on after this hello: its result may still say otherwise
     };
     const result = (id: string, msg: Extract<AgentMsg, { type: 'deployResult' }>) => {
       if (id !== agentId || msg.tag !== tag) return;
       const running = this.#running('agent', agentId);
       // Ok only when its hello named the tag, whatever its deploy says.
-      if (msg.outcome === 'ok' && running !== tag) done('failed', `${msg.log}\n${agent.name} says ok, but runs ${running ?? 'an unknown release'}`);
-      else done(msg.outcome, msg.log);
+      const unshown = msg.outcome === 'ok' && running !== tag;
+      const outcome = unshown ? 'failed' : msg.outcome;
+      const log = unshown ? `${msg.log}\n${agent.name} says ok, but runs ${running ?? 'an unknown release'}` : msg.log;
+      if (open) return done(outcome, log);
+      stop(); // one result per deploy: a repeat, or an older deploy's, changes nothing
+      this.#amend(row, outcome, log);
     };
     const off = () => {
       agents.off('agentUp', up);
       agents.off('deployResult', result);
     };
-    const done = (outcome: Exclude<DeployOutcome, 'running'>, log: string) => {
-      if (!open) return;
-      open = false;
+    const stop = () => {
       off();
       this.#listeners.delete(off);
       clearTimeout(timeout);
       if (timeout) this.#timers.delete(timeout);
+      this.#agentDeploys.delete(agentId);
+    };
+    const done = (outcome: Exclude<DeployOutcome, 'running'>, log: string) => {
+      if (!open) return;
+      open = false;
+      stop();
       this.#finish(row, outcome, log);
     };
     this.#starting = true;
     try {
       row = this.#begin('agent', agentId, from, tag, by);
+      this.#agentDeploys.set(agentId, tag);
       agents.on('agentUp', up);
       agents.on('deployResult', result);
       this.#listeners.add(off);
@@ -546,7 +575,15 @@ export class Deploys {
     } finally {
       this.#starting = false;
     }
-    if (open) timeout = this.#later(() => done('failed', `${agent.name} didn't come back with ${tag} in time`), this.#agentTimeoutMs);
+    if (open) arm(() => done('failed', `${agent.name} didn't come back with ${tag} in time`));
     return row.id;
+  }
+
+  /** An Agent's deploy closed ok on its hello, which its `deployResult` then tells otherwise (or ok, with its log). */
+  #amend(row: DeployRow, outcome: Exclude<DeployOutcome, 'running'>, log: string): void {
+    this.#d.db.amendDeploy(row.id, outcome, log.split('\n').slice(-LOG_LINES).join('\n'));
+    if (outcome === 'ok') return; // as announced
+    const { part, from, to, target } = row;
+    this.#d.hub.publishTarget({ target: 'deploy', id: target, type: 'notice', severity: 'problem', kind: 'deployFinished', part, from, to, outcome });
   }
 }

@@ -32,9 +32,12 @@ function deployConfig(t: TestContext): Config {
   return cfg;
 }
 
-/** A whole hub with the Agent deploys' routes, its deploy notices kept, once it has asked GitHub. */
-async function deployHub(t: TestContext, cfg = deployConfig(t)) {
-  const h = await gameHub(t, { cfg, releases: github, deploys: { watchMs: 10, agentTimeoutMs: 300 } });
+/**
+ * A whole hub with the Agent deploys' routes, its deploy notices kept, once it has asked GitHub. `agentTimeoutMs`: how
+ * long a deploy waits for the Agent's hello, then for its result.
+ */
+async function deployHub(t: TestContext, cfg = deployConfig(t), agentTimeoutMs = 300) {
+  const h = await gameHub(t, { cfg, releases: github, deploys: { watchMs: 10, agentTimeoutMs } });
   const notices: TargetEvent[] = [];
   h.live.on('event', (_, { at: _at, ...e }: LiveEvent) => {
     if ('target' in e && e.target === 'deploy') notices.push(e);
@@ -84,7 +87,7 @@ test("the deploys answer lists each Agent with the release its hello named, and 
 });
 
 test('an Agent deploy: the Agent is sent `deploy`, and the row is ok once it says hello as the new release', async (t) => {
-  const h = await deployHub(t);
+  const h = await deployHub(t, deployConfig(t), 10_000);
   const a = await connected(h);
   await started(h, a);
   assert.deepEqual(await h.rows(), [{ part: 'agent', target: 'vm', from: 'agent-v1.1.0', to: TAG, by: ACTOR, outcome: 'running', log: '' }]);
@@ -94,11 +97,15 @@ test('an Agent deploy: the Agent is sent `deploy`, and the row is ok once it say
   assert.deepEqual([update.status, await update.text()], [409, "Space Age's Agent is being deployed."]);
   assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' }), [409, 'Another deploy is running.']);
 
-  await restarted(h, a, TAG);
+  const b = await restarted(h, a, TAG);
   await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
   assert.equal((await h.rows())[0]!.log, `Factorio VM runs ${TAG}`);
   assert.equal((await h.answer()).agent.hosts[0]!.running, TAG);
-  assert.equal((await h.game()).blocked, null);
+  // Its unit gates on after the hello, holding the Agent's deploy lock: busy until its result.
+  assert.equal((await h.game()).blocked, "Space Age's Agent is being deployed.");
+  b.agent.send({ type: 'deployResult', tag: TAG, outcome: 'ok', log: `${TAG} connected` });
+  await eventually(async () => (await h.game()).blocked === null);
+  assert.equal((await h.rows())[0]!.log, `${TAG} connected`); // the script's log, nothing announced again
   const told = h.notices.map((n) => {
     if (n.type === 'notice' && n.kind === 'deployStarted') return [n.kind, n.id, n.from];
     if (n.type === 'notice' && n.kind === 'deployFinished') return [n.kind, n.id, n.outcome];
@@ -154,6 +161,92 @@ test("the Agent's deployResult is recorded: rolled back when it came back on the
   back.agent.send({ type: 'deployResult', tag: TAG, outcome: 'ok', log: 'ok' });
   await eventually(async () => (await h.rows())[0]!.outcome === 'failed');
   assert.equal((await h.rows())[0]!.log, 'ok\nFactorio VM says ok, but runs agent-v1.1.0');
+});
+
+test('a deployResult after the hello closed the row ok corrects it once: rolled back is recorded and announced; a repeat changes nothing', async (t) => {
+  const h = await deployHub(t, deployConfig(t), 10_000);
+  const a = await connected(h);
+  await started(h, a);
+  const b = await restarted(h, a, TAG);
+  await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
+  // The gate failed after that hello: the script flips back, and the old release comes back with the result.
+  const c = await restarted(h, b, 'agent-v1.1.0');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await h.rows())[0]!.outcome, 'ok'); // the old release's hello alone changes nothing
+  c.agent.send({ type: 'deployResult', tag: TAG, outcome: 'rolled back', log: `${TAG} didn't connect within 60s\nrolling back to agent-v1.1.0` });
+  await eventually(async () => (await h.rows())[0]!.outcome === 'rolled back');
+  assert.equal((await h.rows())[0]!.log, `${TAG} didn't connect within 60s\nrolling back to agent-v1.1.0`);
+  const told = () => h.notices.flatMap((n) => (n.type === 'notice' && (n.kind === 'deployStarted' || n.kind === 'deployFinished') ? [[n.kind, n.kind === 'deployFinished' ? n.outcome : n.from]] : []));
+  assert.deepEqual(told(), [
+    ['deployStarted', 'agent-v1.1.0'],
+    ['deployFinished', 'ok'],
+    ['deployFinished', 'rolled back'],
+  ]);
+  assert.equal((await h.game()).blocked, null);
+
+  c.agent.send({ type: 'deployResult', tag: TAG, outcome: 'failed', log: 'again' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await h.rows()).map((r) => [r.outcome, r.log]), [['rolled back', `${TAG} didn't connect within 60s\nrolling back to agent-v1.1.0`]]);
+  assert.equal(told().length, 3);
+});
+
+test("while an Agent deploy's unit hasn't reported its end, every deploy is refused saying so; an older deploy's result never changes a newer row", async (t) => {
+  const h = await deployHub(t, deployConfig(t), 10_000);
+  const a = await connected(h);
+  await started(h, a);
+  const b = await restarted(h, a, TAG);
+  await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
+  const finishing = [409, `Factorio VM's deploy of ${TAG} hasn't reported its end yet: deploy once it has.`];
+  assert.deepEqual(await h.refused({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' }), finishing);
+  assert.deepEqual(await h.refused({ part: 'hub', tag: 'hub-v2.7.0' }), finishing);
+  assert.deepEqual(await h.refused({ part: 'agent', tag: TAG, host: 'vm' }), finishing);
+  b.agent.send({ type: 'deployResult', tag: TAG, outcome: 'ok', log: 'ok' });
+  await eventually(async () => (await h.game()).blocked === null);
+  assert.deepEqual(await h.refused({ part: 'agent', tag: TAG, host: 'vm' }), [409, `${TAG} is already running.`]);
+
+  // Back to agent-v1.1.0: the first deploy's result, sent again, is not this one's.
+  const res = h.deploy({ part: 'agent', tag: 'agent-v1.1.0', host: 'vm' });
+  assert.equal((await b.answer()).type, 'deploy');
+  assert.equal((await res).status, 202);
+  b.agent.send({ type: 'deployResult', tag: TAG, outcome: 'rolled back', log: 'an old one' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await h.rows()).map((r) => [r.to, r.outcome]), [['agent-v1.1.0', 'running'], [TAG, 'ok']]);
+  await restarted(h, b, 'agent-v1.1.0');
+  await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
+  assert.equal((await h.rows())[1]!.outcome, 'ok');
+});
+
+test('with no result after its hello, the wait for it ends in time: the row stays ok and the Agent is free again', async (t) => {
+  const h = await deployHub(t); // 300 ms for the hello, then for the result
+  const a = await connected(h);
+  await started(h, a);
+  await restarted(h, a, TAG);
+  await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
+  assert.equal((await h.game()).blocked, "Space Age's Agent is being deployed.");
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal((await h.game()).blocked, null);
+  assert.deepEqual((await h.rows()).map((r) => [r.outcome, r.log]), [['ok', `Factorio VM runs ${TAG}`]]);
+});
+
+test('a restore is refused while an Agent deploy runs on its server, until its result', async (t) => {
+  const h = await deployHub(t, deployConfig(t), 10_000);
+  const a = await connected(h); // its unit inactive
+  a.agent.send({ type: 'saves', saves: [{ name: 'orrery-20261101T000000Z.zip', size: 10, mtime: 1, kind: 'named', current: false }], free: 1e9 });
+  await eventually(async () => {
+    const { backups } = await h.json<ServerDetail>(h.req('GET', '/api/servers/space'));
+    return backups.configured && backups.backups.length === 1;
+  });
+  await started(h, a);
+  const restore = () => h.req('POST', '/api/servers/space/restore', { name: 'orrery-20261101T000000Z.zip' });
+  const refused = await restore();
+  assert.deepEqual([refused.status, await refused.text()], [409, "Space Age's Agent is being deployed: restore once it is done."]);
+  a.agent.send({ type: 'deployResult', tag: TAG, outcome: 'failed', log: "can't download orrery-agent-v1.2.0.tar.gz" }); // before any restart
+  await eventually(async () => (await h.rows())[0]!.outcome === 'failed');
+  const done = restore();
+  const request = (await a.agent.next()) as { type: string; id: string };
+  assert.equal(request.type, 'restore');
+  a.agent.send({ type: 'reply', id: request.id, ok: true });
+  assert.equal((await done).status, 200);
 });
 
 test("an Agent that doesn't take the deploy answers 502 and closes the row failed", async (t) => {

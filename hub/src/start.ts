@@ -188,7 +188,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const restores =
     services && restoreSources.size
       ? new Restores(hub, services, restoreSources, {
-          deploying: () => deploys?.busy() ?? false,
+          deploying: (id) => (deploys?.busy() ? 'hub' : agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!) ? 'agent' : null),
           updating,
           restored: (id) => packs?.restored(id),
         })

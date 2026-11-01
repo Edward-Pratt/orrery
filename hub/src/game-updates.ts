@@ -114,7 +114,10 @@ type Job = {
   backup: string | null;
   quiet: NodeJS.Timeout | undefined;
 };
-/** An update the hub closed before the Agent said how it ended: its later `updateDone` is recorded on the row (`update` null: any). */
+/**
+ * An update the hub closed before the Agent said how it ended: its later `updateDone` is recorded on the row. `update`
+ * null: its id went with the last hub, until the Agent echoes one in a step (it sends its latest on connecting).
+ */
 type Late = { row: number; update: string | null; from: string; to: string; started: number };
 
 /**
@@ -165,7 +168,13 @@ export class GameUpdates {
     }
     const { agents } = this.#d;
     agents.on('agentUp', (agentId) => {
-      if (this.#cancelOnConnect.delete(agentId)) this.#tellCancel(agentId);
+      if (!this.#cancelOnConnect.delete(agentId)) return;
+      this.#tellCancel(agentId, () => {
+        // Refused: nothing runs there. An update whose id it didn't echo first (it resends a running one's step on
+        // connecting, before it reads this) has no end to come, and a stray one must not land on its row.
+        const serverId = this.#serverOf.get(agentId)!;
+        if (this.#late.get(serverId)?.update === null) this.#late.delete(serverId);
+      });
     });
     agents.on('installed', (agentId, msg) => {
       const serverId = this.#serverOf.get(agentId);
@@ -262,6 +271,8 @@ export class GameUpdates {
         quiet: undefined,
       };
       job.id = this.#d.db.startPackUpdate(serverId, { from: job.from, to: job.to, changes: plan.changes, by: byName, started: job.started });
+      // The Agent takes an update only once the last one's end is sent: nothing more of that one comes.
+      this.#late.delete(serverId);
       this.#jobs.set(serverId, job);
       this.#d.hub.audit(by, 'game update', serverId, `${job.from} → ${job.to}${plan.changes.length ? `: ${plan.changes.join(', ')}` : ''}`);
       this.#d.hub.publish(serverId, { severity: 'info', kind: 'packUpdateStarted', from: job.from, to: job.to, by: byName });
@@ -326,7 +337,13 @@ export class GameUpdates {
 
   #onStep(agentId: string, msg: Extract<AgentMsg, { type: 'updateStep' }>): void {
     const job = this.#jobOf(agentId);
-    if (!job || msg.id !== job.update) return;
+    if (!job) {
+      // The update a restarted hub closed, still running there: its end must carry this id.
+      const late = this.#late.get(this.#serverOf.get(agentId) ?? '');
+      if (late?.update === null) late.update = msg.id;
+      return;
+    }
+    if (msg.id !== job.update) return;
     this.#arm(job);
     // The stop is the hub's: the Agent's `stop` `waiting` asks for it.
     if (msg.step === 'stop') {
@@ -451,10 +468,14 @@ export class GameUpdates {
     job.quiet = setTimeout(() => this.#silent(job), this.#o.quietMs);
   }
 
-  /** `updateCancel` to an Agent, answered or not; one that isn't connected gets it when it connects. */
-  #tellCancel(agentId: string): void {
+  /**
+   * `updateCancel` to an Agent, answered or not; one that isn't connected gets it when it connects. `refused`: it is
+   * connected and didn't take it.
+   */
+  #tellCancel(agentId: string, refused?: () => void): void {
     this.#d.agents.request(agentId, { type: 'updateCancel' }).catch(() => {
       if (!this.#d.agents.get(agentId)?.connected) this.#cancelOnConnect.add(agentId);
+      else refused?.();
     });
   }
 

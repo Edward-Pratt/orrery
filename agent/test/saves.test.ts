@@ -10,7 +10,8 @@ import { ServiceWatch, systemctl, type UnitState } from '../src/service.ts';
 import { eventually } from './fake-hub.ts';
 import { fakeSystemctl } from './fake-systemctl.ts';
 
-const T0 = Date.UTC(2026, 9, 31, 12, 0, 5);
+/** Now, in whole seconds (as save names carry it): every time in these tests is relative to it, never a fixed date. */
+const T0 = Math.floor(Date.now() / 1000) * 1000;
 const HOUR = 3600_000;
 const stopped: UnitState = { unit: 'factorio.service', active: 'inactive', sub: 'dead', since: T0, result: 'success' };
 
@@ -62,7 +63,7 @@ async function file(dir: string, name: string, at: number, content = name): Prom
 }
 
 test('save names and kinds, and the map Factorio loaded from its own log line', () => {
-  assert.equal(stamp(T0), '20261031T120005Z');
+  assert.equal(stamp(Date.UTC(2026, 9, 31, 12, 0, 5, 999)), '20261031T120005Z', 'UTC, whole seconds');
   assert.equal(kindOf(`orrery-${stamp(T0)}.zip`), 'named');
   assert.equal(kindOf(`orrery-pre-update-2.1.24-${stamp(T0)}.zip`), 'named');
   assert.equal(kindOf('_autosave3.zip'), 'auto');
@@ -241,20 +242,26 @@ test('restore copies a listed save to restored-<time>-<name>, never over a file,
   await w.s.restore('world.zip');
   assert.equal(await readFile(join(w.saves, copy), 'utf8'), 'the world');
   assert.equal(await readFile(join(w.saves, 'world.zip'), 'utf8'), 'the world', 'the source untouched');
-  const st = await stat(join(w.saves, copy));
-  assert.ok(st.mtimeMs >= T0 + 10 * HOUR + 2000, `${st.mtimeMs}`);
+  assert.equal((await stat(join(w.saves, copy))).mtimeMs, T0 + 10 * HOUR + 2000, 'a file ahead of the clock: 2 s past it');
   assert.equal((await w.s.list()).saves[0]!.name, copy, 'the newest save: the next start loads it');
   assert.equal(w.pushed.at(-1)!.saves[0]!.name, copy, 'and the hub hears of it');
 
   // The same name again (the same second): refused, and the copy there is kept as it was.
-  await writeFile(join(w.saves, copy), 'already here');
+  await file(w.saves, copy, T0 - HOUR, 'already here');
   await assert.rejects(w.s.restore('world.zip'), /exists already: nothing was overwritten/);
   assert.equal(await readFile(join(w.saves, copy), 'utf8'), 'already here');
+  assert.equal((await stat(join(w.saves, copy))).mtimeMs, T0 - HOUR, 'not even its time touched');
 
-  // Newer than everything also when the clock is ahead of every file.
+  // Newer than everything also when the clock is ahead of every file: stamped now.
   now = T0 + 20 * HOUR;
   await w.s.restore('world.zip');
   assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now);
+
+  // The newest file less than 2 s before the clock: still 2 s past it, not now.
+  now = T0 + 30 * HOUR;
+  await file(w.saves, '_autosave2.zip', now - 1000);
+  await w.s.restore('world.zip');
+  assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now + 1000);
 });
 
 test('a save that never appears times out after the bounded wait; one that keeps changing too', async (t) => {

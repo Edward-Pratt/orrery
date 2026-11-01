@@ -234,8 +234,9 @@ test('UDP seq gaps are logged; the hello datagram is the baseline, again after e
 
 test('/orrery-hello once per start, after the gate opens and RCON answers; a hello datagram that never comes is logged', async (t) => {
   const error = t.mock.method(console, 'error', () => {});
-  t.mock.method(console, 'log', () => {});
-  const s = await setup(t);
+  const log = t.mock.method(console, 'log', () => {});
+  const helloMs = 200; // far over a datagram's way on loopback, so one sent in time is never late
+  const s = await setup(t, { helloMs });
   s.events.rconUp();
   await s.start([BANNER, opened(s.factorioPort)]);
   s.events.rconUp(); // still checking
@@ -252,7 +253,8 @@ test('/orrery-hello once per start, after the gate opens and RCON answers; a hel
   s.events.rconUp();
   await eventually(() => s.commands.length === 2);
   await s.send(s.factorio, { seq: 7, t: 'hello' }); // in time this time
-  await sleep(120);
+  await eventually(() => printed(log).includes("[events] the mod's hello came: seq 7"), 2000, 'the hello');
+  await sleep(helloMs + 50);
   assert.equal(printed(error).filter((l) => l.includes('no hello datagram came')).length, 1);
 });
 

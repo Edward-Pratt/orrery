@@ -59,9 +59,9 @@ test('agentHello first, nothing else before welcome; then serviceState, pings an
   assert.equal(hub.of('hello').length, 0, 'no game connection before a welcome');
 
   welcome = true; // the silent connection times out, the next is welcomed
-  const second = await eventually(() => hub.of('agentHello')[1]);
+  // The welcomed one, not the second by index: a slow machine may have opened (and timed out) another silent one first.
+  const second = await eventually(() => hub.of('agentHello').find((c) => c !== first && sent(c, 'ping').length >= 2), 2000, 'pings');
   assert.ok(first!.closed);
-  await eventually(() => sent(second, 'ping').length >= 2, 2000, 'pings');
   assert.deepEqual(sent(second, 'serviceState'), [
     { type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1_700_000_000_000, result: 'success' },
   ]);
@@ -89,10 +89,10 @@ test('reconnects with capped exponential backoff while the hub resets every conn
   await eventually(() => client.connected);
   const at = hub.conns.map((c) => c.at);
   const gaps = at.slice(1).map((a, i) => a - at[i]!);
+  // Lower bounds only (a timer is never early, a busy machine makes it late): they show the doubling, since a flat
+  // retry would wait 40 ms each time; uncapped the 4th wait would be 320 ms.
   for (const [i, want] of [40, 80, 160, 160].entries()) assert.ok(gaps[i]! >= want - 5, `wait ${i} was ${gaps[i]} ms, want ${want}`);
-  const [a, b, c, d] = gaps as [number, number, number, number];
-  assert.ok(b > a * 1.5 && c > b * 1.5, `the waits double: ${gaps.join(', ')}`);
-  assert.ok(d < c * 1.5, `the waits stop at the cap: ${gaps.join(', ')}`);
+  assert.ok(gaps[3]! < 315, `the waits stop at the cap: ${gaps.join(', ')}`);
   assert.equal(hub.of('agentHello').length, 5, 'every attempt opens with agentHello');
 });
 
@@ -114,14 +114,13 @@ test('the game connection: a hello with the agent token and the mod version, the
   client.status(READING);
   const game = await eventually(() => hub.of('hello')[0]);
   assert.deepEqual(game.lines[0], { type: 'hello', protocol: 1, serverId: 'factorio', token: TOKEN, modVersion: '0.1.0' });
-  await sleep(30);
-  client.status({ ups: 59.8, players: ['alice', 'bob'], paused: false, modVersion: '0.1.0' });
+  // Heartbeats start once the client has read the welcome: the first status again until one lands (RCON answers
+  // every 5 s), so the first heartbeat may come more than once.
+  const busy = { type: 'heartbeat', tps: 59.8, players: ['alice', 'bob'], paused: false };
+  await eventually(() => (client.status({ ups: 59.8, players: ['alice', 'bob'], paused: false, modVersion: '0.1.0' }), game.lines.length >= 2));
   client.status({ ups: 0.2, players: [], paused: true, modVersion: '0.1.0' });
-  await eventually(() => game.lines.length === 3);
-  assert.deepEqual(game.lines.slice(1), [
-    { type: 'heartbeat', tps: 59.8, players: ['alice', 'bob'], paused: false },
-    { type: 'heartbeat', tps: 0.2, players: [], paused: true },
-  ]);
+  await eventually(() => game.lines.at(-1)?.tps === 0.2);
+  assert.deepEqual(game.lines.slice(1), [...game.lines.slice(1, -1).map(() => busy), { type: 'heartbeat', tps: 0.2, players: [], paused: true }]);
 
   const agent = hub.of('agentHello')[0]!;
   await client.stop();
@@ -278,9 +277,8 @@ test('started once per run of the unit, after the game hello; not again for a ru
 
   game.socket.destroy(); // the hub dropped the game connection: the next one is the same run
   await eventually(() => game.closed);
-  await sleep(20);
-  client.status(READING);
-  const again = await eventually(() => hub.of('hello')[1], 2000, 'a new game connection');
+  // The next RCON answer opens a new one, once the client has seen the close too: answers until it has.
+  const again = await eventually(() => (client.status(READING), hub.of('hello')[1]), 2000, 'a new game connection');
   await sleep(50);
   assert.deepEqual(sent(again, 'started'), [], 'the same run: no second started');
   await client.stop();

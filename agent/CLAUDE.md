@@ -120,7 +120,7 @@ reject, a reset or nothing; `eventually` polls a condition.
   newest first, the current world, symlinks and folders left out, a swapped `saves/` refused; `saves` pushed on change
   only; the 6 h save only after play (a fake clock); pruning keeps 20 named and 3 world files, the current world and a
   held save; restore refused while active (the fake systemctl on `PATH`), for a symlinked or unlisted save, copying
-  without overwriting and stamped newest; a save that never appears (or keeps growing) fails after the bounded wait;
+  without overwriting and stamped newest (2 s past a file ahead of the clock or one under 2 s behind it, else now); a save that never appears (or keeps growing) fails after the bounded wait;
   one save at a time, an RCON timeout still waiting for the file.
 - `test/status.test.ts` (UPS, paused from players, `tick_paused` and Δtick, untrusted replies, `auto_pause` from
   symlinks and FIFOs, the poller's `status`, `stalled` and `down`), `test/host.test.ts` (a real sample the hub accepts),
@@ -128,3 +128,7 @@ reject, a reset or nothing; `eventually` polls a condition.
   `RconSession` (one connection, in order, a new one after a timeout or a closed server).
 
 Keep timing-sensitive tests on small timeouts, not sleeps of seconds; stop every poller and client in `t.after`.
+Times are relative to `Date.now()` (or a fake clock), never a fixed date, so no test turns red on a later day. A
+test never races a timer of the code's: it waits for what the code shows (a message, a log line), gives a timer it
+must not see fire a wide margin, and asserts only lower bounds on how long a timer took (a busy machine makes timers
+late, never early).

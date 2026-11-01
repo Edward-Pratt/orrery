@@ -138,6 +138,55 @@ async function readHead(file: string, freshAfter: number): Promise<string | null
 }
 
 /**
+ * Game events the agent forwards to the hub, all kinds together: 5 a second sustained, 30 at once. The hub drops a
+ * connection's lines over 20 a second (100 at once) and closes one that stays over that for 10 s, so a player
+ * spamming chat can never take the game connection, and its heartbeats, down with it.
+ */
+export const EVENT_RATE = 5;
+export const EVENT_BURST = 30;
+/** The events dropped over the budget are counted in one log line a minute at most. */
+export const DROP_LOG_MS = 60_000;
+
+/**
+ * The game events' budget, `EVENT_RATE` a second and `EVENT_BURST` at once, on a monotonic clock (ms): a cell-rate
+ * check, so a full burst comes back after a quiet 6 s and nothing builds up past it. `take` says whether one more
+ * event goes now. What it refuses is counted: the first refusal starts a minute, at whose end (or at `flush`) one line
+ * logs the count.
+ */
+export class EventBudget {
+  #now: () => number;
+  /** When the next event would be on time; it may run up to `EVENT_BURST - 1` intervals ahead of the clock. */
+  #due = -Infinity;
+  #dropped = 0;
+  #timer: NodeJS.Timeout | undefined;
+
+  constructor(now: () => number = () => performance.now()) {
+    this.#now = now;
+  }
+
+  take(): boolean {
+    const now = this.#now();
+    const interval = 1000 / EVENT_RATE;
+    const due = Math.max(this.#due, now);
+    if (due - now <= (EVENT_BURST - 1) * interval) {
+      this.#due = due + interval;
+      return true;
+    }
+    if (this.#dropped++ === 0) this.#timer = setTimeout(() => this.flush(), DROP_LOG_MS);
+    return false;
+  }
+
+  /** Logs the count dropped since the minute started, if any, and ends that minute. */
+  flush(): void {
+    clearTimeout(this.#timer);
+    const n = this.#dropped;
+    if (n === 0) return;
+    this.#dropped = 0;
+    console.log(`[events] dropped ${n} game event${n === 1 ? '' : 's'} in the last minute: over ${EVENT_RATE} a second (${EVENT_BURST} at once)`);
+  }
+}
+
+/**
  * Whether UDP events are taken: `closed` while the unit isn't active; after each start `checking` until the log
  * decides, then `on`, or `off` until the next start.
  */
@@ -161,6 +210,8 @@ export type EventsOptions = {
   helloMs?: number;
   /** Between attempts to listen when the port is taken. */
   retryMs?: number;
+  /** The event budget's monotonic clock (ms; `performance.now`). */
+  now?: () => number;
 };
 
 /**
@@ -172,7 +223,8 @@ export type EventsOptions = {
  * 60 s, turns events off until the next start, logged once. A datagram over 4 KiB, or that isn't the mod's shape,
  * is dropped, and so is a `link` or `unlink` for a player not online; each kind of drop is logged once per start.
  * Gaps in `seq` are logged; its baseline is the `hello` datagram that `/orrery-hello` makes the mod send, once per
- * start after the gate opens and RCON answers. Emits each event as the game connection's message.
+ * start after the gate opens and RCON answers. Emits each event as the game connection's message, within
+ * `EventBudget` (5 a second, 30 at once; the rest dropped, counted in the log once a minute).
  */
 export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
   #o: Required<EventsOptions>;
@@ -192,10 +244,12 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
   #hello: 'none' | 'sent' | 'answered' | 'came' = 'none';
   #last: number | null = null;
   #dropped = new Set<string>();
+  #budget: EventBudget;
 
   constructor(options: EventsOptions) {
     super();
-    this.#o = { deadlineMs: 60_000, pollMs: 1000, helloMs: 5000, retryMs: 10_000, ...options };
+    this.#o = { deadlineMs: 60_000, pollMs: 1000, helloMs: 5000, retryMs: 10_000, now: () => performance.now(), ...options };
+    this.#budget = new EventBudget(this.#o.now);
   }
 
   get gate(): Gate {
@@ -220,6 +274,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     this.#socket?.close();
     this.#socket = null;
     this.#bound = null;
+    this.#budget.flush();
   }
 
   /** The unit's state, on each change: a start (it became active, or its change time moved while active) opens a check of the log. */
@@ -346,6 +401,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) {
       return this.#drop('offline', `a ${event.type} for a player not online`);
     }
+    if (!this.#budget.take()) return; // over the budget: counted, and its seq taken above, so no gap is logged
     this.emit('event', event);
   }
 

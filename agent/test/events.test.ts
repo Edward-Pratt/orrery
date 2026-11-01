@@ -34,6 +34,12 @@ const BANNER = '   0.000 2026-10-31 12:00:00; Factorio 2.1.24 (build 87808, linu
 const RCON_LINE = '   0.210 Info RemoteCommandProcessor.cpp:119: Starting RCON interface at IP ADDR:({127.0.0.1:27015})';
 const opened = (port: number) => `   0.512 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({127.0.0.1:${port}}))`;
 const FAILED = '   0.498 Warning Game.cpp:73: Opening Lua UDP Socket failed: Binding IPv4 socket failed: Address already in use';
+/** What Factorio 2.1.24 logs after the Lua UDP socket's Opening line: the game's own socket (a bind that worked)... */
+const HOSTING = '   0.512 Hosting game at IP ADDR:({127.0.0.1:34197})';
+/** ...or, on a taken port, these before FAILED (seen with 127.0.0.1:34198 held by another process). */
+const CLOSED = ['   0.498 Info UDPSocket.cpp:238: Closing socket', '   0.498 Info UDPSocket.cpp:268: Socket closed'];
+/** The Lua UDP socket bound: its Opening line and the line after it. */
+const up = (port: number) => `${opened(port)}\n${HOSTING}`;
 
 async function udp(): Promise<Socket> {
   const socket = createSocket('udp4');
@@ -101,7 +107,7 @@ const printed = (mock: { mock: { calls: { arguments: unknown[] }[] } }) => mock.
 test('packets from a wrong source port are dropped; the same from Factorio’s port is relayed, only while the unit is active', async (t) => {
   const s = await setup(t);
   await s.send(s.factorio, { seq: 1, t: 'chat', player: 'Alice', message: 'before any start' });
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on', 2000, 'the gate');
 
   await s.send(s.stranger, { seq: 2, t: 'chat', player: 'Alice', message: 'forged' });
@@ -165,12 +171,22 @@ test('events are dropped when the Opening socket line is missing, or Factorio co
   await sleep(50);
   assert.deepEqual(s.got, []);
 
-  await s.start([BANNER, RCON_LINE, opened(s.factorioPort)]);
+  // Factorio 2.1.24 with the port taken (the e2e loop): the Opening line comes before the close and the failure, so
+  // whoever holds the port (it sends from Factorio's port) gets nothing through.
+  await s.start([BANNER, opened(s.factorioPort), ...CLOSED, FAILED, HOSTING]);
+  await eventually(() => s.events.gate === 'off');
+  assert.equal(off().length, 4);
+  assert.match(off()[3]!, /could not open its Lua UDP socket/);
+  await s.send(s.factorio, { seq: 4, t: 'chat', player: 'forged', message: 'from whoever holds the port' });
+  await sleep(50);
+  assert.deepEqual(s.got, []);
+
+  await s.start([BANNER, RCON_LINE, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
-  await s.send(s.factorio, { seq: 4, t: 'join', player: 'Alice' });
+  await s.send(s.factorio, { seq: 5, t: 'join', player: 'Alice' });
   await eventually(() => s.got.length === 1);
   assert.deepEqual(s.got, [{ type: 'join', player: 'Alice' }]);
-  assert.equal(off().length, 3, 'each start reports once');
+  assert.equal(off().length, 4, 'each start reports once');
 });
 
 test('whether events reach the hub is a state, emitted once per change: off with why, on again at a start with the line', async (t) => {
@@ -182,10 +198,10 @@ test('whether events reach the hub is a state, emitted once per change: off with
   assert.match((s.states[0] as { reason: string }).reason, /^no "Opening socket" line for 127\.0\.0\.1:\d+ in .* within 0\.3 s: off until Factorio starts again$/);
   await s.start([BANNER, FAILED]); // off again: no change
   await eventually(() => s.events.gate === 'off');
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.states.length === 2, 2000, 'on again');
   assert.deepEqual(s.states[1], { on: true });
-  await s.start([BANNER, opened(s.factorioPort)]); // on again: no change
+  await s.start([BANNER, up(s.factorioPort)]); // on again: no change
   await eventually(() => s.events.gate === 'on');
   await s.start([BANNER, FAILED]);
   await eventually(() => s.states.length === 3, 2000, 'off at the failure line');
@@ -218,7 +234,7 @@ test("the agent's own UDP port taken past one retry is off too; on once it liste
   await eventually(() => events.bound === port, 2000, 'listening');
   await sleep(50);
   assert.equal(states.length, 1, 'listening, but no start has shown the socket: nothing to say yet');
-  await writeFile(log, `${BANNER}\n${opened(34198)}\n`);
+  await writeFile(log, `${BANNER}\n${up(34198)}\n`);
   events.service(unit('active', Math.floor(Date.now() / 1000) * 1000 - 5000));
   await eventually(() => states.length === 2, 2000, 'on');
   assert.deepEqual(states[1], { on: true });
@@ -228,7 +244,7 @@ test('a log not written since the start is the previous run’s: it is not read 
   const s = await setup(t, { deadlineMs: 5000 });
   const since = Math.floor(Date.now() / 1000) * 1000 - 10_000;
   // A restart the agent didn't see stopped: the previous run's log, last written in the second the unit became active.
-  await writeFile(s.log, `${BANNER}\n${opened(s.factorioPort)}\n`);
+  await writeFile(s.log, `${BANNER}\n${up(s.factorioPort)}\n`);
   await utimes(s.log, (since + 900) / 1000, (since + 900) / 1000);
   s.events.service(unit('active', since));
   await sleep(60);
@@ -249,7 +265,7 @@ test('a log not written since the start is the previous run’s: it is not read 
 
 test('link for an offline name is dropped; for an online one it is relayed with uuid "", and so is unlink', async (t) => {
   const s = await setup(t);
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
   await s.send(s.factorio, { seq: 1, t: 'link', player: 'Mallory', code: 'ABC234' });
   await s.send(s.factorio, { seq: 2, t: 'unlink', player: 'Mallory' });
@@ -277,7 +293,7 @@ test('a link from a player who joined since the last poll: a fresh /orrery-statu
       return command === '/orrery-status' ? JSON.stringify({ ok: true, tick: 1, players: ['Alice', 'Mallory'], version: '2.1.24', mods: { orrery: '0.1.0' } }) : '{"ok":true}';
     },
   });
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
   await s.send(s.factorio, { seq: 1, t: 'link', player: 'Mallory', code: 'ABC234' });
   await eventually(() => s.got.length === 1, 2000, 'the link');
@@ -304,7 +320,7 @@ test('UDP seq gaps are logged; the hello datagram is the baseline, again after e
   const log = t.mock.method(console, 'log', () => {});
   const s = await setup(t);
   const seqLines = () => printed(log).filter((l) => /lost|went back/.test(l));
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
   await s.send(s.factorio, { seq: 5, t: 'hello' });
   await s.send(s.factorio, { seq: 6, t: 'join', player: 'Alice' });
@@ -315,7 +331,7 @@ test('UDP seq gaps are logged; the hello datagram is the baseline, again after e
   assert.deepEqual(seqLines(), ['[events] 2 game events lost: seq 7 to 8 never came', '[events] seq went back from 10 to 3']);
 
   // After a restart the map may have rewound (a crash, a restore): no baseline until the next hello or event.
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
   await s.send(s.factorio, { seq: 2, t: 'join', player: 'Alice' });
   await s.send(s.factorio, { seq: 4, t: 'join', player: 'Alice' });
@@ -329,7 +345,7 @@ test('/orrery-hello once per start, after the gate opens and RCON answers; a hel
   const helloMs = 200; // far over a datagram's way on loopback, so one sent in time is never late
   const s = await setup(t, { helloMs });
   s.events.rconUp();
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   s.events.rconUp(); // still checking
   await eventually(() => s.events.gate === 'on');
   assert.deepEqual(s.commands, []);
@@ -339,7 +355,7 @@ test('/orrery-hello once per start, after the gate opens and RCON answers; a hel
   assert.deepEqual(s.commands, ['/orrery-hello']);
   await eventually(() => printed(error).some((l) => l.includes('no hello datagram came')), 2000, 'the missing hello logged');
 
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on');
   s.events.rconUp();
   await eventually(() => s.commands.length === 2);
@@ -393,7 +409,7 @@ test('GameEvents forwards within the budget: a chat flood from Factorio’s port
   const log = t.mock.method(console, 'log', () => {});
   let now = 0; // frozen: the first 200 come at once
   const s = await setup(t, { now: () => now });
-  await s.start([BANNER, opened(s.factorioPort)]);
+  await s.start([BANNER, up(s.factorioPort)]);
   await eventually(() => s.events.gate === 'on', 2000, 'the gate');
   /**
    * Sends chat datagrams `from` to `to` (seq), then `last` from the same socket: processed after them, the line it
@@ -466,15 +482,20 @@ test('the mod’s datagrams map to the game connection’s messages, within the 
   assert.equal(deathMessage('Alice', 'locomotive', null), 'Alice was killed by a locomotive');
 });
 
-test('socketState: the engine line for that port, or the failure line, whichever comes first; whole lines only', () => {
-  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n`, 34198), 'on');
-  assert.equal(socketState(`${BANNER}\r\n${opened(34198)}\r\n`, 34198), 'on');
+test('socketState: the Opening line for that port counts once the next line is in and is not Factorio closing it; the failure line anywhere is off; whole lines only', () => {
+  assert.equal(socketState(`${BANNER}\n${up(34198)}\n`, 34198), 'on');
+  assert.equal(socketState(`${BANNER}\r\n${opened(34198)}\r\n${HOSTING}\r\n`, 34198), 'on');
   assert.equal(socketState(`${BANNER}\n${opened(34198)}`, 34198), null, 'a line still being written');
-  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n`, 34199), null);
-  assert.equal(socketState(`${BANNER}\n${FAILED}\n${opened(34198)}\n`, 34198), 'off');
-  assert.equal(socketState(`${opened(34198)}\n${FAILED}\n`, 34198), 'on');
-  assert.equal(socketState(`10000.123 Info UDPSocket.cpp:41: Opening socket at (IP ADDR:({127.0.0.1:34198}))\n`, 34198), 'on');
-  assert.equal(socketState(`   0.512 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({0.0.0.0:34198}))\n`, 34198), null);
+  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n`, 34198), null, 'the bind\'s outcome is not logged yet');
+  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n${HOSTING}`, 34198), null, 'the next line still being written');
+  assert.equal(socketState(`${BANNER}\n${up(34198)}\n`, 34199), null);
+  assert.equal(socketState(`${BANNER}\n${FAILED}\n${up(34198)}\n`, 34198), 'off');
+  // Factorio 2.1.24 with 127.0.0.1:34198 taken: the Opening line comes first, then the close and the failure.
+  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n${CLOSED.join('\n')}\n${FAILED}\n${HOSTING}\n`, 34198), 'off');
+  assert.equal(socketState(`${BANNER}\n${opened(34198)}\n${CLOSED[0]}\n`, 34198), 'off', 'closed before the failure line is in');
+  assert.equal(socketState(`${opened(34198)}\n${FAILED}\n`, 34198), 'off');
+  assert.equal(socketState(`10000.123 Info UDPSocket.cpp:41: Opening socket at (IP ADDR:({127.0.0.1:34198}))\n${HOSTING}\n`, 34198), 'on');
+  assert.equal(socketState(`   0.512 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({0.0.0.0:34198}))\n${HOSTING}\n`, 34198), null);
   assert.equal(socketState(`2026-10-31 12:00:05 [CHAT] Bob:    0.5 Info A.cpp:1: Opening Lua UDP Socket failed\n`, 34198), null);
   assert.equal(socketState(`   7.943 Script @__evil__/control.lua:1: Opening Lua UDP Socket failed\n`, 34198), null);
 });
@@ -547,7 +568,7 @@ test('the game connection: say, notice and linkResult run as the mod’s command
   await eventually(() => printed(error).some((l) => l.includes('linkResult was not shown') && l.includes('not online: Bob')));
 
   // The mod's link datagram, from Factorio's port while the gate is on, reaches the hub as the hub's own parser reads it.
-  await writeFile(join(dir, 'factorio-current.log'), `${BANNER}\n${opened(factorio.address().port)}\n`);
+  await writeFile(join(dir, 'factorio-current.log'), `${BANNER}\n${up(factorio.address().port)}\n`);
   events.start();
   const port = await eventually(() => events.bound);
   events.service(unit('active', Math.floor(Date.now() / 1000) * 1000 - 10_000));

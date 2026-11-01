@@ -99,22 +99,28 @@ function toEvent(t: string, raw: Record<string, unknown>): GameEvent | string {
 /** An engine line of the log (seconds since start, level, `File.cpp:N:`), so a chat line or a mod's `log()` can't pass for one. */
 export const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
 const FAILED = new RegExp(ENGINE + 'Opening Lua UDP Socket failed');
+const CLOSING = new RegExp(ENGINE + 'Closing socket$');
 
 /**
- * What a log says about Factorio's Lua UDP socket: `on` once it has the line Factorio writes when it binds the socket
- * on 127.0.0.1:`port` (`Opening socket at (IP ADDR:({127.0.0.1:34198}))`), `off` once it has `Opening Lua UDP Socket
- * failed` (the port was taken), whichever comes first; null for neither. Only whole lines count.
+ * What a log says about Factorio's Lua UDP socket on 127.0.0.1:`port`. Factorio writes `Opening socket at (IP
+ * ADDR:({127.0.0.1:34198}))` before it binds, so on a taken port that line is followed by `Closing socket`, `Socket
+ * closed` and `Opening Lua UDP Socket failed` (seen on 2.1.24). `off` once the log has the failure line, or the Opening
+ * line followed by `Closing socket`; `on` once the Opening line is followed by any other line and there is no failure
+ * line; null while neither is known (no Opening line, or it is the last line yet). Only whole lines count.
  */
 export function socketState(log: string, port: number): 'on' | 'off' | null {
   const opened = new RegExp(ENGINE + String.raw`Opening socket at \(IP ADDR:\(\{127\.0\.0\.1:${port}\}\)\)$`);
   const lines = log.split('\n');
   lines.pop(); // what follows the last newline is a line still being written (or nothing)
-  for (const raw of lines) {
+  let open = -1;
+  for (const [i, raw] of lines.entries()) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    if (opened.test(line)) return 'on';
+    lines[i] = line;
     if (FAILED.test(line)) return 'off';
+    if (open < 0 && opened.test(line)) open = i;
   }
-  return null;
+  if (open < 0 || open + 1 === lines.length) return null; // the bind's outcome isn't logged yet
+  return CLOSING.test(lines[open + 1]!) ? 'off' : 'on';
 }
 
 /**

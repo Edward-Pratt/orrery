@@ -10,7 +10,8 @@
 #   --image <name:tag>     the image (default container-registry.oracle.com/os/oraclelinux:10-slim; fallback
 #                          docker.io/library/debian:trixie-slim)
 #   --refresh-image        pull the image again and pin its new digest (best while the server is stopped)
-#   --memory-max <size>    MemoryMax= for the container (e.g. 6G or 50%); no cap without it
+#   --memory-max <size>    MemoryMax= for the container (e.g. 6G or 50%); a re-run without it keeps the cap the
+#                          installed factorio.container has, and --memory-max none drops it (no cap by default)
 #   --world <path.zip>     the first world, when saves/ is empty (else a new one is created)
 #   --no-hub               the hub check only warns: for the run before the hub listens (the agent then only logs)
 #   --new-token            ask for the agent token again (a re-run keeps the one it has)
@@ -44,7 +45,7 @@ set -euo pipefail
 die() { echo "setup-agent-host: $*" >&2; exit 1; }
 usage() {
   echo "usage: $0 --agent-id <id> --hub <ipv4>:<port> --admins <name>[,<name>...] [--factorio <version>]" \
-    "[--image <name:tag>] [--refresh-image] [--memory-max <size>] [--world <path.zip>] [--no-hub] [--new-token]" >&2
+    "[--image <name:tag>] [--refresh-image] [--memory-max <size>|none] [--world <path.zip>] [--no-hub] [--new-token]" >&2
   exit 2
 }
 umask 077
@@ -92,8 +93,9 @@ fi
 [[ -z $factorio || $factorio =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bad Factorio version: $factorio (want X.Y.Z)"
 [[ -z $image || ($image =~ ^[a-z0-9.-]+\.[a-z]+(:[0-9]+)?/[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$ && $image != *..*) ]] ||
   die "bad image: $image (want a full name with its registry and a tag, like $FALLBACK_IMAGE)"
-[[ -z $memory_max || $memory_max =~ ^[1-9][0-9]*[KMGT]?$ || $memory_max =~ ^[1-9][0-9]?%$ ]] ||
-  die "bad --memory-max: $memory_max (want systemd's MemoryMax=, like 6G or 50%)"
+memory_ok() { [[ $1 =~ ^[1-9][0-9]*[KMGT]?$ || $1 =~ ^[1-9][0-9]?%$ ]]; } # systemd's MemoryMax=, of the kinds this writes
+[[ -z $memory_max || $memory_max == none ]] || memory_ok "$memory_max" ||
+  die "bad --memory-max: $memory_max (want systemd's MemoryMax=, like 6G or 50%, or none)"
 if [[ -n $world ]]; then
   [[ $world =~ ^/[A-Za-z0-9._/-]+\.zip$ && $world != *..* ]] || die "the world must be an absolute plain path to a .zip: $world"
   [[ -f $world ]] || die "no world file $world"
@@ -166,6 +168,14 @@ for f in "$etc/containers/systemd/factorio.container" "$etc/systemd/system/orrer
   "$lib/setup-agent-host.sh" "$lib/deploy-agent.sh"; do
   managed "$f" || die "${f#"$R"} exists without the line \"$MARKER\": it isn't this script's, so move it away first"
 done
+# Without --memory-max, the cap stays what the installed factorio.container has (this script's file, checked above).
+quadlet=$etc/containers/systemd/factorio.container
+if [[ -z $memory_max && -f $quadlet ]]; then
+  while IFS= read -r line; do [[ $line != MemoryMax=* ]] || memory_max=${line#MemoryMax=}; done < "$quadlet"
+  [[ -z $memory_max ]] || memory_ok "$memory_max" ||
+    die "factorio.container has MemoryMax=$memory_max, which this script doesn't write: give --memory-max <size> or --memory-max none"
+fi
+[[ $memory_max != none ]] || memory_max=''
 # unit_from <unit> <property> <path>: the unit is unknown, or systemd loads it from this script's file.
 unit_from() {
   local k v load='' from=''
@@ -573,7 +583,7 @@ for d in "$etc/containers/systemd" "$etc/systemd/system" "$etc/polkit-1/rules.d"
 active=0
 systemctl is-active --quiet factorio.service && active=1
 changed=0
-put_managed "$etc/containers/systemd/factorio.container" 644 <<< "$filled"
+put_managed "$quadlet" 644 <<< "$filled"
 quadlet_changed=$changed
 put_managed "$etc/systemd/system/orrery-agent.service" 644 < "$dl/orrery-agent.service"
 put_managed "$etc/systemd/system/orrery-agent-deploy@.service" 644 < "$dl/orrery-agent-deploy@.service"

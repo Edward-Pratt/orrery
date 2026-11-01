@@ -316,6 +316,7 @@ TOKEN='Tok3n+with/base64=chars.0123456789abcdefXYZ' NEW_TOKEN=fedcba9876543210fe
 DIGEST1=$(printf one | sha256sum | cut -c1-64) DIGEST2=$(printf two | sha256sum | cut -c1-64)
 OL=container-registry.oracle.com/os/oraclelinux:10-slim DEBIAN=docker.io/library/debian:trixie-slim
 ARGS=(--agent-id factorio-vm --hub "$HUB" --admins Alice,Bob)
+MARKER_LINE='Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.'
 Q=$R/etc/containers/systemd/factorio.container
 fresh() { # an OL9 aarch64 VM with Podman 5.2, no factorio user, nothing of ours
   rm -rf "$R" "$F"
@@ -638,6 +639,11 @@ check '--memory-max adds MemoryMax= to [Service]; --world copies the world in, w
   [[ $(grep -A1 "^TimeoutStopSec=200$" "$Q" | tail -n 1) == MemoryMax=6G ]] &&
   cmp -s "$T/old-world.zip" "$R/srv/factorio/saves/world.zip" && ! called " --create "'
 check 'a re-run with saves in place ignores --world' 'IN= run "${ARGS[@]}" --world "$T/old-world.zip" && says "--world ignored"'
+check 'a re-run without --memory-max keeps the cap the Quadlet file has' '
+  IN= run "${ARGS[@]}" && [[ $(grep -c "^MemoryMax=" "$Q") == 1 && $(grep -A1 "^TimeoutStopSec=200$" "$Q" | tail -n 1) == MemoryMax=6G ]]'
+check 'another --memory-max replaces the cap' 'IN= run "${ARGS[@]}" --memory-max 50% && [[ $(grep "^MemoryMax=" "$Q") == MemoryMax=50% ]]'
+check '--memory-max none drops the cap, and a re-run without it adds none back' '
+  IN= run "${ARGS[@]}" --memory-max none && ! grep -q "^MemoryMax=" "$Q" && IN= run "${ARGS[@]}" && ! grep -q "^MemoryMax=" "$Q"'
 fresh
 check '--image pins another image, with its own glibc' '
   run "${ARGS[@]}" --image "$DEBIAN" && grep -qx "Image=$DEBIAN@sha256:$DIGEST1" "$Q" &&
@@ -743,6 +749,8 @@ refuses 'a short image name' 'bad image' '' "${ARGS[@]}" --image oraclelinux:10-
 refuses 'an image with no tag' 'bad image' '' "${ARGS[@]}" --image docker.io/library/debian
 refuses 'an image with a digest' 'bad image' '' "${ARGS[@]}" --image "$OL@sha256:$DIGEST1"
 refuses 'a bad --memory-max' 'bad --memory-max' '' "${ARGS[@]}" --memory-max '6 G'
+refuses 'a MemoryMax= in the Quadlet file it does not write, without --memory-max' 'has MemoryMax=infinity, which this script doesn' \
+  'mkdir -p "$R/etc/containers/systemd"; printf "# x\n# %s\nMemoryMax=infinity\n" "$MARKER_LINE" > "$Q"' "${ARGS[@]}"
 refuses 'a relative --world' 'absolute plain path' '' "${ARGS[@]}" --world world.zip
 refuses 'a missing --world' 'no world file' '' "${ARGS[@]}" --world /nonexistent/world.zip
 refuses 'an unknown flag' 'usage:' '' "${ARGS[@]}" --force

@@ -64,12 +64,17 @@ export const AGENT_FLOOR = 'agent-v1.1.0';
  * that isn't a version.
  */
 export function beforeAgentFloor(version: string | null): boolean {
+  return beforeAgentRelease(version, AGENT_FLOOR);
+}
+
+/** Whether an Agent's release is older than `floor` (an `agent-vX.Y.Z` tag), by `beforeAgentFloor`'s rules. */
+export function beforeAgentRelease(version: string | null, floor: string): boolean {
   const m = version === null ? null : /^(?:agent-v)?(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!m) return false;
   const v = m.slice(1).map(Number);
   if (v.every((n) => n === 0)) return false;
-  const floor = AGENT_FLOOR.slice('agent-v'.length).split('.').map(Number);
-  return v[0]! - floor[0]! < 0 || (v[0] === floor[0] && (v[1]! - floor[1]! < 0 || (v[1] === floor[1] && v[2]! < floor[2]!)));
+  const f = floor.slice('agent-v'.length).split('.').map(Number);
+  return v[0]! - f[0]! < 0 || (v[0] === f[0] && (v[1]! - f[1]! < 0 || (v[1] === f[1] && v[2]! < f[2]!)));
 }
 
 type Waiting = { request: AgentRequest['type']; resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };

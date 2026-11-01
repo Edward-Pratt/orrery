@@ -10,7 +10,7 @@ const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'milestone', '
  * in memory, so a live stream can replay them and resume after a given id. TPS and `paused` events, host samples and check
  * results stay out of that buffer (they would push chat and notices out, at an Agent's heartbeat budget of 1 a second too):
  * only the latest of each is kept, a server's TPS and `paused` until it goes down (or its Agent leaves), a server's latest
- * `packUpdateStep` until its update finishes, and a library add's latest progress until it finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also stored in `Db`,
+ * `packUpdateStep` until its update finishes, a server's latest game `settings` notice, and a library add's latest progress until it finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also stored in `Db`,
  * and seed its buffer when the hub starts (only for servers still in the config), so they survive a restart with their
  * ids and `at`; nothing else does. Ids start at the clock or above the highest stored one, whichever is later, so a
  * client's id from before a restart stays older than new ones.
@@ -38,6 +38,7 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
       if (e.type === 'tps') this.#latest.set(`server:${e.serverId}`, entry);
       else if (e.type === 'paused') this.#latest.set(`paused:${e.serverId}`, entry);
       else if (e.type === 'notice' && e.kind === 'packUpdateStep') this.#latest.set(`pack:${e.serverId}`, entry);
+      else if (e.type === 'notice' && e.kind === 'settings') this.#latest.set(`settings:${e.serverId}`, entry);
       else {
         if (e.type === 'notice' && e.kind === 'packUpdateFinished') this.#latest.delete(`pack:${e.serverId}`);
         if (e.type === 'stopped' || e.type === 'crashed' || e.type === 'lost') {

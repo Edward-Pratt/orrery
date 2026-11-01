@@ -433,7 +433,7 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   assert.equal(demo!.tps, null);
   assert.equal(demo!.service, null);
   assert.equal(demo!.packUpdate, null);
-  assert.deepEqual(demo!.features, { chat: false, tps: false, quests: false, console: false, update: false });
+  assert.deepEqual(demo!.features, { chat: false, tps: false, quests: false, console: false, update: false, settings: false });
   assert.deepEqual(((await get('/api/servers/demo')) as ServerDetail).backups, { configured: false });
   assert.deepEqual(await get('/api/integrations'), {
     minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false, agents: false, library: false, newServer: false,
@@ -671,8 +671,8 @@ async function cardsOf(app: WebApi, cookie: string) {
   return (await (await app.request('/api/servers', { headers: { cookie } })).json()) as ServerCard[];
 }
 
-const MOD = { chat: true, tps: true, quests: true, console: true, update: false };
-const NO_MOD = { chat: false, tps: false, quests: false, console: false, update: false };
+const MOD = { chat: true, tps: true, quests: true, console: true, update: false, settings: false };
+const NO_MOD = { chat: false, tps: false, quests: false, console: false, update: false, settings: false };
 
 test('the API says which integrations are on, and nothing else about them', async (t) => {
   const { get } = await apiHub(t);
@@ -699,7 +699,7 @@ test("a factorio server's card has its game and the UPS rate, the game connectio
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
     // Over its Agent's game connection; game updates only through an Agent, with GameUpdates (systemd on). Quests are the Mod's alone.
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: true } },
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: true, settings: true } },
   );
   assert.equal(cards.find((c) => c.id === 'gtnh')!.features.update, false); // no Agent runs it
 });

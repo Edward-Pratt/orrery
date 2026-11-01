@@ -175,9 +175,17 @@ export type ServiceActionAnswer = { at: number | null };
 /**
  * What a server has: chat, the rate (`tps`) and the console for a Minecraft server with the Mod (a token configured)
  * and for a factorio server; quests for a Minecraft server with the Mod only; game updates (`update`, the Game tab)
- * for a factorio server only.
+ * and game settings (`settings`, the Settings tab) for a factorio server only.
  */
-export type Features = { chat: boolean; tps: boolean; quests: boolean; console: boolean; update: boolean };
+export type Features = {
+  chat: boolean;
+  tps: boolean;
+  quests: boolean;
+  console: boolean;
+  update: boolean;
+  /** Left out by a hub before `hub-v2.16.0`, which has no game settings. */
+  settings?: boolean;
+};
 
 /** A countdown restart (or, with `stop`, a countdown stop of its service) in progress: when it fires and who scheduled it. */
 export type PendingRestart = { at: number; by: string; stop: boolean };

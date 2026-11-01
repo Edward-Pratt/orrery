@@ -4,6 +4,7 @@ import { BackupWatcher } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './factorio.ts';
+import { GameSettings } from './game-settings.ts';
 import { GameUpdates, type GameUpdatesOptions } from './game-updates.ts';
 import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
@@ -212,6 +213,21 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.gameUpdates,
     );
   gameUpdates?.start();
+  // Game settings, with an Agent's server: listening before any Agent can connect.
+  const gameSettings =
+    agents &&
+    services &&
+    new GameSettings({
+      hub,
+      agents,
+      services,
+      restarts,
+      servers: config.servers,
+      updating,
+      restoring: (id) => restores?.busy(id) ?? false,
+      deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
+    });
+  gameSettings?.start();
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   deploys =
     github &&
@@ -293,7 +309,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, gameSettings, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

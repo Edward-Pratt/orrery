@@ -43,6 +43,8 @@ import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
 import { GameRefused } from './factorio.ts';
 import type { GameUpdates } from './game-updates.ts';
+import type { GameSettings } from './game-settings.ts';
+import type { GameSettingsAnswer, GameSettingsState } from './api.ts';
 import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
@@ -134,6 +136,8 @@ export type WebDeps = {
   packs?: Packs;
   /** Only with the agents (and systemd) integrations. */
   gameUpdates?: GameUpdates;
+  /** Only with the agents (and systemd) integrations. */
+  gameSettings?: GameSettings;
   /** With packs. */
   uploads?: Uploads;
   /** With packs. */
@@ -143,7 +147,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, gameSettings, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   // A factorio server is run by an Agent (its `server`).
@@ -166,7 +170,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)) },
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)), settings: Boolean(gameSettings?.has(s.id)) },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -570,6 +574,24 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       game(c, async (sid, user) => ({ id: await gameUpdates.update(sid, await jsonBody(c.req), actor(user), user.username) }) satisfies GameUpdateAnswer, 202),
     );
     app.post('/servers/:id/game/update/cancel', (c) => game(c, async (sid, user) => gameUpdates.cancel(sid, actor(user), user.username)));
+  }
+  // Game settings are written while the server is stopped too, so they come before the online check below.
+  if (gameSettings) {
+    /** Runs a game settings call for a server an Agent runs, mapping its refusals to their status. */
+    const settings = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<object>) => {
+      const id = c.req.param('id')!;
+      if (!gameSettings.has(id)) return c.notFound();
+      try {
+        return c.json(await fn(id, c.get('user')));
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/servers/:id/settings', (c) => settings(c, async (sid) => gameSettings.state(sid) satisfies GameSettingsState));
+    app.put('/servers/:id/settings', (c) =>
+      settings(c, async (sid, user) => (await gameSettings.set(sid, await jsonBody(c.req), actor(user), user.username)) satisfies GameSettingsAnswer),
+    );
   }
   // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
   app.post('/servers/:id/*', async (c, next) => {

@@ -531,7 +531,7 @@ $R/usr/local/lib/orrery/defaults/server-settings.json" ]] &&
   [[ $(stat -c %a "$R/usr/local/lib/orrery/defaults/server-settings.json") == 600 ]]'
 check 'with firewalld and SELinux off: no firewall-cmd, no SELinux tools; the OCI ingress reminder' '
   ! called "^(firewall-cmd|semanage|restorecon)" && says "reminder: players reach the server only if" && says "firewalld isn'\''t running"'
-check 'leaves no temp file behind' '[[ -z $(find "$R" -name ".*" ! -name .incoming) ]]'
+check 'leaves no temp file behind' '[[ -z $(find "$R" -name ".*" ! -name .incoming) && -z $(ls -A "$R/usr/local/lib/orrery/.incoming") ]]'
 written > "$T/first"
 cp "$R/etc/orrery-agent.env" "$R/etc/orrery-factorio.env" "$T/"
 
@@ -698,6 +698,20 @@ check 'says the check may take 5 minutes, then shows its report as it runs, and 
 first-boot check (fixture): waiting for RCON" ]] &&
   grep -qx "first-boot check (fixture): waiting for RCON" "$BOOT" && grep -qx "first-boot check (fixture): every check ran" "$BOOT" &&
   says "done: send /srv/factorio/first-boot.txt to the owner (it is factorio'\''s: sudo cat /srv/factorio/first-boot.txt)"'
+# Ctrl-C during the check: SIGINT to the run's whole process group (set -m gives the background run its own, and keeps
+# SIGINT from being ignored in it), over the report of a run whose checks all passed.
+fresh
+run "${ARGS[@]}" || true
+touch "$F/check-waits"
+check 'a run stopped during the check saves the report so far, saying so, over the older one; and leaves no temp file' '
+  set -m && { IN= run "${ARGS[@]}" & } && pid=$! && set +m &&
+  for _ in $(seq 600); do ! grep -q "waiting for RCON" "$T/out" || break; sleep 0.1; done && kill -INT -- "-$pid" && ! wait "$pid" &&
+  grep -qx "first-boot check (fixture): waiting for RCON" "$BOOT" && ! grep -q "every check ran" "$BOOT" &&
+  grep -qx "setup-agent-host: stopped before the first-boot check ended, so this report is cut short" "$BOOT" &&
+  grep -qx "game password: $(GP_OF)" "$BOOT" && [[ $(stat -c %a "$BOOT") == 600 ]] && ! says "done:" &&
+  [[ -z $(find "$R" -name ".first-boot.txt.*") && ! -e $R/usr/local/lib/orrery/.incoming/first-boot.txt ]]'
+set +m
+cat "$F/calls" >> "$T/all-calls" # the run's own copy died with it
 fresh
 touch "$F/check-fails"
 check 'a failing first-boot check fails the run, with the report saved' '

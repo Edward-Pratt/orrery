@@ -676,26 +676,34 @@ fi
 # ---- 18. The first-boot report, by the agent's own check (run as factorio; the secrets go in its environment only).
 # HOME as its units set it: runuser sets factorio's own, /srv/factorio, which the container can write, and nothing
 # native may read a dotfile from there. The report shows on the terminal as it comes (the check waits up to 5 minutes for
-# RCON) and goes, as factorio, into a new temp file in /srv/factorio, renamed to first-boot.txt at its end.
-# The game password goes in the saved report only: first-boot.txt is factorio's, mode 600 (mktemp's) in its 750 home.
-# It reaches the writer in its environment, never in an argv, and the check never has it.
+# RCON), root keeps it as it comes in its own .incoming/, and then it goes, with the game password note, into
+# first-boot.txt as factorio. A run stopped during the check (Ctrl-C, a lost SSH session) saves what came, with a line
+# saying so, rather than leave an older run's report there.
+# The game password goes in first-boot.txt only: factorio's, mode 600 (mktemp's) in its 750 home. It reaches the writer
+# through a pipe, never an argv, and neither the check nor root's copy ever has it.
 if [[ -n $game_pw ]]; then
   pw_note="game password: $game_pw
 share the game password only with the players: anyone who has it and the VM's address can join"
 else
   pw_note="warning: no game_password found in /srv/factorio/config/server-settings.json (edited by hand): without one, anyone who finds the server can join"
 fi
+report=$lib/.incoming/first-boot.txt
+# save_report [line]: the report so far, then the line and the password note, into first-boot.txt; then root's copy goes.
+save_report() {
+  { cat -- "$report"; [[ -z ${1:-} ]] || printf '%s\n' "$1"; printf '%s\n' "$pw_note"; } | fwrite "$srv/first-boot.txt" &&
+    rm -f -- "$report"
+}
 echo "running the first-boot check (up to 5 minutes while Factorio loads)..."
+trap 'save_report "setup-agent-host: stopped before the first-boot check ended, so this report is cut short" || true' EXIT
 set +e
 {
   echo "setup-agent-host: agent $agent_id ($atag), Factorio $ver, image $ref (glibc $glibc), $(podman --version)"
   RCON_PASSWORD=$rcon ORRERY_AGENT_TOKEN=$token runuser -u factorio -- env HOME=/srv/orrery-agent "$node" "$agent/current/src/index.ts" check 2>&1
-} | NOTE=$pw_note as_factorio bash -c \
-  't=$(mktemp "$(dirname -- "$1")/.${1##*/}.XXXXXX") && tee -- "$t" && printf "%s\n" "$NOTE" >> "$t" && mv -T "$t" "$1"' \
-  report "$srv/first-boot.txt"
+} | tee -- "$report"
 st=("${PIPESTATUS[@]}")
 set -e
-((st[1] == 0)) || die "can't write /srv/factorio/first-boot.txt"
+trap - EXIT
+save_report && ((st[1] == 0)) || die "can't write /srv/factorio/first-boot.txt"
 if [[ -n $game_pw ]]; then
   echo "the game password is in /srv/factorio/first-boot.txt (not shown here): share it only with the players"
 else

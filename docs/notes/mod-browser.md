@@ -220,13 +220,14 @@ which delegates to the catalog; its `catalog` dependency becomes
 
 #### `GET /api/servers/:id/game/mods`
 
-Query parameters, each checked (400 with the reason, before any portal read):
+Query parameters, each checked (400 with the reason). Their shape is checked before any portal read; `category` is
+then checked again against the categories answer (cached), and an unknown id is 400 too:
 
 | Param | Rule | Default |
 |---|---|---|
 | `factorio` | required, `VERSION` (`^\d+\.\d+\.\d+$`); the hub takes its line (`lineOf`) | none: 400 |
 | `q` | trimmed, at most 100 characters | empty |
-| `category` | empty, or one of the ids from `/api/categories` | empty |
+| `category` | empty, or `^[a-z0-9-]{1,32}$` and one of the ids from `/api/categories` | empty |
 | `sort` | `downloads`, `updated` or `name` | `downloads` |
 | `page` | integer 1 to 1000 | 1 |
 

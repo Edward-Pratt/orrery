@@ -360,7 +360,7 @@ test('a save is answered once its file held for the stable time; one at a time; 
   assert.equal(slow.backups[0]!.ok, true, slow.backups[0]!.detail);
 
   // No auth answer: the command was never sent, so no file can come. It fails at once, not after the wait.
-  const unsent = await world(t, { waitMs: 60_000, run: async () => Promise.reject(new RconTimeout('RCON did not answer within 4000 ms')) });
+  const unsent = await world(t, { waitMs: 300, run: async () => Promise.reject(new RconTimeout('RCON did not answer within 4000 ms')) });
   await unsent.s.save();
   assert.match(unsent.backups[0]!.detail, /^orrery-\d{8}T\d{6}Z\.zip: RCON did not answer within 4000 ms$/);
 

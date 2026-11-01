@@ -132,13 +132,19 @@ Agent is away.
    handle (`O_NOFOLLOW`, a regular file on the folder's filesystem, at most 1 GiB). It keeps that **handle** for the
    job, hashes the file from it, and replies `{ size, sha256, mtime }`. Factorio may replace a save later (an
    autosave picked by hand); the open handle still reads the file it hashed.
-4. The Agent then opens a new connection to the hub's Agent port, with the first line `agentSend`.
-5. The hub answers one line, `{"type":"send","offset":N}`. N is the length of its partial file for that copy (0 for a
+4. The hub checks the size against its budget and free space ([Retention and the disk
+   budget](#retention-and-the-disk-budget)). A refusal ends the job here, with `saveCopyEnd`, before any socket is
+   opened. Else it sends `saveCopySend { id, copy }` (an empty reply), and only from then is that copy id open for a
+   send connection.
+5. On `saveCopySend`, the Agent opens a new connection to the hub's Agent port, with the first line `agentSend`.
+   Two requests, not one, because the reply and the new connection travel on different sockets: with one, the send
+   could reach the hub before the reply and be refused for a race.
+6. The hub answers one line, `{"type":"send","offset":N}`. N is the length of its partial file for that copy (0 for a
    new one).
-6. The Agent streams the file from N to the end from its handle, then ends its side (half-close).
-7. The hub writes the bytes to the partial file, hashing as they come. At the end it checks that the length is
+7. The Agent streams the file from N to the end from its handle, then ends its side (half-close).
+8. The hub writes the bytes to the partial file, hashing as they come. At the end it checks that the length is
    `size` and the hash `sha256`, then renames the partial file to `<id>.zip`.
-8. The hub sends `saveCopyEnd { id, copy }`, and the Agent closes its handle. It is sent on success, on failure and
+9. The hub sends `saveCopyEnd { id, copy }`, and the Agent closes its handle. It is sent on success, on failure and
    on a cancel.
 
 ### The send connection (`agentSend`)
@@ -155,12 +161,14 @@ The same rules as the other first lines on the Agent port:
 
 Its own rules:
 
-- The `copy` must be a copy id the hub sent to **that** Agent, whose `saveCopy` reply the hub has taken, and whose job
-  is still running. Else the hub sends `reject` (`no such copy`), then closes within 2 s.
+- The `copy` must be a copy id the hub sent `saveCopySend` for, to **that** Agent, whose job is still running and
+  has no send connection yet. Else the hub sends `reject` (`no such copy`), then closes within 2 s.
 - One transfer per Agent at a time, in either direction. A `agentSend` while a fetch or another send runs for that
   Agent is rejected with `a transfer is running`.
 - It is welcomed at most once per 5 s per Agent. The key is `transfer <agentId>`, shared with `agentFetch`, so
   alternating the two kinds can't churn either. A sooner one is rejected with `reconnecting too fast`.
+- Before the hub's `send` line, the Agent sends nothing: a byte after the first line's newline (in the same chunk or
+  later) and before `send` destroys the socket.
 - After the hub's `send` line, the hub writes nothing more. The Agent sends exactly `size − N` raw bytes. One more
   byte destroys the socket and discards what the connection added past `size`.
 - A socket that brings no byte for 60 s is destroyed.
@@ -448,7 +456,9 @@ New module `agent/src/send.ts`, `Sends`, next to stage B's `fetch.ts`:
 - On `saveCopy`: checks `copy` (32 hex) and `name` (at most `LIMITS.text`, printable, listed now by `Saves.list`).
   Opens the file through `Saves`' folder handle (a new `Saves.open(name)` returning the handle and its `fstat`: a
   regular file, the folder's filesystem, at most 1 GiB). Hashes it from the handle, with 1 MiB reads. Replies `{ size,
-  sha256, mtime }`, then opens the send connection.
+  sha256, mtime }`. It opens the send connection only on `saveCopySend` for the copy id it holds (else `ok: false`,
+  "no such copy").
+- On `saveCopySend`: replies at once, then opens the send connection.
 - Holds at most one job, keyed by copy id. A `saveCopy` for another copy id while one is held closes the old one
   first: the hub runs one at a time. One for the same id reuses the handle, and the hash if the `fstat` size and
   `mtime` are unchanged.
@@ -457,12 +467,12 @@ New module `agent/src/send.ts`, `Sends`, next to stage B's `fetch.ts`:
   socket's backpressure, and ends. It never reads anything after that line: a further byte from the hub destroys the
   socket.
 - On `reject` (`no such copy`, `a transfer is running`, `reconnecting too fast`), or a cut, it does nothing more: the
-  hub decides whether to retry, and retries start with `saveCopy`.
+  hub decides whether to retry, and retries start with `saveCopy`. It never opens a send connection on its own.
 - On `saveCopyEnd`, or 60 minutes after its last send connection ended, it closes the handle.
 - Refused (`ok: false`) while a stage B fetch runs (the hub never asks then; this is the Agent's own guard).
 - Logs name the save and the byte counts, never the token.
 
-`agent/src/hub.ts` routes `saveCopy` and `saveCopyEnd`. `agent/src/index.ts` makes `Sends` with the hub's address and
+`agent/src/hub.ts` routes `saveCopy`, `saveCopySend` and `saveCopyEnd`. `agent/src/index.ts` makes `Sends` with the hub's address and
 the Agent's token from its config, as for `fetch.ts`.
 
 ---
@@ -475,24 +485,25 @@ Additive. No `PROTOCOL_VERSION` bump.
 |---|---|---|---|
 | first line | `agentSend` | `agentId`, `token`, `copy` (32 hex) | the send connection. The hub answers `send` `{ offset }` (an integer from 0 to the copy's size), then the Agent sends raw bytes; or `reject` |
 | hub → Agent | `saveCopy` | `id`, `copy` (32 hex), `name` (a listed save, at most `LIMITS.text`) | `reply.data` `{ size: integer 1 to 1 GiB, sha256: 64 hex, mtime: integer }`; answered within 5 min (`AGENT_HASH_MS`: it hashes up to 1 GiB on the VM's disk) |
+| hub → Agent | `saveCopySend` | `id`, `copy` (the copy id of the `saveCopy` just answered) | an empty reply; 30 s. The Agent then opens the send connection |
 | hub → Agent | `saveCopyEnd` | `id`, `copy` | an empty reply; 30 s |
 
 **Budgets**
 
 - No new Agent → hub message type, so `TYPES` and `SAME` don't change. The hub counts the bytes received itself, so
   the Agent pushes no progress.
-- The `saveCopy` reply and the `saveCopyEnd` reply take the line budget only, as every reply does.
+- The replies to `saveCopy`, `saveCopySend` and `saveCopyEnd` take the line budget only, as every reply does.
 - `agentSend` takes its address's line budget, and is welcomed at most once per 5 s per Agent (shared with
   `agentFetch`).
-- The hub sends at most one `saveCopy` in flight per Agent, at most one try per 30 s, and at most one scheduled job
+- The hub has at most one copy job in flight per Agent (one `saveCopy` and one `saveCopySend` per try), at most one try per 30 s, and at most one scheduled job
   per 5 h 30 min per server.
 
 Places that change together:
 
-- `hub/src/types.ts`: `AgentRequest` (`saveCopy`, `saveCopyEnd`), `AgentReplyData` (`saveCopy`).
+- `hub/src/types.ts`: `AgentRequest` (`saveCopy`, `saveCopySend`, `saveCopyEnd`), `AgentReplyData` (`saveCopy`).
 - `hub/src/protocol.ts`: the `agentSend` first-line schema, the reply schema, the `send` line.
-- `agent/src/wire.ts`: `readAgentLine` for the two requests, and its `LIMITS` copy, with `agent/test/wire.test.ts`.
-- `docs/protocol.md`: a fourth row in the Agent connection's "Handshake", the two requests in "Hub → Agent", the
+- `agent/src/wire.ts`: `readAgentLine` for the three requests, and its `LIMITS` copy, with `agent/test/wire.test.ts`.
+- `docs/protocol.md`: a fourth row in the Agent connection's "Handshake", the three requests in "Hub → Agent", the
   limits, and the send connection's rules in "Rate rules".
 
 **Version skew**, stated in `docs/protocol.md`:
@@ -583,8 +594,9 @@ send connection) and a temporary root:
   - three cuts fail the job.
 - **The `agentSend` first line:**
   - from a wrong address, it is destroyed unread;
-  - a wrong token, an unknown copy id, another Agent's copy id, and one before the `saveCopy` reply was taken are
-    rejected;
+  - a wrong token, an unknown copy id, another Agent's copy id, and one before `saveCopySend` was sent are rejected;
+  - a byte after the first line and before `send` destroys the socket;
+  - a copy over the budget ends at `saveCopyEnd`, and no send connection is opened;
   - a second transfer while one runs, a fetch running, and two sends within 5 s are rejected;
   - one byte past `size` destroys the socket and keeps nothing past `size`;
   - 60 s with no byte destroys it;
@@ -615,6 +627,7 @@ send connection) and a temporary root:
 
 - `saveCopy` for a save not listed, a symlink swapped in, a file over 1 GiB, and a bad copy id are refused;
 - the reply's size and sha256 are the file's;
+- no send connection opens before `saveCopySend`, and `saveCopySend` for another copy id is refused;
 - the send writes from `offset` to the end and half-closes;
 - it reads nothing after the `send` line, and a byte from the hub then destroys the socket;
 - `reject` ends the attempt with no retry of its own;
@@ -624,7 +637,7 @@ send connection) and a temporary root:
 - refused while a fetch runs;
 - through the fake hub's real `parseAgentLine`, with nothing in `invalid`.
 
-`agent/test/wire.test.ts`: the two requests' checks, and `LIMITS` equal to the hub's.
+`agent/test/wire.test.ts`: the three requests' checks, and `LIMITS` equal to the hub's.
 
 `web/src/app/servers/save-copies.spec.ts`:
 
@@ -657,7 +670,7 @@ cutting.
 2. Release the hub and deploy it. Against an Agent below `COPIES_FLOOR`, no copy is attempted, and the Saves tab
    (once the web deploys) shows the deploy text. The `save_copies` table is created at start.
 3. Release the dashboard and deploy it.
-4. Release the Agent (`saveCopy`, `saveCopyEnd`, the send connection) and deploy it from the Host page (Releases).
+4. Release the Agent (`saveCopy`, `saveCopySend`, `saveCopyEnd`, the send connection) and deploy it from the Host page (Releases).
    The friend does nothing: no unit, polkit rule or port changes.
 5. Smoke on production:
    - the first scheduled copy after play, with its time and the hub's free space;

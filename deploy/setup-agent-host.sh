@@ -36,9 +36,12 @@
 # (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
 # game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
 # factorio's), never on the terminal, in an argv or in a trace. Everything else but that report is written only when it
-# differs, so a second run finishes a half-failed one. Factorio's and the agent's current links move to a new release
-# only once it passed its checks (Factorio's --version in the image; the agent's deploy/ files and the Quadlet dry run,
-# and its config and units written first), so a run that stops leaves the server and the agent on the releases they had.
+# differs, so a second run finishes a half-failed one. On a re-run the Quadlet file, then Factorio's current link and
+# image.json switch, one right after another and after every download and check (Factorio's --version runs in the image
+# the Quadlet file gets); the agent's current link switches last, once its deploy/ files passed the Quadlet dry run and
+# its config and units are written. So a re-run that stops on its way (a failed download or check) leaves the server on
+# the release and the image it had, and the agent on its release. A first install points Factorio's current at its
+# release first: the world is made from it, and no unit exists yet.
 # Root never writes inside factorio's trees: those writes run as factorio, and every write goes to a new temp file in the
 # target's folder, then a rename, so a link left there steers nothing.
 # SETUP_ROOT exists for deploy/test-setup-agent-host.sh only: it prefixes every path the script reads or writes (/etc,
@@ -400,9 +403,15 @@ Run this again with --image $FALLBACK_IMAGE"
 }
 [[ $out == *"Version: $ver "* ]] || die "Factorio --version in ${ref%@*} didn't say $ver: $out"
 old_factorio=$(readlink "$opt/current" 2> /dev/null) || old_factorio=''
-flip "$opt" "releases/$ver"
 [[ -d $etc/orrery-agent ]] || install -d -m 755 "$etc/orrery-agent"
-put "$img_file" 644 <<< "{ \"image\": \"$ref\", \"glibc\": \"$glibc\" }"
+# switch_factorio: Factorio's current at this release, and image.json at this image. On a re-run it runs with the
+# Quadlet file's write (section 14), after every download and check, so the server never starts a release in an image
+# it wasn't checked in. On a first install current comes now: the world is made from it, and no unit exists yet.
+switch_factorio() {
+  flip "$opt" "releases/$ver"
+  put "$img_file" 644 <<< "{ \"image\": \"$ref\", \"glibc\": \"$glibc\" }"
+}
+[[ -e $opt/current ]] || switch_factorio
 
 # ---- 9. Configuration, kept on a re-run unless still this script's default.
 config factorio "$srv/config/config.ini" << 'EOF'
@@ -602,13 +611,15 @@ if ! [[ $rcon =~ ^[A-Za-z0-9]{32}$ ]]; then
   put "$etc/orrery-factorio.env" 600 <<< "RCON_PASSWORD=$rcon"
 fi
 
-# ---- 14. Units: the Quadlet file checked above, and this tag's units.
+# ---- 14. Units: the Quadlet file checked above, with Factorio's current and image.json right after it, and this tag's
+# units.
 for d in "$etc/containers/systemd" "$etc/systemd/system" "$etc/polkit-1/rules.d"; do [[ -d $d ]] || install -d -m 755 "$d"; done
 active=0
 systemctl is-active --quiet factorio.service && active=1
 changed=0
 put_managed "$quadlet" 644 <<< "$filled"
 quadlet_changed=$changed
+switch_factorio
 put_managed "$etc/systemd/system/orrery-agent.service" 644 < "$dl/orrery-agent.service"
 put_managed "$etc/systemd/system/orrery-agent-deploy@.service" 644 < "$dl/orrery-agent-deploy@.service"
 put_managed "$lib/deploy-agent.sh" 755 < "$dl/deploy-agent.sh"

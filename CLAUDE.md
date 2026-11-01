@@ -27,8 +27,9 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   a rootful Podman Quadlet (`factorio.container`), the Agent as `orrery-agent.service` from the newest `agent-v*`
   release, the newest `factorio-v*` release's mod when `mods/` has none, `60-orrery-agent.rules`, and a random game
   password in `server-settings.json` (kept on a re-run), shown only in the mode-600 `/srv/factorio/first-boot.txt`. A re-run
-  keeps the image, the Factorio version and `--memory-max` unless told otherwise, and points Factorio's or the agent's
-  `current` at a new release only once that release passed its checks (the agent's after its units are written); tested by
+  keeps the image, the Factorio version and `--memory-max` unless told otherwise. It switches Factorio's `current` and
+  image together with `factorio.container`, once that release passed `--version` in that image, and the agent's `current`
+  last, after its units are written, so a re-run that fails on its way leaves both as they were; tested by
   `test-setup-agent-host.sh`. `deploy-agent.sh` and `orrery-agent-deploy@.service` ship with it (an agent release next
   to the running one, rolled back if it won't connect; tested by `test-deploy-agent.sh`), but nothing starts them
   until agent deploys exist (release 2).

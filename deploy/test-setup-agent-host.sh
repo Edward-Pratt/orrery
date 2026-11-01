@@ -612,6 +612,24 @@ check 'a --factorio release it can run becomes current; a running server is told
   says "factorio.service was running: it runs Factorio 2.1.25 from its next restart" && ! called "^systemctl (stop|restart) factorio"'
 rm -f "$F/active-factorio.service"
 
+# ---- A new release and a new image switch only together, with the Quadlet file: a re-run that stops on its way leaves
+# the server on the release and the image it had (else its next restart runs the new release in the old image).
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/ol"
+cp "$Q" "$R/etc/orrery-agent/image.json" "$T/ol/"
+gone "$RAW/orrery-agent.service"
+check 'a re-run with a new --factorio and --image that stops on its way switches none of current, the Quadlet file and image.json' '
+  ! IN= run "${ARGS[@]}" --factorio 2.1.25 --image "$DEBIAN" && says "can'\''t download https://$RAW/orrery-agent.service" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -d $R/opt/factorio/releases/2.1.25 ]] &&
+  cmp -s "$T/ol/factorio.container" "$Q" && cmp -s "$T/ol/image.json" "$R/etc/orrery-agent/image.json" && ! called "^podman image rm"'
+rm -rf "$F/gone"
+check 'the next run switches all three, to the release checked in that image' '
+  IN= run "${ARGS[@]}" --factorio 2.1.25 --image "$DEBIAN" &&
+  called "^podman run .* $DEBIAN@sha256:$DIGEST1 /opt/factorio/releases/2.1.25/bin/arm64/factorio --version$" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.25 ]] && grep -qx "Image=$DEBIAN@sha256:$DIGEST1" "$Q" &&
+  [[ $(canon "$R/etc/orrery-agent/image.json") == "{\"image\":\"$DEBIAN@sha256:$DIGEST1\",\"glibc\":\"2.41\"}" ]]'
+
 # ---- The game password on a VM set up before it existed, and in a file edited by hand without one.
 fresh
 run "${ARGS[@]}" || true

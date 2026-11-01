@@ -84,7 +84,6 @@ export function formatLinkHint(code: string, games: Game[]): string {
   const lines = GAMES.filter((g) => games.includes(g)).map((g) => how[g]);
   if (lines.length > 1) return `${lines.map((l) => `${l}.`).join(' ')} The code works for 10 minutes.`;
   return `${lines[0] ?? how.minecraft} within 10 minutes.`; // no servers at all: Minecraft's, as before Factorio
-
 }
 
 const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };

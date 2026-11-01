@@ -32,7 +32,7 @@ Lengths count characters (UTF-16 code units).
 | chat and death `message`, a milestone's `text` | 1 KiB (1024 characters) |
 | `players[]` | 200 entries |
 | `output[]` (`cmdResult`, `cmdLate`) | 500 lines of 1 KiB (cut) |
-| `detail` (`backup`, cut; `updateStep`), a `reply`'s `error`, an `events`' `reason` | 2 KiB |
+| `detail` (`backup`, cut; `updateStep`), a `reply`'s `error`, an `events`' `reason`, a `settings`' `problem` and `rolledBack` | 2 KiB |
 | `deployResult.log` | 16 KiB |
 | `reply.data` | 256 KiB as serialised JSON |
 | `lines[]` of a `log` or `journal` reply | 1000 lines of 1 KiB |
@@ -42,6 +42,11 @@ Lengths count characters (UTF-16 code units).
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
 | an `update`'s `url`s (`factorio.url`, `mods[].url`: a mod's signed link is long) | 2 KiB (2048 characters) |
+| game settings' `name` (`settings`, `settingsSet`) | 100 characters (and at least 1: see "Game settings" for every rule) |
+| `admins[]` (`settings`, `settingsSet`) | 100 entries, each 1 to 60 characters |
+| `pending[]` (`settings`, a `settingsSet` reply's `pending` and `applied`) | 16 entries, each 1 to 64 characters |
+| `extra[]` (`settings`) | 32 entries, each 1 to 64 characters |
+| `game_password` (`settingsSet`) | 64 characters |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
 | one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
@@ -171,6 +176,7 @@ welcomed; the connection that one opened stays.
 | `updateStep` | `id`, `step` (`prepare`, `backup`, `stop`, `swap`, `gate` or `rollback`), `state` (`waiting`, `running`, `done` or `failed`), `detail` | during an update; `id` is the `update` request's |
 | `updateDone` | `id`, `outcome` (`ok`, `rolled back`, `failed in staging`, `failed before swap`, `failed` or `cancelled`), `from`, `to`, optional `backup` (the pre-update save) | at the end of an update |
 | `deployResult` | `tag`, `outcome` (`ok`, `failed` or `rolled back`), `log` | once per deploy (`ok` too), when its own deploy's unit is over (after the restart, on whichever release came back), from `deploy-status.json` |
+| `settings` | `settings` (the game settings as read: see "Game settings"; null while `server-settings.json` can't be read), `admins` (string[]), `problem` (string or null: why the file can't be read), `pending` (string[]: keys saved but waiting for a restart), `extra` (string[]: keys in the file the next write drops), `rolledBack` (string or null: why the Agent last put back the settings it last started with, until the next `settingsSet`) | on connect, and after each change (its own writes, a start, the files changing) |
 | `events` | `on` (boolean), optional `reason` (why they are off) | whether it forwards its server's game events: off until Factorio's next start once Factorio's log says its Lua UDP socket failed (127.0.0.1:34198 taken), or has no `Opening socket` line within 60 s of the start, or while the Agent can't listen on its own UDP port (34199) past one retry; on once a start's log shows the socket and the Agent listens. Sent on connect (once it has decided) and on each change. The hub posts one host notice per change it hears (`eventsOff` with the `reason`, `eventsOn`): a repeat posts nothing, and a hub that restarted while they were off posts `eventsOff` once more |
 | `reply` | `id`, `ok` (boolean), optional `error`, optional `data` | the answer to a request |
 
@@ -195,6 +201,7 @@ since it copies the whole save first (the hub waits that long for it).
 | `updateResume` | `id` | the update running continues after the hub's stop (the unit is inactive) | — |
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
+| `settingsSet` | `id`, `settings` (every key of "Game settings" but `game_password_set`), optional `game_password` (string or null), `admins` (string[]) | writes the game settings and applies what it can at once (see "Game settings") | `{ applied: string[], pending: string[] }` |
 
 The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
 deploys (both below), only to an Agent whose `agentHello` names `agent-v1.1.0` or later (the hub's `AGENT_FLOOR`; the
@@ -298,6 +305,51 @@ start while the unit still runs. The Agent sends `deployResult` again on each co
 `deployResult` for no deploy running, of another tag, a second one (such a repeat), or one after the hub gave the
 deploy up or restarted, is ignored.
 
+### Game settings
+
+A factorio server's game settings are its `server-settings.json` (the source of truth: Factorio's own `/config set`
+changes don't persist) and its adminlist, `server-adminlist.json`. Both files are container-written, so the Agent
+reads them as untrusted and reports only what passes these rules. The hub checks a request against them before it
+sends `settingsSet`, and the Agent checks it again.
+
+| key | rule |
+|---|---|
+| `name` | 1 to 100 characters, trimmed (no leading or trailing whitespace), no control character (C0, DEL, C1, U+2028 or U+2029) |
+| `description` | 0 to 256 characters, no control character (so one line) |
+| `max_players` | an integer from 0 to 1000; 0 means no limit |
+| `require_user_verification` | boolean: whether players' factorio.com accounts are checked |
+| `autosave_interval` | an integer from 0 to 1440 (minutes); 0 means off |
+| `autosave_slots` | an integer from 1 to 100 |
+| `afk_autokick_interval` | an integer from 0 to 1440 (minutes); 0 means never |
+| `auto_pause`, `auto_pause_when_players_connect`, `only_admins_can_pause_the_game` | boolean |
+| `allow_commands` | `"true"`, `"false"` or `"admins-only"` (strings on the wire; the file's JSON has `true`, `false` and `"admins-only"`) |
+| `game_password_set` (`settings` only) | boolean: whether the file holds a password. The password itself is never in a message the Agent sends |
+| `game_password` (`settingsSet` only) | left out: keep the file's; null: remove it; else 1 to 64 characters of printable ASCII with no space (`!` to `~`) |
+| `admins[]` | each `^[A-Za-z0-9_.-]{1,60}$`, at most 100 |
+| `pending[]`, `extra[]`, `applied[]` | each a settings key, `^[a-z_]{1,64}$` (`admins` and `game_password` among them) |
+
+Across fields, checked by the modules and refused with a reason: `require_user_verification` false needs a game
+password (one the request sets, or the file's when it is left out), and no admin twice, whatever the case. A
+`settings` or a `settingsSet` with a field that breaks a rule is invalid as a whole (see "Field limits").
+
+The Agent answers `settingsSet` `ok: false`, with why, when a rule fails, while a game update or its own deploy
+runs, or while its unit is starting or stopping. Otherwise it writes `server-settings.json` from the checked fields
+alone (visibility always off: never public, never on the LAN; no factorio.com username or token), then, while the
+server runs, applies each changed key that has a live option with Factorio's `/config set`, and the admins with
+`/promote` and `/demote`; while it is stopped, it writes the adminlist instead. `reply.data` names the keys that
+applied at once (`applied`) and those that wait for the next restart (`pending`: a changed `auto_pause` or
+`autosave_slots`, which have no live option, and any change it didn't apply live); then it sends `settings`, whose
+`pending` holds every key whose saved value the running server doesn't have yet (a start empties it). If the next
+start fails, the Agent puts back the settings of the last start that succeeded and says so in `rolledBack`.
+
+The hub sends `settingsSet` only to an Agent whose `agentHello` names `agent-v1.2.0` or later (the repo's own
+`agent-v0.0.0`, the dev loop, counts as later). `settings` and `settingsSet` came without a protocol bump:
+
+- A hub older than them parses `settings` as an unknown type and ignores it (it still counts as a line, so the
+  Agent connection stays up), and never sends `settingsSet`.
+- An Agent older than them never sends `settings`. One sent `settingsSet` all the same answers it `ok: false` with
+  `unknown type`, which the hub passes on as the Agent's refusal.
+
 ### Liveness
 
 - With no line for 20 s on the Agent connection, or a close without `bye`, the hub marks the Agent lost: it drops
@@ -340,7 +392,7 @@ at the hub, without the Agent knowing.
 | `chat`, `join`, `leave`, `death`, `milestone`, together | 2 a second, bursts of 30 |
 | `link`, `unlink`, together | 1 a second, bursts of 5 |
 | `updateStep` | 5 a second, bursts of 20 |
-| `serviceState`, `saves`, `installed`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
+| `serviceState`, `saves`, `installed`, `settings`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
 | `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
 | `heartbeat` | 1 a second, bursts of 5. Its names not on its server's player list yet (none are while the server is offline, so after a reconnect all are) at most 1 per 10 s, bursts of 200 (a full `players`): a name over it is left out of that heartbeat and comes with a later one |
 | `backup` | 1 per 10 s, bursts of 3 |

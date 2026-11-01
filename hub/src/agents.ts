@@ -47,7 +47,7 @@ export type AgentEvents = { agentUp: [agentId: string]; agentLost: [agentId: str
 export type AgentCall = AgentRequest extends infer R ? (R extends AgentRequest ? Omit<R, 'id'> : never) : never;
 /** What a request's promise resolves to: its reply's checked `data`, for the requests that answer with data. */
 export type AgentAnswer<T extends AgentRequest['type']> = T extends keyof AgentReplyData ? AgentReplyData[T] : void;
-const WITH_DATA = new Set<string>(['journal', 'logs', 'log'] satisfies (keyof AgentReplyData)[]);
+const WITH_DATA = new Set<string>(['journal', 'logs', 'log', 'settingsSet'] satisfies (keyof AgentReplyData)[]);
 
 /** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
@@ -115,6 +115,7 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
   { name: 'serviceState', types: ['serviceState'], perSecond: 1, burst: 10 },
   { name: 'saves', types: ['saves'], perSecond: 1, burst: 10 },
   { name: 'installed', types: ['installed'], perSecond: 1, burst: 10 },
+  { name: 'settings', types: ['settings'], perSecond: 1, burst: 10 },
   // Its Agent sends one per RCON round trip (5 s): 1 a second bounds its `paused` changes and TPS events.
   { name: 'heartbeat', types: ['heartbeat'], perSecond: 1, burst: 5 },
   // One per Save now, or per 6 h of play: each one is a notice posted to Discord.
@@ -125,7 +126,7 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
 ];
 const NEW_PLAYERS = { name: 'new players', perSecond: 1 / 10, burst: LIMITS.players };
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
-const SAME = new Set(['serviceState', 'saves', 'installed']);
+const SAME = new Set(['serviceState', 'saves', 'installed', 'settings']);
 const SAMPLE_MS = 10_000;
 export const HANDSHAKE_MS = 5_000;
 /** What a Mod sends but an Agent's game connection never does (docs/protocol.md): dropped from it. */
@@ -571,7 +572,7 @@ export class Agents extends EventEmitter<AgentEvents> {
         return this.#events(cfg, conn, msg);
       case 'reply':
         return this.#reply(conn, msg);
-      default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult
+      default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult, settings
         (this.emit as (event: Pushed['type'], id: string, msg: Pushed) => boolean)(msg.type, cfg.id, msg);
     }
   }

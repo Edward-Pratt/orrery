@@ -1,7 +1,7 @@
 // The agent's side of the wire contract (docs/protocol.md, "Agent connection"): the hub's constants, the capped line
 // reader, the line encoder and the checks on what the hub sends. The message types come from hub/src/types.ts through
 // `import type` only: an agent release carries no hub code, so the constants are copies, checked by test/wire.test.ts.
-import type { AgentHello, AgentMsg, AgentRequest, Hello, HubAgentMsg, HubMsg, ModMsg } from '../../hub/src/types.ts';
+import type { AgentHello, AgentMsg, AgentRequest, GameSettingsFields, Hello, HubAgentMsg, HubMsg, ModMsg } from '../../hub/src/types.ts';
 
 /** The protocol version in both hellos: the hub's `PROTOCOL_VERSION`, which `agentHello` shares with the Mod's. */
 export const PROTOCOL_VERSION = 1;
@@ -23,9 +23,31 @@ export const LIMITS = {
   logFiles: 32,
   /** An `update`'s download URLs (`factorio.url`, `mods[].url`): a mod's signed link is longer than `text`. */
   url: 2048,
+  /** Game settings: the server's name, the admins, the `pending` (and `applied`) keys, the `extra` keys. */
+  serverName: 100,
+  admins: 100,
+  pending: 16,
+  extra: 32,
   text: 256,
   /** Bytes in one line on the Agent port, its `\n` included, either way: the hub destroys a socket that sends more. */
   lineBytes: 1024 * 1024,
+} as const;
+
+/**
+ * The hub's rules for one field of a factorio server's game settings (`GAME_SETTINGS` in hub/src/protocol.ts): each
+ * integer key's range, the characters a name or description may not hold, a game password, an admin's name, a key.
+ */
+export const GAME_SETTINGS = {
+  ranges: {
+    max_players: [0, 1000],
+    autosave_interval: [0, 1440],
+    autosave_slots: [1, 100],
+    afk_autokick_interval: [0, 1440],
+  },
+  control: /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/,
+  password: /^[\x21-\x7e]{1,64}$/,
+  admin: /^[A-Za-z0-9_.-]{1,60}$/,
+  key: /^[a-z_]{1,64}$/,
 } as const;
 
 /** Everything the agent sends on either connection. */
@@ -111,6 +133,14 @@ const str =
   (v) =>
     typeof v === 'string' && v.length >= min && v.length <= max ? v : BAD;
 const bool: Check = (v) => (typeof v === 'boolean' ? v : BAD);
+const int =
+  (min: number, max: number): Check =>
+  (v) =>
+    Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? v : BAD;
+const matching =
+  (re: RegExp): Check =>
+  (v) =>
+    typeof v === 'string' && re.test(v) ? v : BAD;
 const oneOf =
   (...values: string[]): Check =>
   (v) =>
@@ -144,6 +174,28 @@ const object =
 /** A request's id: what its reply carries back. */
 const id = str(LIMITS.text, 1);
 
+// A `settingsSet`'s fields, each by its rule in `GAME_SETTINGS`; the rules across fields are settings.ts's.
+const oneLine =
+  (max: number, min = 0): Check =>
+  (v) =>
+    typeof v === 'string' && !GAME_SETTINGS.control.test(v) ? str(max, min)(v) : BAD;
+const range = (key: keyof typeof GAME_SETTINGS.ranges): Check => int(GAME_SETTINGS.ranges[key][0], GAME_SETTINGS.ranges[key][1]);
+const settingsFields = {
+  name: (v) => (typeof v === 'string' && v === v.trim() ? oneLine(LIMITS.serverName, 1)(v) : BAD),
+  description: oneLine(LIMITS.text),
+  max_players: range('max_players'),
+  require_user_verification: bool,
+  autosave_interval: range('autosave_interval'),
+  autosave_slots: range('autosave_slots'),
+  afk_autokick_interval: range('afk_autokick_interval'),
+  auto_pause: bool,
+  auto_pause_when_players_connect: bool,
+  only_admins_can_pause_the_game: bool,
+  allow_commands: oneOf('true', 'false', 'admins-only'),
+} satisfies Fields<GameSettingsFields>;
+/** Left out: keep the file's; null: remove it; else a password by the rule. */
+const gamePassword: Check = (v) => (v === undefined || v === null ? v : matching(GAME_SETTINGS.password)(v));
+
 /** The Agent connection: the handshake's answer, then the hub's requests. */
 const AGENT: Schemas<HubAgentMsg> = {
   welcome: {},
@@ -161,6 +213,7 @@ const AGENT: Schemas<HubAgentMsg> = {
   updateResume: { id },
   updateCancel: { id },
   deploy: { id, tag: str() },
+  settingsSet: { id, settings: object(settingsFields), game_password: gamePassword, admins: list(matching(GAME_SETTINGS.admin), LIMITS.admins) },
 };
 
 /** The hub's messages on the game connection that the agent carries out in game, as the mod's RCON commands. */

@@ -8,6 +8,8 @@ import type {
   DeployPart,
   DeployRow,
   FactorioMod,
+  GameSettingsReport,
+  GameSettingsValues,
   Release,
   HistoryAnswer,
   HostSample,
@@ -25,6 +27,7 @@ import type {
 } from './types.ts';
 
 export type {
+  AllowCommands,
   Backup,
   BackupsAnswer,
   CheckStatus,
@@ -33,6 +36,8 @@ export type {
   DeployRow,
   FactorioMod,
   Game,
+  GameSettingsFields,
+  GameSettingsValues,
   HistoryAnswer,
   HostSample,
   HubEvent,
@@ -535,6 +540,24 @@ export type RunningInstall = { id: string; name: string; by: string; started: nu
  * /api/servers/pending/:id` discards one, folder, Java link and all (404 unknown, 409 once it is in config). Audited.
  */
 export type PendingServers = { pending: PendingServer[]; installing: RunningInstall | null };
+
+/**
+ * Game settings (a factorio server only; others 404): its `server-settings.json` and admins, as its Agent reads and
+ * writes them. The routes are registered before the online check, so they answer for a stopped server too.
+ */
+/**
+ * `GET /api/servers/:id/settings`: the Agent's latest report (`GameSettingsReport`; `settings` null and nothing else
+ * before its first, or while the file can't be read: `problem` says why), and why Save is refused now (`blocked`,
+ * null: it can).
+ */
+export type GameSettingsState = GameSettingsReport & { blocked: string | null };
+/**
+ * `PUT /api/servers/:id/settings`: every value and the admins; `game_password` left out keeps it, null removes it.
+ * 400 for bad input (the reason names the field, never a value), 409 while `blocked`, 502 when the Agent refuses it.
+ */
+export type GameSettingsRequest = Omit<GameSettingsValues, 'game_password_set'> & { game_password?: string | null; admins: string[] };
+/** What applied at once, and what waits for the next restart, by their keys. */
+export type GameSettingsAnswer = { applied: string[]; pending: string[] };
 
 /**
  * Game updates (a factorio server only; others 404): moving it to another Factorio version or set of mods, with the

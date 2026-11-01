@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { LIMITS, parseAgentLine, parseModLine, parseReplyData } from '../src/protocol.ts';
+import { GAME_SETTINGS, LIMITS, parseAgentLine, parseModLine, parseReplyData } from '../src/protocol.ts';
 
 test('parses valid messages', () => {
   assert.deepEqual(parseModLine('{"type":"chat","player":"Steve","message":"hi"}'), {
@@ -131,6 +131,28 @@ const AGENT_MSGS = {
   updateDone: { type: 'updateDone', id: '7', outcome: 'rolled back', from: '2.1.24 · 5 mods', to: '2.1.25 · 5 mods', backup: 'orrery-pre-update-2.1.24-x.zip' },
   deployResult: { type: 'deployResult', tag: 'agent-v1.0.1', outcome: 'ok', log: 'flipped current\nconnected' },
   events: { type: 'events', on: false, reason: 'Factorio could not open its Lua UDP socket (is 127.0.0.1:34198 taken?)' },
+  settings: {
+    type: 'settings',
+    settings: {
+      name: 'orrery Factorio',
+      description: 'Our base, on a friend\'s VM',
+      max_players: 0,
+      game_password_set: true,
+      require_user_verification: false,
+      autosave_interval: 10,
+      autosave_slots: 5,
+      afk_autokick_interval: 0,
+      auto_pause: true,
+      auto_pause_when_players_connect: false,
+      only_admins_can_pause_the_game: true,
+      allow_commands: 'admins-only',
+    },
+    admins: ['alice', 'Bob.the-2nd_'],
+    problem: null,
+    pending: ['auto_pause'],
+    extra: ['tags', 'max_upload_slots'],
+    rolledBack: null,
+  },
   reply: { type: 'reply', id: '3', ok: true, data: { lines: ['a', 'b'] } },
 };
 
@@ -142,6 +164,8 @@ test('every Agent port message parses, and only on the Agent port', () => {
   assert.deepEqual(parseAgentLine('{"type":"reply","id":"4","ok":false,"error":"no such save"}'), { type: 'reply', id: '4', ok: false, error: 'no such save' });
   assert.deepEqual(parseAgentLine('{"type":"updateDone","id":"7","outcome":"ok","from":"a","to":"b"}'), { type: 'updateDone', id: '7', outcome: 'ok', from: 'a', to: 'b' });
   assert.deepEqual(parseAgentLine('{"type":"events","on":true}'), { type: 'events', on: true });
+  const unreadable = { type: 'settings', settings: null, admins: [], problem: 'Unexpected end of file', pending: [], extra: [], rolledBack: 'x' };
+  assert.deepEqual(parseAgentLine(JSON.stringify(unreadable)), unreadable, "a file that can't be read");
   // Game connection messages go through parseModLine once a game hello is accepted.
   assert.equal(parseAgentLine('{"type":"chat","player":"Ann","message":"hi"}'), null);
   for (const line of ['', 'not json', 'null', '[]', '{"type":"constructor"}', '{"type":"__proto__"}']) assert.equal(parseAgentLine(line), null, line);
@@ -167,6 +191,40 @@ test('Agent port messages check their field types and values', () => {
     ['events', { reason: 1 }],
     ['reply', { ok: 'true' }],
     ['reply', { error: 1 }],
+    ...([
+      ['name', ''],
+      ['name', ' padded'],
+      ['name', 'two\nlines'],
+      ['name', 'tab\there'],
+      ['name', 'c1\u0085'],
+      ['name', 'sep\u2028'],
+      ['description', 'two\nlines'],
+      ['description', 1],
+      ['max_players', -1],
+      ['max_players', 1001],
+      ['max_players', 1.5],
+      ['max_players', '8'],
+      ['autosave_interval', 1441],
+      ['autosave_slots', 0],
+      ['autosave_slots', 101],
+      ['afk_autokick_interval', 1441],
+      ['auto_pause', 'yes'],
+      ['game_password_set', 1],
+      ['require_user_verification', null],
+      ['allow_commands', 'maybe'],
+      ['allow_commands', true],
+    ] as const).map(([key, value]) => ['settings', { settings: { ...AGENT_MSGS.settings.settings, [key]: value } }] as [keyof typeof AGENT_MSGS, object]),
+    ['settings', { settings: (({ auto_pause: _, ...rest }) => rest)(AGENT_MSGS.settings.settings) }],
+    ['settings', { settings: 'x' }],
+    ['settings', { admins: ['a b'] }],
+    ['settings', { admins: ['x'.repeat(61)] }],
+    ['settings', { admins: [''] }],
+    ['settings', { problem: 1 }],
+    ['settings', { pending: ['Auto_Pause'] }],
+    ['settings', { extra: ['max-players'] }],
+    ['settings', { extra: [''] }],
+    ['settings', { rolledBack: false }],
+    ['settings', { admins: undefined }],
   ];
   for (const [type, change] of bad) {
     assert.equal(parseAgentLine(JSON.stringify({ ...AGENT_MSGS[type], ...change })), null, `${type} ${JSON.stringify(change)}`);
@@ -227,12 +285,21 @@ test('every field has a limit, on both ports: at it parses, over it the message 
     [AGENT_MSGS.events, ['reason'], LIMITS.detail],
     [AGENT_MSGS.reply, ['id'], LIMITS.text],
     [{ type: 'reply', id: '1', ok: false, error: 'e' }, ['error'], LIMITS.detail],
+    [AGENT_MSGS.settings, ['settings', 'name'], LIMITS.serverName],
+    [AGENT_MSGS.settings, ['settings', 'description'], LIMITS.text],
+    [AGENT_MSGS.settings, ['admins', 0], 60],
+    [AGENT_MSGS.settings, ['problem'], LIMITS.detail],
+    [AGENT_MSGS.settings, ['rolledBack'], LIMITS.detail],
+    [AGENT_MSGS.settings, ['pending', 0], 64],
+    [AGENT_MSGS.settings, ['extra', 0], 64],
   ];
   for (const [parse, cases] of [[parseModLine, game], [parseAgentLine, agent]] as const) {
     for (const [msg, path, max] of cases) {
       const what = `${(msg as { type: string }).type}.${path.join('.')}`;
-      assert.ok(parse(withField(msg, path, x(max))), `${what} at ${max}`);
-      assert.equal(parse(withField(msg, path, x(max + 1))), null, `${what} over ${max}`);
+      // A settings key is lower case and `_` only.
+      const fill = (n: number) => ((msg as { type: string }).type === 'settings' && ['pending', 'extra'].includes(String(path[0])) ? '_' : 'x').repeat(n);
+      assert.ok(parse(withField(msg, path, fill(max))), `${what} at ${max}`);
+      assert.equal(parse(withField(msg, path, fill(max + 1))), null, `${what} over ${max}`);
     }
   }
   // Lists, by their entries.
@@ -244,6 +311,9 @@ test('every field has a limit, on both ports: at it parses, over it the message 
     [parseAgentLine, AGENT_MSGS.hostSample, ['sample', 'disks'], { mount: '/', free: 1, total: 2 }, LIMITS.disks],
     [parseAgentLine, AGENT_MSGS.saves, ['saves'], AGENT_MSGS.saves.saves[0], LIMITS.saves],
     [parseAgentLine, AGENT_MSGS.installed, ['mods'], { name: 'm', version: '1.0.0' }, LIMITS.mods],
+    [parseAgentLine, AGENT_MSGS.settings, ['admins'], 'alice', LIMITS.admins],
+    [parseAgentLine, AGENT_MSGS.settings, ['pending'], 'auto_pause', LIMITS.pending],
+    [parseAgentLine, AGENT_MSGS.settings, ['extra'], 'tags', LIMITS.extra],
   ];
   for (const [parse, msg, path, item, max] of lists) {
     const what = `${(msg as { type: string }).type}.${path.join('.')}`;
@@ -292,6 +362,43 @@ test("a reply's data is checked against its request, and copied", () => {
   assert.equal(parseReplyData('logs', { files: Array(LIMITS.logFiles + 1).fill(file) }), null);
   assert.equal(parseReplyData('logs', { files: [{ ...file, size: '10' }] }), null);
   assert.equal(parseReplyData('logs', ['factorio-current.log']), null);
+
+  assert.deepEqual(parseReplyData('settingsSet', { applied: ['name', 'max_players'], pending: ['auto_pause'], password: 'x' }), {
+    applied: ['name', 'max_players'],
+    pending: ['auto_pause'],
+  });
+  assert.ok(parseReplyData('settingsSet', { applied: Array(LIMITS.pending).fill('name'), pending: Array(LIMITS.pending).fill('auto_pause') }));
+  for (const bad of [
+    { applied: Array(LIMITS.pending + 1).fill('name'), pending: [] },
+    { applied: [], pending: Array(LIMITS.pending + 1).fill('auto_pause') },
+    { applied: ['max-players'], pending: [] },
+    { applied: [] },
+    { applied: [1], pending: [] },
+  ]) {
+    assert.equal(parseReplyData('settingsSet', bad), null, JSON.stringify(bad).slice(0, 80));
+  }
+});
+
+test("game settings take each rule's edges: the integer ranges, the name's length, any printable text, the admins' names", () => {
+  const at = (change: object) => parseAgentLine(JSON.stringify({ ...AGENT_MSGS.settings, settings: { ...AGENT_MSGS.settings.settings, ...change } }));
+  for (const [key, [min, max]] of Object.entries(GAME_SETTINGS.ranges)) {
+    assert.ok(at({ [key]: min }), `${key} ${min}`);
+    assert.ok(at({ [key]: max }), `${key} ${max}`);
+    assert.equal(at({ [key]: min - 1 }), null, `${key} ${min - 1}`);
+    assert.equal(at({ [key]: max + 1 }), null, `${key} ${max + 1}`);
+  }
+  assert.deepEqual(GAME_SETTINGS.ranges, { max_players: [0, 1000], autosave_interval: [0, 1440], autosave_slots: [1, 100], afk_autokick_interval: [0, 1440] });
+  assert.ok(at({ name: 'Ünïcode "quoted" 😀 base', description: '' }), 'UTF-8, quotes and spaces; an empty description');
+  for (const allow of ['true', 'false', 'admins-only']) assert.ok(at({ allow_commands: allow }), allow);
+  const admins = (list: string[]) => parseAgentLine(JSON.stringify({ ...AGENT_MSGS.settings, admins: list }));
+  assert.ok(admins(['A', 'x'.repeat(60), 'a_b.c-d', '0']));
+  for (const name of ['a b', 'é', 'a/b', 'a\u0000', 'x'.repeat(61)]) assert.equal(admins([name]), null, name);
+  // The password rule, for the hub's checks and the Agent's: printable ASCII, no space, 1 to 64.
+  for (const ok of ['a', '!~', 'x'.repeat(64)]) assert.ok(GAME_SETTINGS.password.test(ok), ok);
+  for (const bad of ['', 'pass word', 'é', 'tab\t', 'x'.repeat(65), 'del\u007f']) assert.ok(!GAME_SETTINGS.password.test(bad), JSON.stringify(bad));
+  // Fields the schema doesn't hold are dropped: a username, a token, a password sent back by mistake.
+  const sent = parseAgentLine(JSON.stringify({ ...AGENT_MSGS.settings, settings: { ...AGENT_MSGS.settings.settings, game_password: 'secret', token: 't' }, username: 'u' }));
+  assert.deepEqual(sent, AGENT_MSGS.settings);
 });
 
 test("a reply's data too deeply nested to serialise is refused, not thrown", (t) => {

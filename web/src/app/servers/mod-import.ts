@@ -15,12 +15,18 @@ const FOUND: Record<'noRelease' | 'missing' | 'unchecked', (line: string) => str
   unchecked: () => 'not checked: add it by name to see',
 };
 const mods = (n: number) => `${n} mod${n === 1 ? '' : 's'}`;
+/** The most names that aren't a mod's listed one by one: a pasted list can hold tens of thousands. */
+const INVALID_SHOWN = 50;
+const onOff = (enabled: boolean) => (enabled ? 'enabled' : 'disabled');
 
 /** The preview: what Confirm adds, what's in the update already, and what's skipped and why. */
 type Preview = {
-  add: { name: string; title: string; version: string | null }[];
+  /** `unsure`: a version the check didn't answer (it gives only the line's newest), checked by the catalog on Add. */
+  add: { name: string; title: string; version: string | null; unsure: boolean }[];
   already: string[];
   skipped: { name: string; why: string }[];
+  /** How many names that aren't a mod's are past the first `INVALID_SHOWN`, counted but not listed. */
+  more: number;
   /** What the list left out on its own: disabled mods, and names given twice. */
   left: string | null;
   /** Why Confirm can't add them; null: it can. */
@@ -88,7 +94,12 @@ type Preview = {
           @if (hasVersions()) {
             <label class="flex items-start gap-2">
               <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />
-              <span>Keep the versions in the file<span class="block text-xs text-muted-foreground">Unticked, each is the newest that fits Factorio {{ line() }}.</span></span>
+              <span>
+                Keep the versions in the file
+                <span class="block text-xs text-muted-foreground">
+                  Unticked, each is the newest that fits Factorio {{ line() }}. Ticked, the catalog checks each version is for {{ line() }} once added.
+                </span>
+              </span>
             </label>
           }
           @if (p.add.length) {
@@ -99,7 +110,12 @@ type Preview = {
                     <span class="block truncate">{{ m.title }}</span>
                     <span class="block truncate font-mono text-xs text-muted-foreground">{{ m.name }}</span>
                   </span>
-                  <span class="shrink-0 text-xs text-muted-foreground">{{ m.version ?? 'Newest that fits' }}</span>
+                  <span class="shrink-0 text-end text-xs text-muted-foreground">
+                    {{ m.version ?? 'Newest that fits' }}
+                    @if (m.unsure) {
+                      <span class="block" data-import-unsure>checked for {{ line() }} on Add</span>
+                    }
+                  </span>
                 </li>
               }
             </ul>
@@ -109,10 +125,13 @@ type Preview = {
           }
           @if (p.skipped.length) {
             <div data-import-skipped>
-              <p class="font-medium">Skipped ({{ p.skipped.length }})</p>
+              <p class="font-medium">Skipped ({{ p.skipped.length + p.more }})</p>
               <ul class="list-inside list-disc text-muted-foreground">
                 @for (s of p.skipped; track $index) {
                   <li data-import-skip><span class="font-mono text-xs">{{ s.name }}</span>: {{ s.why }}</li>
+                }
+                @if (p.more) {
+                  <li data-import-skip-more>and {{ p.more }} more that aren't a mod's name</li>
                 }
               </ul>
             </div>
@@ -138,7 +157,10 @@ export class ModImport {
   /** The sheet's picks, and the mods the catalog added for them: both in the update already. */
   readonly picks = input.required<string[]>();
   readonly required = input.required<ReadonlyMap<string, string>>();
-  /** What the server runs: a mod it runs (removed in the sheet) comes back at its version, as Add by name does. */
+  /**
+   * What the server runs, every enabled mod: a mod it runs (removed in the sheet) comes back at its version, as Add by
+   * name does; a game mod's setting in the list is compared with the server's.
+   */
   readonly installed = input.required<readonly { name: string; version: string }[]>();
   /** Confirm: the mods to put in the picks. */
   readonly add = output<GameModPick[]>();
@@ -172,15 +194,23 @@ export class ModImport {
       if (inUpdate(m.name)) continue;
       if (m.found === 'fits') {
         const pinned = this.keep() ? fileVersion.get(m.name) : null;
-        add.push({ name: m.name, title: m.title ?? m.name, version: pinned ?? running.get(m.name) ?? null });
+        const version = pinned ?? running.get(m.name) ?? null;
+        add.push({ name: m.name, title: m.title ?? m.name, version, unsure: version !== null && version !== m.latest });
       } else skipped.push({ name: m.name, why: FOUND[m.found](answer.line) });
     }
-    skipped.push(...list.game.map((name) => ({ name, why: 'comes with Factorio' })));
-    skipped.push(...list.invalid.map((name) => ({ name: shown(name), why: "not a mod's name" })));
+    // The update never changes the game's own: each stays enabled or disabled as the server has it.
+    const onServer = new Set(this.installed().map((m) => m.name));
+    for (const { name, enabled } of list.game) {
+      const server = onServer.has(name);
+      const why = enabled === server ? `comes with Factorio, ${onOff(server)} on the server too` : `comes with Factorio: ${onOff(enabled)} here but ${onOff(server)} on the server, which keeps its own setting`;
+      skipped.push({ name, why });
+    }
+    skipped.push(...list.invalid.slice(0, INVALID_SHOWN).map((name) => ({ name: shown(name), why: "not a mod's name" })));
     const left = [list.disabled.length && `${mods(list.disabled.length)} disabled in the file left out`, list.duplicates && `${list.duplicates} given twice, taken once`].filter(Boolean).join('; ');
     const total = this.picks().length + add.length;
     const blocked = !add.length ? 'Nothing here is new to the update.' : total > MODS_MAX ? `That makes ${total} mods: an update takes at most ${MODS_MAX}.` : null;
-    return { add, already: list.mods.filter((m) => inUpdate(m.name)).map((m) => m.name), skipped, left: left ? `${left}.` : null, blocked };
+    const more = Math.max(0, list.invalid.length - INVALID_SHOWN);
+    return { add, already: list.mods.filter((m) => inUpdate(m.name)).map((m) => m.name), skipped, more, left: left ? `${left}.` : null, blocked };
   });
 
   constructor() {

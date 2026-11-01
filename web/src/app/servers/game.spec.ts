@@ -331,10 +331,11 @@ describe('server game tab', () => {
     const list = {
       mods: [
         { name: 'base', enabled: true },
-        { name: 'space-age', enabled: true },
+        { name: 'recycler', enabled: true },
+        { name: 'space-age', enabled: false },
         { name: 'flib', enabled: true },
         { name: 'helmod', enabled: true, version: '2.0.0' },
-        { name: 'Squeak Through', enabled: true },
+        { name: 'Squeak Through', enabled: true, version: '1.0.0' },
         { name: 'gone-mod', enabled: true },
         { name: 'old-mod', enabled: true },
         { name: 'RateCalculator', enabled: false },
@@ -369,18 +370,25 @@ describe('server game tab', () => {
     expect(all('[data-import-skip]').map(text)).toEqual([
       'gone-mod: not on the mod portal',
       'old-mod: no release for Factorio 2.1',
-      'base: comes with Factorio',
-      'space-age: comes with Factorio',
+      // The server keeps its own game mods as they are: one set otherwise in the file says so.
+      'base: comes with Factorio, enabled on the server too',
+      'recycler: comes with Factorio: enabled here but disabled on the server, which keeps its own setting',
+      'space-age: comes with Factorio: disabled here but enabled on the server, which keeps its own setting',
       "<b>bold</b>: not a mod's name",
     ]);
     expect(document.querySelector('[data-import-skipped] b')).toBeNull(); // shown as text
     expect(text(q('[data-import-left]'))).toBe('1 mod disabled in the file left out.');
     // Nothing changed yet: the picks are as they were.
     expect(backend.match('/api/servers/space/game/catalog')).toEqual([]);
-    // Keep the versions in the file: helmod at 2.0.0, with no new request.
+    // Keep the versions in the file: helmod at 2.0.0, with no new request. The check answered only 2.1's newest, so
+    // 2.0.0 is said to be checked on Add; Squeak Through's 1.0.0 is that newest.
     q<HTMLInputElement>('[data-import-keep]').click();
     await render();
-    expect(adding()[0]).toEqual(['helmod', 'Helmod', '2.0.0']);
+    expect(adding()).toEqual([
+      ['helmod', 'Helmod', '2.0.0 checked for 2.1 on Add'],
+      ['Squeak Through', 'Squeak Through', '1.0.0'],
+    ]);
+    expect(all('[data-import-unsure]')).toHaveLength(1);
     expect(backend.match(() => true)).toEqual([]);
     expect(text(q('[data-import-go]'))).toBe('Add 2 mods');
     q('[data-import-go]').click();
@@ -389,14 +397,14 @@ describe('server game tab', () => {
     expect(text(q('[data-sheet] [hlmSheetTitle]'))).toBe('Update game');
     expect(document.activeElement).toBe(q('[data-import]'));
     // The picks there kept as they are, orrery too; the catalog resolves the new ones' dependencies.
-    const merged = [...PICKS, { name: 'helmod', version: '2.0.0' }, { name: 'Squeak Through', version: null }];
+    const merged = [...PICKS, { name: 'helmod', version: '2.0.0' }, { name: 'Squeak Through', version: '1.0.0' }];
     await catalog({ ...SAME, mods: [...SAME.mods, mod('helmod', ['2.1.0', '2.0.0']), mod('Squeak Through', ['1.0.0'])], changes: ['Added: helmod 2.0.0', 'Added: Squeak Through 1.0.0'] }, merged);
     expect(all('[data-pick]').map((p) => p.getAttribute('data-pick'))).toEqual(['orrery', 'flib', 'RateCalculator', 'helmod', 'Squeak Through']);
     expect(text(q('[data-changes]'))).toContain('Added: Squeak Through 1.0.0');
   });
 
   it('checks pasted names; a list it cannot read, a file over 256 KiB or an older hub say why inline, and nothing new or over 500 mods adds nothing', async () => {
-    const { q, text, open, render, type, backend } = await setup();
+    const { q, text, all, open, render, type, backend } = await setup();
     await open();
     q('[data-import]').click();
     await render();
@@ -415,6 +423,12 @@ describe('server game tab', () => {
     expect(q<HTMLButtonElement>('[data-import-go]').disabled).toBe(true);
     expect(text(q('[data-import-go-why]'))).toBe('Nothing here is new to the update.');
     expect(document.querySelector('[data-import-keep]')).toBeNull(); // pasted names have no versions
+    // Thousands of names that aren't a mod's: the first 50 listed, the rest counted.
+    await paste(Array.from({ length: 2000 }, (_, i) => `m${i}/`).join(','));
+    expect(checks()).toEqual([]);
+    expect(text(q('[data-import-skipped] p'))).toBe('Skipped (2000)');
+    expect(all('[data-import-skip]')).toHaveLength(50);
+    expect(text(q('[data-import-skip-more]'))).toBe("and 1950 more that aren't a mod's name");
     // Not JSON: why, inline, and no request.
     await paste('{"mods": [');
     expect(text(q('[data-import-error]'))).toBe("That isn't a mod-list.json: it isn't JSON.");

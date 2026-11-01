@@ -15,18 +15,19 @@ export const MODS_MAX = 500;
 const NAME_MAX = 256;
 /** The biggest list read: a `mod-list.json` of 500 mods is well under 64 KiB. */
 export const LIST_MAX_BYTES = 256 * 1024;
-/** A mod's name as the Agent (and the hub) accept it, with no `..`. */
+/** A mod's name as the Agent (and the hub) accept it, with no `..` and not `.` alone (a URL's "this folder"). */
 const MOD_NAME = /^[A-Za-z0-9_. -]+$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
-export const validName = (name: string) => name.length > 0 && name.length <= NAME_MAX && MOD_NAME.test(name) && !name.includes('..');
+export const validName = (name: string) => name.length > 0 && name.length <= NAME_MAX && MOD_NAME.test(name) && !name.includes('..') && name !== '.';
 
 /** A mod from the list, enabled, with the version the file pins (null: none, or not a version like 1.2.3). */
 export type ListedMod = { name: string; version: string | null };
 /**
  * A list read: its enabled portal mods, in order, each once; and what was left out: names `disabled` in the file, the
- * game's own (`game`), the ones that aren't a mod's name (`invalid`, as given) and how many came twice.
+ * game's own (`game`, enabled or not there: the server keeps its own setting), the ones that aren't a mod's name
+ * (`invalid`, as given) and how many came twice.
  */
-export type ModList = { mods: ListedMod[]; disabled: string[]; game: string[]; invalid: string[]; duplicates: number };
+export type ModList = { mods: ListedMod[]; disabled: string[]; game: { name: string; enabled: boolean }[]; invalid: string[]; duplicates: number };
 
 /** Why a list can't be read at all: shown in the Import view as is. */
 export class ModListError extends Error {}
@@ -50,7 +51,7 @@ export function parseModList(text: string): ModList {
     }
     seen.add(name);
     if (!validName(name)) list.invalid.push(name);
-    else if (GAME_MODS.has(name)) list.game.push(name);
+    else if (GAME_MODS.has(name)) list.game.push({ name, enabled });
     else if (!enabled) list.disabled.push(name);
     else list.mods.push({ name, version });
   }

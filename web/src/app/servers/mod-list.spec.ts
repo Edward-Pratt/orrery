@@ -39,8 +39,14 @@ describe('mod list parsing', () => {
         { name: 'even-distribution', version: null },
       ],
       disabled: ['RateCalculator'],
-      // Off or on, the game's own are never picked.
-      game: ['base', 'elevated-rails', 'quality', 'recycler', 'space-age'],
+      // Off or on, the game's own are never picked: their setting is kept for the preview to compare.
+      game: [
+        { name: 'base', enabled: true },
+        { name: 'elevated-rails', enabled: true },
+        { name: 'quality', enabled: true },
+        { name: 'recycler', enabled: true },
+        { name: 'space-age', enabled: false },
+      ],
       invalid: [],
       duplicates: 0,
     });
@@ -56,7 +62,7 @@ describe('mod list parsing', () => {
         { name: 'Squeak Through', version: null },
       ],
       disabled: [],
-      game: ['base'],
+      game: [{ name: 'base', enabled: true }],
       invalid: [],
       duplicates: 2,
     });
@@ -66,7 +72,8 @@ describe('mod list parsing', () => {
     const list = parseModList(['<script>alert(1)</script>', '../../etc/passwd', 'a..b', 'mods/flib', 'x'.repeat(257), 'tab\there', 'bidi‮evil', 'ok_name-1.2', "flib'; drop", 'x'.repeat(256)].join('\n'));
     expect(list.mods.map((m) => m.name)).toEqual(['ok_name-1.2', 'x'.repeat(256)]);
     expect(list.invalid).toHaveLength(8);
-    expect(['flib', 'Squeak Through', 'a.b', '..', '', 'a/b', 'é'].map(validName)).toEqual([true, true, true, false, false, false, false]);
+    // `.` alone is refused too: /api/mods/./full is read as /api/mods/full.
+    expect(['flib', 'Squeak Through', 'a.b', '.b', '..', '.', '', 'a/b', 'é'].map(validName)).toEqual([true, true, true, true, false, false, false, false, false]);
     // In the JSON too.
     expect(parseModList('{"mods":[{"name":"../x","enabled":true},{"name":"<img src=x>","enabled":true}]}').invalid).toEqual(['../x', '<img src=x>']);
   });

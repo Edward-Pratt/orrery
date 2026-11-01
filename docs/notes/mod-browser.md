@@ -443,14 +443,19 @@ the focus back on the button). The task asked for a small dialog; it is a view i
   before it is read); JSON when it starts with `{`, its shape checked (`{"mods":[{"name", "enabled"?, "version"?}]}`,
   `enabled` true or false, missing counts as true; a `version` kept only when it is `x.y.z`); enabled entries only;
   the game's own mods (`GAME_MODS`) and disabled ones left out and counted; each name checked with the Agent's rule
-  (`^[A-Za-z0-9_. -]+$`, at most 256, no `..`), a refused one shown as text, control characters and bidi overrides
+  (`^[A-Za-z0-9_. -]+$`, at most 256, no `..`, not `.` alone: `/api/mods/./full` is read as `/api/mods/full`, so
+  the hub refuses it too), a refused one shown as text, control characters and bidi overrides
   replaced, cut to 64; duplicates dropped; over 500 enabled portal mods refused (the hub's `LIMITS.mods`);
 - the names not in the update yet (not picked, not added by the catalog as a dependency) go to the hub's check, none
   asked when there are none;
 - the preview, before anything changes: N mods to add (each the newest that fits, or back at the version the server
   runs, as Add by name; "Keep the versions in the file", shown only when the file has some, unticked by default, pins
-  the file's), M already in the update, every skipped one with why (not on the mod portal, no release for Factorio
-  2.1, not checked, comes with Factorio, not a mod's name) and the disabled count;
+  the file's; the check answers only the line's newest, so a kept version that isn't it says "checked for 2.1 on
+  Add", the catalog's to refuse), M already in the update, every skipped one with why (not on the mod portal, no
+  release for Factorio 2.1, not checked, comes with Factorio, not a mod's name) and the disabled count. A game mod
+  says whether the server has it enabled too: the update keeps the server's own setting, so one enabled in the file
+  and disabled on the server (or the other way) says so. Names that aren't a mod's: the first 50 listed, the rest
+  counted ("and N more"), so a paste of thousands doesn't render thousands of rows;
 - Add N mods merges them into the picks (the ones there kept as they are, `orrery` too), back in the update view,
   and asks the catalog, which resolves their dependencies and shows What changes as for any pick. Disabled with
   nothing new, or when the picks would pass 500.
@@ -474,8 +479,9 @@ the portal's, made plain and cut by the hub, shown as text.
 **Tests.** `hub/test/factorio.test.ts` (listed, deprecated, no release for the line, missing, a failed read, the cap of
 20, one list read, cached), `hub/test/game-updates.test.ts` (401, 404, the 400 table, an answer, 502),
 `web/src/app/servers/mod-list.spec.ts` (a real `mod-list.json`, pasted names, injection-looking names, bad JSON and
-shapes, the byte cap, the 500 cap) and `web/src/app/servers/game.spec.ts` (upload, check, preview, keep versions,
-merge and the catalog; paste, nothing new, errors inline, over 256 KiB, the older hub's 404, over 500, Back).
+shapes, the byte cap, the 500 cap, `.` alone) and `web/src/app/servers/game.spec.ts` (upload, check, preview, the
+game's own against the server's, keep versions and the one not the line's newest, merge and the catalog; paste,
+nothing new, 2000 bad names shown as 50 and a count, errors inline, over 256 KiB, the older hub's 404, over 500, Back).
 
 **Smoke after the cut.** Import a real client's `mod-list.json` on a scratch sheet: the preview's skipped names make
 sense, Add puts them in, the catalog resolves; close the sheet without updating.

@@ -262,8 +262,14 @@ if (process.argv[2] === 'check') {
   const got = { args: process.argv.slice(2), home: e.HOME, rcon: /^[A-Za-z0-9]{32}$/.test(e.RCON_PASSWORD || ''), token: (e.ORRERY_AGENT_TOKEN || '').length >= 32 };
   fs.writeFileSync(e.F + '/check-ran', JSON.stringify(got) + '\n');
   fs.writeFileSync(e.CHECK_ENV, JSON.stringify(e) + '\n');
+  if (fs.existsSync(e.F + '/check-waits')) { // a check still waiting for RCON: its line must reach the terminal now
+    fs.writeSync(1, 'first-boot check (fixture): waiting for RCON\n');
+    const end = Date.now() + 10_000;
+    while (!fs.existsSync(e.F + '/seen') && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    if (!fs.existsSync(e.F + '/seen')) process.exitCode = 1;
+  }
   console.log('first-boot check (fixture): every check ran');
-  process.exitCode = fs.existsSync(e.F + '/check-fails') ? 1 : 0;
+  if (fs.existsSync(e.F + '/check-fails')) process.exitCode = 1;
 }
 EOF
 mkdir -p "$X/nodejs.org/dist/v$NV" "$X/www.factorio.com/get-download/2.1.24/headless" \
@@ -664,6 +670,15 @@ fresh
 touch "$F/missing-podman"
 check 'installs a missing Podman, then checks it' '
   run "${ARGS[@]}" && [[ $(grep ^dnf "$F/calls") == "dnf install -y podman" ]] && called "^podman --version$"'
+fresh
+touch "$F/check-waits"
+check 'says the check may take 5 minutes, then shows its report as it runs, and saves all of it' '
+  { run "${ARGS[@]}" & } && pid=$! &&
+  for _ in $(seq 600); do ! grep -q "waiting for RCON" "$T/out" || break; sleep 0.1; done && touch "$F/seen" && wait "$pid" &&
+  [[ $(grep -n -e "^running the first-boot check (up to 5 minutes while Factorio loads)" -e "waiting for RCON$" "$T/out" | cut -d: -f2-) == "running the first-boot check (up to 5 minutes while Factorio loads)...
+first-boot check (fixture): waiting for RCON" ]] &&
+  grep -qx "first-boot check (fixture): waiting for RCON" "$BOOT" && grep -qx "first-boot check (fixture): every check ran" "$BOOT" &&
+  says "done: send /srv/factorio/first-boot.txt to the owner (it is factorio'\''s: sudo cat /srv/factorio/first-boot.txt)"'
 fresh
 touch "$F/check-fails"
 check 'a failing first-boot check fails the run, with the report saved' '

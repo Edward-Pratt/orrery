@@ -185,7 +185,14 @@ export type Features = {
   update: boolean;
   /** Left out by a hub before `hub-v2.16.0`, which has no game settings. */
   settings?: boolean;
+  /** Uploading a save (a factorio server's Saves tab); left out by a hub before `hub-v2.19.0`. */
+  upload?: boolean;
 };
+
+/** `POST /api/servers/:id/saves`: a finished upload (`POST /api/uploads`) to send to the server's Agent as a save. */
+export type SaveUploadRequest = { upload: string };
+/** Its 202 answer: the file's name; the rest arrives as `saveUpload` notices on the stream. */
+export type SaveUploadAnswer = { file: string };
 
 /** A countdown restart (or, with `stop`, a countdown stop of its service) in progress: when it fires and who scheduled it. */
 export type PendingRestart = { at: number; by: string; stop: boolean };

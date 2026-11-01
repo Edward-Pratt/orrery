@@ -91,7 +91,16 @@ export type AgentRequest =
   | { type: 'updateResume'; id: string }
   | { type: 'updateCancel'; id: string }
   | { type: 'deploy'; id: string; tag: string }
-  | { type: 'settingsSet'; id: string; settings: GameSettingsFields; game_password?: string | null; admins: string[] };
+  | { type: 'settingsSet'; id: string; settings: GameSettingsFields; game_password?: string | null; admins: string[] }
+  /**
+   * A save uploaded from the dashboard, sent in order: `saveUploadStart` (the upload's id, its file name, size and
+   * sha256), a `saveChunk` per piece (base64, at its byte `offset`, each answered before the next), then
+   * `saveUploadEnd`, which the Agent answers once the file checks out and is stored; `saveUploadCancel` drops it.
+   */
+  | { type: 'saveUploadStart'; id: string; upload: string; name: string; size: number; sha256: string }
+  | { type: 'saveChunk'; id: string; upload: string; offset: number; data: string }
+  | { type: 'saveUploadEnd'; id: string; upload: string }
+  | { type: 'saveUploadCancel'; id: string; upload: string };
 /** Everything the hub sends on an Agent connection: the handshake's answer, then requests. */
 export type HubAgentMsg = Extract<HubMsg, { type: 'welcome' | 'reject' }> | AgentRequest;
 /** What an `ok` reply's `data` holds, for the requests that answer with data (the others send none). */
@@ -101,6 +110,8 @@ export type AgentReplyData = {
   log: { lines: string[] };
   /** The keys that applied at once, and those waiting for the next restart. */
   settingsSet: { applied: string[]; pending: string[] };
+  /** The stored save's name in `saves/`. */
+  saveUploadEnd: { name: string };
 };
 
 /** Who may run Lua commands on a factorio server: as server-settings.json's `allow_commands`. */
@@ -235,6 +246,11 @@ export type Notice = { severity: Severity } & (
   | { kind: 'verificationOn'; name: string; by: string | null }
   /** A factorio server's start failed after its game settings changed: its Agent put back those of its last good start. */
   | { kind: 'settingsRolledBack'; name: string }
+  /**
+   * A save uploaded from the dashboard on its way to a factorio server's Agent (stream only): `sending` with the bytes
+   * `sent` of `size`, `storing` while the Agent checks it, then `done` with the stored `name`, or `failed` with `error`.
+   */
+  | { kind: 'saveUpload'; state: 'sending' | 'storing' | 'done' | 'failed'; file: string; sent: number; size: number; name?: string; error?: string }
 );
 /** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */
 export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';

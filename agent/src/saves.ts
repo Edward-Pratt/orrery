@@ -1,5 +1,6 @@
 // The server's saves as Backups (Factorio's `saves/` folder): listed with their kind and the current world, a named
 // save on the hub's request and every 6 h after play, pruning, and a restore by copy.
+import { createHash, type Hash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { constants, link, lstat, open, readdir, statfs, unlink, type FileHandle } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
@@ -8,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { AgentMsg, Save, SaveKind } from '../../hub/src/types.ts';
 import { head, openPlain } from './files.ts';
 import { RconNoAnswer } from './rcon.ts';
+import { checkSave, compareVersions } from './save-check.ts';
 import type { UnitState } from './service.ts';
 import { LIMITS, printable } from './wire.ts';
 
@@ -34,7 +36,7 @@ const NAMED = /^orrery-(?:pre-update-\d+\.\d+\.\d+-)?\d{8}T\d{6}Z\.zip$/;
  * A copy while it is written: a restore's `.restored-<time>-<name>.partial` (the name a listed save's), or a game
  * update's `.orrery-pre-update-<from>-<time>.zip.partial` (`keep`).
  */
-const PARTIAL = /^\.(?:restored-\d{8}T\d{6}Z-.+|orrery-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z)\.zip\.partial$/;
+const PARTIAL = /^\.(?:restored-\d{8}T\d{6}Z-.+|orrery-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z|upload-[0-9a-f]{32})\.zip\.partial$/;
 /** The prefixes earlier restores put on a name: a restored copy's name carries only the newest one. */
 const RESTORED = /^(?:restored-\d{8}T\d{6}Z-)+/;
 
@@ -123,6 +125,18 @@ function saved(reply: string, name: string): boolean {
  * - `keep`: a game update's held copy of a listed save, `orrery-pre-update-<from>-<time>.zip`, 2 s older than it, so
  *   a start still loads the save itself and never writes the copy.
  */
+/** A save being uploaded: its partial file kept open while chunks arrive in order, hashed as they land. */
+type Upload = { fh: FileHandle; partial: string; name: string; size: number; sha256: string; written: number; hash: Hash };
+
+/** What an uploaded save is stored as: `uploaded-<time>-<name>`, `name` the file's own without `.zip`, in safe characters only. */
+export function uploadedName(file: string, ms: number): string {
+  const safe = file.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40).replace(/^-+|-+$/g, '') || 'save';
+  return `uploaded-${stamp(ms)}-${safe}.zip`;
+}
+
+/** At least this much stays free beside an upload. */
+export const UPLOAD_SPARE = 512 * 1024 * 1024;
+
 export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResult] }> {
   #o: Required<SavesOptions>;
   #startedAt: number;
@@ -134,6 +148,7 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   #playedAt: number | null = null;
   #saving = false;
   #held = new Set<string>();
+  #uploads = new Map<string, Upload>();
 
   constructor(options: SavesOptions) {
     super();
@@ -323,6 +338,91 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
    * release may write as it stops, and never the copy: a rollback restores what the old release saved. Written as
    * `.<copy>.partial` and linked to its name like a restore's copy (never over a file); resolves with its name.
    */
+  /**
+   * Starts receiving an uploaded save (`saveUploadStart`): only with room for it and `UPLOAD_SPARE` more, into
+   * `.upload-<id>.zip.partial` (`O_EXCL`, no link followed), which neither the list nor a start takes for a save.
+   */
+  async uploadStart(id: string, name: string, size: number, sha256: string): Promise<void> {
+    if (this.#uploads.size > 0) throw new Error('another save is being uploaded');
+    const partial = `.upload-${id}.zip.partial`;
+    const fh = await this.#within(async (base) => {
+      const fs = await statfs(base);
+      const free = fs.bavail * fs.bsize;
+      if (free < size + UPLOAD_SPARE) throw new Error(`not enough space: ${mb(free)} free, the save needs ${mb(size)} and ${mb(UPLOAD_SPARE)} to spare`);
+      // Read and write: `uploadEnd` checks the file through this same handle.
+      return open(`${base}/${partial}`, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+    });
+    this.#uploads.set(id, { fh, partial, name, size, sha256, written: 0, hash: createHash('sha256') });
+    console.log(`[saves] receiving ${printable(name)} (${mb(size)})`);
+  }
+
+  /** The next piece of an upload (`saveChunk`): only at the bytes received so far, never past its size. */
+  async uploadChunk(id: string, offset: number, data: Buffer): Promise<void> {
+    const up = this.#uploads.get(id);
+    if (!up) throw new Error('no such upload: send saveUploadStart first');
+    if (offset !== up.written) throw new Error(`expected the piece at ${up.written}, not ${offset}`);
+    if (up.written + data.length > up.size) throw new Error('more bytes than the upload said');
+    for (let done = 0; done < data.length; ) done += (await up.fh.write(data, done, data.length - done, offset + done)).bytesWritten;
+    up.written += data.length;
+    up.hash.update(data);
+  }
+
+  /**
+   * Ends an upload (`saveUploadEnd`): every byte in, its sha256 the one announced, a Factorio save (`checkSave`) no newer
+   * than `installed`, then synced, timed 2 s before the newest save (so no start loads it unasked: loading it is a
+   * restore) and linked to `uploadedName`. The partial file is removed whatever happens.
+   */
+  async uploadEnd(id: string, installed: string | undefined): Promise<string> {
+    const up = this.#uploads.get(id);
+    if (!up) throw new Error('no such upload: send saveUploadStart first');
+    this.#uploads.delete(id);
+    try {
+      if (up.written !== up.size) throw new Error(`only ${up.written} of ${up.size} bytes arrived`);
+      if (up.hash.digest('hex') !== up.sha256) throw new Error('the file arrived damaged: its sha256 differs');
+      const check = await checkSave(up.fh, up.size);
+      if (!check.ok) throw new Error(`this isn't a Factorio save: ${check.reason}`);
+      if (installed && compareVersions(check.version, installed) > 0) {
+        throw new Error(`it was made with Factorio ${check.version}, newer than this server's ${installed}: update the game first`);
+      }
+      await up.fh.sync();
+      const name = await this.#within(async (base) => {
+        let newest = 0;
+        for (const n of await readdir(base)) {
+          if (!n.endsWith('.zip')) continue;
+          const st = await lstat(`${base}/${n}`).catch(() => null);
+          if (st?.isFile()) newest = Math.max(newest, st.mtimeMs);
+        }
+        const at = new Date((newest || this.#o.now()) - NEWER_MS);
+        await up.fh.utimes(at, at);
+        let ms = this.#o.now();
+        let name = uploadedName(up.name, ms);
+        const taken = new Set(await readdir(base));
+        while (taken.has(name)) name = uploadedName(up.name, (ms += 1000));
+        await link(`${base}/${up.partial}`, `${base}/${name}`);
+        return name;
+      });
+      console.log(`[saves] stored the upload ${printable(up.name)} as ${name} (Factorio ${check.version})`);
+      await this.refresh();
+      return name;
+    } finally {
+      await this.#dropUpload(up);
+    }
+  }
+
+  /** Drops an upload (`saveUploadCancel`, or the hub giving up): its partial file removed. Nothing to drop is fine. */
+  async uploadCancel(id: string): Promise<void> {
+    const up = this.#uploads.get(id);
+    if (!up) return;
+    this.#uploads.delete(id);
+    await this.#dropUpload(up);
+    console.log(`[saves] dropped the upload ${printable(up.name)}`);
+  }
+
+  async #dropUpload(up: Upload): Promise<void> {
+    await up.fh.close().catch(() => {});
+    await this.#within((base) => unlink(`${base}/${up.partial}`)).catch(() => {});
+  }
+
   async keep(name: string, from: string): Promise<string> {
     if (!/^\d+\.\d+\.\d+$/.test(from)) throw new Error(`${JSON.stringify(from)} is not a version`);
     if (!(await this.list()).saves.some((s) => s.name === name)) throw new Error(`${name} is not a listed save`);

@@ -47,6 +47,8 @@ Lengths count characters (UTF-16 code units).
 | `pending[]` (`settings`, a `settingsSet` reply's `pending` and `applied`) | 16 entries, each 1 to 64 characters |
 | `extra[]` (`settings`) | 32 entries, each 1 to 64 characters |
 | `game_password` (`settingsSet`) | 64 characters |
+| a `saveChunk`'s `data` (base64 of at most 512 KiB) | 700,000 characters |
+| an uploaded save's `size` (`saveUploadStart`) | 1 GiB |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
 | one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
@@ -203,6 +205,10 @@ worst case of about 50 s (its `systemctl` checks, 20 s of live commands and the 
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 | `settingsSet` | `id`, `settings` (every key of "Game settings" but `game_password_set`), optional `game_password` (string or null), `admins` (string[]) | writes the game settings and applies what it can at once (see "Game settings") | `{ applied: string[], pending: string[] }` |
+| `saveUploadStart` | `id`, `upload` (32 hex: the hub's upload id), `name` (the file's name), `size`, `sha256` (64 hex) | opens `saves/.upload-<upload>.zip.partial`, refused while another upload or a game update runs, or with less than the size and 512 MiB free | — |
+| `saveChunk` | `id`, `upload`, `offset`, `data` (base64) | writes the piece at `offset`, which must be the bytes received so far, never past `size`. The hub sends one at a time, each after the last's reply | — |
+| `saveUploadEnd` | `id`, `upload` | checks every byte arrived, the sha256, and that the file is a Factorio save (a zip with one top folder, safe names, `level.dat0`) no newer than the installed Factorio, then stores it as `uploaded-<time>-<name>.zip`, timed 2 s before the newest save so no start loads it unasked (loading it is a `restore`); the partial file is removed whatever happens. Answered within 5 min | `{ name }` |
+| `saveUploadCancel` | `id`, `upload` | drops the upload and its partial file (none is fine) | — |
 
 The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
 deploys (both below), only to an Agent whose `agentHello` names `agent-v1.1.0` or later (the hub's `AGENT_FLOOR`; the

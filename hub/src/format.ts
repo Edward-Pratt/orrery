@@ -126,6 +126,7 @@ function noticeText(n: Notice, game: Game): string | null {
     case 'packUpdateStarted':
       return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
     case 'packUpdateStep': // progress for the dashboard
+    case 'saveUpload': // the dashboard's upload progress
     case 'settings': // for the dashboard's Settings tab
       return null;
     case 'verificationOff':

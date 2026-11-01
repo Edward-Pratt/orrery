@@ -45,6 +45,7 @@ const GAME_MAX = 1024 ** 3;
 const MOD_MAX = 512 * 1024 ** 2;
 const META_MAX = 16 * 1024 ** 2;
 const SETTINGS_MAX = 64 * 1024 ** 2;
+const MOD_LIST_MAX = 1024 ** 2;
 /** The releases kept besides the running one: the newest three. */
 export const KEEP_RELEASES = 3;
 /** The health gate's limit, and the wait for a stop to finish (factorio.service stops within 200 s). */
@@ -69,8 +70,9 @@ export const GAME_MODS: readonly string[] = ['base', 'elevated-rails', 'quality'
 /**
  * `updateDone`'s `from` and `to`, as the hub names its row (docs/protocol.md, "Game updates"): "2.1.24 · 5 mods",
  * every enabled mod counted, the game's own included. `from`: the latest `installed`; `to`: the update's version, with
- * the game's own mods enabled in that `installed` and the update's mods. With no `installed` yet: the bare versions
- * (`from` the release `current` points at).
+ * the game's own mods enabled in that `installed` and the update's mods (one new in the target release is enabled too,
+ * but neither side counts it: it is first seen in prepare). With no `installed` yet: the bare versions (`from` the
+ * release `current` points at).
  */
 export function labels(installed: InstalledMsg | null, current: string, req: Request<'update'>): { from: string; to: string } {
   if (!installed) return { from: current, to: req.factorio.version };
@@ -148,7 +150,10 @@ type Job = {
   factorio: string;
   /** The portal mods it installs. */
   mods: FactorioMod[];
-  /** The gate's mod set: the release's own mods (`base`, …) and `mods`, by name; known once prepare has the release. */
+  /**
+   * The gate's mod set, by name: the release's own mods (`base`, …) that the staged `mod-list.json` enables (as the
+   * server's current one had them; one new in the release on) and `mods`; known once prepare has the release.
+   */
   expect: Record<string, string> | null;
   /** What ran before: its version, and its mods as `/orrery-status` last said (null: not known). */
   from: { factorio: string; mods: Record<string, string> | null };
@@ -361,7 +366,8 @@ function readJob(raw: unknown): Job | null {
  *    factorio.com's list and each mod's sha1 against the mod portal's, before any download; the tarball downloaded to
  *    `<install>/.incoming/` (only when the release isn't there yet), checked, unpacked (`unpack`) and its binary's
  *    glibc need checked against the image's (`image.json`) before it becomes `<install>/releases/<ver>/`; the mods
- *    downloaded to `<data>/.incoming/`, checked and staged in `<data>/mods.next/` with a `mod-list.json` and
+ *    downloaded to `<data>/.incoming/`, checked and staged in `<data>/mods.next/` with a `mod-list.json` (the release's
+ *    own mods on or off as the current one has them, one new in the release on, and the update's on) and
  *    `mod-settings.dat` carried over. Downloads follow redirects only to `ALLOWED_HOSTS`, at most 5, with caps, and
  *    stop after `STALL_MS` without a byte.
  * 2. backup: a pre-update save while the server runs, else the newest save; held from pruning until the end.
@@ -644,7 +650,15 @@ export class Updates {
       console.log(`[update] installed Factorio ${v} in ${release}`);
     } else await this.#glibc(release, v);
     const own = await ownMods(release);
-    job.expect = { ...own, ...Object.fromEntries(job.mods.map((m) => [m.name, m.version])) };
+    // The game's own mods stay as the server has them (docs/protocol.md, "Game updates"); one new in this release is on.
+    const listed = await this.#modList();
+    const on = Object.keys(own)
+      .sort()
+      .map((name) => ({ name, enabled: listed.get(name) ?? true }));
+    job.expect = {
+      ...Object.fromEntries(on.filter((m) => m.enabled).map((m) => [m.name, own[m.name]!])),
+      ...Object.fromEntries(job.mods.map((m) => [m.name, m.version])),
+    };
 
     // The mods, staged in mods.next. mods.prev is the last update's: removed, so one during this update is this one's.
     await rm(join(data, 'mods.prev'), { recursive: true, force: true });
@@ -663,7 +677,7 @@ export class Updates {
           if (sha1 !== mod.sha1) throw new Fail(`The download of ${mod.name} ${mod.version} doesn't match the mod portal's sha1`);
           await rename(`${incoming}/${file}`, `${next}/${file}`);
         }
-        const list = [...Object.keys(own).sort(), ...job.mods.map((m) => m.name)].map((name) => ({ name, enabled: true }));
+        const list = [...on, ...job.mods.map((m) => ({ name: m.name, enabled: true }))];
         const fh = await create(`${next}/mod-list.json`);
         try {
           await writeAll(fh, Buffer.from(JSON.stringify({ mods: list }, null, 2) + '\n'));
@@ -675,6 +689,48 @@ export class Updates {
     const settings = await this.#settings();
     await this.#save(job);
     this.#step(r, 'prepare', 'done', `Staged Factorio ${v} and ${plural(job.mods.length, 'mod')}${settings ? ', mod-settings.dat carried over' : ''}`);
+  }
+
+  /**
+   * Which mods the server's current `mods/mod-list.json` enables or disables, by name (a container-written file, read
+   * through the folder opened `O_NOFOLLOW`, a regular file of 1 MiB at most; it only says which of the release's own
+   * mods are on). No file: an empty map (Factorio's default, every mod on). One that isn't Factorio's list fails prepare.
+   */
+  async #modList(): Promise<Map<string, boolean>> {
+    const { data } = this.#o;
+    const text = await within(join(data, 'mods'), async (mods) => {
+      const file = await openPlain(`${mods}/mod-list.json`);
+      if (!file) {
+        if (await there(`${mods}/mod-list.json`)) throw new Fail('mods/mod-list.json is not a regular file');
+        return null;
+      }
+      try {
+        if (file.st.size > MOD_LIST_MAX) throw new Fail(`mods/mod-list.json is over ${mb(MOD_LIST_MAX)}`);
+        const buf = Buffer.alloc(file.st.size);
+        const { bytesRead } = await file.fh.read(buf, 0, buf.length, 0);
+        return buf.subarray(0, bytesRead).toString('utf8');
+      } finally {
+        await file.fh.close();
+      }
+    }).catch((err: NodeJS.ErrnoException) => {
+      if (err instanceof Fail) throw err;
+      if (err.code === 'ENOENT') return null; // no mods folder yet
+      throw new Fail(`Can't read mods/mod-list.json: ${reason(err)}`);
+    });
+    const listed = new Map<string, boolean>();
+    if (text === null) return listed;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    const entries = isObject(parsed) && Array.isArray(parsed.mods) ? parsed.mods : null;
+    if (!entries || !entries.every((m: unknown) => isObject(m) && typeof m.name === 'string' && typeof m.enabled === 'boolean')) {
+      throw new Fail("mods/mod-list.json is not Factorio's mod list ({ mods: [{ name, enabled }] }): nothing was changed");
+    }
+    for (const m of entries as { name: string; enabled: boolean }[]) if (!listed.has(m.name)) listed.set(m.name, m.enabled);
+    return listed;
   }
 
   /** The binary's highest glibc need against the image's, from setup's `image.json`. */

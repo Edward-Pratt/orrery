@@ -452,6 +452,66 @@ test('an update while the server runs: a pre-update save, the hub stops it, the 
   assert.ok(!JSON.stringify(w.sent).includes('SECRET'));
 });
 
+test("the game's own mods keep their enabled state from the current mod-list.json; one new in the release is enabled; the gate expects exactly that", async (t) => {
+  const w = await world(t);
+  // space-age off by hand; a mod the update drops listed too.
+  const list = { mods: [{ name: 'base', enabled: true }, { name: 'space-age', enabled: false }, { name: 'orrery', enabled: true }, { name: 'old-mod', enabled: false }] };
+  await writeFile(join(w.data, 'mods/mod-list.json'), JSON.stringify(list));
+  await eventually(() => w.installed && w.installed.mods.length === 2, 2000, 'installed without space-age');
+  // 2.1.25 ships one more of the game's own mods.
+  const info = JSON.stringify({ name: 'quality', version: '2.1.25', title: 'quality' });
+  w.offer('2.1.25', releaseTar('2.1.25', { extra: [{ name: 'factorio/data/quality/info.json', data: info }] }));
+  w.mod('orrery', '0.2.0');
+  w.mod('flib', '0.16.2');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']]));
+  await w.step('stop', 'waiting');
+  const staged = JSON.parse(await readFile(join(w.data, 'mods.next/mod-list.json'), 'utf8'));
+  assert.deepEqual(staged.mods, [
+    { name: 'base', enabled: true },
+    { name: 'quality', enabled: true },
+    { name: 'space-age', enabled: false },
+    { name: 'orrery', enabled: true },
+    { name: 'flib', enabled: true },
+  ]);
+  assert.deepEqual(JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).expect, { base: '2.1.25', quality: '2.1.25', orrery: '0.2.0', flib: '0.16.2' });
+  await w.unit.act('stop');
+  await w.u.resume();
+  const done = await w.done();
+  assert.equal(done.outcome, 'ok', JSON.stringify(w.steps().at(-1)));
+  // As the hub names its row: the game's own mods enabled in the latest installed (base), and the update's.
+  assert.deepEqual([done.from, done.to], ['2.1.24 · 2 mods', '2.1.25 · 3 mods']);
+  assert.match((await w.step('gate', 'done')).detail, /exactly its 4 mods/);
+  await eventually(() => w.installed?.factorio === '2.1.25', 2000, 'installed after the update');
+  assert.deepEqual(w.installed!.mods.map((m) => m.name), ['base', 'flib', 'orrery', 'quality'], 'installed reports what runs: no space-age');
+});
+
+test("a current mod-list.json that isn't Factorio's list fails prepare: nothing changed", async (t) => {
+  const w = await world(t);
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  for (const bad of ['not json', JSON.stringify({ mods: [{ name: 'space-age', enabled: 'no' }] }), JSON.stringify([])]) {
+    await writeFile(join(w.data, 'mods/mod-list.json'), bad);
+    w.sent.length = 0;
+    await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+    const done = await w.done();
+    assert.equal(done.outcome, 'failed in staging');
+    assert.match((await w.step('prepare', 'failed')).detail, /^mods\/mod-list\.json is not Factorio's mod list/);
+    assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+    assert.equal(await readFile(join(w.data, 'mods/mod-list.json'), 'utf8'), bad, 'left as it was');
+    assert.equal(await exists(join(w.data, 'mods.next')), false);
+    assert.deepEqual(w.unit.calls, [], 'the server never stopped');
+    await until(async () => !(await exists(join(w.state, 'update.json'))), 2000, 'reported');
+  }
+  // A symlink in its place is not followed.
+  await rm(join(w.data, 'mods/mod-list.json'));
+  await writeFile(join(w.dir, 'elsewhere.json'), JSON.stringify({ mods: [] }));
+  await symlink(join(w.dir, 'elsewhere.json'), join(w.data, 'mods/mod-list.json'));
+  w.sent.length = 0;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  assert.equal((await w.done()).outcome, 'failed in staging');
+  assert.equal((await w.step('prepare', 'failed')).detail, 'mods/mod-list.json is not a regular file');
+});
+
 test('a gate failure rolls back to the old release, mods.prev with its mod-settings.dat, and the pre-update save', async (t) => {
   const w = await world(t, { gateMs: 300 });
   w.offer('2.1.25');

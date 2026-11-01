@@ -284,8 +284,6 @@ New module `agent/src/settings.ts` (`GameSettings`):
    - Write it to `.server-settings.json.<random>.partial` in the config folder through the folder handle (`O_CREAT`,
      `O_EXCL`, mode 600), `fsync` it, then rename it over `server-settings.json` (never through `/tmp`: the SELinux
      label).
-   - Before the first write ever, copy the current file's checked model to `<state>/settings.json` as `lastGood`, if
-     it is fully readable and the server last started with it.
    - Then arm the start gate.
 4. **Apply live**, only when the unit is active and RCON answers:
    - one `/config set <option> <value>` per changed key with a live option;
@@ -299,8 +297,13 @@ New module `agent/src/settings.ts` (`GameSettings`):
    the names, lowercased), and nothing is applied live.
 5. **Reply** `{ applied, pending }`, then push `settings`.
 
-**Pending.** When the unit becomes active, the Agent stores the checked model it read then as `startedWith`, in
-`<state>/settings.json`. `pending` lists the restart-only keys (`auto_pause`, `autosave_slots`) whose file value
+**Started with, and last good.** When the unit becomes active, the Agent stores the checked model it reads then as
+`startedWith`, in `<state>/settings.json`. An Agent that starts while the unit is already active (after a deploy or a
+restart of its own) has seen no such change: it reads the file then as `startedWith`, as `readAutoPause` reads it
+today. **Every good start** (RCON answers within 300 s of the unit becoming active, gate armed or not) also makes
+that model `lastGood`, when it was fully readable. That is the one rule for `lastGood`.
+
+**Pending.** `pending` lists the restart-only keys (`auto_pause`, `autosave_slots`) whose file value
 differs from `startedWith`, plus any live key that failed in step 4. A start empties it. `status.ts`'s
 `readAutoPause` (UPS and paused) switches from reading the file to `startedWith.auto_pause`: the file can now hold a
 value the running server doesn't have yet.
@@ -308,8 +311,8 @@ value the running server doesn't have yet.
 **Start gate** (new `agent/src/gate.ts`, `StartGate`; stage B uses it for restores too). Armed by each write, it watches
 the next start:
 
-- **Good**: RCON answers within 300 s of the unit becoming active (`TimeoutStartSec`). The gate disarms, and the
-  model just started with becomes `lastGood`.
+- **Good**: RCON answers within 300 s of the unit becoming active (`TimeoutStartSec`). The gate disarms (and, as at
+  every good start, the model just started with becomes `lastGood`).
 - **Failed**: the unit is `failed`, or `activating` with an `auto-restart` SubState and a Result other than success,
   before RCON answered. The Agent writes `lastGood` back the same way as step 3, so the auto-restart 10 s later uses
   it. It then disarms and pushes `settings` with `rolledBack` (the time and Factorio's last error line from
@@ -561,6 +564,17 @@ The existing `restore` keeps working for an older hub. What changes:
 
   The audit has the request's row and no outcome row, and the Saves tab shows the service's real state.
 - Exclusive, as restores are now, with game updates, deploys, uploads being stored and world generation on that server.
+
+### Audit and Discord (stage B)
+
+- **Audit** (target the server):
+  - `restore`, as today, with `stop` and `start` noted, `dropMods` listed, and its outcome row (`ok`, or `rolled
+    back` with the detail, from `restoreResult`);
+  - `world create`: the preset, the seed and the overrides, then the stored name or the error;
+  - `save upload`: the file name and size, then the stored name or the error.
+- **Discord** (the alerts channel): `restoreRolledBack`, "<server> didn't start with <name>: the Agent put the previous
+  world back." Uploads, world creation and a good restore post nothing. The restore's start already posts the
+  server's `started`, as any start does.
 
 ### Save header check
 

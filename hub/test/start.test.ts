@@ -1893,8 +1893,11 @@ test("with agents but no host integration, each Agent's Host is served with its 
   const sample: HostSample = { ts: Date.now(), cpu: 0.5, load: [1, 1, 1], memory: { used: 2, total: 8 }, disks: [{ mount: '/', free: 50 * 1024 ** 3, total: 100 * 1024 ** 3 }] };
   agent.send({ type: 'hostSample', sample });
   await until(() => handle.hosts.get('vm')!.latest() !== null);
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample }]);
-  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [sample]);
+  const stored = handle.hosts.get('vm')!.latest()!; // stamped with the hub's clock
+  assert.ok(stored.ts >= sample.ts && stored.ts <= Date.now());
+  assert.deepEqual(stored, { ...sample, ts: stored.ts });
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: stored }]);
+  assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [stored]);
   assert.equal((await app.request('/api/host', { headers: { cookie } })).status, 404);
   assert.equal((await app.request('/api/hosts/oracle/samples', { headers: { cookie } })).status, 404);
 });

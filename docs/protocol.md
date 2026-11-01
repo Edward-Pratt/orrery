@@ -129,8 +129,8 @@ An Agent is a small service on another Host that runs one Factorio server there 
 hub's Agent port, `integrations.agents.listen` (for example the hub's tailnet address, port 25584), never the Mod
 port. The same transport and handshake rules apply, with these on top: the peer's address must be the Agent's
 configured `address`, checked before any byte is read (else the socket is destroyed silently, for either first
-line); a line over its cap (see "Field limits"), or 10 s over the rate limit, closes the connection; every field has
-its limit (above).
+line); a line over its cap (see "Field limits"), or 10 s over the line budget (see "Rate rules"), closes the
+connection; every field has its limit (above).
 
 An Agent opens two connections:
 
@@ -203,3 +203,29 @@ own listings, and refuses an `update` whose versions, names or URLs fail its che
   connection to close too (then the Agent is lost); otherwise the server crashed.
 - Hung detection is the Mod's (30 s without a heartbeat), and stays on while paused, since the Agent's heartbeats
   follow each RCON round trip, paused or not. It is off only while the Agent is lost.
+
+### Rate rules
+
+The hub's budgets on the Agent port are its safety net against a token holder; an Agent stays under them. What goes
+over is dropped (the hub logs it at most once a minute, with a count), never answered.
+
+- **Connections**: at most 4 at once from one address (an Agent connection, a game connection and two spare),
+  handshaken or not; a fifth is destroyed before any byte is read. Agents sharing an address share the 4. A refused
+  first line gets its `reject`, then the hub closes the connection within 2 s, whatever the peer does.
+- **Lines**: each connection (the Agent connection and the game connection, each its own) 20 lines a second, in bursts
+  of up to 100, before and after the handshake. A line over it is dropped; a connection still dropping lines 10 s on
+  is closed.
+- **Message types**, each within its own connection: a message over its budget is dropped and the connection stays.
+
+| type | budget |
+|---|---|
+| `chat`, `join`, `leave`, `death`, `milestone`, together | 2 a second, bursts of 30 |
+| `link`, `unlink`, together | 1 a second, bursts of 5 |
+| `updateStep` | 5 a second, bursts of 20 |
+| `serviceState`, `saves`, `installed`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
+| `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
+| any other | the line budget only |
+
+An Agent forwards its server's game events at most 5 a second (bursts of 30, every type together, the rest dropped),
+so a player flooding chat never gets the game connection closed, and sends an `updateStep` for the same step at
+most once a second unless its `state` changes.

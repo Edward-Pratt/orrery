@@ -92,7 +92,7 @@ function noticeText(n: Notice): string | null {
     case 'restartCancelledDown':
       return '❎ Restart cancelled (server went down)';
     case 'restartFailed':
-      return `❌ Restart failed: ${n.error}`;
+      return `❌ Restart failed: ${md(n.error)}`; // a factorio server's: its Agent's refusal
     case 'lag': {
       // Only Minecraft has dimensions to name (Factorio's rate is UPS); an older Mod sends none.
       if (n.label === 'UPS') return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}`;
@@ -102,15 +102,15 @@ function noticeText(n: Notice): string | null {
     case 'lagRecovered':
       return `✅ ${n.label} back to normal (${n.tps.toFixed(1)})`;
     case 'backupOverdue':
-      return `⚠️ No new backup for ${n.hours} h (newest: ${n.newest})`;
+      return `⚠️ No new backup for ${n.hours} h (newest: ${md(n.newest)})`;
     case 'backupsMissing':
       return '⚠️ No backups found';
     case 'lowDisk':
       return `⚠️ Low disk space for backups: ${formatBytes(n.free)} free (limit ${n.minFreeGB} GB)`;
     case 'backupFinished':
-      return `✅ Backup finished (${n.detail})`;
+      return `✅ Backup finished (${md(n.detail)})`; // an Agent's detail is its own text
     case 'backupFailed':
-      return `❌ Backup failed: ${n.detail}`;
+      return `❌ Backup failed: ${md(n.detail)}`;
     case 'packUpdateStarted':
       return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
     case 'packUpdateStep': // progress for the dashboard
@@ -194,9 +194,9 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
     case 'memoryOk':
       return `✅ Host ${e.id}: memory back to ${e.percent}%`;
     case 'diskLow':
-      return `⚠️ Host ${e.id}: low disk on ${e.mount}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`;
+      return `⚠️ Host ${e.id}: low disk on ${md(e.mount)}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`; // an Agent's sample names it
     case 'diskOk':
-      return `✅ Host ${e.id}: disk on ${e.mount} back to ${formatBytes(e.free)} free`;
+      return `✅ Host ${e.id}: disk on ${md(e.mount)} back to ${formatBytes(e.free)} free`;
     case 'serviceFailed':
       return `❌ Service ${e.id} failed (${e.unit})`;
     case 'agentLost':
@@ -204,10 +204,11 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
     case 'agentBack':
       return `✅ Host ${e.id}: agent ${e.name} is connected again`;
     case 'deployStarted':
-      return `🚀 Deploying ${deployed(e)}: ${e.from ?? 'unknown'} → ${e.to} (by ${e.by})`;
+      // `from` can be a hello's version (a game connection's `modVersion`, an Agent's `agentVersion`).
+      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : md(e.from)} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
       if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
-      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from ?? 'the previous release'}`;
+      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : md(e.from)}`;
       return `❌ Deploying ${deployed(e)} ${e.to} failed`;
   }
 }
@@ -407,7 +408,7 @@ export function formatTopic(s: ServerState): string {
   if (s.hung) return '🟠 Not responding';
   const tps = s.tps === null ? '' : ` · ${Math.round(s.tps)} ${rateOf(s.game).label}`;
   const n = s.players.length;
-  const who = n ? `: ${s.players.join(', ')}` : '';
+  const who = n ? `: ${s.players.map(md).join(', ')}` : ''; // a topic renders markdown too
   return truncate(`🟢 Online${tps} · ${n} player${n === 1 ? '' : 's'}${who}`, 1024);
 }
 

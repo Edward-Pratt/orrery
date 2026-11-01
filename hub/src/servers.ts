@@ -294,9 +294,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   /**
    * A factorio server's game connection, its hello already checked by `Agents` (the Agent's token, for its own server,
    * while its Agent connection is up). From here it is like a Mod's: the welcome goes out, and the returned function
-   * takes each of its lines, which `Agents` reads with its line cap and rate limit.
+   * takes each of its messages, which `Agents` reads with its line cap and budgets and parses with `parseModLine`.
    */
-  attach(socket: Socket, serverId: string, modVersion: string): (line: string) => void {
+  attach(socket: Socket, serverId: string, modVersion: string): (msg: ModMsg) => void {
     this.#sockets.add(socket);
     socket.on('close', () => this.#sockets.delete(socket));
     return this.#open(socket, serverId, modVersion);
@@ -326,7 +326,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   #accept(socket: Socket): void {
-    let onLine: ((line: string) => void) | null = null;
+    let onMsg: ((msg: ModMsg) => void) | null = null;
     this.#sockets.add(socket);
     socket.on('error', () => {}); // 'close' always follows and does the cleanup
     const helloTimer = setTimeout(() => socket.destroy(), this.#helloTimeoutMs);
@@ -334,16 +334,19 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     lines.on('error', () => {});
     lines.on('line', (line) => {
       if (socket.destroyed || socket.writableEnded) return;
-      if (onLine) return onLine(line);
-      clearTimeout(helloTimer);
       const msg = parseModLine(line);
+      if (onMsg) {
+        if (msg && msg.type !== 'hello') onMsg(msg); // junk after handshake is ignored
+        return;
+      }
+      clearTimeout(helloTimer);
       if (msg?.type !== 'hello') return void socket.destroy();
       const reason = this.#checkHello(msg);
       if (reason) {
         this.#send(socket, { type: 'reject', reason });
         return void socket.end();
       }
-      onLine = this.#open(socket, msg.serverId, msg.modVersion);
+      onMsg = this.#open(socket, msg.serverId, msg.modVersion);
     });
     socket.on('close', () => {
       this.#sockets.delete(socket);
@@ -351,8 +354,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     });
   }
 
-  /** Makes an accepted game connection its server's: welcomed, online, and its lines handled from then on. */
-  #open(socket: Socket, id: string, modVersion: string): (line: string) => void {
+  /** Makes an accepted game connection its server's: welcomed, online, and its messages handled from then on. */
+  #open(socket: Socket, id: string, modVersion: string): (msg: ModMsg) => void {
     this.#settle(id); // a crash waiting on the Agent is decided before the new connection counts
     const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
     const old = this.#conns.get(id);
@@ -363,10 +366,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     this.#send(socket, { type: 'welcome' });
     this.#emit(id, 'connected');
     socket.on('close', () => this.#closed(id, conn));
-    return (line) => {
-      if (socket.destroyed || socket.writableEnded) return;
-      const msg = parseModLine(line);
-      if (msg && msg.type !== 'hello') this.#handle(id, conn, msg); // junk after handshake is ignored
+    return (msg) => {
+      if (!socket.destroyed && !socket.writableEnded) this.#handle(id, conn, msg);
     };
   }
 

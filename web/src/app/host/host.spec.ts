@@ -316,16 +316,28 @@ describe('host page releases', () => {
     expect(row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
   });
 
-  it("still lists the hub, the dashboard and each Mod for a hub below release 1, whose answer has no agent part", async () => {
+  it("still deploys from a hub below release 1: no /api/hosts, and an answer with no agent part", async () => {
+    const h = await setup(SAMPLE, false, { ...ON, github: true, agents: false, library: false });
+    h.backend.expectOne('/api/hosts').flush('Not Found', { status: 404, statusText: 'Not Found' }); // it serves /api/host
+    await h.render();
     const { agent: _, ...older } = ANSWER;
-    const { el, row, deploy, backend, render } = await releases(older as DeploysAnswer);
-    expect([...el.querySelectorAll('[data-row]')].map((r) => r.getAttribute('data-row'))).toEqual(['hub', 'web', 'mod:gtnh']);
+    h.backend.expectOne('/api/deploys').flush(older);
+    await h.render();
+    const row = (key: string) => h.el.querySelector<HTMLElement>(`[data-row="${key}"]`)!;
+    expect([...h.el.querySelectorAll('[data-row]')].map((r) => r.getAttribute('data-row'))).toEqual(['hub', 'web', 'mod:gtnh']);
     expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false); // rolled forward from here
-    await deploy('web', 'web-v0.4.1'); // or the dashboard back, to one that reads the older hub's API
+    // Or the dashboard back, to one that reads the older hub's API.
+    row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.click();
+    await h.render();
+    const select = row('web').querySelector<HTMLSelectElement>('[data-pick]')!;
+    select.value = 'web-v0.4.1';
+    select.dispatchEvent(new Event('change'));
+    await h.render();
+    row('web').querySelector<HTMLButtonElement>('[data-next]')!.click();
+    await h.render();
     dialogButton('ok').click();
-    await render();
-    const req = backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys');
-    expect(req.request.body).toEqual({ part: 'web', tag: 'web-v0.4.1' });
+    await h.render();
+    expect(h.backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys').request.body).toEqual({ part: 'web', tag: 'web-v0.4.1' });
   });
 
   const AGENTS: DeploysAnswer = {

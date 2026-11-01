@@ -250,6 +250,16 @@ test('servers that do not connect within the grace period are reported offline',
   ]);
 });
 
+test('with the Minecraft integration off (no Mod port), a minecraft server stays unknown after the grace period', async (t) => {
+  const hub = new ServerHub([{ id: 'gtnh', name: 'GTNH', game: 'minecraft', token: TOKEN }], { graceMs: 100 });
+  const events: HubEvent[] = [];
+  hub.on('event', (e) => events.push(e));
+  t.after(() => hub.close());
+  hub.start(); // as startHub does, with no listen()
+  await sleep(250);
+  assert.deepEqual(events, []);
+});
+
 test("a factorio server is offline after the grace period only while its Agent is connected, else unknown", async (t) => {
   const hub = new ServerHub(
     [

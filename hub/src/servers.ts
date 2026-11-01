@@ -134,6 +134,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #settling = new Map<string, NodeJS.Timeout>(); // factorio servers whose game connection closed, waiting on the Agent
   #lifecycle = new Map<string, LifecycleBudget>(); // factorio servers' lifecycle budgets, kept across connections
   #server: Server | null = null;
+  #listening = false; // the Mod port is open: without it a minecraft server has no way to connect
   #timer: NodeJS.Timeout | undefined;
   #grace: NodeJS.Timeout | undefined;
   #closing = false;
@@ -168,11 +169,12 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    */
   start(): void {
     this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
-    // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); a factorio
-    // server whose Agent isn't connected stays unknown.
+    // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); one that
+    // can't connect stays unknown: a factorio server whose Agent isn't connected, a minecraft one with no Mod port.
     this.#grace = setTimeout(() => {
       for (const s of this.#states.values()) {
-        if (!this.#conns.has(s.id) && (s.game !== 'factorio' || this.#agentsUp.has(s.id))) this.#emit(s.id, 'offline');
+        const canConnect = s.game === 'factorio' ? this.#agentsUp.has(s.id) : this.#listening;
+        if (!this.#conns.has(s.id) && canConnect) this.#emit(s.id, 'offline');
       }
     }, this.#graceMs);
   }
@@ -184,6 +186,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       server.once('error', reject);
       server.listen(port, host, () => {
         this.#server = server;
+        this.#listening = true;
         resolve((server.address() as AddressInfo).port);
       });
     });

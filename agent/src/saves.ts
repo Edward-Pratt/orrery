@@ -8,7 +8,7 @@ import type { AgentMsg, Save, SaveKind } from '../../hub/src/types.ts';
 import { head, openPlain } from './files.ts';
 import { RconTimeout } from './rcon.ts';
 import type { UnitState } from './service.ts';
-import { LIMITS } from './wire.ts';
+import { LIMITS, printable } from './wire.ts';
 
 /** A named save every 6 h, if anyone played since the last one. */
 export const SAVE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -96,9 +96,10 @@ function saved(reply: string, name: string): boolean {
  * through the folder opened once, `O_DIRECTORY | O_NOFOLLOW`, as `/proc/self/fd/<fd>/<name>`; a file counts only if
  * it is a regular one on that folder's filesystem).
  *
- * - Lists every `*.zip`, newest first (500 at most), with its kind and `current` on the file Factorio last loaded
- *   (the log's last `Loading map` line, matched against the folder's own entries by path); emits `saves` with the
- *   free space on each change of the list (every 10 s, and after its own changes).
+ * - Lists every `*.zip` but a name with a control character (`printable`), newest first (500 at most), with its kind
+ *   and `current` on the file Factorio last loaded (the log's last `Loading map` line, matched against the folder's
+ *   own entries by path); emits `saves` with the free space on each change of the list (every 10 s, and after its own
+ *   changes).
  * - `save`: `/orrery-save orrery-<time>`, then waits until the file is there and its size and time held for 5 s (5
  *   minutes at most), and emits `backup`; one at a time. `played` makes one every 6 h if anyone played since the last.
  * - `prune` after each named save and restore: the newest 20 named saves and 3 world files stay; never the current
@@ -151,7 +152,8 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
     return this.#within(async (base, dev) => {
       const saves: Save[] = [];
       for (const name of await readdir(base)) {
-        if (!name.endsWith('.zip') || name.length > LIMITS.text) continue;
+        // A name with a control character (a newline: a forged log line) is no save: Factorio and the agent make none.
+        if (!name.endsWith('.zip') || name.length > LIMITS.text || printable(name) !== name) continue;
         const st = await lstat(`${base}/${name}`).catch(() => null); // lstat: a symlink is not a file
         if (!st?.isFile() || st.dev !== dev) continue;
         saves.push({ name, size: st.size, mtime: Math.round(st.mtimeMs), kind: kindOf(name), current: name === current });
@@ -234,9 +236,9 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
       for (const s of doomed) {
         try {
           await unlink(`${base}/${s.name}`);
-          console.log(`[saves] pruned ${s.name}`);
+          console.log(`[saves] pruned ${printable(s.name)}`);
         } catch (err) {
-          console.error(`[saves] can't prune ${s.name}: ${(err as Error).message}`);
+          console.error(`[saves] can't prune ${printable(s.name)}: ${printable((err as Error).message)}`);
         }
       }
     }).catch((err: Error) => console.error(`[saves] can't prune: ${err.message}`));
@@ -284,7 +286,7 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
         await src.fh.close();
       }
     });
-    console.log(`[saves] restored ${name} as ${copy}: the next start loads it`);
+    console.log(`[saves] restored ${printable(name)} as ${printable(copy)}: the next start loads it`);
     await this.prune();
     await this.refresh();
   }
@@ -308,7 +310,7 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   async #make(name: string): Promise<number> {
     try {
       const reply = await this.#o.run(`/orrery-save ${name}`);
-      if (!saved(reply, name)) throw new Error(`/orrery-save answered ${JSON.stringify(reply.slice(0, 200))}`);
+      if (!saved(reply, name)) throw new Error(`/orrery-save answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
     } catch (err) {
       // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the file tells.
       if (!(err instanceof RconTimeout)) throw err;

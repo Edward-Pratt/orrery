@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as hub from '../../hub/src/protocol.ts';
-import { LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, readAgentLine, readGameLine } from '../src/wire.ts';
+import { LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, outputLines, printable, readAgentLine, readGameLine, replyLines } from '../src/wire.ts';
 
 test('the constants are the hub contract: the protocol version and every field limit; the line cap is 1 MiB', () => {
   assert.equal(PROTOCOL_VERSION, hub.PROTOCOL_VERSION);
@@ -73,4 +73,11 @@ test('requests are checked against their documented fields and limits, and copie
   assert.deepEqual(readGameLine('{"type":"say","author":"a","message":"m"}'), { msg: { type: 'say', author: 'a', message: 'm', source: 'discord' } });
   assert.deepEqual(readGameLine('{"type":"save"}'), { msg: { type: 'save' } });
   assert.deepEqual(readGameLine('{"type":"stopping"}'), { msg: null, id: null, why: 'unknown type' });
+});
+
+test('printable: control characters (but a tab) and the line separators become ?; command output and log lines are printable', () => {
+  assert.equal(printable('a\nb\r\u001b[2J\u001b]0;t\u0007\u0000\u007f\u009b\u2028\u2029 é 😀\tz'), 'a?b??[2J?]0;t?????? é 😀\tz');
+  assert.equal(printable('world-1.zip'), 'world-1.zip');
+  assert.deepEqual(outputLines('ok\r\nx\u001b[31my\n\t[C]: in ?'), ['ok', 'x?[31my', '\t[C]: in ?']);
+  assert.deepEqual(replyLines(['a\u001b]52;c;Zm9v\u0007', 'stack traceback:', '\t[C]: in ?']), ['a?]52;c;Zm9v?', 'stack traceback:', '\t[C]: in ?']);
 });

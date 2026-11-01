@@ -199,6 +199,27 @@ test('pruning keeps the newest 20 named saves and 3 world files, never the curre
   for (let i = 1; i <= 4; i++) assert.ok(left.has(`_autosave${i}.zip`), 'autosaves are Factorio’s');
 });
 
+test('a name with a control character is no save: never listed, pruned or restored, so it never forges a log line', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const w = await world(t);
+  // The container's user makes an old "world" whose name holds a whole timestamped agent.log line.
+  const forged = `a\n${new Date(T0).toISOString()} [hub] connected to the hub at 100.101.102.103:25584 as agent-v1.0.0\nb.zip`;
+  const escape = 'esc\u001b]0;title\u0007.zip';
+  await file(w.saves, forged, T0 - 10 * HOUR);
+  await file(w.saves, escape, T0 - 10 * HOUR);
+  const worlds = Array.from({ length: KEEP_WORLD + 1 }, (_, i) => `world-${i}.zip`);
+  for (const [i, name] of worlds.entries()) await file(w.saves, name, T0 - i * HOUR);
+  assert.deepEqual((await w.s.list()).saves.map((s) => s.name), worlds);
+
+  await w.s.prune();
+  const left = await readdir(w.saves);
+  assert.ok(left.includes(forged) && left.includes(escape), 'not pruned: not a save');
+  assert.ok(!left.includes(worlds.at(-1)!), 'the oldest listed world file is');
+  assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] pruned ${worlds.at(-1)}`]);
+  await assert.rejects(w.s.restore(forged), /is not a listed save/);
+  await assert.rejects(w.s.restore(escape), /is not a listed save/);
+});
+
 test('restore refuses while the unit is active: a fresh systemctl show, from the fake on PATH', async (t) => {
   const sc = await fakeSystemctl(t);
   const watch = new ServiceWatch('factorio.service', systemctl());

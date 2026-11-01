@@ -4,6 +4,7 @@ import type { Config } from './config.ts';
 import { HostSampler, procReaders, type HostReaders } from './host.ts';
 import { Rcon } from './rcon.ts';
 import { parseStatus, type Status } from './status.ts';
+import { printable } from './wire.ts';
 
 export type CheckOptions = {
   /** How long RCON gets to answer: Factorio may still be loading the map (factorio.service allows a 300 s start). */
@@ -52,8 +53,9 @@ function reach(host: string, port: number, waitMs: number): Promise<string | nul
 
 /**
  * The first-boot check (setup's last step, `index.ts check`), as a report on stdout: the config and secrets, a host
- * sample, RCON's `/orrery-status` (the game's version and every loaded mod) and whether the hub can be reached. True
- * when all passed; the hub is only a warning, since setup may run before the hub listens (`--no-hub`).
+ * sample, RCON's `/orrery-status` (the game's version and every loaded mod, its name `printable`: any mod can shape it,
+ * and setup prints the report on a root terminal) and whether the hub can be reached. True when all passed; the hub
+ * is only a warning, since setup may run before the hub listens (`--no-hub`).
  */
 export async function check(load: () => Config, version: string, o: CheckOptions = {}): Promise<boolean> {
   const say = (mark: 'ok' | 'FAIL' | 'warn', what: string) => console.log(`${mark.padEnd(4)} ${what}`);
@@ -90,7 +92,7 @@ export async function check(load: () => Config, version: string, o: CheckOptions
     say('FAIL', `rcon: 127.0.0.1:${server.rconPort}: ${status}`);
     ok = false;
   } else {
-    const mods = Object.entries(status.mods).map(([name, v]) => `${name} ${v}`).join(', ');
+    const mods = Object.entries(status.mods).map(([name, v]) => `${printable(name)} ${v}`).join(', ');
     say('ok', `rcon: Factorio ${status.version}, tick ${status.tick}, ${status.players.length} online; mods: ${mods}`);
   }
 

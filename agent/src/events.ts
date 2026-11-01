@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { constants, open, type FileHandle } from 'node:fs/promises';
 import type { ModMsg } from '../../hub/src/types.ts';
 import type { UnitState } from './service.ts';
-import { LIMITS, type ToGame } from './wire.ts';
+import { LIMITS, printable, type ToGame } from './wire.ts';
 
 /** The game connection's messages that come from the mod's datagrams. */
 export type GameEvent = Extract<ModMsg, { type: 'chat' | 'join' | 'leave' | 'death' | 'milestone' | 'link' | 'unlink' }>;
@@ -301,7 +301,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
       (reply) => {
         if (run !== this.#run || this.#hello !== 'sent') return;
         this.#hello = 'answered';
-        if (!answeredOk(reply)) return console.error(`[events] /orrery-hello answered ${JSON.stringify(reply.slice(0, 200))}`);
+        if (!answeredOk(reply)) return console.error(`[events] /orrery-hello answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
         this.#helloTimer = setTimeout(() => {
           console.error(`[events] no hello datagram came on UDP 127.0.0.1:${this.#o.port}: the mod sends to 34199 from ${this.#o.factorioPort}; are the ports right?`);
         }, this.#o.helloMs);
@@ -463,7 +463,7 @@ export function toCommand(msg: ToGame): string {
 export async function toGame(run: (command: string) => Promise<string>, msg: ToGame): Promise<void> {
   try {
     const reply = await run(toCommand(msg));
-    if (!answeredOk(reply)) console.error(`[game] ${msg.type} was not shown: ${JSON.stringify(reply.slice(0, 200))}`);
+    if (!answeredOk(reply)) console.error(`[game] ${msg.type} was not shown: ${printable(JSON.stringify(reply.slice(0, 200)))}`);
   } catch (err) {
     console.error(`[game] ${msg.type} was not shown: ${(err as Error).message}`);
   }

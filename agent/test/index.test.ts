@@ -116,8 +116,10 @@ test('with no hub reachable the agent keeps running, logs that once, and connect
   assert.equal(code, 0);
 });
 
-test('check: prints the report and exits 0 when RCON answers, even with no hub (a warning)', async (t) => {
-  const rcon = await fakeRcon(status);
+test('check: prints the report and exits 0 when RCON answers, even with no hub (a warning); a mod name prints without its escapes', async (t) => {
+  // Any mod's name reaches the report, which setup prints on a root terminal: its escape sequences must not.
+  const mods = { base: '2.1.24', 'x\u001b]0;pwned\u0007\u001b[2J': '1.0.0', orrery: '0.1.0' };
+  const rcon = await fakeRcon(() => JSON.stringify({ ...JSON.parse(status()), mods }));
   t.after(() => rcon.close());
   const { env } = await world(t, rcon.port, 1);
   const child = spawn(process.execPath, [INDEX, 'check'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -128,7 +130,8 @@ test('check: prints the report and exits 0 when RCON answers, even with no hub (
   assert.equal(code, 0, out);
   assert.match(out, /^ok {3}config: agent factorio-vm/m);
   assert.match(out, /^ok {3}host: cpu \d+%/m);
-  assert.match(out, /^ok {3}rcon: Factorio 2\.1\.24, .*mods: base 2\.1\.24, orrery 0\.1\.0$/m);
+  assert.match(out, /^ok {3}rcon: Factorio 2\.1\.24, .*mods: base 2\.1\.24, x\?\]0;pwned\?\?\[2J 1\.0\.0, orrery 0\.1\.0$/m);
+  assert.doesNotMatch(out, /[\u001b\u0007]/, 'no escape sequence reaches the terminal');
   assert.match(out, /^warn hub: can't reach 127\.0\.0\.1:1/m);
   assert.ok(!out.includes(TOKEN) && !out.includes(PASSWORD), 'no secret in the report');
 });

@@ -107,7 +107,7 @@ test('a started hub relays mod chat to the frontend and shuts down cleanly', asy
 test("with integrations.minecraft off, a minecraft server's uptime stays unknown: no Mod port, so no grace 'down'", async (t) => {
   const rows = async (integrations: Config['integrations']) => {
     const cfg = config(t, integrations);
-    const handle = await startHub(cfg, { startFrontend: async () => ({ stop() {} }), get: async () => {}, hub: { graceMs: 50 } });
+    const handle = await startHub(cfg, { startFrontend: async () => ({ stop() {} }), get: () => assert.fail('no ping within a test'), hub: { graceMs: 50 } });
     await sleep(200);
     await handle.close();
     const db = new DatabaseSync(cfg.dbPath);

@@ -29,6 +29,9 @@ export const LIMITS = {
   pending: 16,
   extra: 32,
   text: 256,
+  /** A `saveChunk`'s base64 `data` (512 KiB at most before it), and an uploaded save's size. */
+  saveChunk: 700_000,
+  saveBytes: 1024 * 1024 * 1024,
   /** Bytes in one line on the Agent port, its `\n` included, either way: the hub destroys a socket that sends more. */
   lineBytes: 1024 * 1024,
 } as const;
@@ -204,6 +207,11 @@ export const settingsFieldOk = (key: keyof GameSettingsFields, value: unknown): 
 /** Left out: keep the file's; null: remove it; else a password by the rule. */
 const gamePassword: Check = (v) => (v === undefined || v === null ? v : matching(GAME_SETTINGS.password)(v));
 
+/** An upload's id: the hub's upload, 32 hex digits (it names the partial file, so nothing else may). */
+const uploadId = matching(/^[0-9a-f]{32}$/);
+/** A `saveChunk`'s `data`: base64, at most `LIMITS.saveChunk` characters. */
+const base64: Check = (v) => (str(LIMITS.saveChunk, 1)(v) === BAD ? BAD : matching(/^[A-Za-z0-9+/]+={0,2}$/)(v));
+
 /** The Agent connection: the handshake's answer, then the hub's requests. */
 const AGENT: Schemas<HubAgentMsg> = {
   welcome: {},
@@ -222,6 +230,10 @@ const AGENT: Schemas<HubAgentMsg> = {
   updateCancel: { id },
   deploy: { id, tag: str() },
   settingsSet: { id, settings: object(settingsFields), game_password: gamePassword, admins: list(matching(GAME_SETTINGS.admin), LIMITS.admins) },
+  saveUploadStart: { id, upload: uploadId, name: str(LIMITS.text, 1), size: int(1, LIMITS.saveBytes), sha256: matching(/^[0-9a-f]{64}$/) },
+  saveChunk: { id, upload: uploadId, offset: int(0, LIMITS.saveBytes), data: base64 },
+  saveUploadEnd: { id, upload: uploadId },
+  saveUploadCancel: { id, upload: uploadId },
 };
 
 /** The hub's messages on the game connection that the agent carries out in game, as the mod's RCON commands. */

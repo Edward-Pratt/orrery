@@ -79,6 +79,14 @@ function run(): void {
       updateCancel: () => updates.cancel(),
       deploy: ({ tag }) => deploys.deploy(tag),
       settingsSet: (req) => settings.set(req),
+      // An upload from the dashboard: stored next to the world as a save of its own (loading it is a restore).
+      saveUploadStart: async ({ upload, name, size, sha256 }) => {
+        if (updates.busy) throw new Error('a game update is running');
+        await saves.uploadStart(upload, name, size, sha256);
+      },
+      saveChunk: ({ upload, offset, data }) => saves.uploadChunk(upload, offset, Buffer.from(data, 'base64')),
+      saveUploadEnd: async ({ upload }) => ({ name: await saves.uploadEnd(upload, hub.latestInstalled?.factorio) }),
+      saveUploadCancel: ({ upload }) => saves.uploadCancel(upload),
     },
   });
   const updates: Updates = new Updates({

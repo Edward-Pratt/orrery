@@ -42,6 +42,7 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
       else if (e.type === 'paused') this.#latest.set(`paused:${e.serverId}`, entry);
       else if (e.type === 'notice' && e.kind === 'packUpdateStep') this.#latest.set(`pack:${e.serverId}`, entry);
       else if (e.type === 'notice' && e.kind === 'settings') this.#latest.set(`settings:${e.serverId}`, entry);
+      else if (e.type === 'notice' && e.kind === 'saveUpload') this.#latest.set(`upload:${e.serverId}`, entry);
       else {
         if (e.type === 'notice' && e.kind === 'packUpdateFinished') this.#latest.delete(`pack:${e.serverId}`);
         if (e.type === 'stopped' || e.type === 'crashed' || e.type === 'lost') {

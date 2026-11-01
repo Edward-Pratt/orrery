@@ -24,6 +24,7 @@ import { RestartScheduler } from './restarts.ts';
 import { ServerHub, type HubOptions } from './servers.ts';
 import { Stats } from './stats.ts';
 import { scheduleSummaries } from './summary.ts';
+import { SaveUploads } from './save-uploads.ts';
 import { Uploads } from './uploads.ts';
 import { serveWebApi, webApi, type OAuth, type WebApi } from './web.ts';
 
@@ -260,10 +261,12 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     );
   deploys?.start();
   // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
-  const uploads = services && minecraft ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
+  // Uploads: for packs (a server's service and Mod), and for an Agent's server's uploaded saves.
+  const uploads = services && (minecraft || agents) ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
   // The library takes uploads and is one per Environment: on whenever packs are.
   library =
     uploads &&
+    minecraft &&
     new Library({
       hub,
       db,
@@ -302,6 +305,23 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.packs,
     );
 
+  // Saves uploaded from the dashboard, sent to an Agent's server: not while it updates, restores, saves its game settings or deploys its Agent.
+  const saveUploads =
+    agents &&
+    uploads &&
+    new SaveUploads({
+      hub,
+      agents,
+      uploads,
+      busy: (id) => {
+        const kind = updating(id);
+        if (kind) return `a ${kind} is running`;
+        if (gameSettings?.busy(id)) return 'a game settings save is running';
+        if (restores?.busy(id)) return 'a restore is running';
+        if (agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!)) return "the server's Agent is being deployed";
+        return null;
+      },
+    });
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
@@ -312,7 +332,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, gameSettings, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

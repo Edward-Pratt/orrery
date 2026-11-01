@@ -78,6 +78,10 @@ export const LIMITS = {
   /** The keys a `settings` lists as `extra`. */
   extra: 32,
   text: 256,
+  /** A `saveChunk`'s `data`: base64 of at most 512 KiB, so its line stays well under `lineBytes`. */
+  saveChunk: 700_000,
+  /** An uploaded save's size. */
+  saveBytes: 1024 * 1024 * 1024,
   /**
    * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line
    * destroys the socket. The Agent keeps every line it sends at or under it.
@@ -307,6 +311,7 @@ const REPLY_DATA: { [K in keyof AgentReplyData]: Check } = {
   log: lines,
   logs: object({ files: list(object({ name: str(), size: num, modified: num }), LIMITS.logFiles) }),
   settingsSet: object({ applied: keys(LIMITS.pending), pending: keys(LIMITS.pending) }),
+  saveUploadEnd: object({ name: str() }),
 };
 
 /** One line against `schemas`: a new object of only the schema's fields, or null. */

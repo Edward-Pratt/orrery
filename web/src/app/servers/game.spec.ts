@@ -204,9 +204,32 @@ describe('server game tab', () => {
     expect(text(q('[data-game-mods]'))).toBe('Comes with Factorio: base, elevated-rails, quality, space-age');
     expect(document.querySelector('[data-pick=orrery] [data-remove]')).toBeNull(); // the Agent needs it
     expect(document.querySelector('[data-pick=orrery] [data-locked]')).not.toBeNull();
-    expect(text(q('[data-changes]'))).toContain('Nothing yet.');
+    expect(text(q('[data-changes]'))).toContain('Nothing: the server runs these already. Add a mod or pick other versions.');
     expect(go().disabled).toBe(true);
-    expect(text(q('[data-update-go-why]'))).toBe('Nothing to change yet.');
+    expect(text(q('[data-update-go-why]'))).toBe('Nothing to change: the server runs these already.');
+  });
+
+  it('labels a release factorio.com lists on both channels as stable, whatever the order', async () => {
+    const both = (versions: GameCatalog['versions']) => ({ ...SAME, versions });
+    const stableFirst: GameCatalog['versions'] = [
+      { version: '2.1.24', channel: 'stable' },
+      { version: '2.1.24', channel: 'experimental' },
+    ];
+    const experimentalFirst = [...stableFirst].reverse();
+    for (const versions of [stableFirst, experimentalFirst]) {
+      const running = await setup();
+      await running.open(both(versions));
+      expect(running.all('[data-factorio] option').map(running.text)).toEqual(['2.1.24 · stable (running)']);
+      TestBed.resetTestingModule();
+      document.body.innerHTML = '';
+      const older = await setup({ ...STATE, installed: { ...STATE.installed!, factorio: '2.1.23' } });
+      older.q('[data-update]').click();
+      await older.render();
+      await older.catalog(both(versions), PICKS, '2.1.23');
+      expect(older.all('[data-factorio] option').map(older.text)).toEqual(['2.1.23 (running)', '2.1.24 · stable']);
+      TestBed.resetTestingModule();
+      document.body.innerHTML = '';
+    }
   });
 
   it('asks the catalog on every change, shows the dependencies it added, and an unmet one stops the update until fixed', async () => {

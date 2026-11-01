@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
+import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCheck, lucideLock, lucidePlus, lucideX } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
@@ -190,7 +190,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                     }
                   </ul>
                 } @else {
-                  <p class="text-muted-foreground">{{ factorio() === state()?.installed?.factorio ? 'Nothing yet.' : 'Only the Factorio version.' }}</p>
+                  <p class="text-muted-foreground">{{ factorio() === state()?.installed?.factorio ? 'Nothing: the server runs these already. Add a mod or pick other versions.' : 'Only the Factorio version.' }}</p>
                 }
               </div>
             } @else if (checking()) {
@@ -247,12 +247,15 @@ export default class Game {
   /** Factorio's own releases on offer, and the one running. */
   protected readonly versions = computed(() => {
     const running = this.state()?.installed?.factorio;
-    const list: { version: string; label: string }[] = running ? [{ version: running, label: `${running} (running)` }] : [];
+    // Null: the running one, before the catalog says its channel.
+    const list: { version: string; channel: FactorioRelease['channel'] | null }[] = running ? [{ version: running, channel: null }] : [];
     for (const v of this.#catalog()?.answer.versions ?? []) {
-      if (!list.some((l) => l.version === v.version)) list.push({ version: v.version, label: `${v.version} · ${v.channel}` });
-      else if (v.version === running) list[0] = { version: running, label: `${running} · ${v.channel} (running)` };
+      // factorio.com can list one release as both stable and experimental: it is stable, whatever the order.
+      const at = list.findIndex((l) => l.version === v.version);
+      if (at < 0) list.push({ version: v.version, channel: v.channel });
+      else if (list[at]!.channel === null || v.channel === 'stable') list[at] = { version: v.version, channel: v.channel };
     }
-    return list;
+    return list.map(({ version, channel }) => ({ version, label: `${version}${channel ? ` · ${channel}` : ''}${version === running ? ' (running)' : ''}` }));
   });
   /** The mods the catalog added for a picked one's required dependency. */
   protected readonly dependencies = computed(() => this.#catalog()?.answer.mods.filter((m) => m.requiredBy !== null) ?? []);
@@ -269,7 +272,7 @@ export default class Game {
     const c = this.current();
     if (!c) return this.catalogError() ? 'Fix the problem above first.' : 'Waiting for the mod portal.';
     if (c.unresolved.length) return 'Fix the unmet dependencies first.';
-    if (!c.changes.length && this.factorio() === g?.installed?.factorio) return 'Nothing to change yet.';
+    if (!c.changes.length && this.factorio() === g?.installed?.factorio) return 'Nothing to change: the server runs these already.';
     return null;
   });
 

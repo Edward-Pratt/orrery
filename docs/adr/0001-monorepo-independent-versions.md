@@ -16,5 +16,7 @@ order, each in place before the next: the hub, the dashboard, the agent, and the
 reads new hub API without a guard (one exception: its Releases rows read an older hub's answer, which has no Agent
 part, so a hub rolled back below the Agent's release can still be rolled forward, or the dashboard back, from the
 dashboard; a rollback goes in the reverse order: the dashboard first, then the hub), and a Factorio mod release
-reaches its server by hand (a file in the server's `mods/`) until game updates exist (release 2), and then through a
-game update.
+reaches its server through a game update (as a portal mod; in release 1, before game updates, by hand, a file in the
+server's `mods/`). The agent's own deploys and game updates need a hub and an agent that both have them, so the hub ships
+first, as above; an agent before `agent-v1.1.0` has neither, so the hub refuses both for it (`AGENT_FLOOR`) and its Host's
+setup is re-run once at that release or later (`docs/adr/0004`).

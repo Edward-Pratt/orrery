@@ -26,8 +26,9 @@ export type ReleaseRow = {
 const DAY = 24 * 60 * 60_000;
 
 /**
- * The rows of an answer. A hub below release 1 (the Factorio Agent's) sends no `agent` part: its answer has no Agent
- * rows, so its Releases can still roll the hub forward or the dashboard back (the one guard for an older hub, ADR 0001).
+ * The rows of an answer. A hub below `hub-v2.14.0` (release 1 of the Factorio Agent) sends no `agent` part: its answer
+ * has no Agent rows, so its Releases can still roll the hub forward or the dashboard back (the one guard for an older
+ * hub, ADR 0001).
  */
 export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
   const agent: DeploysAnswer['agent'] = a.agent ?? { latest: null, releases: [], hosts: [] };

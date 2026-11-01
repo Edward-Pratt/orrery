@@ -1,9 +1,9 @@
 # agent (orrery-agent)
 
 A Node service on a remote Host. It dials out to the hub with its token and runs that Host's Factorio server: RCON,
-the Factorio mod's events, the server's unit, saves, host samples, game updates and its own deploys (release 2,
-`docs/ROADMAP.md`: `update`, `updateResume`, `updateCancel` and `deploy`; the hub's side is built separately against
-the same contract). Node 24+ + TypeScript, run directly (type stripping, no build step) like the hub. No runtime
+the Factorio mod's events, the server's unit, saves, host samples, game updates and its own deploys (`update`,
+`updateResume`, `updateCancel` and `deploy`, from `agent-v1.1.0` on: release 2 in `docs/ROADMAP.md`; the hub's side is
+built separately against the same contract, and refuses both for an older Agent). Node 24+ + TypeScript, run directly (type stripping, no build step) like the hub. No runtime
 dependencies: Node built-ins only (game tarballs go through the Host's `xz`, which setup installs).
 
 ```bash

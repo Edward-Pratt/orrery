@@ -30,9 +30,10 @@ file is the contract between the mod and the agent.
   release in place: fix forward with the next patch.
 - Every player who joins a server with the mod must download that exact version from the portal, so release
   rarely: batch changes rather than shipping each one.
-- A release reaches the server by hand until game updates exist (release 2): `deploy/setup-agent-host.sh` installs the
-  newest `factorio-v*` release's zip only when `/srv/factorio/mods` has no `orrery_*.zip`, and keeps one that is there.
-  To put a new release on the server, replace the zip in that folder and restart `factorio.service`.
+- A release reaches the server through a game update: pick `orrery`'s new version on the mod portal in the server's
+  Game tab (with its Agent at `agent-v1.1.0` or later). `deploy/setup-agent-host.sh` installs the newest `factorio-v*`
+  release's zip only when `/srv/factorio/mods` has no `orrery_*.zip`, and keeps one that is there. On an Agent before
+  game updates (`agent-v1.0.0`), replace the zip in that folder by hand and restart `factorio.service`.
 
 ## Rules (do not weaken)
 

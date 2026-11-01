@@ -150,7 +150,7 @@ the Logs tab against `gtnh`'s folder.
 | 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
 | 5 | Packs v2: the pack library (chunked uploads, GitHub Actions artifacts), Java runtimes, New server with `add-server.sh`, the Mod renamed `orrery`: #134 · Map: #123 · Layout: `docs/adr/0003-host-directory-layout.md` | hub + web + mod + deploy (no protocol bump) | L | #90; staging set up for its smoke test |
 
-## Factorio through an Agent — release 1 built (not yet cut), release 2 not started
+## Factorio through an Agent — release 1 shipped (2026-11-01), release 2 built (not yet cut)
 
 Notes: `docs/notes/factorio-agent.md` (the design, the build plan M0 to M8 and the smoke checks; local until the owner
 commits a cleaned copy, because the repo is public and the notes name the friend's VM details) · Decision:
@@ -160,7 +160,8 @@ aarch64 VM, reached over his Tailscale tailnet. An **Agent** (`agent/`) on the V
 reports chat and events to the Agent. Hub, dashboard, Agent and Factorio mod are released separately, in that order
 (`docs/adr/0001`). Split into two releases on 2026-10-31.
 
-**Release 1 — built on the branch `factorio-agent`, to review and cut:**
+**Release 1 — shipped 2026-11-01** as `hub-v2.14.0`, `web-v0.12.0`, `agent-v1.0.0` and `factorio-v1.0.0` (`orrery`
+1.0.0 on the mod portal):
 
 | Milestone | Where | Size |
 |---|---|---|
@@ -170,17 +171,25 @@ reports chat and events to the Agent. Hub, dashboard, Agent and Factorio mod are
 | M4: start, stop and restart with countdowns; console and logs | hub + agent + web | M |
 | M5: saves as Backups (on request, every 6 h after play), and restore | hub + agent + web | M |
 
-Without release 2, the Factorio version changes by re-running the setup with `--factorio`, mods are added by hand, and
-the Agent updates by re-running the setup at the new `agent-v` tag; the dashboard has no Game tab and no Agent rows
-under Releases. A local end-to-end loop (hub, Agent and a headless server) passed its ten scenarios; real players,
+On release 1 alone, the Factorio version changes by re-running the setup with `--factorio`, mods are added by hand,
+and the Agent updates by re-running the setup at the new `agent-v` tag; its dashboard has no Game tab and no Agent rows
+under Releases. A local end-to-end loop (hub, Agent and a headless server) passed its 14 scenarios; real players,
 Discord, Podman, real systemd timeouts and the tailnet are checked only by the smoke tests in the notes, after the cut.
 
-**Release 2 — not started:**
+**Release 2 — built on the branch `factorio-agent-2`, not yet cut:** to cut as the next hub and dashboard minors, then
+`agent-v1.1.0` (`FLOOR`'s Agent release: `agent-v1.0.0` can't deploy itself), in that order. Production deploys the
+hub first, then the dashboard; the friend then runs the setup from `agent-v1.1.0` (once, also over an Agent on
+`agent-v1.0.0`), and later Agent releases deploy from the dashboard.
 
 | Milestone | Where | Size |
 |---|---|---|
 | M6: game updates: the Factorio version and portal mods picked in the Game tab, with their dependencies; backup, countdown stop, swap, health gate and rollback, like a pack update | hub + agent + web | L |
-| M7: Agent deploys from the dashboard (`agent-v*` assets, rollback if the Agent won't reconnect); `deploy/deploy-agent.sh` is built already, nothing starts it yet | hub + agent + web | M |
+| M7: Agent deploys from the dashboard (`agent-v*` assets, rollback if the Agent won't reconnect): the Agent starts `orrery-agent-deploy@<tag>`, which runs `deploy/deploy-agent.sh` | hub + agent + web | M |
+
+A local end-to-end loop (hub, Agent, a headless 2.1.24 server and a fake mod portal and GitHub) passed: an update
+adding a mod and its dependency, a gate failure rolled back to the pre-update save, a cancel while downloading, a hub
+restart during an update, and an Agent deploy through the real `deploy-agent.sh`. The real portal, ARM64 build,
+Podman and polkit are not in it: they are left to the smoke checks in the notes, after the cut.
 
 ## Later / if needed
 

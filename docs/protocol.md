@@ -197,9 +197,12 @@ since it copies the whole save first (the hub waits that long for it).
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 
 The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
-deploys (both below). Release 1's Agent has no handler for these requests: it answers each with a `reply`
-`ok: false` (the hub ends that update `failed in staging`, with no `updateCancel`, or that deploy `failed`, with its error), and sends no
-`installed`, so the hub never offers it an update.
+deploys (both below), only to an Agent whose `agentHello` names `agent-v1.1.0` or later (the hub's `AGENT_FLOOR`; the
+repo's own `agent-v0.0.0`, the dev loop, counts as later). Release 1's `agent-v1.0.0` has no handler for them and sends
+no `installed`: the hub offers it no game update and refuses a deploy onto it before sending anything, both saying the
+friend re-runs the setup at `agent-v1.1.0` or later. When an Agent answers one of them `ok: false` all the same (as
+one with no handler does), the hub ends that update `failed in staging`, with no `updateCancel`, or that deploy
+`failed`, with its error.
 
 The Agent treats every request as untrusted: it never runs a path or argv it was sent, checks names against its
 own listings, and refuses an `update` whose versions, names or URLs fail its checks, or whose `mods` lack `orrery`
@@ -271,9 +274,9 @@ once the last one's `updateDone` is sent, so a new update ends the wait for the 
 
 The Agent deploys itself; the hub picks the release and records the outcome. In order:
 
-1. The hub sends `deploy` with a release GitHub lists, `tag` `agent-vX.Y.Z` (never one below `agent-v1.0.0`), only
-   while the Agent is connected and no game update, restore or countdown runs on its server. The Agent checks the
-   tag again and starts `orrery-agent-deploy@<tag>.service`: the `reply` means started.
+1. The hub sends `deploy` with a release GitHub lists, `tag` `agent-vX.Y.Z` (never one below `agent-v1.1.0`, the
+   hub's `FLOOR`, and never to an Agent running one), only while the Agent is connected and no game update, restore
+   or countdown runs on its server. The Agent checks the tag again and starts `orrery-agent-deploy@<tag>.service`: the `reply` means started.
 2. The deploy restarts the Agent: it sends `bye` first, so its server is `lost` with nothing posted.
 3. The new release's `agentHello` names the tag as `agentVersion` (as every `agentHello` names the Agent's own
    release, `agent-vX.Y.Z`): the hub records the deploy `ok`. An `agentHello` naming another release (the old one,

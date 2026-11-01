@@ -147,3 +147,19 @@ test("a server's paused changes: only the latest is replayed, beside its TPS, an
   ]);
   db.close();
 });
+
+test('20 open dashboard streams, one listener each, raise no MaxListenersExceededWarning', async (t) => {
+  const warnings: Error[] = [];
+  const onWarning = (w: Error) => void (w.name === 'MaxListenersExceededWarning' && warnings.push(w));
+  process.on('warning', onWarning);
+  t.after(() => process.off('warning', onWarning));
+  const db = new Db(':memory:');
+  const live = new LiveFeed(hubOf('gtnh'), db);
+  const listeners = Array.from({ length: 20 }, () => () => {});
+  for (const fn of listeners) live.on('event', fn);
+  await new Promise((r) => setImmediate(r)); // the warning is emitted on a later tick
+  assert.deepEqual(warnings, []);
+  assert.equal(live.listenerCount('event'), 20);
+  for (const fn of listeners) live.off('event', fn);
+  db.close();
+});

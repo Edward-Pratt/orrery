@@ -594,7 +594,7 @@ export type GameModPick = { name: string; version: string | null };
  * have (the game's own mods, like `base`, come with it). A mod left out is removed.
  */
 export type GameUpdateRequest = { factorio: string; mods: GameModPick[] };
-/** A Factorio release on offer: the latest headless one of each channel. */
+/** A Factorio release on offer: the latest headless one of each channel; one on both is listed once, as stable. */
 export type FactorioRelease = { version: string; channel: 'stable' | 'experimental' };
 /**
  * A mod as the catalog resolved it: its title, the version it picked, every release that fits the Factorio version
@@ -604,7 +604,8 @@ export type CatalogMod = { name: string; title: string; version: string; release
 /** A dependency the catalog can't meet: the mod that has it, the dependency as the portal writes it ("flib >= 0.16"), and why. */
 export type UnresolvedDependency = { mod: string; dependency: string; reason: string };
 /**
- * The answer to `POST /api/servers/:id/game/catalog`: the Factorio releases on offer, the picked mods with every
+ * The answer to `POST /api/servers/:id/game/catalog`: the Factorio releases on offer (one on both channels listed
+ * once, as stable), the picked mods with every
  * required dependency resolved transitively (honouring `base` limits and `!` incompatibilities; optional ones left
  * out), what it can't resolve (an update can't start while any remain) and what the update would change ("Added:
  * flib 0.16.2"). 404 for a picked mod the portal doesn't have, 502 if the portal can't be read.
@@ -617,3 +618,45 @@ export type GameCatalog = { versions: FactorioRelease[]; mods: CatalogMod[]; unr
  * or a countdown runs on the server. `POST …/game/update/cancel`: only before the swap (else 409).
  */
 export type GameUpdateAnswer = { id: number };
+/** How the mod browser sorts: most downloaded first, newest release first, or by name (the title it shows, case aside). */
+export type PortalSort = 'downloads' | 'updated' | 'name';
+/** A portal category: its id (`mod-packs`) and title ("Mod packs"). */
+export type PortalCategory = { id: string; title: string };
+/**
+ * A mod on the portal as the browser shows it: name, title, owner, summary (plain text, cut), downloads, its newest
+ * release for the line (`version`, `updated` epoch ms or null), category id or null, whether it needs Space Age, and
+ * its portal page (built by the hub). Every string is the portal's, checked and cut by the hub: show it as text.
+ */
+export type PortalListing = {
+  name: string;
+  title: string;
+  owner: string;
+  summary: string;
+  downloads: number;
+  version: string;
+  updated: number | null;
+  category: string | null;
+  spaceAge: boolean;
+  page: string;
+};
+/**
+ * `GET /api/servers/:id/game/mods?factorio=&q=&category=&sort=&page=`: one page (24) of the portal's mods for the
+ * Factorio version's line, deprecated ones left out, with how many match and the categories to filter by. 400 for a
+ * bad parameter, 502 if the portal can't be read. `GET …/game/mods/:name/thumbnail`: the mod's thumbnail, a PNG
+ * (404 when it has none).
+ */
+export type ModBrowse = { line: string; total: number; mods: PortalListing[]; categories: PortalCategory[] };
+/**
+ * `POST /api/servers/:id/game/check`: the Import mod list's question, before anything is picked: does the portal have
+ * these mods (by name, at most 500, none the game's own or given twice) for the Factorio version's line?
+ */
+export type ModCheckRequest = { factorio: string; names: string[] };
+/**
+ * One name's answer: `fits` (the portal has a release for the line: `latest` is the newest, `title` its title),
+ * `noRelease` (on the portal, none for the line), `missing` (the portal has no such mod) or `unchecked` (not in the
+ * line's list, and past the hub's cap on reading mods one by one: add it by name to find out). Titles are the portal's,
+ * checked and cut: show them as text.
+ */
+export type ModCheck = { name: string; found: 'fits' | 'noRelease' | 'missing' | 'unchecked'; title: string | null; latest: string | null };
+/** The answer to `POST …/game/check`: the line asked about and each name's `ModCheck`, in the order asked. 400 for a bad body, 502 if the portal can't be read. */
+export type ModCheckAnswer = { line: string; mods: ModCheck[] };

@@ -22,6 +22,9 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
 
   constructor(hub: ServerHub, db: Db, perTarget = FEED_KEPT) {
     super();
+    // One listener per open dashboard stream (GET /api/events: the dashboard opens one per section that follows it), each
+    // removed when its stream closes: many at once are normal use, not a leak, so Node's warning at 11 is off.
+    this.setMaxListeners(0);
     this.#next = Math.max(Date.now(), db.feedMaxId() + 1);
     for (const { id } of hub.list()) {
       const stored = db.feed(id, perTarget);

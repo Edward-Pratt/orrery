@@ -1,9 +1,9 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, inject, signal } from '@angular/core';
+import { afterNextRender, Component, computed, inject, Injector, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
+import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideLock, lucidePlus, lucideX } from '@ng-icons/lucide';
+import { lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -12,14 +12,13 @@ import { catchError, debounceTime, EMPTY, filter, firstValueFrom, map, of, start
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { changesCard } from './changes';
+import type { BrowseStatus } from './mod-browser';
+import { ModBrowser } from './mod-browser';
+import { ModImport } from './mod-import';
+import { GAME_MODS } from './mod-list';
 import ServerPage from './server';
 import { failedPrep, PACK_STEPS, UpdateHistory, UpdateSteps } from './update-steps';
 
-/**
- * The mods that come with Factorio itself (the ones setup's `mod-list.json` turns on, `orrery` aside): not on the
- * mod portal, so never picked; a game update brings them with the version.
- */
-const GAME_MODS = new Set(['base', 'elevated-rails', 'quality', 'recycler', 'space-age']);
 /** The orrery mod: the Agent reads the server's status through it, so the hub refuses an update without it. */
 const ORRERY = 'orrery';
 const STEPS: Record<PackStep, string> = { ...PACK_STEPS, backup: 'Save' };
@@ -38,8 +37,8 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
  */
 @Component({
   selector: 'app-server-game',
-  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, UpdateHistory, UpdateSteps],
-  viewProviders: [provideIcons({ lucideCheck, lucideLock, lucidePlus, lucideX })],
+  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, UpdateHistory, UpdateSteps],
+  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX })],
   template: `
     @if (state(); as g) {
       <div class="flex max-w-4xl flex-col gap-8">
@@ -95,9 +94,60 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
       <hlm-sheet side="right" state="open" (closed)="sheet.set(false)">
         <hlm-sheet-content *hlmSheetPortal="let ctx" class="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
           <hlm-sheet-header>
-            <h2 hlmSheetTitle>Update game</h2>
+            @if (browsing()) {
+              <div class="flex items-center gap-1">
+                <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeBrowse()" data-browse-back>
+                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                </button>
+                <h2 hlmSheetTitle>Browse mods</h2>
+              </div>
+            } @else if (importing()) {
+              <div class="flex items-center gap-1">
+                <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeImport()" data-import-back>
+                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                </button>
+                <h2 hlmSheetTitle>Import mod list</h2>
+              </div>
+            } @else {
+              <h2 hlmSheetTitle>Update game</h2>
+            }
           </hlm-sheet-header>
-          <div class="flex flex-col gap-4 px-4 pb-4 text-sm">
+          @defer (when browsing(); prefetch on idle) {
+            @if (browsing()) {
+              <app-mod-browser
+                class="text-sm"
+                [base]="base"
+                [factorio]="factorio()"
+                [picks]="pickNames()"
+                [installed]="installedNames()"
+                [required]="required()"
+                [status]="browseStatus()"
+                (add)="add($event)"
+                (back)="closeBrowse()"
+              />
+            }
+          } @loading (after 100ms) {
+            @if (browsing()) {
+              <p class="flex items-center gap-2 px-4 text-sm text-muted-foreground" data-browse-loading><hlm-spinner /> Opening the mod browser…</p>
+            }
+          } @error {
+            <!-- a deploy replaced the build under this open page, so the browser's chunk is gone -->
+            @if (browsing()) {
+              <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
+            }
+          }
+          @if (importing()) {
+            <app-mod-import
+              class="text-sm"
+              [base]="base"
+              [factorio]="factorio()"
+              [picks]="pickNames()"
+              [required]="required()"
+              [installed]="state()?.installed?.mods ?? []"
+              (add)="importMods($event)"
+            />
+          }
+          <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing() || importing()" data-update-view>
             <label
               >Factorio version
               <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="setFactorio($any($event.target).value)" data-factorio>
@@ -164,6 +214,10 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 <span class="text-xs text-muted-foreground" data-add-error>{{ e }}</span>
               }
             </form>
+            <span class="-mt-2 flex flex-wrap gap-1">
+              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
+              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="lucideFileUp" aria-hidden="true" /> Import mod list</button>
+            </span>
             @if (catalogError(); as e) {
               <p class="text-destructive" data-catalog-error>{{ e }}</p>
             }
@@ -190,7 +244,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                     }
                   </ul>
                 } @else {
-                  <p class="text-muted-foreground">{{ factorio() === state()?.installed?.factorio ? 'Nothing yet.' : 'Only the Factorio version.' }}</p>
+                  <p class="text-muted-foreground">{{ factorio() === state()?.installed?.factorio ? 'Nothing: the server runs these already. Add a mod or pick other versions.' : 'Only the Factorio version.' }}</p>
                 }
               </div>
             } @else if (checking()) {
@@ -211,7 +265,8 @@ export default class Game {
   readonly #server = inject(ServerPage);
   readonly #http = inject(HttpClient);
   readonly #feedback = inject(Feedback);
-  readonly #base = `/api/servers/${encodeURIComponent(this.#server.id)}/game`;
+  readonly #injector = inject(Injector);
+  protected readonly base = `/api/servers/${encodeURIComponent(this.#server.id)}/game`;
   protected readonly steps = STEPS;
   protected readonly flow = FLOW;
   protected readonly orrery = ORRERY;
@@ -232,6 +287,12 @@ export default class Game {
   protected readonly adding = signal('');
   protected readonly addError = signal<string | null>(null);
   protected readonly checking = signal(false);
+  /** The Browse view is shown in place of the update view (which stays in the page, as it was). */
+  protected readonly browsing = signal(false);
+  /** The Import mod list view, in place of the update view the same way. */
+  protected readonly importing = signal(false);
+  /** Where Browse or Import was opened from, and how far the update view was scrolled, for Back. */
+  #viewFrom: { button: HTMLElement; scroller: HTMLElement | null; top: number } | null = null;
   protected readonly catalogError = signal<string | null>(null);
   /** The latest catalog answer and the request it answered, as JSON. */
   readonly #catalog = signal<{ asked: string; answer: GameCatalog } | null>(null);
@@ -247,12 +308,15 @@ export default class Game {
   /** Factorio's own releases on offer, and the one running. */
   protected readonly versions = computed(() => {
     const running = this.state()?.installed?.factorio;
-    const list: { version: string; label: string }[] = running ? [{ version: running, label: `${running} (running)` }] : [];
+    // Null: the running one, before the catalog says its channel.
+    const list: { version: string; channel: FactorioRelease['channel'] | null }[] = running ? [{ version: running, channel: null }] : [];
     for (const v of this.#catalog()?.answer.versions ?? []) {
-      if (!list.some((l) => l.version === v.version)) list.push({ version: v.version, label: `${v.version} · ${v.channel}` });
-      else if (v.version === running) list[0] = { version: running, label: `${running} · ${v.channel} (running)` };
+      // factorio.com can list one release as both stable and experimental: it is stable, whatever the order.
+      const at = list.findIndex((l) => l.version === v.version);
+      if (at < 0) list.push({ version: v.version, channel: v.channel });
+      else if (list[at]!.channel === null || v.channel === 'stable') list[at] = { version: v.version, channel: v.channel };
     }
-    return list;
+    return list.map(({ version, channel }) => ({ version, label: `${version}${channel ? ` · ${channel}` : ''}${version === running ? ' (running)' : ''}` }));
   });
   /** The mods the catalog added for a picked one's required dependency. */
   protected readonly dependencies = computed(() => this.#catalog()?.answer.mods.filter((m) => m.requiredBy !== null) ?? []);
@@ -262,6 +326,14 @@ export default class Game {
       .map((m) => m.name)
       .join(', '),
   );
+  // What the Browse view needs to say each mod's standing and the footer's count.
+  protected readonly pickNames = computed(() => this.picks().map((p) => p.name));
+  protected readonly installedNames = computed(() => (this.state()?.installed?.mods ?? []).map((m) => m.name));
+  protected readonly required = computed(() => new Map(this.dependencies().map((m) => [m.name, m.requiredBy!])));
+  protected readonly browseStatus = computed<BrowseStatus>(() => {
+    const c = this.current();
+    return { checking: this.checking(), changes: c ? c.changes.length : null, unresolved: c?.unresolved.length ?? 0, error: !!this.catalogError() };
+  });
   /** Why Update can't go ahead now; null: it can. */
   protected readonly startWhy = computed(() => {
     const g = this.state();
@@ -269,7 +341,7 @@ export default class Game {
     const c = this.current();
     if (!c) return this.catalogError() ? 'Fix the problem above first.' : 'Waiting for the mod portal.';
     if (c.unresolved.length) return 'Fix the unmet dependencies first.';
-    if (!c.changes.length && this.factorio() === g?.installed?.factorio) return 'Nothing to change yet.';
+    if (!c.changes.length && this.factorio() === g?.installed?.factorio) return 'Nothing to change: the server runs these already.';
     return null;
   });
 
@@ -279,7 +351,7 @@ export default class Game {
         debounceTime(50),
         startWith(undefined),
         switchMap(() =>
-          this.#http.get<GameState>(this.#base).pipe(
+          this.#http.get<GameState>(this.base).pipe(
             catchError((err: HttpErrorResponse) => {
               if (!this.state()) this.missing.set(err.status === 404 ? 'This server has no game updates.' : `The hub didn't answer (HTTP ${err.status}).`);
               return EMPTY;
@@ -298,7 +370,7 @@ export default class Game {
         switchMap((req) => {
           this.checking.set(true);
           this.catalogError.set(null);
-          return this.#http.post<GameCatalog>(`${this.#base}/catalog`, req).pipe(
+          return this.#http.post<GameCatalog>(`${this.base}/catalog`, req).pipe(
             map((answer) => ({ asked: JSON.stringify(req), answer })),
             catchError((err: HttpErrorResponse) => (this.catalogError.set(`The catalog: ${why(err)}`), of(null))),
           );
@@ -349,6 +421,8 @@ export default class Game {
     this.picks.set(i.mods.filter((m) => !GAME_MODS.has(m.name)).map((m) => ({ name: m.name, version: m.version })));
     this.adding.set('');
     this.addError.set(null);
+    this.browsing.set(false);
+    this.importing.set(false);
     this.sheet.set(true);
     this.#ask();
   }
@@ -372,15 +446,70 @@ export default class Game {
     this.#ask();
   }
 
-  /** Adds a portal mod by name at the newest version that fits; the catalog says if the portal has no such mod. */
-  protected add(): void {
-    const name = this.adding().trim();
+  /**
+   * Adds a portal mod by name (typed, or from the Browse view) at the newest version that fits; one the server runs
+   * (removed here, then added back) comes back at the version it runs. The catalog says if the portal has no such mod,
+   * and adds its required dependencies.
+   */
+  protected add(name = this.adding().trim()): void {
     if (!name) return;
     if (GAME_MODS.has(name)) return this.addError.set(`${name} comes with Factorio.`);
     if (this.picks().some((p) => p.name === name)) return this.addError.set(`${name} is in the list already.`);
-    this.picks.update((picks) => [...picks, { name, version: null }]);
-    this.adding.set('');
+    const version = this.state()?.installed?.mods.find((m) => m.name === name)?.version ?? null;
+    this.picks.update((picks) => [...picks, { name, version }]);
+    if (name === this.adding().trim()) this.adding.set('');
+    this.addError.set(null);
     this.#ask();
+  }
+
+  /** Shows the Browse view; the update view keeps its picks and scroll position for Back. */
+  protected openBrowse(event: Event): void {
+    this.#leave(event);
+    this.browsing.set(true);
+  }
+
+  /** Shows the Import mod list view, the same way. */
+  protected openImport(event: Event): void {
+    this.#leave(event);
+    this.importing.set(true);
+  }
+
+  /** Puts the mods Import confirmed in the picks (the ones there kept as they are) and asks the catalog. */
+  protected importMods(mods: GameModPick[]): void {
+    this.picks.update((picks) => [...picks, ...mods.filter((m) => !GAME_MODS.has(m.name) && !picks.some((p) => p.name === m.name))]);
+    this.addError.set(null);
+    this.closeImport();
+    this.#ask();
+  }
+
+  #leave(event: Event): void {
+    const button = event.currentTarget as HTMLElement;
+    const scroller = button.closest<HTMLElement>('[data-sheet]');
+    this.#viewFrom = { button, scroller, top: scroller?.scrollTop ?? 0 };
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  /** Back to the update view, where Browse was, with the focus on it. */
+  protected closeBrowse(): void {
+    this.browsing.set(false);
+    this.#back();
+  }
+
+  protected closeImport(): void {
+    this.importing.set(false);
+    this.#back();
+  }
+
+  #back(): void {
+    const from = this.#viewFrom;
+    if (!from) return;
+    afterNextRender(
+      () => {
+        if (from.scroller) from.scroller.scrollTop = from.top;
+        from.button.focus();
+      },
+      { injector: this.#injector },
+    );
   }
 
   #confirmText(): string {
@@ -404,12 +533,12 @@ export default class Game {
     });
     // Cancelled: back to the sheet as it was.
     if (!ok) return this.sheet.set(true);
-    const answer = await this.#request('Starting the update', () => firstValueFrom(this.#http.post<GameUpdateAnswer>(`${this.#base}/update`, req)));
+    const answer = await this.#request('Starting the update', () => firstValueFrom(this.#http.post<GameUpdateAnswer>(`${this.base}/update`, req)));
     if (answer) this.#reload.next();
   }
 
   protected async cancel(): Promise<void> {
-    const done = await this.#request('Cancelling the update', () => firstValueFrom(this.#http.post(`${this.#base}/update/cancel`, {})));
+    const done = await this.#request('Cancelling the update', () => firstValueFrom(this.#http.post(`${this.base}/update/cancel`, {})));
     if (done !== undefined) this.#feedback.ok('Cancelling: nothing is swapped.');
   }
 

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { AGENT_FLOOR, AgentRefused, beforeAgentFloor, type Agents } from './agents.ts';
-import type { GameCatalog, GameModPick, GameState, GameUpdateRequest } from './api.ts';
+import type { GameCatalog, GameModPick, GameState, GameUpdateRequest, ModBrowse, ModCheckAnswer, ModCheckRequest, PortalSort } from './api.ts';
 import type { ServerSettings } from './config.ts';
 import type { Db } from './db.ts';
-import { GAME_MODS, GameRefused, gameLabel, validName, VERSION, type FactorioCatalog, type Resolution } from './factorio.ts';
+import { CATEGORY, GAME_MODS, GameRefused, gameLabel, lineOf, validName, VERSION, type FactorioCatalog, type Resolution } from './factorio.ts';
 import { LIMITS } from './protocol.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, ServerHub } from './servers.ts';
@@ -27,7 +27,7 @@ export type GameUpdatesDeps = {
   agents: Pick<Agents, 'list' | 'get' | 'request' | 'on'>;
   services: Pick<Services, 'ofServer' | 'act' | 'read'>;
   restarts: Pick<RestartScheduler, 'cancel' | 'pending'>;
-  catalog: Pick<FactorioCatalog, 'releases' | 'resolve' | 'sha256' | 'download' | 'link'>;
+  catalog: Pick<FactorioCatalog, 'releases' | 'resolve' | 'sha256' | 'download' | 'link' | 'browse' | 'thumbnail' | 'check'>;
   /** The servers, for their names. */
   servers: Pick<ServerSettings, 'id' | 'name'>[];
   /** Whether a restore runs on a server. */
@@ -91,6 +91,38 @@ function request(body: unknown): GameUpdateRequest {
     mods.push({ name, version });
   }
   return { factorio: b.factorio, mods };
+}
+
+/** The Import mod list's check request, its shape checked before any portal read: 400 otherwise. */
+function checkRequest(body: unknown): ModCheckRequest {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  if (typeof b.factorio !== 'string' || !VERSION.test(b.factorio)) throw new GameRefused(400, 'Give a Factorio version, like 2.1.24.');
+  if (!Array.isArray(b.names) || b.names.length > LIMITS.mods) throw new GameRefused(400, `Give the mods to check by name (names, at most ${LIMITS.mods}).`);
+  const names: string[] = [];
+  for (const name of b.names as unknown[]) {
+    if (typeof name !== 'string' || !validName(name)) throw new GameRefused(400, 'Give each mod by its name on the mod portal.');
+    if (GAME_MODS.has(name)) throw new GameRefused(400, `${name} comes with Factorio: it isn't on the mod portal.`);
+    if (names.includes(name)) throw new GameRefused(400, `${name} is given twice.`);
+    names.push(name);
+  }
+  return { factorio: b.factorio, names };
+}
+
+const SORTS: PortalSort[] = ['downloads', 'updated', 'name'];
+const QUERY_MAX = 100;
+const PAGES = 1000;
+
+/** The mod browser's query, its shape checked before any portal read: 400 otherwise. */
+function browseQuery(query: Record<string, string | undefined>): { line: string; q: string; category: string; sort: PortalSort; page: number } {
+  const { factorio, q = '', category = '', sort = 'downloads', page = '1' } = query;
+  if (factorio === undefined || !VERSION.test(factorio)) throw new GameRefused(400, 'Give a Factorio version (factorio), like 2.1.24.');
+  const text = q.trim();
+  if (text.length > QUERY_MAX) throw new GameRefused(400, `Search for at most ${QUERY_MAX} characters.`);
+  if (category !== '' && !CATEGORY.test(category)) throw new GameRefused(400, 'Give a category by its id on the mod portal, like mod-packs.');
+  if (!(SORTS as string[]).includes(sort)) throw new GameRefused(400, `Sort by ${SORTS.join(', ')}.`);
+  const n = /^\d{1,4}$/.test(page) ? Number(page) : 0;
+  if (n < 1 || n > PAGES) throw new GameRefused(400, `Give a page from 1 to ${PAGES}.`);
+  return { line: lineOf(factorio), q: text, category, sort: sort as PortalSort, page: n };
 }
 
 type Installed = { factorio: string; mods: FactorioMod[] };
@@ -232,6 +264,33 @@ export class GameUpdates {
     const installed = this.#installed.get(serverId) ?? { factorio: req.factorio, mods: [] };
     const [versions, plan] = await Promise.all([this.#d.catalog.releases(), this.#plan(req, installed)]);
     return { versions, mods: plan.mods.map(({ sha1: _, downloadUrl: __, ...m }) => m), unresolved: plan.unresolved, changes: plan.changes };
+  }
+
+  /**
+   * The mod browser: a page of the portal's mods for the line of the Factorio version in `query` (`factorio`, `q`,
+   * `category`, `sort`, `page`), through the catalog. 400 for a bad parameter, 502 if the portal can't be read.
+   */
+  async browse(serverId: string, query: Record<string, string | undefined>): Promise<ModBrowse> {
+    this.#name(serverId);
+    const { line, ...rest } = browseQuery(query);
+    return this.#d.catalog.browse(line, rest);
+  }
+
+  /**
+   * The Import mod list's check: whether the portal has each name for the line of the Factorio version (`factorio`,
+   * `names`), through the catalog's list for that line. 400 for a bad body, 502 if the portal can't be read.
+   */
+  async check(serverId: string, body: unknown): Promise<ModCheckAnswer> {
+    this.#name(serverId);
+    const req = checkRequest(body);
+    const line = lineOf(req.factorio);
+    return { line, mods: await this.#d.catalog.check(line, req.names) };
+  }
+
+  /** A portal mod's thumbnail (a PNG) for the mod browser; null when it has none or the name isn't a mod's. */
+  async thumbnail(serverId: string, name: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    this.#name(serverId);
+    return validName(name) ? this.#d.catalog.thumbnail(name) : null;
   }
 
   /**

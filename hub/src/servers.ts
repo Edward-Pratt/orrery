@@ -129,6 +129,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
   #modVersions = new Map<string, string>(); // kept after a disconnect: what the server last ran
+  #downs = new Map<string, number>(); // times each server's game connection went away (`downs`)
   #sockets = new Set<Socket>(); // every accepted or attached socket, including ones still before the handshake
   #agentsUp = new Set<string>(); // factorio servers whose Agent connection is up
   #settling = new Map<string, NodeJS.Timeout>(); // factorio servers whose game connection closed, waiting on the Agent
@@ -210,6 +211,15 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   get(id: string): ServerState | undefined {
     const s = this.#states.get(id);
     return s && { ...s, players: [...s.players], dims: [...s.dims] };
+  }
+
+  /**
+   * How many times the server's game connection has gone away since the hub started (it closed, or went with its
+   * Agent): it counts even when a factorio server's `stopped`, `crashed` or `lost` is dropped over its lifecycle
+   * budget, so a restart countdown can tell the server went down since it began without that event.
+   */
+  downs(id: string): number {
+    return this.#downs.get(id) ?? 0;
   }
 
   /** The version the server's Mod reported in its latest hello; undefined if it never connected. */
@@ -434,6 +444,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   #offline(id: string): void {
+    this.#downs.set(id, this.downs(id) + 1);
     Object.assign(this.#states.get(id)!, { online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
   }
 
@@ -527,8 +538,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    * Whether a factorio server's lifecycle event fits its budget (`LIFECYCLE`) now. One that doesn't is dropped, for
    * the uptime log, the stream and Discord alike, and kept as the latest: when the next token comes it goes out then
    * (unless a later event went out first), so the recorded state is never wrong for longer than one token (3 min).
-   * `get` is right all along; what follows the stream is not until then: the dashboard's card and its latest rate
-   * (`LiveFeed`), and a restart countdown, which a dropped `stopped`, `crashed` or `lost` does not cancel.
+   * `get` and `downs` are right all along; what follows the stream is not until then: the dashboard's card and its
+   * latest rate (`LiveFeed`). A restart countdown is cancelled anyway: `RestartScheduler` checks `downs` too.
    */
   #lifecycleFits(serverId: string, type: Lifecycle): boolean {
     const now = Date.now();

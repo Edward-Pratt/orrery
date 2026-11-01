@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentConfig, AgentsIntegration } from './config.ts';
 import type { Hosts } from './host.ts';
-import { LIMITS, parseAgentLine, parseModLine, parseReplyData, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg, type ModMsg } from './protocol.ts';
+import { LIMITS, parseAgentLine, parseModLine, parseReplyData, REPLY_WITH_DATA, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg, type ModMsg } from './protocol.ts';
 import { protocolRefusal, tokenMatches, type ServerHub } from './servers.ts';
 
 /** Shorter timings, for tests. */
@@ -47,7 +47,6 @@ export type AgentEvents = { agentUp: [agentId: string]; agentLost: [agentId: str
 export type AgentCall = AgentRequest extends infer R ? (R extends AgentRequest ? Omit<R, 'id'> : never) : never;
 /** What a request's promise resolves to: its reply's checked `data`, for the requests that answer with data. */
 export type AgentAnswer<T extends AgentRequest['type']> = T extends keyof AgentReplyData ? AgentReplyData[T] : void;
-const WITH_DATA = new Set<string>(['journal', 'logs', 'log', 'settingsSet'] satisfies (keyof AgentReplyData)[]);
 
 /** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
@@ -605,7 +604,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     conn.pending.delete(msg.id);
     clearTimeout(waiting.timer);
     if (!msg.ok) return waiting.reject(new AgentRefused(msg.error ?? `${waiting.request} refused`));
-    if (!WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
+    if (!REPLY_WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
     const data = parseReplyData(waiting.request as keyof AgentReplyData, msg.data);
     if (data === null) return waiting.reject(new Error(`the agent's ${waiting.request} reply is malformed`));
     waiting.resolve(data);

@@ -41,6 +41,7 @@ Lengths count characters (UTF-16 code units).
 | `quests[]` | 1 to 50 entries |
 | `sample.load[]` | 3 entries |
 | `sample.disks[]`, a `logs` reply's `files[]` | 32 entries each |
+| an `update`'s `url`s (`factorio.url`, `mods[].url`: a mod's signed link is long) | 2 KiB (2048 characters) |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
 | one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
 
@@ -187,12 +188,41 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
 | `deploy` | `id`, `tag` (`agent-vX.Y.Z`) | starts its own deploy unit for that release: `reply` means started | — |
 
-Release 1's Agent has no handler for `update`, `updateResume`, `updateCancel` and `deploy`: it answers each with a `reply`
-`ok: false`, and sends no `installed`, `updateStep`, `updateDone` or `deployResult`. The hub parses all of them already,
-and sends none of the requests yet: game updates and Agent deploys (release 2) will use them.
+The hub sends `update`, `updateResume` and `updateCancel` for game updates (below). It doesn't send `deploy` yet:
+Agent deploys come later in release 2, and until then the hub ignores `deployResult`. Release 1's Agent has no
+handler for these requests: it answers each with a `reply` `ok: false` (the hub ends that update `failed in staging`,
+with its error), and sends no `installed`, so the hub never offers it an update.
 
 The Agent treats every request as untrusted: it never runs a path or argv it was sent, checks names against its
 own listings, and refuses an `update` whose versions, names or URLs fail its checks (see `agent/CLAUDE.md`).
+
+### Game updates
+
+The hub resolves the update (the Factorio version, and the portal mods with their dependencies) and decides; the
+Agent carries it out. In order:
+
+1. The hub sends `update` with a fresh `id`, U: `factorio` (`url`: `https://www.factorio.com/get-download/<version>/headless/linux-arm64`,
+   `sha256` from factorio.com's list) and `mods`, every portal mod the server is to have (the game's own, like
+   `base`, come with its version; a mod left out is removed), each with its portal `sha1` and a signed link on
+   `https://dl-mod.factorio.com` whose only query key is `secure`, resolved right before. No credential is ever in
+   it. The `reply` says whether the Agent took it; then every `updateStep` and the `updateDone` carry U.
+2. The Agent prepares (`prepare`) and saves (`backup`; a stopped server: none, and it names the newest save), then
+   sends `updateStep` `stop` `waiting` and waits. Its `stop` step is only ever `waiting`: the stop is the hub's.
+3. The hub stops the unit (`serviceAct` `stop`, after the usual 5-minute countdown in game while players are on;
+   not at all when it is already inactive or failed) and, once the pushed `serviceState` is inactive or failed,
+   sends `updateResume`.
+4. The Agent swaps (`swap`), starts the unit and gates it (`gate`), rolls back if that fails (`rollback`), sends
+   `installed`, then `updateDone` (`backup`: the pre-update save).
+
+`updateResume` and `updateCancel` carry fresh request ids of their own and act on the update running, the one
+update an Agent runs at a time. `updateCancel` is taken only before the swap (else `ok: false`); it never starts or
+stops the unit, and the Agent ends the update with `updateDone` `cancelled`. The hub sends it when Cancel is pressed
+while the Agent prepares, when the countdown is cancelled, when it gives up before the swap (it stopped the server:
+it starts it again), and, on the Agent's next `agentHello`, for an update the hub closed before its swap while the
+Agent was away or the hub restarted. An Agent with no update running answers it `ok: false`. The hub gives up an
+update the Agent says nothing about for 15 minutes (while the hub itself stops the server, it doesn't count); an
+`updateDone` that comes after the hub closed the update (on a restart, the hub no longer knows U, so the next one)
+is still recorded on it.
 
 ### Liveness
 

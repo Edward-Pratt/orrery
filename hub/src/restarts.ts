@@ -44,7 +44,7 @@ export class RestartScheduler {
   #restart: Restart;
 
   /**
-   * `paused` says why a server's daily restart must be skipped today (a pack update restarts it anyway); null: it runs.
+   * `paused` says why a server's daily restart must be skipped today (a pack or game update restarts it anyway); null: it runs.
    * `restart` ends a factorio server's countdown (without it, that rejects).
    */
   constructor(

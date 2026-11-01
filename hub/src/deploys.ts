@@ -92,8 +92,8 @@ export type DeploysDeps = {
   hasMod: (serverId: string) => boolean;
   /** Whether any restore runs (a hub deploy's restart would kill it). */
   restoring: () => boolean;
-  /** Whether a pack update runs on a server (undefined: on any). */
-  packing: (serverId?: string) => boolean;
+  /** What update runs on a server (undefined: on any): `pack update` or `game update`; null: none. */
+  updating: (serverId?: string) => string | null;
   /** Whether a library add runs (a hub deploy's restart would lose it). */
   libraryAdding: () => boolean;
   /** Whether a New server install runs (likewise). */
@@ -217,7 +217,7 @@ export class Deploys {
       newerAfterDays: this.#d.config.newerAfterDays,
       history: history.slice(0, HISTORY),
       older: history.length > HISTORY,
-      packing: this.#d.hub.list().flatMap((s) => (this.#d.packing(s.id) ? [s.id] : [])),
+      packing: this.#d.hub.list().flatMap((s) => (this.#d.updating(s.id) ? [s.id] : [])),
     };
   }
 
@@ -236,10 +236,12 @@ export class Deploys {
     const from = this.#running(part, serverId);
     if (from === tag) throw new DeployRefused(409, `${tag} is already running.`);
     if (part === 'hub' && this.#d.restoring()) throw new DeployRefused(409, 'A restore is running: deploy the hub once it is done.');
-    if (part === 'hub' && this.#d.packing()) throw new DeployRefused(409, 'A pack update is running: deploy the hub once it is done.');
+    const updating = part === 'hub' ? this.#d.updating() : null;
+    if (updating) throw new DeployRefused(409, `A ${updating} is running: deploy the hub once it is done.`);
     if (part === 'hub' && this.#d.libraryAdding()) throw new DeployRefused(409, 'A library add is running: deploy the hub once it is done.');
     if (part === 'hub' && this.#d.installing()) throw new DeployRefused(409, 'A New server install is running: deploy the hub once it is done.');
-    if (server && this.#d.packing(server.id)) throw new DeployRefused(409, `A pack update is running on ${server.name}: deploy the Mod once it is done.`);
+    const onServer = server ? this.#d.updating(server.id) : null;
+    if (server && onServer) throw new DeployRefused(409, `A ${onServer} is running on ${server.name}: deploy the Mod once it is done.`);
     if (part !== 'mod' && newestFirst(release, { tag: FLOOR[part], publishedAt: 0, assets: [] }) > 0) {
       throw new DeployRefused(409, `${tag} is older than ${FLOOR[part]}, the first release that can deploy.`);
     }

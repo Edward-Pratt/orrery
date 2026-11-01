@@ -672,16 +672,29 @@ test('server cards while offline: features only for the server with the mod', as
 });
 
 test("a factorio server's card has its game and the UPS rate, the game connection's chat, rate and console, and game updates", async (t) => {
+  const cfg = agentConfig(t, { web: WEB, systemd: [FACTORIO_UNIT] });
+  cfg.servers.find((s) => s.id === 'space')!.service = 'factorio';
+  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth, run: async () => '' });
+  t.after(() => handle.close());
+  const app = handle.web!.app;
+  const cards = await cardsOf(app, await loginCookie(app));
+  const card = cards.find((c) => c.id === 'space');
+  assert.deepEqual(
+    { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
+    // Over its Agent's game connection; game updates only through an Agent, with GameUpdates (systemd on). Quests are the Mod's alone.
+    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: true } },
+  );
+  assert.equal(cards.find((c) => c.id === 'gtnh')!.features.update, false); // no Agent runs it
+});
+
+test("without GameUpdates (no systemd, so no Services to stop it), an Agent's server has no game updates", async (t) => {
   const cfg = agentConfig(t, { web: WEB });
   const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const card = (await cardsOf(app, await loginCookie(app))).find((c) => c.id === 'space');
-  assert.deepEqual(
-    { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
-    // Over its Agent's game connection; game updates only through an Agent. Quests are the Mod's alone.
-    { game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: null, features: { chat: true, tps: true, quests: false, console: true, update: false } },
-  );
+  const cookie = await loginCookie(app);
+  assert.equal((await cardsOf(app, cookie)).find((c) => c.id === 'space')!.features.update, false);
+  assert.equal((await app.request('/api/servers/space/game', { headers: { cookie } })).status, 404);
 });
 
 test('a connected server card shows TPS, players, uptime and a pending restart', async (t) => {

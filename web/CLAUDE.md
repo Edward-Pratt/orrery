@@ -50,8 +50,7 @@ nothing, so nothing from the hub's runtime or Node types gets compiled here. Don
 - Any 401 means logged out: the `loggedOutOn401` interceptor calls `Session.lost()` (the event stream does too).
 - A deploy deletes the old build's chunks: a lazy page that fails to load after the first navigation reloads the page (`reload.ts`). The New server sheet's `@defer` says to reload instead; `chart.ts`'s lazy `echarts` import has no such fallback yet.
 - Features come from the card (`features.chat`, `features.tps`, `features.console`, `features.update`): a server without the mod shows
-  none of them; a factorio server has the first three. `update` (the Game tab; only a factorio server could have it) is false until
-  game updates exist (release 2).
+  none of them; a factorio server has all four (`update`, the Game tab, only a factorio server has, while the hub's game updates are on).
 - spartan/ui components are generated into `libs/ui` (`npx ng g @spartan-ng/cli:ui <name>`, config in
   `components.json`), and are ours to edit.
 

@@ -18,6 +18,9 @@ import type {
   LibraryAddAnswer,
   LibraryState,
   EditPreview,
+  GameCatalog,
+  GameState,
+  GameUpdateAnswer,
   Me,
   NewServerAnswer,
   PendingServers,
@@ -38,6 +41,8 @@ import type {
 } from './api.ts';
 import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
+import { GameRefused } from './factorio.ts';
+import type { GameUpdates } from './game-updates.ts';
 import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
@@ -127,6 +132,8 @@ export type WebDeps = {
   deploys?: Deploys;
   /** Only with the systemd and Minecraft integrations. */
   packs?: Packs;
+  /** Only with the agents (and systemd) integrations. */
+  gameUpdates?: GameUpdates;
   /** With packs. */
   uploads?: Uploads;
   /** With packs. */
@@ -136,10 +143,10 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
-  // A factorio server is run by an Agent (its `server`); only those have game updates.
+  // A factorio server is run by an Agent (its `server`).
   const agentServed = (id: string) => Boolean(integrations.agents?.agents.some((a) => a.server === id));
   // Chat, a rate (from heartbeats) and the console come over a game connection: the Mod's, or an Agent's.
   const connects = (id: string) => hasMod(id) || agentServed(id);
@@ -159,7 +166,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: false }, // game updates (the Game tab) arrive with M6, in release 2
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)) },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -536,6 +543,27 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     app.delete('/servers/:id/pack/edits/:edit', (c) =>
       pack(c, async (sid, user) => (await packs.removeEdit(sid, id(c, 'edit'), actor(user))) satisfies PackState),
     );
+  }
+  // Game updates start a stopped server too, so they come before the online check below.
+  if (gameUpdates) {
+    /** Runs a game update action for a server an Agent runs, mapping its refusals to their status. */
+    const game = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<unknown>, status: 200 | 202 = 200) => {
+      const id = c.req.param('id')!;
+      if (!gameUpdates.has(id)) return c.notFound();
+      try {
+        const answer = await fn(id, c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer as object, status);
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/servers/:id/game', (c) => game(c, async (sid) => gameUpdates.state(sid) satisfies GameState));
+    app.post('/servers/:id/game/catalog', (c) => game(c, async (sid) => (await gameUpdates.catalog(sid, await jsonBody(c.req))) satisfies GameCatalog));
+    app.post('/servers/:id/game/update', (c) =>
+      game(c, async (sid, user) => ({ id: await gameUpdates.update(sid, await jsonBody(c.req), actor(user), user.username) }) satisfies GameUpdateAnswer, 202),
+    );
+    app.post('/servers/:id/game/update/cancel', (c) => game(c, async (sid, user) => gameUpdates.cancel(sid, actor(user), user.username)));
   }
   // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
   app.post('/servers/:id/*', async (c, next) => {

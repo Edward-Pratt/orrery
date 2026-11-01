@@ -406,6 +406,23 @@ test('formatEvent posts a pack update when it starts and ends, coloured by outco
   assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
 });
 
+test("a factorio server's update is a game update, and the Agent's pre-update save is escaped", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'space' }, 'factorio');
+  const title = (n: Notice) => (post(n) as { embeds: APIEmbed[] }).embeds[0]?.title;
+  const from = '2.1.24 · 1 mod';
+  const to = '2.1.25 · 3 mods';
+  assert.equal(title({ severity: 'info', kind: 'packUpdateStarted', from, to, by: 'alex' }), `📦 Updating the game: ${from} → ${to} (by alex)`);
+  const done = { kind: 'packUpdateFinished', from, to, ms: 400_000 } as const;
+  assert.equal(title({ ...done, severity: 'good', outcome: 'ok' }), `✅ Game updated to ${to} (6 m 40 s)`);
+  assert.equal(
+    title({ ...done, severity: 'problem', outcome: 'rolled back', backup: 'orrery-pre-update_*x*_.zip' }),
+    `❌ Game update to ${to} rolled back: ${from} is running again. Pre-update save: orrery-pre-update\\_\\*x\\*\\_.zip`,
+  );
+  assert.equal(title({ ...done, severity: 'problem', outcome: 'failed before swap' }), `❌ Game update to ${to} failed after the stop, before anything changed: ${from} is starting again`);
+  assert.equal(title({ ...done, severity: 'info', outcome: 'cancelled' }), `❎ Game update to ${to} cancelled: the server wasn't touched`);
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
+});
+
 test('a notice is coloured by its severity, not its text', () => {
   const color = (severity: Severity) =>
     (formatEvent({ severity, kind: 'restartNow', type: 'notice', serverId: 's' }) as { embeds: APIEmbed[] }).embeds[0].color;

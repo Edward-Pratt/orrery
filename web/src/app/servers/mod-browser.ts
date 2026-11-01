@@ -12,7 +12,7 @@ import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { catchError, map, of, Subject, switchMap, tap, timer } from 'rxjs';
 
 /** Where the update sheet's catalog answer stands, for the footer: how many changes, or why there's no count. */
-export type BrowseStatus = { checking: boolean; changes: number | null; unresolved: number };
+export type BrowseStatus = { checking: boolean; changes: number | null; unresolved: number; error: boolean };
 /** How long typing waits before it asks the hub. */
 export const SEARCH_WAIT_MS = 300;
 /** The mods that come with Factorio itself: the portal doesn't list them, and they are never picked. */
@@ -191,7 +191,14 @@ type Load = { page: number; wait: number };
               }
             }
             <!-- aria-disabled, not disabled, so the focus stays on it while the page loads -->
-            <button hlmBtn variant="outline" [attr.aria-disabled]="loading() === 'more' || null" (click)="more()" data-browse-more>
+            <button
+              hlmBtn
+              variant="outline"
+              class="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+              [attr.aria-disabled]="loading() === 'more' || null"
+              (click)="more()"
+              data-browse-more
+            >
               @if (loading() === 'more') {
                 <hlm-spinner />
               }
@@ -206,6 +213,8 @@ type Load = { page: number; wait: number };
       <p class="flex min-w-0 items-center gap-2" data-browse-changes>
         @if (status().checking) {
           <hlm-spinner /> <span class="text-muted-foreground">Checking with the mod portal…</span>
+        } @else if (status().error) {
+          <span class="text-destructive">The catalog refused: review the update.</span>
         } @else if (status().unresolved) {
           <span class="text-destructive">{{ status().unresolved === 1 ? "A dependency can't be met" : status().unresolved + " dependencies can't be met" }}</span>
         } @else if (status().changes !== null) {

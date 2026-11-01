@@ -24,7 +24,7 @@ const CATEGORIES = [
 ];
 const browse = (mods: PortalListing[], total = mods.length): ModBrowse => ({ line: '2.1', total, mods, categories: CATEGORIES });
 const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => listing(`mod-${from + i}`));
-const STATUS: BrowseStatus = { checking: false, changes: 0, unresolved: 0 };
+const STATUS: BrowseStatus = { checking: false, changes: 0, unresolved: 0, error: false };
 
 type Inputs = { factorio: string; picks: string[]; installed: string[]; required: Map<string, string>; status: BrowseStatus };
 
@@ -163,17 +163,20 @@ describe('mod browser', () => {
   });
 
   it('counts the changes in the footer, and Review the update goes back', async () => {
-    const { fixture, q, text, render, backs } = await setup({ status: { checking: true, changes: null, unresolved: 0 } });
+    const { fixture, q, text, render, backs } = await setup({ status: { ...STATUS, checking: true, changes: null } });
     expect(text(q('[data-browse-changes]'))).toBe('Checking with the mod portal…');
-    fixture.componentRef.setInput('status', { checking: false, changes: 10, unresolved: 0 });
+    fixture.componentRef.setInput('status', { ...STATUS, changes: 10 });
     await render();
     expect(text(q('[data-browse-changes]'))).toBe('10 changes');
-    fixture.componentRef.setInput('status', { checking: false, changes: 1, unresolved: 0 });
+    fixture.componentRef.setInput('status', { ...STATUS, changes: 1 });
     await render();
     expect(text(q('[data-browse-changes]'))).toBe('1 change');
-    fixture.componentRef.setInput('status', { checking: false, changes: 2, unresolved: 1 });
+    fixture.componentRef.setInput('status', { ...STATUS, changes: 2, unresolved: 1 });
     await render();
     expect(text(q('[data-browse-changes]'))).toBe("A dependency can't be met");
+    fixture.componentRef.setInput('status', { ...STATUS, changes: null, error: true });
+    await render();
+    expect(text(q('[data-browse-changes]'))).toBe('The catalog refused: review the update.');
     q('[data-browse-review]').click();
     expect(backs()).toBe(1);
   });

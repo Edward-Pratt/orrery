@@ -122,6 +122,10 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 (back)="closeBrowse()"
               />
             }
+          } @loading (after 100ms) {
+            @if (browsing()) {
+              <p class="flex items-center gap-2 px-4 text-sm text-muted-foreground" data-browse-loading><hlm-spinner /> Opening the mod browser…</p>
+            }
           } @error {
             <!-- a deploy replaced the build under this open page, so the browser's chunk is gone -->
             <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
@@ -306,7 +310,7 @@ export default class Game {
   protected readonly required = computed(() => new Map(this.dependencies().map((m) => [m.name, m.requiredBy!])));
   protected readonly browseStatus = computed<BrowseStatus>(() => {
     const c = this.current();
-    return { checking: this.checking(), changes: c ? c.changes.length : null, unresolved: c?.unresolved.length ?? 0 };
+    return { checking: this.checking(), changes: c ? c.changes.length : null, unresolved: c?.unresolved.length ?? 0, error: !!this.catalogError() };
   });
   /** Why Update can't go ahead now; null: it can. */
   protected readonly startWhy = computed(() => {

@@ -14,7 +14,8 @@ hub_pid=''
 trap '[[ -z $hub_pid ]] || kill "$hub_pid" 2> /dev/null || true; rm -rf "$T"' EXIT
 R=$T/root F=$T/fake X=$T/fixtures S=$T/setup-agent-host.sh
 REAL_NODE=$(command -v node) REAL_INSTALL=$(command -v install) REAL_ID=$(command -v id) REAL_UNAME=$(command -v uname)
-export F X R HERE REAL_NODE REAL_INSTALL REAL_ID REAL_UNAME SETUP_ROOT=$R LC_ALL=C
+CHECK_ENV=$T/check-env # the agent check's environment, kept out of $F (it holds the token and the RCON password)
+export F X R HERE REAL_NODE REAL_INSTALL REAL_ID REAL_UNAME SETUP_ROOT=$R LC_ALL=C CHECK_ENV
 mkdir -p "$T/bin" "$X"
 
 # ---- Fakes. Each notes its call in $F/calls; flag files in $F steer them. Commands with their own argv are logged
@@ -243,12 +244,14 @@ printf '#!/bin/sh\nexec "$REAL_NODE" "$@"\n' > "$B/node-v$NV-linux-arm64/bin/nod
 printf '#!/usr/bin/env bash\n[[ $1 != --version ]] || echo "Version: 2.1.24 (build 87808, linux-arm64, headless)"\n' > "$B/factorio/bin/arm64/factorio"
 chmod 755 "$B/node-v$NV-linux-arm64/bin/node" "$B/factorio/bin/arm64/factorio"
 cat > "$B/agent/src/index.ts" << 'EOF'
-// The agent, for the test: its check notes what it got (whether each secret was set, never a value).
+// The agent, for the test: its check notes what it got (whether each secret was set, never a value), and its whole
+// environment in $CHECK_ENV, outside $F, to show the game password never reaches it.
 const fs = require('fs');
 if (process.argv[2] === 'check') {
   const e = process.env;
   const got = { args: process.argv.slice(2), home: e.HOME, rcon: /^[A-Za-z0-9]{32}$/.test(e.RCON_PASSWORD || ''), token: (e.ORRERY_AGENT_TOKEN || '').length >= 32 };
   fs.writeFileSync(e.F + '/check-ran', JSON.stringify(got) + '\n');
+  fs.writeFileSync(e.CHECK_ENV, JSON.stringify(e) + '\n');
   console.log('first-boot check (fixture): every check ran');
   process.exitCode = fs.existsSync(e.F + '/check-fails') ? 1 : 0;
 }
@@ -322,13 +325,24 @@ run() { # [args…]: the script with $IN (default: the token) on stdin, its outp
 }
 says() { grep -qF -- "$1" "$T/out"; }
 called() { grep -qE -- "$1" "$F/calls"; }
-# Everything the script wrote, for comparing runs: paths, modes, link targets, contents (the env files' keys only).
+# The game password in server-settings.json (a regular file only), or nothing.
+GP_OF() {
+  local f=$R/srv/factorio/config/server-settings.json
+  [[ -f $f && ! -L $f ]] || return 0
+  node -e 'try { const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).game_password; if (typeof p === "string") process.stdout.write(p); } catch {}' "$f"
+}
+# Everything the script wrote, for comparing runs: paths, modes, link targets, contents (the env files' keys only; the
+# game password, random per VM, as a placeholder: the checks that it is kept compare it on their own).
 written() {
+  local gp
+  gp=$(GP_OF)
   (cd "$R" && find . -path ./usr/libexec -prune -o -path ./etc/os-release -prune -o -print) | sort | while IFS= read -r p; do
     f=$R/${p#./}
     if [[ -L $f ]]; then echo "$p -> $(readlink "$f")"
     elif [[ -d $f ]]; then echo "$p/ $(stat -c %a "$f")"
     elif [[ $p == ./etc/orrery-*.env ]]; then echo "$p $(stat -c %a "$f") $(cut -d= -f1 "$f" | tr '\n' ' ')"
+    elif [[ $gp =~ ^[A-Za-z0-9]+$ ]] && grep -qF -- "$gp" "$f"; then
+      echo "$p $(stat -c %a "$f") $(sed "s/$gp/<game password>/g" "$f" | sha256sum | cut -c1-64)"
     else echo "$p $(stat -c %a "$f") $(sha "$f")"; fi
   done
 }
@@ -342,7 +356,7 @@ settings_ok() {
     const ok = s.visibility.public === false && s.visibility.lan === false && s.require_user_verification === true &&
       s.auto_pause === true && s.autosave_interval === 10 && s.autosave_slots === 5 && s.non_blocking_saving === false &&
       s.allow_commands === "admins-only" && /setup-agent-host\.sh/.test(s._comment) &&
-      !["username", "password", "token", "game_password"].some((k) => k in s);
+      /^[A-Za-z0-9]{20,}$/.test(s.game_password) && !["username", "password", "token"].some((k) => k in s);
     process.exit(ok ? 0 : 1);' "$1"
 }
 canon() { node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))))' "$1"; }
@@ -404,7 +418,7 @@ check 'pulls the image by its full name and records the pin and its glibc in ima
 check 'writes config.ini with the read-only data and the writable /srv/factorio' '
   grep -qx "read-data=/opt/factorio/current/data" "$R/srv/factorio/config/config.ini" &&
   grep -qx "write-data=/srv/factorio" "$R/srv/factorio/config/config.ini"'
-check 'writes server-settings.json: private, verified users, auto-pause, no credentials, the _comment' 'settings_ok "$R/srv/factorio/config/server-settings.json"'
+check 'writes server-settings.json: private, verified users, auto-pause, a game password, no factorio.com credentials, the _comment' 'settings_ok "$R/srv/factorio/config/server-settings.json"'
 check 'writes the admin list and the mod list' '
   [[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\"]" ]] &&
   [[ $(node -e "console.log(JSON.parse(require(\"fs\").readFileSync(process.argv[1])).mods.map((m) => m.name + (m.enabled ? \"\" : \"-off\")).join(\" \"))" "$R/srv/factorio/mods/mod-list.json") == "base space-age quality elevated-rails recycler orrery" ]]'
@@ -474,6 +488,22 @@ check 'runs the agent check as factorio with its units'\'' HOME (not factorio'\'
   [[ $(cat "$F/check-ran") == "{\"args\":[\"check\"],\"home\":\"/srv/orrery-agent\",\"rcon\":true,\"token\":true}" ]] &&
   grep -q "^setup-agent-host: agent factorio-vm (agent-v0.10.0), Factorio 2.1.24, image $OL@sha256:$DIGEST1 (glibc 2.39)" "$R/srv/factorio/first-boot.txt" &&
   grep -qx "first-boot check (fixture): every check ran" "$R/srv/factorio/first-boot.txt" && says "every check ran"'
+GP=$(GP_OF)
+SET=$R/srv/factorio/config/server-settings.json BOOT=$R/srv/factorio/first-boot.txt
+check 'the game password: 20 random letters and digits, in server-settings.json, mode 600, written as factorio' '
+  [[ $GP =~ ^[A-Za-z0-9]{20,}$ && $(stat -c %a "$SET") == 600 ]] &&
+  grep -qE "^as factorio mv -T $R/srv/factorio/config/\.server-settings\.json\.[A-Za-z0-9]{6} $SET$" "$F/calls"'
+check 'first-boot.txt shows the game password, says to share it only with the players; mode 600, written as factorio' '
+  grep -qx "game password: $GP" "$BOOT" && grep -qx "share the game password only with the players: anyone who has it and the VM'\''s address can join" "$BOOT" &&
+  [[ $(stat -c %a "$BOOT") == 600 && $(stat -c %a "$R/srv/factorio") == 750 ]] &&
+  grep -qE "^as factorio mv -T $R/srv/factorio/\.first-boot\.txt\.[A-Za-z0-9]{6} $BOOT$" "$F/calls" &&
+  says "the game password is in /srv/factorio/first-boot.txt (not shown here)"'
+check 'the game password is printed nowhere else: not the output, no argv, not the agent check'\''s environment; on disk only in its three root- or factorio-only files' '
+  [[ -s $CHECK_ENV ]] && ! grep -rqF -e "$GP" "$F" "$T/out" "$CHECK_ENV" &&
+  [[ $(grep -rlF -e "$GP" "$R" | sort) == "$SET
+$BOOT
+$R/usr/local/lib/orrery/defaults/server-settings.json" ]] &&
+  [[ $(stat -c %a "$R/usr/local/lib/orrery/defaults/server-settings.json") == 600 ]]'
 check 'with firewalld and SELinux off: no firewall-cmd, no SELinux tools; the OCI ingress reminder' '
   ! called "^(firewall-cmd|semanage|restorecon)" && says "reminder: players reach the server only if" && says "firewalld isn'\''t running"'
 check 'leaves no temp file behind' '[[ -z $(find "$R" -name ".*" ! -name .incoming) ]]'
@@ -488,6 +518,7 @@ check 'a second run changes nothing' 'written | cmp -s - "$T/first" && cmp -s "$
 check 'a second run downloads only the release list and the deploy/ files, pulls nothing, installs nothing' '
   [[ -z $(grep ^curl "$F/calls" | grep -vxE "curl https://($API\?per_page=100|$RAW/.*)") ]] &&
   ! called "^(dnf|useradd|podman pull)" && ! says wrote'
+check 'a second run keeps the game password' '[[ $(GP_OF) == "$GP" ]] && grep -qx "game password: $GP" "$BOOT"'
 check 'a second run keeps the installed Factorio rather than the newest' '! called latest-releases && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 ]]'
 check 'a second run still restarts the agent (its new release or unit applies)' 'called "^systemctl restart orrery-agent.service$"'
 
@@ -499,6 +530,8 @@ check 'keeps a hand-edited server-settings.json and agent config, and says so' '
   IN= run --agent-id factorio-vm --hub 127.0.0.2:1 --no-hub --admins Alice,Bob,Carol &&
   cmp -s "$T/server-settings.json" "$R/srv/factorio/config/server-settings.json" && cmp -s "$T/config.json" "$R/etc/orrery-agent/config.json" &&
   says "kept /srv/factorio/config/server-settings.json: edited by hand" && says "kept /etc/orrery-agent/config.json: edited by hand"'
+check 'keeps the game password of a hand-edited server-settings.json, and still shows it' '
+  [[ $(GP_OF) == "$GP" ]] && grep -qx "game password: $GP" "$BOOT" && ! says "warning: no game_password"'
 check 'rewrites a config still at its previous default: the new admins' '[[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\",\"Carol\"]" ]]'
 
 # ---- A config write that fails is finished by the next run: its saved default changes only after the file does.
@@ -522,6 +555,7 @@ OLD_ID=$(printf '%s' "$OL@sha256:$DIGEST1" | sha256sum | cut -c1-64)
 check '--refresh-image pulls again, pins the new digest in image.json and the Quadlet file' '
   IN= run "${ARGS[@]}" --refresh-image && called "^podman pull $OL$" &&
   grep -qx "Image=$OL@sha256:$DIGEST2" "$Q" && grep -qF "$OL@sha256:$DIGEST2" "$R/etc/orrery-agent/image.json"'
+check '--refresh-image keeps the game password' '[[ $(GP_OF) == "$GP" ]]'
 check '--refresh-image removes the old image by its id only' '[[ $(grep "^podman image rm" "$F/calls") == "podman image rm $OLD_ID" ]]'
 touch "$F/active-factorio.service"
 echo "$DIGEST1" > "$F/digest"
@@ -537,6 +571,23 @@ for p in u-34197 u-34198 u-34199 t-27015; do
   echo "UNCONN 0 0 127.0.0.1:${p#*-} 0.0.0.0:* uid:986 ino:1 sk:1 cgroup:/system.slice/factorio.service <->" > "$F/ss-$p"
 done
 check 'ports held by factorio (its own container or agent) are no reason to refuse' 'IN= run "${ARGS[@]}"'
+
+# ---- The game password on a VM set up before it existed, and in a file edited by hand without one.
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/old"
+printf '{\n  "_comment": "an older default of setup-agent-host.sh",\n  "auto_pause": true\n}\n' > "$T/old/server-settings.json"
+cp "$T/old/server-settings.json" "$SET"
+cp "$T/old/server-settings.json" "$R/usr/local/lib/orrery/defaults/server-settings.json"
+check 'a server-settings.json still at the previous default, without a game password, gets the new default with one' '
+  IN= run "${ARGS[@]}" && settings_ok "$SET" && GP2=$(GP_OF) && [[ $GP2 != "$GP" ]] && grep -qx "game password: $GP2" "$BOOT" &&
+  cmp -s "$SET" "$R/usr/local/lib/orrery/defaults/server-settings.json" && [[ $(stat -c %a "$R/usr/local/lib/orrery/defaults/server-settings.json") == 600 ]]'
+node -e 'const f = process.argv[1], s = JSON.parse(require("fs").readFileSync(f)); delete s.game_password; require("fs").writeFileSync(f, JSON.stringify(s))' "$SET"
+cp "$SET" "$T/old/edited.json"
+check 'a hand-edited server-settings.json without a game password is kept, and the report warns, without failing the run' '
+  IN= run "${ARGS[@]}" && cmp -s "$T/old/edited.json" "$SET" && says "kept /srv/factorio/config/server-settings.json: edited by hand" &&
+  says "warning: no game_password found in /srv/factorio/config/server-settings.json" &&
+  grep -q "^warning: no game_password found" "$BOOT" && ! grep -q "^game password:" "$BOOT"'
 
 # ---- SELinux and firewalld on.
 fresh
@@ -605,7 +656,7 @@ precious
 precious" && $(cat "$T/elsewhere-4") == "# Managed by orrery deploy/setup-agent-host.sh" ]] &&
   [[ -L $R/srv/factorio/config/server-settings.json && -L $R/srv/factorio/mods/mod-list.json ]] &&
   [[ ! -L $R/srv/factorio/first-boot.txt && ! -L $R/etc/systemd/system/orrery-agent.service ]] &&
-  cmp -s "$R/etc/systemd/system/orrery-agent.service" "$HERE/orrery-agent.service"'
+  cmp -s "$R/etc/systemd/system/orrery-agent.service" "$HERE/orrery-agent.service" && says "warning: no game_password found"'
 
 # ---- Refusals in preflight: nothing written, nothing run that changes anything.
 refuses() { # <what> <why it says> <setup> [args…]

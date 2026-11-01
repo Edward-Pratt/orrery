@@ -25,7 +25,8 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
   `setup-agent-host.sh` sets up an Agent's Host (the friend runs it as root, and again at each new `agent-v` tag): Factorio in
   a rootful Podman Quadlet (`factorio.container`), the Agent as `orrery-agent.service` from the newest `agent-v*`
-  release, the newest `factorio-v*` release's mod when `mods/` has none, and `60-orrery-agent.rules`; tested by
+  release, the newest `factorio-v*` release's mod when `mods/` has none, `60-orrery-agent.rules`, and a random game
+  password in `server-settings.json` (kept on a re-run), shown only in the mode-600 `/srv/factorio/first-boot.txt`; tested by
   `test-setup-agent-host.sh`. `deploy-agent.sh` and `orrery-agent-deploy@.service` ship with it (an agent release next
   to the running one, rolled back if it won't connect; tested by `test-deploy-agent.sh`), but nothing starts them
   until agent deploys exist (release 2).
@@ -149,7 +150,10 @@ alone: the deploy units load `/etc/orrery.env`, and their `npm ci` must never se
 `release.yml`'s portal step.
 On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's
 `config.json`; read by `orrery-agent.service`) and `/etc/orrery-factorio.env` (`RCON_PASSWORD`; read by the Agent's unit and the
-container). The friend's machine holds them; the owner never sees them.
+container). The friend's machine holds them; the owner never sees them. Setup also writes a random `game_password` into
+`/srv/factorio/config/server-settings.json` (kept on a re-run; its saved default in `/usr/local/lib/orrery/defaults/` is
+root-only) and shows it only in `/srv/factorio/first-boot.txt` (factorio's, mode 600), for the friend to share with the players;
+the owner sees it there too, as the friend sends that file.
 
 ## Issues and domain docs
 

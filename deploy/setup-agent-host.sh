@@ -32,7 +32,9 @@
 #
 # Safe to run again. Unit, polkit, .container and shell files it writes carry the "Managed by" line above, and it
 # refuses to overwrite one without it. Config files are written only when missing or still its own previous default
-# (kept in /usr/local/lib/orrery/defaults/), so hand edits stay. Everything else is written only when it differs, so a
+# (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
+# game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
+# factorio's), never on the terminal or in an argv. Everything else is written only when it differs, so a
 # second run finishes a half-failed one. Root never writes inside factorio's trees: those writes run as factorio,
 # and every write goes to a new temp file in the target's folder, then a rename, so a link left there steers nothing.
 # SETUP_ROOT exists for deploy/test-setup-agent-host.sh only: it prefixes every path the script reads or writes (/etc,
@@ -221,7 +223,8 @@ fput() {
   echo "wrote ${1#"$R"}"
 }
 # config <root|factorio> <file>: stdin is this script's default for <file>. Written when <file> is missing or still the
-# previous default (kept in defaults/), so a file edited by hand (or a link put there) is kept as it is.
+# previous default (kept in defaults/, root-only: server-settings.json's holds the game password), so a file edited by
+# hand (or a link put there) is kept as it is.
 config() {
   local saved=$lib/defaults/${2##*/} new cur=''
   new=$(cat)
@@ -236,7 +239,7 @@ config() {
   fi
   # The target first: a run stopped between the two finds it equal to the new default, so the next run saves it.
   if [[ $1 == factorio ]]; then fput "$2" <<< "$new"; else put "$2" 644 <<< "$new"; fi
-  put "$saved" 644 <<< "$new"
+  put "$saved" 600 <<< "$new"
 }
 fsha() { local h; h=$(as_factorio sha256sum -- "$1"); printf '%s' "${h%% *}"; }
 fetch() { "${CURL[@]}" -o "$2" "$1" || die "can't download ${1%%\?*}"; }
@@ -390,9 +393,29 @@ config factorio "$srv/config/config.ini" << 'EOF'
 read-data=/opt/factorio/current/data
 write-data=/srv/factorio
 EOF
-config factorio "$srv/config/server-settings.json" << 'EOF'
+# game_password <file>: the game_password in factorio's server-settings.json (read as factorio, never through a link,
+# and only through stdin), or nothing.
+game_password() {
+  [[ ! -L $1 ]] || return 0
+  as_factorio cat -- "$1" 2> /dev/null | "$node" -e '
+    try {
+      const p = JSON.parse(require("fs").readFileSync(0, "utf8")).game_password;
+      if (typeof p === "string") process.stdout.write(p);
+    } catch {}' || true
+}
+# The game password: the one the file holds, when it is of this script's kind (so a re-run never changes it), else a new
+# random one, which reaches the file only when the file is missing or still the previous default.
+settings=$srv/config/server-settings.json
+game_pw=$(game_password "$settings")
+if ! [[ $game_pw =~ ^[A-Za-z0-9]{20,}$ ]]; then
+  game_pw=$(LC_ALL=C tr -dc A-Za-z0-9 < <(head -c 4096 /dev/urandom))
+  game_pw=${game_pw:0:20}
+  ((${#game_pw} == 20)) || die "can't make a game password"
+fi
+config factorio "$settings" << EOF
 {
-  "_comment": "Written by orrery deploy/setup-agent-host.sh, and kept on a re-run once edited. A private server: not listed, no username, password or token.",
+  "_comment": "Written by orrery deploy/setup-agent-host.sh, and kept on a re-run once edited. A private server: not listed, joined with its game_password (random, kept on a re-run); no factorio.com username, password or token.",
+  "game_password": "$game_pw",
   "visibility": { "public": false, "lan": false },
   "require_user_verification": true,
   "auto_pause": true,
@@ -402,6 +425,7 @@ config factorio "$srv/config/server-settings.json" << 'EOF'
   "allow_commands": "admins-only"
 }
 EOF
+game_pw=$(game_password "$settings") # the one the server uses: a file edited by hand may hold another, or none
 list=''
 IFS=, read -ra names <<< "$admins"
 for n in "${names[@]}"; do list+="${list:+, }\"$n\""; done
@@ -602,6 +626,16 @@ report=$(
   RCON_PASSWORD=$rcon ORRERY_AGENT_TOKEN=$token runuser -u factorio -- env HOME=/srv/orrery-agent "$node" "$agent/current/src/index.ts" check 2>&1
 ) && ok=1 || ok=0
 printf '%s\n' "$report"
-fput "$srv/first-boot.txt" <<< "$report"
+# The game password goes in the saved report only: first-boot.txt is factorio's, mode 600 (mktemp's) in its 750 home.
+if [[ -n $game_pw ]]; then
+  pw_note="game password: $game_pw
+share the game password only with the players: anyone who has it and the VM's address can join"
+  echo "the game password is in /srv/factorio/first-boot.txt (not shown here): share it only with the players"
+else
+  pw_note="warning: no game_password found in /srv/factorio/config/server-settings.json (edited by hand): without one, anyone who finds the server can join"
+  echo "$pw_note" >&2
+fi
+fput "$srv/first-boot.txt" <<< "$report
+$pw_note"
 ((ok && started)) || die "the first-boot check found a problem: send /srv/factorio/first-boot.txt to the owner"
 echo "done: send /srv/factorio/first-boot.txt to the owner"

@@ -23,7 +23,8 @@ file (and `image.json`, read from beside it) and `ORRERY_AGENT_ROOT` the agent's
 `docs/protocol.md` ("Agent connection") is authoritative. The message types come from `hub/src/types.ts`, through
 `import type` only: a release tarball is `agent/` alone, so no runtime import may leave `agent/`. `src/wire.ts` holds
 the agent's copies of `PROTOCOL_VERSION` and `LIMITS`; `test/wire.test.ts` checks them against
-`hub/src/protocol.ts`, so change them together. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
+`hub/src/protocol.ts`, so change them together. `src/update.ts`'s `GAME_MODS` (the game's own mods, for an update's
+`to`) is a copy of `hub/src/factorio.ts`'s, checked by `test/update.test.ts`. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
 set on 2026-10-31 while the owner was away: `docs/adr/0004`), its `\n` included, both ways.
 
 The release is `agent-v` + `package.json`'s `version`, which stays `0.0.0` in the repo (like `factorio/info.json`):

@@ -223,8 +223,10 @@ Agent carries it out. In order:
 3. The hub stops the unit (`serviceAct` `stop`, after the usual 5-minute countdown in game while players are on;
    not at all when it is already inactive or failed) and, once the pushed `serviceState` is inactive or failed,
    sends `updateResume`.
-4. The Agent swaps (`swap`), starts the unit and gates it (`gate`), rolls back if that fails (`rollback`), sends
-   `installed`, then `updateDone` (`backup`: the pre-update save).
+4. The Agent swaps (`swap`: first it copies the newest save, which the stop just wrote, as
+   `orrery-pre-update-<from>-<time>.zip`, older than that save so the new release never loads or writes the copy),
+   starts the unit and gates it (`gate`), rolls back if that fails (`rollback`, the copy restored as the newest save),
+   sends `installed`, then `updateDone` (`backup`: the pre-update save, that copy).
 
 The game's own mods (`base`, `elevated-rails`, `quality`, `recycler`, `space-age`: what a release ships in its
 `data/`, `core` aside) are never in `mods`. The Agent keeps each one enabled or disabled as the server's current
@@ -245,8 +247,10 @@ game's own mods enabled in that `installed` plus every mod in the update's `mods
 `elevated-rails`, `quality`, `space-age` and `orrery` enabled is `2.1.24 · 5 mods`.
 
 `updateResume` and `updateCancel` carry fresh request ids of their own and act on the update running, the one
-update an Agent runs at a time. `updateCancel` is taken only before the swap (else `ok: false`); it never starts or
-stops the unit, and the Agent ends the update with `updateDone` `cancelled`. The hub sends it when Cancel is pressed
+update an Agent runs at a time. `updateCancel` is taken only before the swap (else `ok: false`); it never stops the
+unit, and starts it only when it was active at the `backup` step and is stopped now (once stopping is over): the hub
+stopped it, and may have restarted since without knowing (a second start does nothing). The Agent ends the update with
+`updateDone` `cancelled`. The hub sends it when Cancel is pressed
 while the Agent prepares, when the countdown is cancelled, when it gives up before the swap (it stopped the server:
 it starts it again), when its `update` got no `reply` in time or the connection dropped first (the Agent may have
 started it), and, on the Agent's next `agentHello`, for an update the hub closed before its swap while the

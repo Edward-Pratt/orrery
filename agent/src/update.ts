@@ -106,7 +106,7 @@ export type UpdatesOptions = {
   /** `/etc/orrery-agent/image.json`, setup's record of the container image and its glibc. */
   image: string;
   unit: UnitControl;
-  saves: Pick<Saves, 'preUpdate' | 'list' | 'hold' | 'release' | 'restore'>;
+  saves: Pick<Saves, 'preUpdate' | 'keep' | 'list' | 'hold' | 'release' | 'restore'>;
   /** Sends on the Agent connection; false while it isn't up. */
   send: (msg: AgentMsg) => boolean;
   /** `updateDone` on the Agent connection (`HubClient.deliver`): true once its write succeeded. */
@@ -161,8 +161,13 @@ type Job = {
   label: { from: string; to: string };
   /** `current`'s target before the update, `releases/X.Y.Z`. */
   previous: string;
-  /** The save a rollback loads: the pre-update save, or the newest one when the server was stopped. */
+  /**
+   * The save the update holds: until the swap the pre-update save (or, the server stopped, the newest one); from the
+   * swap the copy of the newest save as the stop left it (`Saves.keep`), which a rollback restores; null: none.
+   */
   backup: string | null;
+  /** The unit was active at the backup: a cancel finding it stopped then starts it again (the hub stopped it). */
+  wasActive?: boolean;
   phase: Phase;
   outcome: PackFinished | null;
   /** The hub stopped the server for it (`updateResume`): a failure before the swap starts the old one again. */
@@ -353,6 +358,7 @@ function readJob(raw: unknown): Job | null {
     typeof raw.previous === 'string' &&
     RELEASE.test(raw.previous) &&
     (raw.backup === null || (typeof raw.backup === 'string' && raw.backup.length <= LIMITS.text && /^[^/\0]+\.zip$/.test(raw.backup))) &&
+    (raw.wasActive === undefined || typeof raw.wasActive === 'boolean') &&
     PHASES.includes(raw.phase as Phase) &&
     (raw.outcome === null || OUTCOMES.includes(raw.outcome as PackFinished)) &&
     typeof raw.resumed === 'boolean';
@@ -370,15 +376,18 @@ function readJob(raw: unknown): Job | null {
  *    own mods on or off as the current one has them, one new in the release on, and the update's on) and
  *    `mod-settings.dat` carried over. Downloads follow redirects only to `ALLOWED_HOSTS`, at most 5, with caps, and
  *    stop after `STALL_MS` without a byte.
- * 2. backup: a pre-update save while the server runs, else the newest save; held from pruning until the end.
+ * 2. backup: a pre-update save while the server runs, else the newest save; held from pruning until the swap.
  * 3. stop, the hub's: `waiting` (its only state that goes out) until the hub stopped the server (`updateResume`) or
- *    cancelled the update (`updateCancel`, which never starts or stops the unit).
- * 4. swap: the unit checked stopped, `current` flipped to the new release, `mods` to `mods.prev`, `mods.next` to
- *    `mods`, the unit started.
+ *    cancelled the update (`updateCancel`, which never stops the unit; it starts it only if it ran at the backup and
+ *    is stopped now: the hub stopped it, and may have restarted since without knowing).
+ * 4. swap: the unit checked stopped, the newest save (the one the stop just wrote) copied as the rollback's save
+ *    (`Saves.keep`: older than it, so the new release never loads or writes the copy), `current` flipped to the new
+ *    release, `mods` to `mods.prev`, `mods.next` to `mods`, the unit started.
  * 5. gate, 5 minutes at most: `/orrery-status` with the new version and exactly the expected mods, and the game
  *    connection up.
  * 6. rollback, when the swap or the gate failed: the old `current`, `mods.prev` back (its `mod-settings.dat` with it),
- *    the backup copied as the newest save, started and gated again (the game connection only while the Agent
+ *    the swap's copy copied as the newest save (none if that copy failed: the old release's own newest is intact),
+ *    started and gated again (the game connection only while the Agent
  *    connection is up): `rolled back`, or `failed`.
  *
  * `<state>/update.json` (the agent's own folder: a file of that name under `<data>` is never read) records each phase
@@ -537,7 +546,8 @@ export class Updates {
 
   /**
    * The hub's `updateCancel`, with a request id of its own, on the one update running: only before the swap; the
-   * downloads stop and `.incoming` is cleaned. It never starts or stops the unit: a server the hub stopped, it starts.
+   * downloads stop and `.incoming` is cleaned. It never stops the unit, and starts it only when it ran at the backup
+   * and is stopped now (`#startAfterCancel`): the hub starts a server it stopped, unless it restarted meanwhile.
    */
   async cancel(): Promise<void> {
     const r = this.#running;
@@ -575,7 +585,8 @@ export class Updates {
       this.#step(r, step, 'failed', r.cancelled ? 'Cancelled by the hub' : reason(err));
       if (!r.cancelled && !(err instanceof Fail)) console.error(`[update] ${job.id}: ${reason(err)}`);
       await this.#clean();
-      if (job.resumed && !r.cancelled) await this.#startOld(); // a cancel never starts the unit: the hub does
+      if (r.cancelled) await this.#startAfterCancel(job);
+      else if (job.resumed) await this.#startOld();
       return this.#finish(r, r.cancelled ? 'cancelled' : job.resumed ? 'failed before swap' : 'failed in staging');
     }
     let outcome: PackFinished;
@@ -773,9 +784,13 @@ export class Updates {
             await writeAll(out, buf.subarray(0, bytesRead));
             pos += bytesRead;
           }
-        } finally {
+        } catch (err) {
+          // A part copy (a full disk) is no settings file, and it holds the space a rollback needs.
           await out.close();
+          await rm(`${next}/mod-settings.dat`, { force: true }).catch(() => {});
+          throw err;
         }
+        await out.close();
       });
     } finally {
       await src.fh.close();
@@ -789,7 +804,8 @@ export class Updates {
     await this.#save(job);
     this.#step(r, 'backup', 'running', `Saving the game as orrery-pre-update-${job.from.factorio}`);
     const unit = await this.#o.unit.read();
-    if (unit.active === 'active') {
+    job.wasActive = unit.active === 'active';
+    if (job.wasActive) {
       job.backup = await this.#o.saves.preUpdate(job.from.factorio);
       await this.#save(job);
       return this.#step(r, 'backup', 'done', `Saved ${job.backup}`);
@@ -797,7 +813,7 @@ export class Updates {
     job.backup = (await this.#o.saves.list()).saves[0]?.name ?? null;
     if (job.backup) this.#o.saves.hold(job.backup);
     await this.#save(job);
-    this.#step(r, 'backup', 'done', job.backup ? `The server is stopped: no save made; a rollback loads ${job.backup}, the newest` : 'The server is stopped and has no saves');
+    this.#step(r, 'backup', 'done', job.backup ? `The server is stopped: no save made; the swap keeps a copy of ${job.backup}, the newest, for a rollback` : 'The server is stopped and has no saves');
   }
 
   /** The stop step, the hub's: `waiting` until its `updateResume` (it stopped the server) or `updateCancel`. */
@@ -819,8 +835,8 @@ export class Updates {
   async #swap(r: Running): Promise<void> {
     const { job } = r;
     const { data } = this.#o;
-    await this.#save(job); // the swap phase, before anything moves
     this.#step(r, 'swap', 'running', `Putting Factorio ${job.factorio} and ${plural(job.mods.length, 'mod')} in place`);
+    await this.#keep(job); // and the swap phase recorded, before anything moves
     this.#latest = null;
     // Factorio writes mod-settings.dat as it stops: the copy prepare made is taken again, as it is now.
     const settings = await this.#settings();
@@ -832,6 +848,27 @@ export class Updates {
     await this.#save(job);
     await this.#o.unit.act('start');
     this.#step(r, 'swap', 'done', `Factorio ${job.factorio} and ${plural(job.mods.length, 'mod')} in place${settings ? ', with mod-settings.dat' : ''}; the server is starting`);
+  }
+
+  /**
+   * The rollback's save, taken once the server is stopped and before anything moves: a copy of the newest save, which
+   * the stop just wrote with all the play up to it (`Saves.keep`), held instead of the backup step's save. The new
+   * release loads (and on a stop writes) that newest file, never the copy. A copy that fails leaves none: then nothing
+   * has moved yet, and the old release's own newest save is the one to go back to. Recorded with the swap phase, before
+   * the flip: a restart before that ends the update before the swap, with nothing to restore.
+   */
+  async #keep(job: Job): Promise<void> {
+    const prior = job.backup;
+    job.backup = null;
+    if (prior) this.#o.saves.release(prior);
+    let newest: string | undefined;
+    try {
+      newest = (await this.#o.saves.list()).saves[0]?.name;
+      if (newest) job.backup = await this.#o.saves.keep(newest, job.from.factorio);
+    } catch (err) {
+      console.error(`[update] ${job.id}: can't keep a copy of ${newest ?? 'the newest save'} for a rollback: ${reason(err)}`);
+    }
+    await this.#save(job);
   }
 
   /**
@@ -864,7 +901,8 @@ export class Updates {
     this.#step(r, 'rollback', 'running', `Going back to Factorio ${back}, its mods and the pre-update save`);
     try {
       job.phase = 'rollback';
-      await this.#save(job);
+      // Not written (a full disk): a restart finds the swap or the gate there, and rolls back the same way.
+      await this.#save(job).catch((err: Error) => console.error(`[update] can't write ${this.#file}: ${reason(err)}`));
       const unit = await this.#o.unit.read();
       if (!stopped(unit)) await this.#o.unit.act('stop');
       await this.#stopped();
@@ -905,7 +943,7 @@ export class Updates {
     await this.#save(job).catch((err: Error) => console.error(`[update] can't write ${this.#file}: ${reason(err)}`));
     if (job.backup) this.#o.saves.release(job.backup);
     await this.#clean();
-    await this.#prune().catch((err: Error) => console.error(`[update] can't prune ${this.#o.install}/releases: ${reason(err)}`));
+    await this.#prune(job.previous).catch((err: Error) => console.error(`[update] can't prune ${this.#o.install}/releases: ${reason(err)}`));
     console.log(`[update] ${job.id}: ${outcome}`);
     this.#running = null;
     this.#done = this.#doneMsg(job);
@@ -996,6 +1034,27 @@ export class Updates {
     }
   }
 
+  /**
+   * After a cancel: a server that ran at the backup and is stopped now (or still stopping: waited for, 5 minutes at
+   * most) was stopped by the hub, which starts it again, unless it restarted meanwhile and doesn't know: so it is
+   * started here too (a second start does nothing). Running (a countdown cancelled), it is left alone.
+   */
+  async #startAfterCancel(job: Job): Promise<void> {
+    if (!job.wasActive) return;
+    try {
+      let s = await this.#o.unit.read();
+      if (s.active === 'deactivating') {
+        await this.#stopped();
+        s = await this.#o.unit.read();
+      }
+      if (!stopped(s)) return;
+      console.log(`[update] ${job.id}: cancelled with the server stopped, which ran before the update: starting it again`);
+      await this.#o.unit.act('start');
+    } catch (err) {
+      console.error(`[update] can't start the server again: ${reason(err)}`);
+    }
+  }
+
   /** The old server again, after a failure before the swap, if the hub had stopped it. */
   async #startOld(): Promise<void> {
     try {
@@ -1025,15 +1084,18 @@ export class Updates {
     await rename(tmp, current);
   }
 
-  /** Keeps the newest three releases and the running one. */
-  async #prune(): Promise<void> {
+  /**
+   * Keeps the newest three releases, the running one and `previous` (`releases/X.Y.Z`, what ran before the update: a
+   * rollback that failed before flipping back leaves it needed for a recovery).
+   */
+  async #prune(previous: string): Promise<void> {
     const dir = join(this.#o.install, 'releases');
     const versions = (await readdir(dir, { withFileTypes: true }))
       .filter((d) => d.isDirectory() && VERSION.test(d.name))
       .map((d) => d.name)
       .sort(newestFirst);
     const running = (await this.#current().catch(() => null))?.slice('releases/'.length);
-    const keep = new Set([...versions.slice(0, KEEP_RELEASES), running]);
+    const keep = new Set([...versions.slice(0, KEEP_RELEASES), running, previous.slice('releases/'.length)]);
     for (const v of versions) {
       if (keep.has(v)) continue;
       await rm(join(dir, v), { recursive: true, force: true });

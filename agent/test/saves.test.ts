@@ -286,6 +286,57 @@ test('restore copies a listed save to restored-<time>-<name>, never over a file,
   assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now + 1000);
 });
 
+test('a restore of a restored copy names the new copy after the original: chained restores never outgrow a file name', async (t) => {
+  let now = T0;
+  const w = await world(t, { now: () => now });
+  await file(w.saves, 'world.zip', T0 - HOUR, 'the world');
+  await w.s.restore('world.zip');
+  let name = `restored-${stamp(now)}-world.zip`;
+  // Ten restores, each of the copy the last one made (a rollback's on a stopped server, or the dashboard's).
+  for (let i = 1; i <= 10; i++) {
+    now = T0 + i * 1000;
+    await w.s.restore(name);
+    name = `restored-${stamp(now)}-world.zip`;
+    assert.equal(await readFile(join(w.saves, name), 'utf8'), 'the world', `restore ${i}`);
+  }
+  assert.ok(!(await readdir(w.saves)).some((n) => n.includes('restored-') && n.indexOf('restored-', 1) !== -1), 'no name carries two prefixes');
+  // A world file of the owner's that merely starts so keeps the rest of its name.
+  await file(w.saves, 'restored-world.zip', T0 - HOUR, 'theirs');
+  now = T0 + HOUR;
+  await w.s.restore('restored-world.zip');
+  assert.equal(await readFile(join(w.saves, `restored-${stamp(now)}-restored-world.zip`), 'utf8'), 'theirs');
+});
+
+test("keep copies a save byte for byte as a held orrery-pre-update-<from>-<time>.zip, 2 s older than it: a start still loads the save itself", async (t) => {
+  const w = await world(t, { now: () => T0 });
+  await file(w.saves, 'world.zip', T0 - 1000, 'the world, saved at the stop');
+  await file(w.saves, 'older.zip', T0 - 10 * HOUR, 'older');
+  const name = await w.s.keep('world.zip', '2.1.24');
+  assert.equal(name, `orrery-pre-update-2.1.24-${stamp(T0)}.zip`);
+  assert.equal(await readFile(join(w.saves, name), 'utf8'), 'the world, saved at the stop');
+  assert.equal((await stat(join(w.saves, name))).mtimeMs, T0 - 3000, '2 s before the save it copies');
+  const listed = (await w.s.list()).saves;
+  assert.deepEqual(listed.map((s) => s.name), ['world.zip', name, 'older.zip'], 'the save itself stays the newest');
+  assert.equal(listed[1]!.kind, 'named');
+  assert.ok(!(await readdir(w.saves)).some((n) => n.endsWith('.partial')), 'no partial file left');
+
+  // The same second again (a pre-update save made just before): the next free second, never over a file.
+  const again = await w.s.keep('world.zip', '2.1.24');
+  assert.equal(again, `orrery-pre-update-2.1.24-${stamp(T0 + 1000)}.zip`);
+  assert.equal(await readFile(join(w.saves, name), 'utf8'), 'the world, saved at the stop');
+
+  // Held from pruning until released: past the 20 named saves kept, it stays.
+  for (let i = 0; i < KEEP_NAMED + 2; i++) await file(w.saves, `orrery-${stamp(T0 + (i + 5) * 1000)}.zip`, T0 + (i + 5) * 1000);
+  await w.s.prune();
+  assert.ok((await readdir(w.saves)).includes(name), 'held');
+  w.s.release(name);
+  await w.s.prune();
+  assert.ok(!(await readdir(w.saves)).includes(name), 'pruned once released');
+
+  await assert.rejects(w.s.keep('nothing.zip', '2.1.24'), /nothing\.zip is not a listed save/);
+  await assert.rejects(w.s.keep('world.zip', '../x'), /is not a version/);
+});
+
 test('restore writes the copy under a name that is no save, and refuses if the server started meanwhile: nothing left behind', async (t) => {
   let reads = 0;
   let during: string[] = [];
@@ -314,6 +365,7 @@ test("start removes a partial copy left by a restore the agent's exit cut short,
   t.after(() => w.s.stop());
   // The agent exited during a restore (process.exit skips its finally): its partial copy stays, hidden from the list.
   const left = `.restored-${stamp(T0 - HOUR)}-world.zip.partial`;
+  const leftKeep = `.orrery-pre-update-2.1.24-${stamp(T0 - HOUR)}.zip.partial`; // a game update's copy (keep)
   const kept = [
     'world.zip',
     `restored-${stamp(T0 - 2 * HOUR)}-world.zip`,
@@ -323,6 +375,7 @@ test("start removes a partial copy left by a restore the agent's exit cut short,
   ];
   for (const name of kept) await file(w.saves, name, T0 - 3 * HOUR);
   await file(w.saves, left, T0 - HOUR, 'half a world');
+  await file(w.saves, leftKeep, T0 - HOUR, 'half a world');
   // The container's link with that shape, to a file outside saves/: neither it nor what it points at is removed.
   await file(w.dir, 'outside.zip', T0);
   const linked = `.restored-${stamp(T0)}-evil.zip.partial`;
@@ -332,10 +385,13 @@ test("start removes a partial copy left by a restore the agent's exit cut short,
   w.s.start();
   await eventually(() => w.pushed.length === 1, 2000, 'the first list');
   const now = await readdir(w.saves);
-  assert.ok(!now.includes(left), 'the partial copy is removed');
+  assert.ok(!now.includes(left) && !now.includes(leftKeep), 'the partial copies are removed');
   assert.deepEqual(now.sort(), [...kept, linked, `.restored-${stamp(T0)}-folder.zip.partial`].sort(), 'nothing else is');
   assert.equal(await readFile(join(w.dir, 'outside.zip'), 'utf8'), 'outside.zip');
-  assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] removed ${left}, left by a restore the agent's exit cut short`]);
+  assert.deepEqual(
+    log.mock.calls.map((c) => String(c.arguments[0])).sort(),
+    [`[saves] removed ${left}, left by a copy the agent's exit cut short`, `[saves] removed ${leftKeep}, left by a copy the agent's exit cut short`].sort(),
+  );
 });
 
 test("a pre-update save keeps its version's dots: the command names the .zip, as Factorio makes a name's last . part its extension", async (t) => {

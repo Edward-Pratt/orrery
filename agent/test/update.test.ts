@@ -513,7 +513,7 @@ test("a current mod-list.json that isn't Factorio's list fails prepare: nothing 
   assert.equal((await w.step('prepare', 'failed')).detail, 'mods/mod-list.json is not a regular file');
 });
 
-test('a gate failure rolls back to the old release, mods.prev with its mod-settings.dat, and the pre-update save', async (t) => {
+test('a gate failure rolls back to the old release, mods.prev with its mod-settings.dat, and the world as the stop saved it', async (t) => {
   const w = await world(t, { gateMs: 300 });
   w.offer('2.1.25');
   w.mod('orrery', '0.2.0');
@@ -533,10 +533,13 @@ test('a gate failure rolls back to the old release, mods.prev with its mod-setti
   assert.equal(await readFile(join(w.data, 'mods/mod-settings.dat'), 'utf8'), 'startup settings v1', 'mod-settings.dat survives the rollback');
   assert.equal(await exists(join(w.data, 'mods.prev')), false);
   assert.equal(await exists(join(w.data, 'mods.next')), false);
-  // The pre-update save, copied as the newest: --start-server-load-latest loads it.
+  // The swap's copy of the world as the stop saved it (not the pre-update save, older by the countdown's play),
+  // copied as the newest: --start-server-load-latest loads it.
   const saves = await w.saves.list();
+  assert.match(done.backup!, /^orrery-pre-update-2\.1\.24-\d{8}T\d{6}Z\.zip$/);
   assert.equal(saves.saves[0]!.name, `restored-${saves.saves[0]!.name.split('-')[1]}-${done.backup}`);
-  assert.equal(await readFile(join(w.data, 'saves', saves.saves[0]!.name), 'utf8'), 'save of releases/2.1.24');
+  assert.equal(await readFile(join(w.data, 'saves', saves.saves[0]!.name), 'utf8'), 'the world, saved at the stop');
+  assert.equal(await readFile(join(w.data, 'saves', done.backup!), 'utf8'), 'the world, saved at the stop');
   assert.ok(saves.saves[0]!.mtime > (await stat(join(w.data, 'saves/world.zip'))).mtimeMs);
   assert.deepEqual(w.unit.calls, ['stop', 'start', 'stop', 'start']);
   for (const m of w.sent) assert.ok(parseAgentLine(JSON.stringify(m)), `the hub takes ${JSON.stringify(m)}`);
@@ -757,8 +760,8 @@ test('updateCancel before the swap cleans .incoming; after it, it is refused', a
   assert.deepEqual(w.unit.calls, []);
   assert.ok(!w.steps().some((m) => m.step === 'stop' && m.state !== 'waiting'), "the stop is the hub's: its end is not a step");
 
-  // Cancelled after updateResume, while the agent checks the stop (the hub giving up): it never starts or stops the
-  // unit, as the hub starts a server it stopped itself.
+  // Cancelled after updateResume, while the agent checks the stop (the hub giving up): it never stops the unit, and
+  // starts the one the hub stopped (which the hub starts too: a second start does nothing).
   w.sent.length = 0;
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u2b'));
   await w.step('stop', 'waiting');
@@ -768,9 +771,8 @@ test('updateCancel before the swap cleans .incoming; after it, it is refused', a
   await w.u.cancel();
   w.unit.state = { ...w.unit.state, active: 'inactive', sub: 'dead' };
   assert.equal((await w.done()).outcome, 'cancelled');
-  assert.deepEqual(w.unit.calls, [], 'a cancel never starts or stops the unit');
+  assert.deepEqual(w.unit.calls, ['start'], 'a cancel never stops the unit; the one stopped for it is started');
   assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
-  await w.unit.act('start');
 
   w.sent.length = 0;
   w.broken.add('2.1.25');
@@ -783,23 +785,121 @@ test('updateCancel before the swap cleans .incoming; after it, it is refused', a
   assert.equal((await w.done()).outcome, 'rolled back');
 });
 
-test('an update on a stopped server keeps the newest save for a rollback', async (t) => {
+test('an update on a stopped server keeps a copy of the newest save for a rollback', async (t) => {
   const w = await world(t);
   await w.unit.act('stop');
   w.unit.calls.length = 0;
   w.offer('2.1.25');
   w.mod('orrery', '0.2.0');
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
-  assert.equal((await w.step('backup', 'done')).detail, 'The server is stopped: no save made; a rollback loads world.zip, the newest');
+  assert.equal((await w.step('backup', 'done')).detail, 'The server is stopped: no save made; the swap keeps a copy of world.zip, the newest, for a rollback');
   await w.step('stop', 'waiting');
   await w.u.resume();
   const done = await w.done();
   assert.equal(done.outcome, 'ok');
-  assert.equal(done.backup, 'world.zip');
+  assert.match(done.backup!, /^orrery-pre-update-2\.1\.24-\d{8}T\d{6}Z\.zip$/);
   assert.equal(done.from, '2.1.24 · 3 mods');
   assert.equal(done.to, '2.1.25 · 3 mods');
   assert.deepEqual(w.unit.calls, ['start']);
-  assert.deepEqual((await w.saves.list()).saves.map((s) => s.name), ['world.zip'], 'no save made');
+  assert.deepEqual((await w.saves.list()).saves.map((s) => s.name), ['world.zip', done.backup], 'no save made; the copy older than the world');
+});
+
+test('a rollback on a stopped server restores the world as it was before the swap, not as the new release saved it at the rollback stop', async (t) => {
+  const w = await world(t, { gateMs: 300 });
+  await w.unit.act('stop');
+  w.unit.calls.length = 0;
+  // Factorio saves into the world it loaded as it stops (SIGINT): whatever release runs, in its own format.
+  const act = w.unit.act;
+  w.unit.act = async (verb) => {
+    if (verb === 'stop' && w.unit.state.active === 'active') await writeFile(join(w.data, 'saves/world.zip'), `save of ${await readlink(join(w.install, 'current'))}`);
+    return act(verb);
+  };
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.broken.add('2.1.25'); // it loads the map, then never passes the gate
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.u.resume();
+  const done = await w.done();
+  assert.equal(done.outcome, 'rolled back');
+  assert.equal(await readFile(join(w.data, 'saves/world.zip'), 'utf8'), 'save of releases/2.1.25', 'the new release wrote the world it loaded');
+  const newest = (await w.saves.list()).saves[0]!;
+  assert.equal(newest.name, `restored-${newest.name.split('-')[1]}-${done.backup}`);
+  assert.equal(await readFile(join(w.data, 'saves', newest.name), 'utf8'), 'the world', 'the old release loads the world as it was before the swap');
+  assert.equal(await readFile(join(w.data, 'saves', done.backup!), 'utf8'), 'the world');
+  assert.deepEqual(w.unit.calls, ['start', 'stop', 'start']);
+});
+
+test('a hub that restarts during its own stop: the cancel it sends then starts the server the update stopped', async (t) => {
+  const w = await world(t);
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  // The hub stops the server, then restarts while Factorio saves: the new hub sends updateCancel, not updateResume.
+  w.unit.state = { ...w.unit.state, active: 'deactivating', sub: 'stop-sigterm' };
+  await w.u.cancel();
+  await sleep(50);
+  assert.deepEqual(w.unit.calls, [], 'not while it still stops');
+  w.unit.state = { ...w.unit.state, active: 'inactive', sub: 'dead' };
+  assert.equal((await w.done()).outcome, 'cancelled');
+  assert.deepEqual(w.unit.calls, ['start'], 'started once stopped');
+  assert.equal(w.unit.state.active, 'active');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+
+  // A server that was stopped before the update stays stopped.
+  await w.unit.act('stop');
+  w.unit.calls.length = 0;
+  w.sent.length = 0;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2'));
+  await w.step('stop', 'waiting');
+  await w.u.cancel();
+  assert.equal((await w.done()).outcome, 'cancelled');
+  assert.deepEqual(w.unit.calls, []);
+});
+
+test("a rollback whose bookkeeping can't be written (a full disk) still rolls back and starts the old server", async (t) => {
+  const w = await world(t);
+  const error = t.mock.method(console, 'error', () => {});
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  w.unit.state = { ...w.unit.state, active: 'deactivating', sub: 'stop-sigterm' };
+  await w.u.resume();
+  await w.step('swap', 'running'); // the resume is recorded; every write of update.json from here fails
+  const tmp = join(w.state, `update.json.${process.pid}.tmp`);
+  await mkdir(tmp);
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  w.unit.state = { ...w.unit.state, active: 'inactive', sub: 'dead' };
+  const done = await w.done();
+  assert.equal(done.outcome, 'rolled back');
+  assert.equal(w.unit.calls.at(-1), 'start');
+  assert.equal(w.unit.state.active, 'active');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  assert.deepEqual((await readdir(join(w.data, 'mods'))).sort(), ['mod-list.json', 'mod-settings.dat', 'orrery_0.1.0.zip'], 'the old mods');
+  assert.ok(error.mock.calls.some((c) => /can't write .*update\.json/.test(String(c.arguments[0]))), 'logged');
+});
+
+test('a rollback that fails before flipping back keeps the release the update came from', async (t) => {
+  const w = await world(t, { gateMs: 300 });
+  // Two newer releases from earlier tries that rolled back: the newest three are 2.1.27, 2.1.26 and 2.1.25.
+  for (const v of ['2.1.26', '2.1.27']) await mkdir(join(w.install, 'releases', v, 'data'), { recursive: true });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.broken.add('2.1.25');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  await w.u.resume();
+  await w.step('gate', 'running');
+  w.unit.act = async (verb) => {
+    if (verb === 'stop') throw new Error('Interactive authentication required.');
+  };
+  const done = await w.done();
+  assert.equal(done.outcome, 'failed');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.25');
+  assert.deepEqual((await readdir(join(w.install, 'releases'))).sort(), ['2.1.24', '2.1.25', '2.1.26', '2.1.27'], 'the release to go back to is kept');
 });
 
 test("updateDone's from and to as the hub names its row: every enabled mod, the game's own included, from the latest installed", async (t) => {

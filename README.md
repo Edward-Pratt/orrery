@@ -210,3 +210,7 @@ v2 makes orrery a hub for everything that runs or ships, not only GTNH. Discord,
 servers, the host, systemd services and HTTP checks become integrations you switch on in config, and a browser
 dashboard (Angular) joins Discord as a way in. See
 `docs/adr/0002-hub-with-integrations.md` and `docs/ROADMAP.md`.
+
+## License
+
+MIT: see `LICENSE` (the Factorio mod ships its own copy, `factorio/LICENSE`).

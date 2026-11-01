@@ -134,11 +134,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # the version comes from factorio-v* tags
-      - run: |
-          tag=$(git describe --tags --abbrev=0 --match 'factorio-v*' 2>/dev/null || echo factorio-v0.0.0)
-          bash .github/factorio-zip.sh factorio "${tag#factorio-v}" dist
+      - run: | # a factorio-v tag's own version; any other run the changelog's top one (the zip refuses a mismatch)
+          if [[ $GITHUB_REF_NAME == factorio-v* ]]; then v=${GITHUB_REF_NAME#factorio-v}
+          else v=$(sed -n 's/^Version: *//p' factorio/changelog.txt | head -n 1 | tr -d '\r'); fi
+          bash .github/factorio-zip.sh factorio "$v" dist
       - uses: actions/upload-artifact@v4
         with:
           name: factorio-zip

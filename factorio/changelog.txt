@@ -1,5 +1,5 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.1.0
+Version: 1.0.0
   Features:
     - Chat both ways between the server and orrery (Discord and the dashboard), with Discord text kept from rendering as rich text.
     - Join, leave and death events, with the cause of death.

@@ -96,11 +96,17 @@ check 'the Factorio zip needs only one info.json' '! factorio_zip 1.2.3 && says 
 rm "$T/factorio/locale/en/info.json"
 check 'the Factorio zip needs a version X.Y.Z' \
   '! factorio_zip 1.2 && says "want a version" && ! factorio_zip v1.2.3 && [[ ! -e $T/fdist ]]'
-touch "$T/factorio/control.lua" "$T/factorio/locale/en/orrery.cfg" "$T/factorio/CLAUDE.md"
-check 'the Factorio zip has the portal'\''s layout, without CLAUDE.md' \
+touch "$T/factorio/control.lua" "$T/factorio/locale/en/orrery.cfg" "$T/factorio/CLAUDE.md" "$T/factorio/LICENSE"
+check 'the Factorio zip needs a changelog' '! factorio_zip 1.2.3 && says "Version: (none), not 1.2.3" && [[ ! -e $T/fdist ]]'
+printf -- '%s\nVersion: 1.2.4\n  Features:\n    - Next.\n%s\nVersion: 1.2.3\n  Features:\n    - One.\n' "$(printf -- '-%.0s' {1..99})" \
+  "$(printf -- '-%.0s' {1..99})" > "$T/factorio/changelog.txt"
+check 'the Factorio zip needs the changelog'\''s top section to be its version' \
+  '! factorio_zip 1.2.3 && says "top section is Version: 1.2.4, not 1.2.3" && [[ ! -e $T/fdist ]]'
+printf -- '%s\r\nVersion: 1.2.3\r\n  Features:\r\n    - One.\r\n' "$(printf -- '-%.0s' {1..99})" > "$T/factorio/changelog.txt"
+check 'the Factorio zip has the portal'\''s layout, its changelog and LICENSE, without CLAUDE.md' \
   'factorio_zip 1.2.3 && [[ $(ls "$T/fdist") == orrery_1.2.3.zip ]] &&
    diff <(unzip -Z1 "$T/fdist/orrery_1.2.3.zip" | grep -v "/$" | sort) \
-     <(printf "orrery_1.2.3/%s\n" control.lua info.json locale/en/orrery.cfg) > /dev/null'
+     <(printf "orrery_1.2.3/%s\n" LICENSE changelog.txt control.lua info.json locale/en/orrery.cfg | sort) > /dev/null'
 check 'the Factorio zip carries the version, the source keeps its own' \
   'unzip -p "$T/fdist/orrery_1.2.3.zip" orrery_1.2.3/info.json | jq -e ".name == \"orrery\" and .version == \"1.2.3\"" > /dev/null &&
    [[ $(jq -r .version "$T/factorio/info.json") == 0.0.0 ]]'

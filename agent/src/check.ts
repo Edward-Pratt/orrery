@@ -86,7 +86,7 @@ const TAIL = 2000;
 const OTHERS: readonly string[] = [
   'S4 players: no game event lost under load (agent.log logs every seq gap)',
   'S7 players: on_player_changed_surface does not fire on remote view, or the landing check ignores it',
-  'S9 owner: the portal zip layout and changelog, from the factorio-v0.1.0 upload and its portal page',
+  'S9 owner: the portal zip layout and changelog, from the factorio-v1.0.0 upload and its portal page',
   'S10 owner and friend: join once; orrery downloads from the portal, and each player needs Space Age',
   'S11 owner: the signed dl-mod.factorio.com redirect, on the hub host (passed 2026-10-31)',
   "S12 owner: the factorio.com service token's scope (moot while S11 holds)",

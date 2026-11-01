@@ -316,10 +316,10 @@ fresh() { # an OL9 aarch64 VM with Podman 5.2, no factorio user, nothing of ours
 }
 override() { mkdir -p "$(dirname "$F/x/$1")"; cat > "$F/x/$1"; } # <host/path>: this test's version of a download
 gone() { mkdir -p "$(dirname "$F/gone/$1")"; touch "$F/gone/$1"; } # <host/path>: a 404
-run() { # [args…]: the script with $IN (default: the token) on stdin, its output in $T/out
+run() { # [args…]: the script with $IN (default: the token) on stdin, its output in $T/out; TRACE=1 runs it under bash -x
   local r=0
   : > "$F/calls"
-  PATH=$T/wrap:$PATH bash "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
+  PATH=$T/wrap:$PATH bash ${TRACE:+-x} "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
   cat "$F/calls" >> "$T/all-calls"
   return $r
 }
@@ -618,6 +618,10 @@ check '--image pins another image, with its own glibc' '
   [[ $(canon "$R/etc/orrery-agent/image.json") == "{\"image\":\"$DEBIAN@sha256:$DIGEST1\",\"glibc\":\"2.41\"}" ]]'
 fresh
 check '--no-hub only warns when the hub is unreachable' 'run --agent-id factorio-vm --hub 127.0.0.1:1 --admins Alice --no-hub && says "warning: can'\''t reach the hub"'
+fresh
+check 'under bash -x, no secret reaches the trace: the script turns xtrace off' '
+  TRACE=1 run "${ARGS[@]}" && head -n 3 "$T/out" | grep -q "^+ " && GP3=$(GP_OF) && [[ -n $GP3 ]] &&
+  ! grep -qF -e "$GP3" -e "$TOKEN" -e "$(RCON_OF)" "$T/out"'
 fresh
 touch "$F/missing-podman"
 check 'installs a missing Podman, then checks it' '

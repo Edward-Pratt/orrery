@@ -234,3 +234,8 @@ test('a download link is the signed dl-mod.factorio.com one: asked with the acco
   await assert.rejects(new FactorioCatalog(none.fetch).link(download), (err: GameRefused) => err.status === 409 && /FACTORIO_USERNAME and FACTORIO_TOKEN aren't set/.test(err.message));
   assert.deepEqual(none.asked, []);
 });
+
+test('a release on both channels is listed once, as stable', async () => {
+  const { fetch } = portal({ 'https://factorio.com/api/latest-releases': { body: { stable: { headless: '2.1.24' }, experimental: { headless: '2.1.24' } } } });
+  assert.deepEqual(await new FactorioCatalog(fetch).releases(), [{ version: '2.1.24', channel: 'stable' }]);
+});

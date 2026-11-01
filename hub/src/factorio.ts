@@ -129,7 +129,7 @@ export class FactorioCatalog {
     this.#account = account;
   }
 
-  /** The latest headless release of each channel. */
+  /** The latest headless release of each channel; one on both is listed once, as stable. */
   async releases(): Promise<FactorioRelease[]> {
     const data = await this.#cached(LATEST, async () => {
       try {
@@ -141,7 +141,7 @@ export class FactorioCatalog {
     const out: FactorioRelease[] = [];
     for (const channel of ['stable', 'experimental'] as const) {
       const version = (data as Record<string, Record<string, unknown> | undefined> | null)?.[channel]?.headless;
-      if (typeof version === 'string' && VERSION.test(version)) out.push({ version, channel });
+      if (typeof version === 'string' && VERSION.test(version) && !out.some((r) => r.version === version)) out.push({ version, channel });
     }
     return out;
   }

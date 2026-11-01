@@ -675,8 +675,7 @@ class Checks {
    * S6: read-data/write-data put Factorio's files under the data folder (its log there, this run's and this uid's;
    * S1's save in saves/), and nothing under the release since it started. Two more names the notes don't confirm
    * Factorio writes (`NAMES`) are a warning at most: one under the release instead, or one that can't be looked up. One
-   * in neither place is only not written yet (a world with no mod settings may never write `mods/mod-settings.dat`), so
-   * it goes on the ok line, never as outside the data folder.
+   * in neither place is only not written yet, so it goes on the ok line, never as outside the data folder.
    */
   async #s6(): Promise<void> {
     const { data, install } = this.#c.server;

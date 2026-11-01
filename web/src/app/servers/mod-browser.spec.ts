@@ -263,6 +263,12 @@ describe('mod browser', () => {
     const names = all('[data-listing]').map((r) => r.getAttribute('data-listing'));
     expect(names).toHaveLength(47);
     expect(new Set(names).size).toBe(47);
+    // The next page is past the end: Load more goes, rather than staying at 47 of 48.
+    q('[data-browse-more]').click();
+    await render();
+    await answer(read().req, browse([], 48));
+    expect(all('[data-listing]')).toHaveLength(47);
+    expect(q('[data-browse-more]')).toBeNull();
   });
 
   it('says when nothing matches, and Clear search asks again without the query', async () => {

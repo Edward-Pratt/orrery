@@ -313,7 +313,8 @@ export class ModBrowser implements OnInit {
           const shown = new Set(rows.map((m) => m.name));
           return [...rows, ...answer.mods.filter((m) => !shown.has(m.name))];
         });
-        this.total.set(answer.total);
+        // A page past the end (rows dropped as repeats left the count short of the total): every row is shown.
+        this.total.set(page > 1 && !answer.mods.length ? (this.rows()?.length ?? 0) : answer.total);
         this.categories.set(answer.categories);
         this.#page.set(page);
       });

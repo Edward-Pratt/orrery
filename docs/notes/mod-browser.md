@@ -1,6 +1,6 @@
 # Game tab: two fixes and a mod browser
 
-Status: design, not built. Date: 2026-11-01. Based on `main` at `48f5a05` (production: `hub-v2.15.0`, `web-v0.13.0`,
+Status: built on `fa/mod-browser`, not yet cut: release `hub-v2.16.0` (deployed first), then `web-v0.14.0`. Date: 2026-11-01. Based on `main` at `48f5a05` (production: `hub-v2.15.0`, `web-v0.13.0`,
 `agent-v1.1.1`); file and line references are at that commit.
 
 The owner asked for three things on a factorio server's Game tab (`web/src/app/servers/game.ts`):

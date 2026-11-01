@@ -478,9 +478,9 @@ test('a thumbnail: its path from the short page, the PNG from assets-mod.factori
     assert.equal(await catalog.thumbnail(name), null, name);
   }
   assert.ok(asked.every((a) => !a.url.includes('evil') && !a.url.endsWith('.jpg')));
-  // A name that isn't a mod's: no request.
+  // A name that isn't a mod's: no request. `.` alone would read /api/mods/, the portal's list.
   const before = asked.length;
-  for (const name of ['../etc', 'a/b', '']) assert.equal(await catalog.thumbnail(name), null);
+  for (const name of ['../etc', 'a/b', '', '.']) assert.equal(await catalog.thumbnail(name), null);
   assert.equal(asked.length, before);
 });
 

@@ -22,9 +22,12 @@ export class GameRefused extends Error {
 /** An answer over its cap (502): a thumbnail's short page over it only means "no thumbnail". */
 class OverCap extends GameRefused {}
 
-/** A mod's name as the Agent accepts it (and no `..`): also every name taken from the portal. */
+/**
+ * A mod's name as the Agent accepts it, with no `..` and not `.` alone (a URL reads that as "this folder", so
+ * `/api/mods/./full` would be `/api/mods/full`): also every name taken from the portal.
+ */
 export const MOD_NAME = /^[A-Za-z0-9_. -]+$/;
-export const validName = (name: string) => name.length <= LIMITS.text && MOD_NAME.test(name) && !name.includes('..');
+export const validName = (name: string) => name.length <= LIMITS.text && MOD_NAME.test(name) && !name.includes('..') && name !== '.';
 /** A Factorio or mod version as the Agent accepts it. */
 export const VERSION = /^\d+\.\d+\.\d+$/;
 /**

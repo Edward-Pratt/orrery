@@ -432,6 +432,7 @@ test('the game routes: 404 for a server no Agent runs, 400 for bad input, 409 wi
   await eventually(async () => (await h.game()).installed !== null);
   await refused('catalog', { factorio: '2.1', mods: [] }, 400, 'Give a Factorio version, like 2.1.24.');
   await refused('catalog', { factorio: '2.1.24', mods: [{ name: '../x', version: null }] }, 400, 'Give each mod by its name on the mod portal.');
+  await refused('catalog', { factorio: '2.1.24', mods: [{ name: '.', version: null }] }, 400, 'Give each mod by its name on the mod portal.');
   await refused('catalog', { factorio: '2.1.24', mods: [{ name: 'flib', version: '../../x' }] }, 400, 'flib: give a version like 1.2.3, or null for the newest that fits.');
   await refused('catalog', { factorio: '2.1.24', mods: [{ name: 'base', version: null }] }, 400, "base comes with Factorio: it isn't picked.");
   await refused('catalog', { factorio: '2.1.24', mods: [{ name: 'flib', version: null }, { name: 'flib', version: null }] }, 400, 'flib is picked twice.');
@@ -665,6 +666,7 @@ test("Import mod list's check: each name on the portal for the version's line or
     [{ factorio: '2.1.24', names: 'helmod' }, `Give the mods to check by name (names, at most ${LIMITS.mods}).`],
     [{ factorio: '2.1.24', names: Array.from({ length: LIMITS.mods + 1 }, (_, i) => `m${i}`) }, `Give the mods to check by name (names, at most ${LIMITS.mods}).`],
     [{ factorio: '2.1.24', names: ['../etc'] }, 'Give each mod by its name on the mod portal.'],
+    [{ factorio: '2.1.24', names: ['.'] }, 'Give each mod by its name on the mod portal.'], // /api/mods/./full is /api/mods/full
     [{ factorio: '2.1.24', names: ['<script>'] }, 'Give each mod by its name on the mod portal.'],
     [{ factorio: '2.1.24', names: ['x'.repeat(LIMITS.text + 1)] }, 'Give each mod by its name on the mod portal.'],
     [{ factorio: '2.1.24', names: [7] }, 'Give each mod by its name on the mod portal.'],

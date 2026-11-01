@@ -657,7 +657,7 @@ test("Import mod list's check: each name on the portal for the version's line or
       { name: 'gone', found: 'missing', title: null, latest: null },
     ],
   });
-  assert.deepEqual(await h.json<ModCheckAnswer>(h.req('POST', check, { factorio: '2.1.24', names: [] })), { line: '2.1', mods: [] });
+  assert.deepEqual(await h.json<ModCheckAnswer>(h.req('POST', check, { factorio: '2.0.0', names: [] })), { line: '2.0', mods: [] }); // no read
   for (const [bad, why] of [
     [{ names: ['helmod'] }, 'Give a Factorio version, like 2.1.24.'],
     [{ factorio: '2.1', names: ['helmod'] }, 'Give a Factorio version, like 2.1.24.'],

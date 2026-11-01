@@ -463,7 +463,7 @@ the line's list the mod browser already reads and keeps 15 minutes (it holds eve
 for the line): `fits` with its title and newest version, no read per name. Only a name missing from it is read with
 `mod(name)` (cached 5 minutes), the first 20 (`CHECK_READS`), through the thumbnails' 4-at-once slots: `fits` (a
 deprecated mod with a release for the line), `noRelease` or `missing`; a failed read, and any name past the cap, is
-`unchecked` (add it by name to find out). The list failing is 502. `GameUpdates.check` checks the body before any
+`unchecked` (add it by name to find out). The list failing is 502; no names, no read. `GameUpdates.check` checks the body before any
 portal read (400): a Factorio version, at most 500 names, each passing `validName`, none the game's own or given twice.
 `catalog()` is unchanged: a picked mod the portal hasn't got is still its 404.
 

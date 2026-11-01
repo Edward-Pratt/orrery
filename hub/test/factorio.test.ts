@@ -571,6 +571,8 @@ test("the mod list check answers from the line's list, reads only the names miss
   await catalog.check('2.1', ['flib', 'old']);
   assert.deepEqual(asked, []);
   await assert.rejects(catalog.check('2.1.24', ['flib']), (err: GameRefused) => err.status === 400);
+  // No names: nothing read at all.
+  assert.deepEqual(await new FactorioCatalog(async () => assert.fail('read')).check('2.0', []), []);
   // The list failing fails the check.
   const down = new FactorioCatalog(async () => new Response('', { status: 503 }));
   await assert.rejects(down.check('2.1', ['flib']), (err: GameRefused) => err.status === 502 && err.message === "The mod portal can't be read: HTTP 503.");

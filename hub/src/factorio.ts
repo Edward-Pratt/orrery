@@ -436,6 +436,7 @@ export class FactorioCatalog {
    */
   async check(line: string, names: string[]): Promise<ModCheck[]> {
     if (!LINE.test(line)) throw new GameRefused(400, `${line} isn't a Factorio line, like 2.1.`);
+    if (!names.length) return [];
     const listed = new Map((await this.#list(line)).map((m) => [m.name, m]));
     const unlisted = names.filter((n) => !listed.has(n)).slice(0, CHECK_READS);
     const read = new Map(

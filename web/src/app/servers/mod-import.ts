@@ -12,7 +12,7 @@ const why = (err: HttpErrorResponse) => (err.status === 404 ? HUB_RELEASE : type
 const FOUND: Record<'noRelease' | 'missing' | 'unchecked', (line: string) => string> = {
   noRelease: (line) => `no release for Factorio ${line}`,
   missing: () => 'not on the mod portal',
-  unchecked: () => "not checked (too many names not in the portal's list): add it by name to see",
+  unchecked: () => 'not checked: add it by name to see',
 };
 const mods = (n: number) => `${n} mod${n === 1 ? '' : 's'}`;
 
@@ -168,6 +168,8 @@ export class ModImport {
     const add: Preview['add'] = [];
     const skipped: Preview['skipped'] = [];
     for (const m of answer.mods) {
+      // A catalog answer that landed after the check went out can have made it a dependency meanwhile.
+      if (inUpdate(m.name)) continue;
       if (m.found === 'fits') {
         const pinned = this.keep() ? fileVersion.get(m.name) : null;
         add.push({ name: m.name, title: m.title ?? m.name, version: pinned ?? running.get(m.name) ?? null });
@@ -207,6 +209,7 @@ export class ModImport {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    input.value = ''; // so picking the same file again (fixed, say) reads it again
     if (file.size > LIST_MAX_BYTES) return this.#fail(`${file.name} is over ${LIST_MAX_BYTES / 1024} KiB: a mod-list.json is much smaller.`);
     let text: string;
     try {

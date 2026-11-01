@@ -91,9 +91,8 @@ test('reconnects with capped exponential backoff while the hub resets every conn
   const at = hub.conns.map((c) => c.at);
   const gaps = at.slice(1).map((a, i) => a - at[i]!);
   // Lower bounds only (a timer is never early, a busy machine makes it late): they show the doubling, since a flat
-  // retry would wait 40 ms each time; uncapped the 4th wait would be 320 ms.
+  // retry would wait 40 ms each time. The cap is `backoff`'s own test above: an upper bound here would race the machine.
   for (const [i, want] of [40, 80, 160, 160].entries()) assert.ok(gaps[i]! >= want - 5, `wait ${i} was ${gaps[i]} ms, want ${want}`);
-  assert.ok(gaps[3]! < 315, `the waits stop at the cap: ${gaps.join(', ')}`);
   assert.equal(hub.of('agentHello').length, 5, 'every attempt opens with agentHello');
 });
 

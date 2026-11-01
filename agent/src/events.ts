@@ -342,6 +342,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
       const text = await head(this.#o.log, HEAD_MAX, freshAfter);
       if (run !== this.#run) return;
       const state = text === null ? null : socketState(text, this.#o.factorioPort);
+      // check.ts (S4) reads this line, the "off" one below, and the hello lines from agent.log: keep their wording.
       if (state === 'on') {
         this.#gate = 'on';
         return console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);

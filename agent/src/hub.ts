@@ -265,6 +265,7 @@ export class HubClient {
     for (const l of links) l.drop('stopping');
   }
 
+  /** The first-boot check quotes the latest of these from agent.log, and stops waiting at a `(rejected: …)` one. */
   #log(state: string): void {
     if (state !== this.#logged) console.log(`[hub] ${state}`);
     this.#logged = state;

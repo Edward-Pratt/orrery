@@ -374,7 +374,7 @@ test('check: RCON that never answers fails once waits.rcon is up, both refused a
   assert.equal(await refused.run({ waits: { rcon: 200 } }), false);
   assert.match(refused.line('rcon:'), /^FAIL rcon: 127\.0\.0\.1:\d+: RCON connection failed: connect ECONNREFUSED/);
   const silent = await host(t, { silent: true });
-  assert.equal(await silent.run({ waits: { rcon: 300, command: 50 } }), false);
+  assert.equal(await silent.run({ waits: { rcon: 1000, command: 50 } }), false); // room for many tries, however late the timers
   assert.match(silent.line('rcon:'), /^FAIL rcon: 127\.0\.0\.1:\d+: RCON command timed out after 50 ms$/);
   assert.ok(silent.commands.filter((c) => c === '/orrery-status').length >= 2, 'retried until the wait was up');
   for (const h of [refused, silent]) {

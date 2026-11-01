@@ -1,9 +1,9 @@
 // The first-boot check (`index.ts check`): setup's last step, run as factorio with the two secrets in its environment
 // only, after setup started factorio.service and orrery-agent.service. A report on stdout, each line printed as its
-// check ends, so setup can show it live; true (exit 0) only when no check failed. Each smoke check of the design
-// (docs/notes/factorio-agent.md, "Smoke checks") the agent can make from its seat gets a line, in the order they run
-// (S1, S2, S20, S3, S5, S4, S6, S8, S16, S21, S25, S29); the others end the report, naming who makes them. Whatever
-// RCON or a file the container writes says goes through `printable`, and no secret is ever printed.
+// check ends, so setup can show it live; true (exit 0) only when no check failed. Each of the design's first-boot
+// smoke checks (docs/notes/factorio-agent.md) the agent can make from its seat gets a line, in the order they run (S1,
+// S2, S20, S3, S5, S4, S6, S8, S16, S21, S25, S29); the others end the report, naming who makes them. Whatever RCON or
+// a file the container writes says goes through `printable`, and no secret is ever printed.
 import { createSocket } from 'node:dgram';
 import { constants, lstat, open, readdir, readFile, readlink, type FileHandle } from 'node:fs/promises';
 import { connect } from 'node:net';
@@ -116,14 +116,17 @@ const describe = (s: UnitState | null) => (s ? `${s.active} (${s.sub}), Result=$
 const quote = (reply: string) => printable(JSON.stringify(reply.slice(0, 200)));
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Factorio's shutdown lines (smoke-x64 section 7): the signal and Goodbye carry only the seconds, the save is an engine line. */
+/**
+ * Factorio's shutdown lines (smoke-x64 section 7): the signal and Goodbye carry only the seconds, the save is an engine
+ * line, so a mod's `log()` or a chat line can't pass for any of them.
+ */
 const SIGNAL = /^ *\d+\.\d+ Received (SIG[A-Z]+), shutting down$/;
 const SAVING = new RegExp(ENGINE + 'Saving map as (.+)$');
 const GOODBYE = /^ *\d+\.\d+ Goodbye$/;
 
 export type Shutdown = { signal: string | null; saved: string | null; goodbye: boolean };
 
-/** What the end of a run's log says about its shutdown: the signal, the file it saved to, and whether it said Goodbye. */
+/** What the end of a run's log says about its shutdown: the signal, the file it saved to, whether it said Goodbye. */
 export function shutdownOf(lines: string[]): Shutdown {
   const s: Shutdown = { signal: null, saved: null, goodbye: false };
   for (const line of lines) {
@@ -594,7 +597,7 @@ class Checks {
     else this.#report.say('FAIL', `S4 ${evidence}: fallback, a write_file tail`);
   }
 
-  /** The mod's hello since the last start: from agent.log while the agent holds its UDP port, else to the check itself. */
+  /** The mod's hello since the last start: in agent.log while the agent holds its UDP port, else to the check itself. */
   async #hello(): Promise<{ ok: boolean; evidence: string }> {
     const { agentUdpPort, factorioUdpPort } = this.#c.server;
     const socket = createSocket('udp4');
@@ -823,7 +826,7 @@ class Checks {
     return null;
   }
 
-  /** S29: the mods setup enables, and every one mod-list.json enables, are loaded, in the version `current` points at. */
+  /** S29: setup's mods and every one mod-list.json enables are loaded, in the version `current` points at. */
   async #s29(): Promise<void> {
     const { data, install } = this.#c.server;
     const status = parseStatus(await this.#run('/orrery-status'));
@@ -845,7 +848,7 @@ class Checks {
     else this.#report.say('ok', `S29 Factorio ${status.version} (${install}/current)${list}; mods: ${mods}`);
   }
 
-  /** The hub: reachable over TCP (a warning only, for `--no-hub`), and whether the agent got a welcome since it started. */
+  /** The hub: reachable over TCP (a warning only, for `--no-hub`), and whether the agent was welcomed since its start. */
   async #hub(): Promise<void> {
     const { host, port } = this.#c.hub;
     const why = await reach(host, port, this.#w.hub);

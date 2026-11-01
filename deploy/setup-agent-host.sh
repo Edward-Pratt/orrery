@@ -459,7 +459,26 @@ config factorio "$srv/mods/mod-list.json" << 'EOF'
 EOF
 
 # ---- 10. The orrery mod, when mods/ has none; later versions go in by hand until Game updates exist (release 2).
-releases=$(fetch_text "https://api.github.com/repos/$REPO/releases?per_page=100")
+# GitHub's release list, all parts together, newest first and 100 a page: read page by page until it holds a release of
+# each part this run needs (the agent's, and the mod's when mods/ has none) or ends; at most 20 pages, inside GitHub's 60
+# requests an hour without a token. Each part's newest is then among them: release.sh tags only above a part's latest.
+need=(agent)
+compgen -G "$srv/mods/orrery_*.zip" > /dev/null || need+=(factorio)
+releases='[]'
+for ((page = 1; page <= 20; page++)); do
+  more=$(fetch_text "https://api.github.com/repos/$REPO/releases?per_page=100&page=$page")
+  # Kept of each release: its tag, draft flag and assets' names and digests. Through stdin only: a page outgrows an argv.
+  out=$(printf '%s\x1e%s' "$releases" "$more" | "$node" -e '
+    const [had, page] = require("fs").readFileSync(0, "utf8").split("\x1e").map((s) => JSON.parse(s));
+    const all = had.concat(page.map((r) => ({
+      tag_name: r.tag_name, draft: r.draft, assets: (r.assets ?? []).map((a) => ({ name: a.name, digest: a.digest })),
+    })));
+    const has = (part) => all.some((r) => !r.draft && new RegExp(`^${part}-v\\d+\\.\\d+\\.\\d+$`).test(r.tag_name));
+    console.log(page.length < 100 || process.argv.slice(1).every(has) ? "done" : "more");
+    console.log(JSON.stringify(all));' "${need[@]}") || die "GitHub's release list (page $page) isn't a JSON list of releases"
+  releases=${out#*$'\n'}
+  [[ ${out%%$'\n'*} != done ]] || break
+done
 newest() { # <part>: the newest <part>-vX.Y.Z release on GitHub (by version, drafts left out)
   "$node" -e '
     const re = new RegExp(`^${process.argv[1]}-v(\\d+)\\.(\\d+)\\.(\\d+)$`);

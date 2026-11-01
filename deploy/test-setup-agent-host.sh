@@ -197,6 +197,8 @@ echo "curl $url" >> "$F/calls"
 [[ -z $out ]] || echo "as ${FAKE_AS:-root} curl -o $out" >> "$F/calls"
 path=${url#https://}
 path=${path%%\?*}
+page_re='[?&]page=([0-9]+)' # page N > 1 of a list is served from <path>.pageN
+if [[ $url =~ $page_re ]] && ((BASH_REMATCH[1] > 1)); then path+=.page${BASH_REMATCH[1]}; fi
 [[ $path != */ ]] || path+=index
 src=$X/$path
 [[ $path != raw.githubusercontent.com/Edward-Pratt/orrery/*/deploy/* ]] || src=$HERE/${path##*/}
@@ -528,7 +530,7 @@ echo '{"stable":{"headless":"2.1.30"}}' | override factorio.com/api/latest-relea
 check 'a second run succeeds without a token on stdin (it keeps the one it has)' 'IN= run "${ARGS[@]}"'
 check 'a second run changes nothing' 'written | cmp -s - "$T/first" && cmp -s "$T/orrery-agent.env" "$R/etc/orrery-agent.env" && cmp -s "$T/orrery-factorio.env" "$R/etc/orrery-factorio.env"'
 check 'a second run downloads only the release list and the deploy/ files, pulls nothing, installs nothing' '
-  [[ -z $(grep ^curl "$F/calls" | grep -vxE "curl https://($API\?per_page=100|$RAW/.*)") ]] &&
+  [[ -z $(grep ^curl "$F/calls" | grep -vxE "curl https://($API\?per_page=100&page=1|$RAW/.*)") ]] &&
   ! called "^(dnf|useradd|podman pull)" && ! says wrote'
 check 'a second run keeps the game password' '[[ $(GP_OF) == "$GP" ]] && grep -qx "game password: $GP" "$BOOT"'
 check 'a second run keeps the installed Factorio rather than the newest' '! called latest-releases && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 ]]'
@@ -667,6 +669,26 @@ touch "$F/start-fails"
 check 'a unit that will not start still gets the report, and fails the run' '
   ! run "${ARGS[@]}" && says "warning: factorio.service didn'\''t start" && grep -q "every check ran" "$R/srv/factorio/first-boot.txt"'
 
+# ---- The release list, page by page: a part's newest release is found behind 100 newer releases of other parts.
+hub_page() { # <n> <one more release, JSON>: a release list of n hub releases, then that one
+  local i
+  echo '['
+  for ((i = 1; i <= $1; i++)); do echo "  { \"tag_name\": \"hub-v1.0.$i\", \"draft\": false, \"assets\": [] },"; done
+  echo "  $2"
+  echo ']'
+}
+fresh
+hub_page 99 '{ "tag_name": "hub-v2.0.0", "draft": false, "assets": [] }' | override "$API"
+api "$(sha "$X/$MOD_ZIP")" | override "$API.page2"
+check 'reads the release list page by page until it holds the agent'\''s and the mod'\''s releases' '
+  run "${ARGS[@]}" && called "^curl https://$API\?per_page=100&page=2$" && ! called "page=3" &&
+  [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 && -f $R/srv/factorio/mods/orrery_0.1.0.zip ]]'
+hub_page 99 '{ "tag_name": "agent-v0.10.0", "draft": false, "assets": [] }' | override "$API"
+gone "$API.page2"
+check 'stops at the first page holding what the run needs: with the mod in mods/, the agent'\''s release alone' '
+  IN= run "${ARGS[@]}" && called "^curl https://$API\?per_page=100&page=1$" && ! called "page=2"'
+rm -rf "$F/gone"
+
 # ---- A half-failed run (the agent's download fails) is finished by the next.
 fresh
 gone "$AGENT_TGZ"
@@ -779,6 +801,8 @@ refuses_late 'an agent download not matching its .sha256' "doesn't match its .sh
   'echo "$DIGEST2  orrery-agent-v0.10.0.tar.gz" | override "$AGENT_TGZ.sha256"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'a mod download not matching its listed sha256' "doesn't match the sha256 GitHub lists" \
   'api "$DIGEST2" | override "$API"' "$R/srv/factorio/mods/orrery_0.1.0.zip" "${ARGS[@]}"
+refuses_late 'a release list that is not a JSON list' "GitHub's release list (page 1) isn't a JSON list" \
+  'echo "{ \"message\": \"Not Found\" }" | override "$API"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'no agent release' 'GitHub has no agent-v release yet' 'grep -v "\"agent-v0" "$X/$API" | override "$API"' \
   "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'the Quadlet dry run failing' 'fake failure' 'touch "$F/quadlet-fails"' "$Q" "${ARGS[@]}"

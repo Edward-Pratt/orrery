@@ -196,7 +196,8 @@ const SORTS: Record<PortalSort, (a: PortalListing, b: PortalListing) => number> 
  * factorio.com and the mod portal, for game updates: the Factorio releases on offer (`api/latest-releases`), the
  * headless build's sha256 (`download/sha256sums/`), each mod's releases (`/api/mods/<name>/full`) and the dependencies
  * between them, resolved for a Factorio version; and, right before an update, each mod's signed download link, asked
- * with the owner's account. Every name and version taken from the portal is checked as the Agent checks it. Hub core.
+ * with the owner's account. For the mod browser, a line's mods on the portal (`browse`) and their thumbnails
+ * (`thumbnail`). Every name and version taken from the portal is checked as the Agent checks it. Hub core.
  */
 export class FactorioCatalog {
   #fetch: PortalFetch;

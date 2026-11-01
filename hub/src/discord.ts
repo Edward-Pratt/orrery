@@ -34,12 +34,14 @@ import {
 import type { DiscordConfig } from './config.ts';
 import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
-import type { HubEvent, LiveEvent, ServerHub } from './servers.ts';
+import type { HubEvent, LiveEvent, ServerHub, TargetEvent } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
 import type { Game } from './types.ts';
 
 export type DiscordFrontend = {
   client: Client;
+  /** Stops it: held alerts dropped, the client destroyed. */
+  stop: () => void;
 };
 
 const WEBHOOK_NAME = 'GTNH Relay';
@@ -115,17 +117,68 @@ export function channelFor(e: LiveEvent, cfg: DiscordConfig): string | undefined
   return Object.hasOwn(cfg.channels, e.serverId) ? cfg.channels[e.serverId] : undefined;
 }
 
+/** How often an Agent's `agentLost`, and its `agentBack`, may each be posted to Discord: once per 10 minutes. */
+export const AGENT_ALERT_MS = 10 * 60_000;
+
+type AgentNotice = Extract<TargetEvent, { type: 'notice'; kind: 'agentLost' | 'agentBack' }>;
+
 /**
- * Posts each announced event about the host, a service or a check to the alerts channel (none: not posted). Server
- * events never come this way: they go to their own server's channel.
+ * An Agent's `agentLost` and `agentBack` on Discord (`seen` takes each; `post` puts one up): each kind at most once
+ * per `AGENT_ALERT_MS` per Agent. One that comes sooner is held and posted when its 10 minutes are up, if it is still
+ * the Agent's latest; one that would only repeat what Discord last said is not posted, so a back after a held lost is
+ * held too. A flapping Agent can't flood the alerts channel, and Discord's last word is never wrong for longer than
+ * 10 minutes; the stream and the dashboard keep every event. `stop` drops what is held.
  */
-export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId: string, message: Post) => Promise<void>): void {
-  hub.on('target', (e) => {
+export function agentAlerts(post: (e: AgentNotice) => void): { seen: (e: AgentNotice) => void; stop: () => void } {
+  type Agent = { shown: AgentNotice['kind'] | null; at: Record<AgentNotice['kind'], number>; latest: AgentNotice; timer?: NodeJS.Timeout };
+  const agents = new Map<string, Agent>(); // by host id: configured Agents only
+  const ago = (now: number, stamp: number) => (now < stamp ? Infinity : now - stamp); // a clock stepped back: long ago
+  const show = (a: Agent) => {
+    clearTimeout(a.timer);
+    a.timer = undefined;
+    const e = a.latest;
+    if (e.kind === a.shown) return; // Discord says so already
+    const now = Date.now();
+    const wait = AGENT_ALERT_MS - ago(now, a.at[e.kind]);
+    if (wait > 0) return void (a.timer = setTimeout(() => show(a), wait).unref());
+    a.shown = e.kind;
+    a.at[e.kind] = now;
+    post(e);
+  };
+  return {
+    seen: (e) => {
+      let a = agents.get(e.id);
+      if (!a) agents.set(e.id, (a = { shown: null, at: { agentLost: -Infinity, agentBack: -Infinity }, latest: e }));
+      a.latest = e;
+      show(a);
+    },
+    stop: () => {
+      for (const a of agents.values()) clearTimeout(a.timer);
+    },
+  };
+}
+
+const isAgentNotice = (e: TargetEvent): e is AgentNotice => e.type === 'notice' && (e.kind === 'agentLost' || e.kind === 'agentBack');
+
+/**
+ * Posts each announced event about the host, a service or a check to the alerts channel (none: not posted), an
+ * Agent's lost and back through `agentAlerts`. Server events never come this way: they go to their own server's
+ * channel. Returns what stops it (held alerts dropped).
+ */
+export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId: string, message: Post) => Promise<void>): () => void {
+  const send = (e: TargetEvent) => {
     const channelId = channelFor(e, cfg);
     const message = formatTargetEvent(e);
     if (!channelId || !message) return;
     post(channelId, message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
-  });
+  };
+  const agents = agentAlerts(send);
+  const listener = (e: TargetEvent) => (isAgentNotice(e) ? agents.seen(e) : send(e));
+  hub.on('target', listener);
+  return () => {
+    hub.off('target', listener);
+    agents.stop();
+  };
 }
 
 /**
@@ -291,7 +344,7 @@ export async function startDiscord(
     else postSafe(e.serverId, message);
   });
 
-  postTargets(hub, cfg, postTo);
+  const stopTargets = postTargets(hub, cfg, postTo);
 
   client.on(Events.MessageCreate, (m) => {
     const serverId = serverByChannel.get(m.channelId);
@@ -443,5 +496,9 @@ export async function startDiscord(
   await client.login(token);
   return {
     client,
+    stop: () => {
+      stopTargets();
+      void client.destroy();
+    },
   };
 }

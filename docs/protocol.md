@@ -253,7 +253,10 @@ at the hub, without the Agent knowing.
 
 What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples
 name, each mount's change told at most once per 10 min (a change meanwhile is told after the wait, if it still holds),
-and its service's failure is a notice at most once per 10 min (every state still goes on the stream).
+and its service's failure is a notice at most once per 10 min (every state still goes on the stream). Its `agentLost`
+and `agentBack` host notices are each posted to Discord at most once per 10 min per Agent: one sooner waits and is
+posted when the 10 min are up if it is still the latest, and one that would repeat what Discord last said is not
+posted (so a back after a held lost is held too). The stream and the dashboard keep every one.
 
 An Agent forwards its server's game events at most 5 a second (bursts of 30, every type together, the rest dropped),
 so a player flooding chat never gets the game connection closed; of those the hub takes 2 a second (above). It sends

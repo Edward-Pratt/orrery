@@ -22,6 +22,7 @@ import {
   formatTop,
   formatTopic,
   formatTps,
+  inline,
   md,
   TOPIC_MIN_GAP_MS,
   topicDue,
@@ -367,7 +368,7 @@ test("formatEvent posts lag and backup notices with today's wording and severity
     embeds: [{ title: '⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)', color: COLORS.orange }],
   });
   assert.deepEqual(post({ severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)' }), {
-    embeds: [{ title: '✅ Backup finished (12\\.3 seconds (1.2GB))', color: COLORS.green }], // escaped as a list's number; Discord shows "12.3"
+    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }], // mid-title: no list rule, so no backslash
   });
   assert.deepEqual(post({ severity: 'problem', kind: 'backupFailed', detail: 'disk full' }), {
     embeds: [{ title: '❌ Backup failed: disk full', color: COLORS.red }],
@@ -493,34 +494,39 @@ test("a milestone is posted per kind, escaped, its text capped at 200 and its fo
 });
 
 test('the /link hint names each game that has a server, in a fixed order', () => {
-  assert.equal(formatLinkHint('ABC234', ['minecraft']), 'In Minecraft, type `/discord link ABC234`. Within 10 minutes.');
-  assert.equal(formatLinkHint('ABC234', ['factorio']), 'In Factorio, type `/orrery-link ABC234`. Within 10 minutes.');
+  assert.equal(formatLinkHint('ABC234', ['minecraft']), 'In Minecraft, type `/discord link ABC234` within 10 minutes.');
+  assert.equal(formatLinkHint('ABC234', ['factorio']), 'In Factorio, type `/orrery-link ABC234` within 10 minutes.');
   assert.equal(
     formatLinkHint('ABC234', ['factorio', 'minecraft']),
-    'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. Within 10 minutes.',
+    'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. The code works for 10 minutes.',
   );
 });
 
-test("an Agent's text in a notice or a topic is escaped: a backup's detail, a save's name, a refusal, a mount, a version, players", () => {
+test("an Agent's text in a notice or a topic is escaped: a backup's detail, a save's name, a refusal, a mount, a version (inline: mid-line or a title), players", () => {
   const evil = '[pay](https://evil.example) # **x** ||y|| <#1>';
   assert.notEqual(md(evil), evil);
+  // A notice is an embed title, so its Agent text is escaped inline: masked links and every inline markup still are.
+  assert.equal(inline(evil), '\\[pay](https://evil.example) # \\*\\*x\\*\\* \\|\\|y\\|\\| <#1>');
+  assert.equal(inline('`a` _b_ ~~c~~ __d__ *e*'), '\\`a\\` \\_b\\_ \\~\\~c\\~\\~ \\_\\_d\\_\\_ \\*e\\*');
+  assert.equal(inline('12.3 seconds (1.2GB)'), '12.3 seconds (1.2GB)');
+  assert.equal(inline('1.4.0'), '1.4.0');
   const notice = (n: Notice) => (formatEvent({ ...n, type: 'notice', serverId: 'space' }) as { embeds: APIEmbed[] }).embeds[0]!.title;
-  assert.equal(notice({ severity: 'good', kind: 'backupFinished', detail: evil }), `✅ Backup finished (${md(evil)})`);
-  assert.equal(notice({ severity: 'problem', kind: 'backupFailed', detail: evil }), `❌ Backup failed: ${md(evil)}`);
-  assert.equal(notice({ severity: 'warning', kind: 'backupOverdue', hours: 13, newest: evil }), `⚠️ No new backup for 13 h (newest: ${md(evil)})`);
-  assert.equal(notice({ severity: 'problem', kind: 'restartFailed', error: evil }), `❌ Restart failed: ${md(evil)}`);
+  assert.equal(notice({ severity: 'good', kind: 'backupFinished', detail: evil }), `✅ Backup finished (${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'backupFailed', detail: evil }), `❌ Backup failed: ${inline(evil)}`);
+  assert.equal(notice({ severity: 'warning', kind: 'backupOverdue', hours: 13, newest: evil }), `⚠️ No new backup for 13 h (newest: ${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'restartFailed', error: evil }), `❌ Restart failed: ${inline(evil)}`);
   const target = (e: object) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title;
   const host = { target: 'host', id: 'vm', type: 'notice' };
-  assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${md(evil)}: 0 B free (limit 10 GB)`);
-  assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${md(evil)} back to 0 B free`);
+  assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${inline(evil)}: 0 B free (limit 10 GB)`);
+  assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${inline(evil)} back to 0 B free`);
   assert.equal(
     target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: evil }),
-    `⚠️ Host vm: game events from agent Factorio VM are off: ${md(evil)}`,
+    `⚠️ Host vm: game events from agent Factorio VM are off: ${inline(evil)}`,
   );
   assert.equal(target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: 'x'.repeat(2048) })!.length, 256); // an embed title's most
   assert.equal(target({ ...host, severity: 'good', kind: 'eventsOn', name: 'Factorio VM' }), '✅ Host vm: game events from agent Factorio VM are on again');
   const deploy = { target: 'deploy', id: 'gtnh', type: 'notice', part: 'mod', from: evil, to: 'mod-v1.2.0' };
-  assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${md(evil)} → mod-v1.2.0 (by web:a (1))`);
-  assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${md(evil)}`);
+  assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${inline(evil)} → mod-v1.2.0 (by web:a (1))`);
+  assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${inline(evil)}`);
   assert.equal(formatTopic({ ...online, game: 'factorio', tps: 60, players: [evil] }), `🟢 Online · 60 UPS · 1 player: ${md(evil)}`);
 });

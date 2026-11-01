@@ -133,13 +133,17 @@ export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId
  * escaped). A dashboard line: `<admin> (dashboard)` with their avatar. A minecraft player: their name with their skin.
  * A factorio player: `<name> (Factorio)`, so a line can never pass for a dashboard one or the bot, and only for a name
  * with no whitespace or parentheses: any text can come as a name from the game's mods or the Agent, and `Edward
- * (dashboard)` would look like the owner's line.
+ * (dashboard)` would look like the owner's line. A factorio name with "discord" or "clyde" in it, which Discord refuses
+ * as a webhook username, is posted as the bot at once: no doomed webhook call, and nothing for `refusedNames` to keep.
  */
 export function relayAs(e: Extract<HubEvent, { type: 'chat' | 'say' }>, game: Game | undefined): { username: string; avatarURL?: string } | null {
   if (e.type === 'say') return { username: `${e.author} (dashboard)`, avatarURL: e.avatar };
-  if (game === 'factorio') return /[\s()]/.test(e.player) ? null : { username: `${e.player} (Factorio)` };
+  if (game === 'factorio') return /[\s()]|discord|clyde/i.test(e.player) ? null : { username: `${e.player} (Factorio)` };
   return { username: e.player, avatarURL: game === 'minecraft' ? `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64` : undefined };
 }
+
+/** The most names `refusedNames` keeps: past it, the oldest is dropped (it is only tried once more). */
+export const REFUSED_KEPT = 1000;
 
 const errorCode = (err: unknown) => (err as { code?: number }).code;
 
@@ -151,8 +155,8 @@ export function usernameRefused(err: unknown): boolean {
 
 /**
  * Posts a chat line through a channel's relay webhook under `username`, escaped and cut to Discord's 2000 characters.
- * Throws what Discord answered; a name it refused is remembered in `refusedNames`, so it isn't tried again, while any
- * other error (the content, a deleted webhook) leaves the name alone.
+ * Throws what Discord answered; a name it refused is remembered in `refusedNames` (the newest `REFUSED_KEPT`), so it
+ * isn't tried again, while any other error (the content, a deleted webhook) leaves the name alone.
  */
 export async function sendChat(
   hook: Pick<Webhook, 'send'>,
@@ -164,7 +168,10 @@ export async function sendChat(
   try {
     await hook.send({ username, avatarURL, content: chatContent(message), allowedMentions: { parse: [] } });
   } catch (err) {
-    if (usernameRefused(err)) refusedNames.add(username);
+    if (usernameRefused(err)) {
+      refusedNames.add(username);
+      if (refusedNames.size > REFUSED_KEPT) refusedNames.delete(refusedNames.values().next().value!); // a Set keeps insertion order
+    }
     throw err;
   }
 }

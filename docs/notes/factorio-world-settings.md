@@ -1,6 +1,6 @@
 # Factorio: game settings, new worlds and save uploads
 
-Status: design, not built. Date: 2026-11-01. Based on `main` at `48f5a05` (production: `hub-v2.15.0`, `web-v0.13.0`,
+Status: stage A built on `fa/world-settings` (not yet cut; `docs/ROADMAP.md`), stage B designed only. Date: 2026-11-01. Based on `main` at `48f5a05` (production: `hub-v2.15.0`, `web-v0.13.0`,
 `agent-v1.1.1`). Built in two stages, each released on its own: **stage A** (game settings) is complete and buildable
 without stage B; **stage B** (new worlds and save uploads) builds on it.
 
@@ -60,9 +60,16 @@ writing this note.
 - **New (2026-11-01):** a test mod's command read `game.console_command_used` before and after `/config set name`,
   `description`, `password`, `max-players`, `allow-commands`, `require-user-verification`, `/promote` and `/demote`.
   It was `false` both times, so none of these flag the save the way `/c` does.
+- **Checked 2026-11-01** (a 2.1.24 headless started from setup's file, over RCON): `/config set description` with no
+  value answers `Server description cleared.`, and `The server description is already empty.` when it already was;
+  Factorio trims the value (`  a b ` is set as `a b`, spaces alone clear it), but not the name (`a  b` stays).
+  `/config set require-user-verification` to the value it has answers `User verification is already enabled.` (or
+  `disabled.`); the other options answer their change line again. `/config get` answers Factorio's defaults for the
+  keys setup's file leaves out, equal to the Agent's: `max-players` 0, `afk-auto-kick` disabled,
+  `auto-pause-when-players-connect` false, `only-admins-can-pause` true (and `autosave-interval` 10, `allow-commands`
+  admins only, verification true, which the file sets). `auto-pause` has no `/config get` (setup's file sets it).
 - Not checked: `/config` with players online; a password holding a space (`/config set password pass word` answered
-  `Server password changed.`, but no read-back shows whether the space survived); `/config set description` with no
-  value.
+  `Server password changed.`, but no read-back shows whether the space survived).
 
 **Map generation**
 
@@ -158,7 +165,7 @@ connection, a separate HTTP port, and a raw connection on the Agent port. The ra
 | Key | Label | Rule (hub and Agent alike) | Applies |
 |---|---|---|---|
 | `name` | Name | 1 to 100 characters, trimmed, no control characters | live: `name` |
-| `description` | Description | 0 to 256 characters, no control characters (so one line) | live: `description` when not empty; an empty one at the next restart (unverified live) |
+| `description` | Description | 0 to 256 characters, no control characters (so one line); trimmed, as Factorio does | live: `description` (an empty one as a bare `description`, checked) |
 | `max_players` | Max players | integer 0 to 1000; 0 means no limit | live: `max-players` |
 | `game_password` | Game password | write-only: left out keeps it, `null` removes it, else `^[\x21-\x7E]{1,64}$` (printable ASCII with no space, since a space's fate is unverified) | live: `password` (a bare `password` removes it) |
 | `require_user_verification` | Check players' factorio.com accounts | boolean; false needs a game password (kept or new) | live: `require-user-verification` |
@@ -301,7 +308,11 @@ New module `agent/src/settings.ts` (`GameSettings`):
 `startedWith`, in `<state>/settings.json`. An Agent that starts while the unit is already active (after a deploy or a
 restart of its own) has seen no such change: it reads the file then as `startedWith`, as `readAutoPause` reads it
 today. **Every good start** (RCON answers within 300 s of the unit becoming active, gate armed or not) also makes
-that model `lastGood`, when it was fully readable. That is the one rule for `lastGood`.
+that model `lastGood`, when it was fully readable. That is the rule for `lastGood`, with one exception: while there is
+no `lastGood` yet, a run RCON first answers in later than that (an Agent deployed onto a server that has run for a
+while, as `agent-v1.2.0`'s own deploy is) gives it too, so the first save after that deploy has something to put back.
+Its `startedWith` is the file as read when the Agent came to the run, which a hand edit since the start could make
+differ from what the server runs; a later good start replaces it.
 
 **Pending.** `pending` lists the restart-only keys (`auto_pause`, `autosave_slots`) whose file value
 differs from `startedWith`, plus any live key that failed in step 4. A start empties it. `status.ts`'s
@@ -313,6 +324,8 @@ the next start:
 
 - **Good**: RCON answers within 300 s of the unit becoming active (`TimeoutStartSec`). The gate disarms (and, as at
   every good start, the model just started with becomes `lastGood`).
+- **Late**: RCON first answers past 300 s (a big map loading slowly). Not good, but the server runs: the gate disarms
+  all the same, so that run crashing hours later puts nothing back.
 - **Failed**: the unit is `failed`, or `activating` with an `auto-restart` SubState and a Result other than success,
   before RCON answered. The Agent writes `lastGood` back the same way as step 3, so the auto-restart 10 s later uses
   it. It then disarms and pushes `settings` with `rolledBack` (the time and Factorio's last error line from
@@ -342,7 +355,10 @@ New module `hub/src/game-settings.ts`, `GameSettings` (hub core, with agents and
   connected. So are: a game update, a restore or a deploy on that server, a countdown running, and the unit starting
   or stopping.
 - `set(id, body, by)`: 400 for bad input (the rules above, each reason naming the field); 409 when `blocked`. Else it
-  sends `settingsSet` and answers the Agent's `{ applied, pending }`, or 502 with the Agent's error.
+  sends `settingsSet` and answers the Agent's `{ applied, pending }`, or 502 with the Agent's error. A name that
+  changes is refused over 50 UTF-8 bytes (400 on the name, as the form shows it), as the Agent refuses it.
+- While a save runs (`busy`), a game update, a restore and the Agent's deploy wait, and the Agent refuses them too
+  (its deploy would restart it in the middle of the save).
 - It audits the change and publishes `settings` on the server's live feed whenever a push or a save changes the state.
 
 `hub/src/agents.ts` routes the `settings` push to `GameSettings`, as `installed` goes to `GameUpdates`.
@@ -388,11 +404,15 @@ export type GameSettingsAnswer = { applied: string[]; pending: string[] };
 → "Our base"; max_players: 0 → 8; game password changed; admins: +bob`. A rollback is audited as `hub:agent` with its
 detail.
 
-**Discord** (the alerts channel, through the existing notice path):
+**Discord** (the alerts channel alone, through the existing notice path: never the server's channel, where its
+players read; without an alerts channel they are not posted):
 
-- `verificationOff`: "User verification is now off on <server> (by <name>): player names aren't checked."
-- `verificationOn`: when it is turned on again.
-- `settingsRolledBack`: "<server> didn't start with its new settings: the Agent put back the previous ones."
+- `verificationOff`: "User verification is now off on <server> (by <name>): player names aren't checked." It is
+  posted whenever verification turns off as the hub knows it: a save (with the admin's name), or a report (without
+  one: a rollback putting back an older file, or a hand edit).
+- `verificationOn`: when it is turned on again, the same way.
+- `settingsRolledBack`: "<server> didn't start with its new settings: the Agent put back the previous ones, its game
+  password and user verification included." (a rollback can bring back a password the owner rotated after a leak).
 
 Other changes post nothing.
 
@@ -403,7 +423,7 @@ Additive. No `PROTOCOL_VERSION` bump.
 | Direction | Message | Fields | Notes |
 |---|---|---|---|
 | Agent → hub | `settings` | `settings` (`GameSettingsValues` or null), `admins` (string[], at most 100), `problem` (string or null, 2 KiB), `pending` (string[], at most 16), `extra` (string[], at most 32, each `^[a-z_]{1,64}$`), `rolledBack` (string or null, 2 KiB) | on connect, and after each change. Budget: as `installed` (dropped when identical to the last one taken on that connection, else 1 a second, bursts of 10) |
-| hub → Agent | `settingsSet` | `id`, `settings` (every key of the table but the password), optional `game_password` (string or null), `admins` (string[]) | answered within 30 s; `reply.data` `{ applied: string[], pending: string[] }` |
+| hub → Agent | `settingsSet` | `id`, `settings` (every key of the table but the password), optional `game_password` (string or null), `admins` (string[]) | answered within 60 s (the Agent's worst case is about 50 s); `reply.data` `{ applied: string[], pending: string[] }` |
 
 Places that change together: `hub/src/types.ts` (`AgentMsg`, `AgentRequest`, `AgentReplyData`); `hub/src/protocol.ts`
 (`AGENT` schemas, and the new limits: admins 100, pending 16, extra 32, name 100); `agent/src/wire.ts`

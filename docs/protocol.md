@@ -188,7 +188,8 @@ and ignores it (it still counts as a line, so the Agent connection stays up), an
 ### Hub → Agent
 
 Every request carries a fresh `id` and is answered by a `reply` with that `id`, within 30 s; a `restore` within 10 min,
-since it copies the whole save first (the hub waits that long for it).
+since it copies the whole save first (the hub waits that long for it); a `settingsSet` within 60 s, over the Agent's
+worst case of about 50 s (its `systemctl` checks, 20 s of live commands and the adminlist's read-back).
 
 | type | fields | effect | `reply.data` |
 |---|---|---|---|
@@ -315,7 +316,7 @@ sends `settingsSet`, and the Agent checks it again.
 | key | rule |
 |---|---|
 | `name` | 1 to 100 characters, trimmed (no leading or trailing whitespace), no control character (C0, DEL, C1, U+2028 or U+2029) |
-| `description` | 0 to 256 characters, no control character (so one line) |
+| `description` | 0 to 256 characters, no control character (so one line). The hub trims it, as Factorio's `/config set` does (spaces alone clear it); the Agent sends `/config set` the trimmed value either way |
 | `max_players` | an integer from 0 to 1000; 0 means no limit |
 | `require_user_verification` | boolean: whether players' factorio.com accounts are checked |
 | `autosave_interval` | an integer from 0 to 1440 (minutes); 0 means off |
@@ -329,18 +330,22 @@ sends `settingsSet`, and the Agent checks it again.
 | `pending[]`, `extra[]`, `applied[]` | each a settings key, `^[a-z_]{1,64}$` (`admins` and `game_password` among them) |
 
 Across fields, checked by the modules and refused with a reason: `require_user_verification` false needs a game
-password (one the request sets, or the file's when it is left out), and no admin twice, whatever the case. A
+password (one the request sets, or the file's when it is left out), no admin twice, whatever the case, and a
+`name` that changes (one the file doesn't hold already) at most 50 bytes in UTF-8, as Factorio 2.1.24 keeps no more. A
 `settings` or a `settingsSet` with a field that breaks a rule is invalid as a whole (see "Field limits").
 
 The Agent answers `settingsSet` `ok: false`, with why, when a rule fails, while a game update or its own deploy
-runs, or while its unit is starting or stopping. Otherwise it writes `server-settings.json` from the checked fields
+runs, or while its unit is starting or stopping; while a `settingsSet` runs or waits it refuses a game update, a
+`restore` and a `deploy`, and the hub holds those back too. Otherwise it writes `server-settings.json` from the checked fields
 alone (visibility always off: never public, never on the LAN; no factorio.com username or token), then, while the
 server runs, applies each changed key that has a live option with Factorio's `/config set`, and the admins with
-`/promote` and `/demote`; while it is stopped, it writes the adminlist instead. `reply.data` names the keys that
+`/promote` and `/demote` (a key counts as applied on Factorio's change line, or its line saying the server already
+had the value: verification and an empty description); while it is stopped, it writes the adminlist instead. `reply.data` names the keys that
 applied at once (`applied`) and those that wait for the next restart (`pending`: a changed `auto_pause` or
 `autosave_slots`, which have no live option, and any change it didn't apply live); then it sends `settings`, whose
 `pending` holds every key whose saved value the running server doesn't have yet (a start empties it). If the next
-start fails, the Agent puts back the settings of the last start that succeeded and says so in `rolledBack`.
+start fails, the Agent puts back the settings of the last start that succeeded (with none seen yet, those the
+running server started with when the Agent came to it more than 300 s into its run) and says so in `rolledBack`.
 
 The hub sends `settingsSet` only to an Agent whose `agentHello` names `agent-v1.2.0` or later (the repo's own
 `agent-v0.0.0`, the dev loop, counts as later). `settings` and `settingsSet` came without a protocol bump:

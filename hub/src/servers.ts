@@ -524,6 +524,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    * Whether a factorio server's lifecycle event fits its budget (`LIFECYCLE`) now. One that doesn't is dropped, for
    * the uptime log, the stream and Discord alike, and kept as the latest: when the next token comes it goes out then
    * (unless a later event went out first), so the recorded state is never wrong for longer than one token (3 min).
+   * `get` is right all along; what follows the stream is not until then: the dashboard's card and its latest rate
+   * (`LiveFeed`), and a restart countdown, which a dropped `stopped`, `crashed` or `lost` does not cancel.
    */
   #lifecycleFits(serverId: string, type: Lifecycle): boolean {
     const now = Date.now();
@@ -531,7 +533,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     if (!b) this.#lifecycle.set(serverId, (b = { tokens: LIFECYCLE.burst, last: now, pending: null, dropped: 0, loggedAt: -Infinity }));
     b.tokens = Math.min(LIFECYCLE.burst, b.tokens + (Math.max(0, now - b.last) * LIFECYCLE.perHour) / HOUR_MS);
     b.last = now;
-    if (b.tokens >= 1) {
+    // A hair under 1 is float rounding when the timer below fires: a whole token, so its replay is never a drop.
+    if (b.tokens >= 1 - 1e-9) {
       b.tokens -= 1;
       b.pending = null; // a later event went out: the dropped one is stale
       return true;

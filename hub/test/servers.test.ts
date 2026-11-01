@@ -437,6 +437,64 @@ test("a factorio server's normal use, a few starts and stops a day, is all recor
   assert.equal(errors.mock.callCount(), 0);
 });
 
+test("a factorio server's bad minute, 20 lifecycle events at once, is all recorded; the 21st waits for the budget", async (t) => {
+  const { hub, events, errors, attach, closed, rows } = factorio(t);
+  const expected: string[] = [];
+  hub.agentUp('space');
+  let game = attach();
+  game.send({ type: 'started' });
+  expected.push('connected', 'started');
+  // a restart: the game stops, and comes back
+  game.send({ type: 'stopping' });
+  game.socket.destroy();
+  await closed();
+  game = attach();
+  game.send({ type: 'started' });
+  expected.push('stopped', 'connected', 'started');
+  // its Agent restarts, then the game crashes twice, then its Agent is lost, then the game crashes again
+  const agentBack = () => {
+    hub.agentDown('space');
+    hub.agentUp('space');
+    game = attach();
+    game.send({ type: 'started' });
+    expected.push('lost', 'connected', 'started');
+  };
+  const crash = async () => {
+    game.socket.destroy();
+    await closed();
+    t.mock.timers.tick(5_000); // settleMs: its Agent connection stayed up
+    game = attach();
+    game.send({ type: 'started' });
+    expected.push('crashed', 'connected', 'started');
+  };
+  agentBack();
+  await crash();
+  await crash();
+  agentBack();
+  await crash();
+  // 20 events in 15 s: the burst takes them all, nothing dropped or logged
+  assert.equal(expected.length, 20);
+  assert.deepEqual(
+    events.map((e) => e.type),
+    expected,
+  );
+  assert.deepEqual(
+    rows().map((r) => r.reason),
+    expected,
+  );
+  assert.equal(errors.mock.callCount(), 0);
+
+  // the 21st finds under a token (one comes every 3 min), so it waits, and goes out when the token comes
+  hub.agentDown('space');
+  assert.equal(events.length, 20);
+  assert.equal(errors.mock.callCount(), 1);
+  t.mock.timers.tick(180_000);
+  assert.equal(events.length, 21);
+  assert.equal(events.at(-1)?.type, 'lost');
+  assert.equal(rows().at(-1)?.reason, 'lost');
+  assert.equal(errors.mock.callCount(), 1); // putting it through is no second drop
+});
+
 test("a Minecraft server's lifecycle has no budget: every connect and crash is recorded", async (t) => {
   const { hub, port, events } = await setup(t);
   const db = new Db(':memory:');

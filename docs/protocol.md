@@ -233,8 +233,10 @@ at the hub, without the Agent knowing.
   `recovered`, `offline`, `lost`) is at most 20 events an hour per server, in bursts of 20, its connections and
   reconnects together. Each is a row of the uptime log (never pruned), an event on the stream and maybe a Discord post;
   one over it is dropped from all three alike, and the latest dropped goes out when the next one fits (at most 3 min
-  on, unless a later event went out first), so the recorded state is never wrong for longer. The server's live state
-  (online, players) is kept all along. A Mod's server has no such budget.
+  on, unless a later event went out first), so the recorded state is never wrong for longer. The hub's own state of the
+  server (online, players, as the API's server list gives it) is right all along, but what follows the stream may lag
+  until a dropped event goes out: the dashboard's card (fetched again only on a card event) and its latest rate, and a
+  restart countdown, which a dropped `stopped`, `crashed` or `lost` does not cancel. A Mod's server has no such budget.
 - **Message types**, each within its own connection: a message over its budget is dropped and the connection stays.
 
 | type | budget |

@@ -61,6 +61,21 @@ type Conn = {
   started: boolean;
 };
 
+/**
+ * A factorio server's lifecycle events, its connections and reconnects together (docs/protocol.md, "Rate rules"): 20 an
+ * hour, in bursts of 20. Each is a row of the never-pruned uptime log, a stream event and maybe a Discord post, so an
+ * Agent's token holder churning connections must not add them without end.
+ */
+const LIFECYCLE = { perHour: 20, burst: 20 };
+const HOUR_MS = 3_600_000;
+const LOG_MS = 60_000;
+
+/**
+ * A factorio server's lifecycle budget: a token bucket (a clock stepping back adds none), the latest event dropped
+ * over it (put through when the next token comes), and the drops since the last log line.
+ */
+type LifecycleBudget = { tokens: number; last: number; pending: Lifecycle | null; timer?: NodeJS.Timeout; dropped: number; loggedAt: number };
+
 /** Removes Minecraft § formatting codes. */
 export function stripCodes(s: string): string {
   return s.replace(/§.?/gs, '');
@@ -117,7 +132,9 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #sockets = new Set<Socket>(); // every accepted or attached socket, including ones still before the handshake
   #agentsUp = new Set<string>(); // factorio servers whose Agent connection is up
   #settling = new Map<string, NodeJS.Timeout>(); // factorio servers whose game connection closed, waiting on the Agent
+  #lifecycle = new Map<string, LifecycleBudget>(); // factorio servers' lifecycle budgets, kept across connections
   #server: Server | null = null;
+  #listening = false; // the Mod port is open: without it a minecraft server has no way to connect
   #timer: NodeJS.Timeout | undefined;
   #grace: NodeJS.Timeout | undefined;
   #closing = false;
@@ -152,11 +169,12 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    */
   start(): void {
     this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
-    // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); a factorio
-    // server whose Agent isn't connected stays unknown.
+    // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); one that
+    // can't connect stays unknown: a factorio server whose Agent isn't connected, a minecraft one with no Mod port.
     this.#grace = setTimeout(() => {
       for (const s of this.#states.values()) {
-        if (!this.#conns.has(s.id) && (s.game !== 'factorio' || this.#agentsUp.has(s.id))) this.#emit(s.id, 'offline');
+        const canConnect = s.game === 'factorio' ? this.#agentsUp.has(s.id) : this.#listening;
+        if (!this.#conns.has(s.id) && canConnect) this.#emit(s.id, 'offline');
       }
     }, this.#graceMs);
   }
@@ -168,6 +186,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       server.once('error', reject);
       server.listen(port, host, () => {
         this.#server = server;
+        this.#listening = true;
         resolve((server.address() as AddressInfo).port);
       });
     });
@@ -178,6 +197,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     clearInterval(this.#timer);
     clearTimeout(this.#grace);
     for (const timer of this.#settling.values()) clearTimeout(timer);
+    for (const b of this.#lifecycle.values()) clearTimeout(b.timer);
     for (const late of this.#late.values()) clearTimeout(late.timer);
     for (const socket of this.#sockets) socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
@@ -499,6 +519,48 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   #emit(serverId: string, type: Lifecycle): void {
+    if (this.#configs.get(serverId)?.game === 'factorio' && !this.#lifecycleFits(serverId, type)) return;
     this.emit('event', { serverId, type });
+  }
+
+  /**
+   * Whether a factorio server's lifecycle event fits its budget (`LIFECYCLE`) now. One that doesn't is dropped, for
+   * the uptime log, the stream and Discord alike, and kept as the latest: when the next token comes it goes out then
+   * (unless a later event went out first), so the recorded state is never wrong for longer than one token (3 min).
+   * `get` is right all along; what follows the stream is not until then: the dashboard's card and its latest rate
+   * (`LiveFeed`), and a restart countdown, which a dropped `stopped`, `crashed` or `lost` does not cancel.
+   */
+  #lifecycleFits(serverId: string, type: Lifecycle): boolean {
+    const now = Date.now();
+    let b = this.#lifecycle.get(serverId);
+    if (!b) this.#lifecycle.set(serverId, (b = { tokens: LIFECYCLE.burst, last: now, pending: null, dropped: 0, loggedAt: -Infinity }));
+    b.tokens = Math.min(LIFECYCLE.burst, b.tokens + (Math.max(0, now - b.last) * LIFECYCLE.perHour) / HOUR_MS);
+    b.last = now;
+    // A hair under 1 is float rounding when the timer below fires: a whole token, so its replay is never a drop.
+    if (b.tokens >= 1 - 1e-9) {
+      b.tokens -= 1;
+      b.pending = null; // a later event went out: the dropped one is stale
+      return true;
+    }
+    b.pending = type;
+    b.dropped++;
+    if (now < b.loggedAt || now - b.loggedAt >= LOG_MS) {
+      console.error(`[hub] ${serverId}: over ${LIFECYCLE.perHour} lifecycle events an hour, dropped ${b.dropped}`);
+      b.loggedAt = now;
+      b.dropped = 0;
+    }
+    if (!b.timer) {
+      const budget = b;
+      budget.timer = setTimeout(
+        () => {
+          budget.timer = undefined;
+          const latest = budget.pending;
+          budget.pending = null;
+          if (latest && !this.#closing) this.#emit(serverId, latest); // through the budget again: rounding may re-arm it
+        },
+        Math.ceil(((1 - b.tokens) * HOUR_MS) / LIFECYCLE.perHour),
+      );
+    }
+    return false;
   }
 }

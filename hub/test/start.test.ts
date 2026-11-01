@@ -104,6 +104,23 @@ test('a started hub relays mod chat to the frontend and shuts down cleanly', asy
   assert.deepEqual(lifecycle(cfg.dbPath), [{ state: 'up', reason: 'connected' }]);
 });
 
+test("with integrations.minecraft off, a minecraft server's uptime stays unknown: no Mod port, so no grace 'down'", async (t) => {
+  const rows = async (integrations: Config['integrations']) => {
+    const cfg = config(t, integrations);
+    const handle = await startHub(cfg, { startFrontend: async () => ({ stop() {} }), get: () => assert.fail('no ping within a test'), hub: { graceMs: 50 } });
+    await sleep(200);
+    await handle.close();
+    const db = new DatabaseSync(cfg.dbPath);
+    try {
+      return db.prepare("SELECT state, reason FROM events WHERE reason != 'hub start'").all().map((r) => ({ ...r }));
+    } finally {
+      db.close();
+    }
+  };
+  assert.deepEqual(await rows({ discord: DISCORD }), []);
+  assert.deepEqual(await rows({ minecraft: MINECRAFT }), [{ state: 'down', reason: 'offline' }]); // its Mod could have connected
+});
+
 test('a command run through the hub lands in its audit log', async (t) => {
   const cfg = config(t, { minecraft: MINECRAFT, discord: DISCORD });
   let hub: ServerHub | undefined;

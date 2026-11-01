@@ -91,6 +91,10 @@ test("the deploys answer lists each Agent with the release its hello named, and 
 
 test('an Agent deploy: the Agent is sent `deploy`, and the row is ok once it says hello as the new release', async (t) => {
   const h = await deployHub(t, deployConfig(t), 10_000);
+  const hostNotices: string[] = [];
+  h.live.on('event', (_, e: LiveEvent) => {
+    if ('target' in e && e.target === 'host' && e.type === 'notice') hostNotices.push(e.kind);
+  });
   const a = await connected(h);
   await started(h, a);
   assert.deepEqual(await h.rows(), [{ part: 'agent', target: 'vm', from: 'agent-v1.1.0', to: TAG, by: ACTOR, outcome: 'running', log: '' }]);
@@ -121,6 +125,8 @@ test('an Agent deploy: the Agent is sent `deploy`, and the row is ok once it say
       ['deployFinished', 'vm', 'ok'],
     ],
   );
+  // The deploy's restart is a planned exit (`bye`): no agentLost, so no agentBack, on the stream or Discord.
+  assert.deepEqual(hostNotices, []);
   const audit = (await h.json<AuditLog>(h.req('GET', '/api/audit'))).entries.filter((e) => e.action === 'deploy');
   assert.deepEqual(
     audit.map(({ actor, target, details }) => ({ actor, target, details })),

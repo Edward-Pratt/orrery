@@ -123,17 +123,32 @@ export class AgentRefused extends Error {}
 /** How long ago `stamp` was by the hub's clock, `now`: as long ago as can be if the clock has stepped back past it. */
 const ago = (now: number, stamp: number) => (now < stamp ? Infinity : now - stamp);
 
-/** Counts drops and logs them at most once a minute: `say(count)`, the drops since the last log, this one included. */
-function everyMinute(say: (count: number) => string): () => void {
+/** The timers of `everyMinute`'s pending logs, which `Agents.close` clears; after `close`, none is set. */
+export type DropLogs = { timers: Set<NodeJS.Timeout>; closed: boolean };
+
+/**
+ * Counts drops and logs them at most once a minute, `say(count)` with the drops since the last line: the first at
+ * once, later ones summed and logged when the minute is up (at the next drop then, or by a timer in `logs`).
+ */
+export function everyMinute(say: (count: number) => string, logs: DropLogs): () => void {
   let count = 0;
   let at = -Infinity;
+  let timer: NodeJS.Timeout | undefined;
+  const log = () => {
+    if (timer) logs.timers.delete(timer);
+    clearTimeout(timer);
+    timer = undefined;
+    console.error(say(count));
+    at = Date.now();
+    count = 0;
+  };
   return () => {
     count++;
-    const now = Date.now();
-    if (ago(now, at) < LOG_MS) return;
-    console.error(say(count));
-    at = now;
-    count = 0;
+    const wait = LOG_MS - ago(Date.now(), at);
+    if (wait <= 0) return log();
+    if (timer || logs.closed) return;
+    timer = setTimeout(log, wait).unref();
+    logs.timers.add(timer);
   };
 }
 
@@ -161,9 +176,9 @@ function bucket(perSecond: number, burst: number): (now: number) => boolean {
  */
 type Budget = { lines: (socket: Socket) => boolean; fits: (type: string) => boolean; newPlayer: () => boolean; dropped: (name: string) => void };
 
-function budget(label: string, rate: Rate): Budget {
+function budget(label: string, rate: Rate, drops: DropLogs): Budget {
   const take = bucket(rate.perSecond, rate.burst);
-  const logLines = everyMinute((n) => `[agents] ${label}: over ${rate.perSecond} lines/s, dropping lines (${n} dropped)`);
+  const logLines = everyMinute((n) => `[agents] ${label}: over ${rate.perSecond} lines/s, dropping lines (${n} dropped)`, drops);
   let overSince = 0;
   let lastDrop = 0;
   const lines = (socket: Socket) => {
@@ -185,7 +200,7 @@ function budget(label: string, rate: Rate): Budget {
   const logs = new Map<string, () => void>();
   const dropped = (name: string) => {
     let log = logs.get(name);
-    if (!log) logs.set(name, (log = everyMinute((n) => `[agents] ${label}: over the ${name} budget, dropped ${n}`)));
+    if (!log) logs.set(name, (log = everyMinute((n) => `[agents] ${label}: over the ${name} budget, dropped ${n}`, drops)));
     log();
   };
   const takes = (of: { name: string; perSecond: number; burst: number }) => {
@@ -280,7 +295,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   #sampled = new Map<string, number>(); // when each Agent's latest stored host sample came (the hub's clock)
   #budgets = new Map<string, Budget>(); // by `agent <id>`, `game <server id>` and peer address: they outlive sockets
   #welcomed = new Map<string, number>(); // when each `agent <id>` and `game <server id>` was last welcomed
-  #tooMany = everyMinute((n) => `[agents] over ${PEER_SOCKETS} connections at once from one address: ${n} refused`);
+  #drops: DropLogs = { timers: new Set(), closed: false }; // the drop logs' pending lines
+  #tooMany = everyMinute((n) => `[agents] over ${PEER_SOCKETS} connections at once from one address: ${n} refused`, this.#drops);
   #server: Server | null = null;
   #retry: NodeJS.Timeout | undefined;
   #closing = false;
@@ -344,6 +360,9 @@ export class Agents extends EventEmitter<AgentEvents> {
   close(): Promise<void> {
     this.#closing = true;
     clearTimeout(this.#retry);
+    this.#drops.closed = true;
+    for (const timer of this.#drops.timers) clearTimeout(timer);
+    this.#drops.timers.clear();
     for (const socket of this.#sockets) socket.destroy();
     return new Promise((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
   }
@@ -425,7 +444,7 @@ export class Agents extends EventEmitter<AgentEvents> {
   /** A connection's budgets by its key (`agent <id>`, `game <server id>` or a peer address), made on first use. */
   #budget(key: string): Budget {
     let b = this.#budgets.get(key);
-    if (!b) this.#budgets.set(key, (b = budget(key, this.#rate)));
+    if (!b) this.#budgets.set(key, (b = budget(key, this.#rate, this.#drops)));
     return b;
   }
 

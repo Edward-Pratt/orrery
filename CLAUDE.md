@@ -112,7 +112,7 @@ that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Mi
 (the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests,
 its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, tested by `test-release.sh`), as
 `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
-(`.github/factorio-zip.sh`), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
+(`.github/factorio-zip.sh`, refusing a version that isn't `factorio/changelog.txt`'s top section), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
 `FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in

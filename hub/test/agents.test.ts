@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { connect, Server, Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { test, type TestContext } from 'node:test';
-import { Agents, type AgentsOptions } from '../src/agents.ts';
+import { Agents, everyMinute, type AgentsOptions, type DropLogs } from '../src/agents.ts';
 import { Db } from '../src/db.ts';
 import { Hosts } from '../src/host.ts';
 import { LiveFeed } from '../src/live.ts';
@@ -555,6 +555,41 @@ test('a chat flood at 15 lines/s for 20 s: chat over its budget is dropped, the 
   // 300 chat lines, 68 passed on: 232 dropped, the first logged at once, so the next log counts 231 and its own.
   assert.equal(errors.mock.calls.at(-1)!.arguments[0], '[agents] game space: over the game events budget, dropped 232');
   assert.equal(events.filter((e) => e.type === 'join').length, 30);
+});
+
+test('drop logs: the first at once, the rest summed when the minute is up, by a timer once drops stop; none after close', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000_000 });
+  const errors = t.mock.method(console, 'error', () => {});
+  const said = () => errors.mock.calls.map((c) => String(c.arguments[0]));
+  const logs: DropLogs = { timers: new Set(), closed: false };
+  const drop = everyMinute((n) => `dropped ${n}`, logs);
+  drop(); // logged at once
+  t.mock.timers.tick(10_000);
+  drop();
+  drop();
+  t.mock.timers.tick(49_999);
+  assert.deepEqual(said(), ['dropped 1']);
+  t.mock.timers.tick(1); // the minute is up: the two since, though no drop came
+  assert.deepEqual(said(), ['dropped 1', 'dropped 2']);
+  assert.equal(logs.timers.size, 0);
+  t.mock.timers.tick(30_000);
+  drop(); // within a minute of the last line: waits
+  t.mock.timers.tick(29_999);
+  drop();
+  assert.deepEqual(said(), ['dropped 1', 'dropped 2']);
+  t.mock.timers.tick(1); // a minute after the last line: both
+  assert.deepEqual(said(), ['dropped 1', 'dropped 2', 'dropped 2']);
+  t.mock.timers.tick(1_000);
+  drop();
+  assert.equal(logs.timers.size, 1);
+  // What Agents.close does: the pending line is never logged, and no timer is set after.
+  logs.closed = true;
+  for (const timer of logs.timers) clearTimeout(timer);
+  logs.timers.clear();
+  drop();
+  t.mock.timers.tick(120_000);
+  assert.deepEqual(said(), ['dropped 1', 'dropped 2', 'dropped 2']);
+  assert.equal(logs.timers.size, 0);
 });
 
 test('a flood over 20 lines/s for 10 s closes its connection', async (t) => {

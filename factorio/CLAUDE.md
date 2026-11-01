@@ -10,13 +10,17 @@ file is the contract between the mod and the agent.
 | `control.lua` | The commands, the event handlers and `storage`. |
 | `locale/en/orrery.cfg` | The mod's name and description, the command help texts, the two lines a player sees from `/orrery-link`. |
 | `changelog.txt` | The portal's strict format: a line of 99 `-`, `Version: X.Y.Z`, two-space categories, four-space `- ` entries. |
+| `LICENSE` | MIT, as the repo's (the portal page says `default_mit`); it ships in the zip. |
 
 ## Releases
 
 - `info.json` keeps `version` at `0.0.0`. The release writes the real one into the zip's copy, from the
-  `factorio-vX.Y.Z` tag (`.github/factorio-zip.sh`; CI zips the newest `factorio-v*` tag's version).
+  `factorio-vX.Y.Z` tag (`.github/factorio-zip.sh`; CI zips a `factorio-v*` tag's version, and any other run the
+  changelog's top one).
 - `changelog.txt` is not rewritten: before cutting a tag, make its top section's `Version:` the version the tag will
-  get (`release.sh` prints it), and add a section per release.
+  get (`release.sh` prints it), and add a section per release. `factorio-zip.sh` refuses to zip a version that isn't
+  the top section's, so a mismatch fails the release's CI before anything reaches the portal (the tag stays: fix
+  forward with the next patch).
 - The zip is `orrery_<version>.zip` with the single top folder `orrery_<version>/`, the portal's layout. This
   `CLAUDE.md` is left out of it; everything else in this folder ships, so keep test files and notes elsewhere.
   `bash .github/test-release.sh` tests the script.

@@ -10,7 +10,7 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Config } from './config.ts';
-import { ENGINE, parseDatagram, socketState } from './events.ts';
+import { ENGINE, openingLine, parseDatagram, socketState } from './events.ts';
 import { head, openPlain, tail } from './files.ts';
 import { HostSampler, procReaders, type HostReaders } from './host.ts';
 import { AGENT_LOG, AGENT_UNIT } from './logs.ts';
@@ -86,7 +86,7 @@ const TAIL = 2000;
 const OTHERS: readonly string[] = [
   'S4 players: no game event lost under load (agent.log logs every seq gap)',
   'S7 players: on_player_changed_surface does not fire on remote view, or the landing check ignores it',
-  'S9 owner: the portal zip layout and changelog, from the factorio-v0.1.0 upload and its portal page',
+  'S9 owner: the portal zip layout and changelog, from the factorio-v1.0.0 upload and its portal page',
   'S10 owner and friend: join once; orrery downloads from the portal, and each player needs Space Age',
   'S11 owner: the signed dl-mod.factorio.com redirect, on the hub host (passed 2026-10-31)',
   "S12 owner: the factorio.com service token's scope (moot while S11 holds)",
@@ -587,9 +587,19 @@ class Checks {
     const uid = process.getuid!();
     const owner = udpOwner((await readFile(join(this.#p.proc, 'net', 'udp'), 'utf8').catch(() => '')), port);
     const text = await head(this.#log, MiB, this.#since);
-    const logged = text !== null && socketState(text, port) === 'on';
+    const state = text === null ? null : socketState(text, port);
+    const logged = state === 'on';
+    const opening = text !== null && text.split('\n').some((l) => openingLine(port).test(l.replace(/\r$/, '')));
     const socket = owner === null ? `nothing bound on 127.0.0.1:${port}` : `127.0.0.1:${port} bound by uid ${owner}`;
-    const line = logged ? '"Opening socket" logged' : 'no "Opening socket" line in factorio-current.log since the start';
+    const line = logged
+      ? '"Opening socket" logged'
+      : opening && state === 'off'
+        ? '"Opening socket" logged, but the socket failed or closed (the port is taken?)'
+        : opening
+          ? '"Opening socket" logged, with nothing after it yet'
+          : state === 'off'
+            ? '"Opening Lua UDP Socket failed" logged'
+            : 'no "Opening socket" line in factorio-current.log since the start';
     if (owner !== uid || !logged) return this.#report.say('FAIL', `S4 ${socket}, ${line}: fallback, a write_file tail`);
     const hello = await this.#hello();
     const evidence = `${socket}, ${line}, ${hello.evidence}`;

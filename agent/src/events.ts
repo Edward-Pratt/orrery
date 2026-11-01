@@ -101,6 +101,9 @@ export const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
 const FAILED = new RegExp(ENGINE + 'Opening Lua UDP Socket failed');
 const CLOSING = new RegExp(ENGINE + 'Closing socket$');
 
+/** Factorio's `Opening socket` line for its Lua UDP socket on 127.0.0.1:`port` (a whole line, `\r` taken off). */
+export const openingLine = (port: number) => new RegExp(ENGINE + String.raw`Opening socket at \(IP ADDR:\(\{127\.0\.0\.1:${port}\}\)\)$`);
+
 /**
  * What a log says about Factorio's Lua UDP socket on 127.0.0.1:`port`. Factorio writes `Opening socket at (IP
  * ADDR:({127.0.0.1:34198}))` before it binds, so on a taken port that line is followed by `Closing socket`, `Socket
@@ -109,7 +112,7 @@ const CLOSING = new RegExp(ENGINE + 'Closing socket$');
  * line; null while neither is known (no Opening line, or it is the last line yet). Only whole lines count.
  */
 export function socketState(log: string, port: number): 'on' | 'off' | null {
-  const opened = new RegExp(ENGINE + String.raw`Opening socket at \(IP ADDR:\(\{127\.0\.0\.1:${port}\}\)\)$`);
+  const opened = openingLine(port);
   const lines = log.split('\n');
   lines.pop(); // what follows the last newline is a line still being written (or nothing)
   let open = -1;

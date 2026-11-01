@@ -56,6 +56,8 @@ type Setup = {
   /** False: /orrery-save answers ok but no file appears. */
   saveWrites?: boolean;
   signal?: 'SIGINT' | 'SIGTERM';
+  /** Factorio's Lua UDP port is another process's: Factorio logs its Opening line, then closes it and fails. */
+  udpTaken?: boolean;
   /** 'world': a start always loads saves/world.zip, not the newest file. */
   load?: 'newest' | 'world';
   /** What the running agent logs at each start: the mod's hello, or events off. */
@@ -178,8 +180,10 @@ async function host(t: TestContext, s: Setup = {}) {
       ? `${at} [events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${factorioUdpPort}\n${at} [events] the mod's hello came: seq 7\n`
       : `${at} [events] game events are off until Factorio starts again: Factorio could not open its Lua UDP socket\n`;
   };
+  const taken = '   0.101 Info UDPSocket.cpp:238: Closing socket\n   0.101 Info UDPSocket.cpp:268: Socket closed\n' +
+    '   0.101 Warning Game.cpp:73: Opening Lua UDP Socket failed: Binding IPv4 socket failed: Address already in use\n';
   const startLog = () =>
-    `   0.100 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({127.0.0.1:${factorioUdpPort}}))\n   1.500 Info AppManager.cpp:520: Loading map ${loaded}: 1234 bytes.\n`;
+    `   0.100 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({127.0.0.1:${factorioUdpPort}}))\n${s.udpTaken ? taken : ''}   1.500 Info AppManager.cpp:520: Loading map ${loaded}: 1234 bytes.\n`;
   await writeFile(log, startLog());
   await writeFile(agentLog, lines());
   const agentStart = Date.now() - 30_000;
@@ -443,6 +447,12 @@ test('check: S4 fails when the agent logs game events off; with the agent down t
   assert.equal(await down.run(), true, down.text());
   assert.match(down.line('S4'), /the mod's hello came from it \(seq 7; orrery-agent\.service is down, so the check listened on 127\.0\.0\.1:\d+\)$/);
   assert.ok(down.commands.includes('/orrery-hello'));
+});
+
+test('check: S4 with the Lua UDP port taken says the Opening line came but the socket failed or closed', async (t) => {
+  const h = await host(t, { udpTaken: true, players: ['alice'] });
+  assert.equal(await h.run(), false);
+  assert.match(h.line('S4'), /^FAIL S4 127\.0\.0\.1:\d+ bound by uid \d+, "Opening socket" logged, but the socket failed or closed \(the port is taken\?\): fallback, a write_file tail$/);
 });
 
 test('check: S16 fails on 203/EXEC and warns with SELinux not enforcing', async (t) => {

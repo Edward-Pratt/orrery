@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Zips the Factorio mod for its release: orrery_<version>.zip whose single top folder is orrery_<version>/
-# (the mod portal's layout). The version goes into the zip's copy of info.json; the source stays as it is.
+# (the mod portal's layout). The version goes into the zip's copy of info.json; the source stays as it is. The
+# changelog's top section must already be that version's (the portal shows it as the release's changelog).
 #   bash .github/factorio-zip.sh <mod dir> <version> <out dir>
 set -euo pipefail
 dir=${1%/} v=$2 out=$3
@@ -8,6 +9,8 @@ die() { echo "factorio-zip: $*" >&2; exit 1; }
 [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "want a version X.Y.Z, got '$v'"
 [[ $(find "$dir" -name info.json) == "$dir/info.json" ]] && jq -e '.name == "orrery"' "$dir/info.json" > /dev/null ||
   die 'want one info.json, at the top, named orrery'
+top=$(sed -n 's/^Version: *//p' "$dir/changelog.txt" 2> /dev/null | head -n 1 | tr -d '\r' || true)
+[[ $top == "$v" ]] || die "changelog.txt's top section is Version: ${top:-(none)}, not $v: set it before the release"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 cp -R "$dir/." "$T/orrery_$v"

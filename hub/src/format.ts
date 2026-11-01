@@ -33,6 +33,15 @@ export function md(s: string): string {
   return escapeMarkdown(stripCodes(s), { heading: true, maskedLink: true, bulletedList: true, numberedList: true });
 }
 
+/**
+ * Escapes text that goes mid-line or in an embed title (a notice's detail, a save's name, a version, an error): every
+ * inline markdown and masked links, but not the line-start rules (headings, lists), which there would only put a
+ * backslash before a backup's "12.3 seconds".
+ */
+export function inline(s: string): string {
+  return escapeMarkdown(stripCodes(s), { maskedLink: true });
+}
+
 /** Embed titles render less markdown than descriptions, so they only get § codes stripped. */
 function title(s: string): string {
   return truncate(stripCodes(s), TITLE);
@@ -69,10 +78,12 @@ function milestoneText(m: Extract<GameMsg, { type: 'milestone' }>): string {
 /** What `/link` answers: how to type the code in each game that has a server. */
 export function formatLinkHint(code: string, games: Game[]): string {
   const how: Record<Game, string> = {
-    minecraft: `In Minecraft, type \`/discord link ${code}\`.`,
-    factorio: `In Factorio, type \`/orrery-link ${code}\`.`,
+    minecraft: `In Minecraft, type \`/discord link ${code}\``,
+    factorio: `In Factorio, type \`/orrery-link ${code}\``,
   };
-  return [...GAMES.filter((g) => games.includes(g)).map((g) => how[g]), 'Within 10 minutes.'].join(' ');
+  const lines = GAMES.filter((g) => games.includes(g)).map((g) => how[g]);
+  if (lines.length > 1) return `${lines.map((l) => `${l}.`).join(' ')} The code works for 10 minutes.`;
+  return `${lines[0] ?? how.minecraft} within 10 minutes.`; // no servers at all: Minecraft's, as before Factorio
 }
 
 const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
@@ -93,7 +104,7 @@ function noticeText(n: Notice, game: Game): string | null {
     case 'restartCancelledDown':
       return '❎ Restart cancelled (server went down)';
     case 'restartFailed':
-      return `❌ Restart failed: ${md(n.error)}`; // a factorio server's: its Agent's refusal
+      return `❌ Restart failed: ${inline(n.error)}`; // a factorio server's: its Agent's refusal
     case 'lag': {
       // Only Minecraft has dimensions to name (Factorio's rate is UPS); an older Mod sends none.
       if (n.label === 'UPS') return `🐢 Lag: ${n.tps.toFixed(1)} ${n.label}`;
@@ -103,15 +114,15 @@ function noticeText(n: Notice, game: Game): string | null {
     case 'lagRecovered':
       return `✅ ${n.label} back to normal (${n.tps.toFixed(1)})`;
     case 'backupOverdue':
-      return `⚠️ No new backup for ${n.hours} h (newest: ${md(n.newest)})`;
+      return `⚠️ No new backup for ${n.hours} h (newest: ${inline(n.newest)})`;
     case 'backupsMissing':
       return '⚠️ No backups found';
     case 'lowDisk':
       return `⚠️ Low disk space for backups: ${formatBytes(n.free)} free (limit ${n.minFreeGB} GB)`;
     case 'backupFinished':
-      return `✅ Backup finished (${md(n.detail)})`; // an Agent's detail is its own text
+      return `✅ Backup finished (${inline(n.detail)})`; // an Agent's detail is its own text
     case 'backupFailed':
-      return `❌ Backup failed: ${md(n.detail)}`;
+      return `❌ Backup failed: ${inline(n.detail)}`;
     case 'packUpdateStarted':
       return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
     case 'packUpdateStep': // progress for the dashboard
@@ -134,18 +145,23 @@ function noticeText(n: Notice, game: Game): string | null {
   }
 }
 
-/** A game update's start and end (the Agent's pre-update save named with `md()`: its name is the game folder's). */
+/**
+ * A game update's start and end. `from` names the Factorio version the Agent reported (`installed`) and the pre-update
+ * save is named in the game's folder: both `inline()`, as they go mid-line in the embed title. `to` is the version the
+ * admin picked, checked as `X.Y.Z`.
+ */
 function gameUpdateText(n: Extract<Notice, { kind: 'packUpdateStarted' | 'packUpdateFinished' }>): string {
-  if (n.kind === 'packUpdateStarted') return `📦 Updating the game: ${n.from} → ${n.to} (by ${n.by})`;
+  const from = inline(n.from);
+  if (n.kind === 'packUpdateStarted') return `📦 Updating the game: ${from} → ${n.to} (by ${n.by})`;
   switch (n.outcome) {
     case 'ok':
       return `✅ Game updated to ${n.to} (${formatDuration(n.ms)})`;
     case 'rolled back':
-      return `❌ Game update to ${n.to} rolled back: ${n.from} is running again.${n.backup ? ` Pre-update save: ${md(n.backup)}` : ''}`;
+      return `❌ Game update to ${n.to} rolled back: ${from} is running again.${n.backup ? ` Pre-update save: ${inline(n.backup)}` : ''}`;
     case 'failed':
       return `❌ Game update to ${n.to} failed: the server didn't come back, even after a rollback`;
     case 'failed before swap':
-      return `❌ Game update to ${n.to} failed after the stop, before anything changed: ${n.from} is starting again`;
+      return `❌ Game update to ${n.to} failed after the stop, before anything changed: ${from} is starting again`;
     case 'failed in staging':
       return `⚠️ Game update to ${n.to} failed while preparing: the server wasn't touched`;
     case 'cancelled':
@@ -215,9 +231,9 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
     case 'memoryOk':
       return `✅ Host ${e.id}: memory back to ${e.percent}%`;
     case 'diskLow':
-      return `⚠️ Host ${e.id}: low disk on ${md(e.mount)}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`; // an Agent's sample names it
+      return `⚠️ Host ${e.id}: low disk on ${inline(e.mount)}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`; // an Agent's sample names it
     case 'diskOk':
-      return `✅ Host ${e.id}: disk on ${md(e.mount)} back to ${formatBytes(e.free)} free`;
+      return `✅ Host ${e.id}: disk on ${inline(e.mount)} back to ${formatBytes(e.free)} free`;
     case 'serviceFailed':
       return `❌ Service ${e.id} failed (${e.unit})`;
     case 'agentLost':
@@ -225,15 +241,15 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
     case 'agentBack':
       return `✅ Host ${e.id}: agent ${e.name} is connected again`;
     case 'eventsOff': // the Agent's words
-      return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${md(e.reason)}`;
+      return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
     case 'eventsOn':
       return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
     // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':
-      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : md(e.from)} → ${e.to} (by ${e.by})`;
+      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : inline(e.from)} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
       if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
-      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : md(e.from)}`;
+      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : inline(e.from)}`;
       return `❌ Deploying ${deployed(e)} ${e.to} failed`;
   }
 }

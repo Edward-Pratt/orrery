@@ -45,7 +45,7 @@ if (config.integrations.agents && !factorioAccount) {
 const handle = await startHub(config, {
   startFrontend: async (hub, stats, restarts, links, cfg) => {
     const discord = await startDiscord(hub, stats, restarts, links, cfg, token ?? '');
-    return { stop: () => void discord.client.destroy() };
+    return { stop: () => discord.stop() };
   },
   get: httpGet,
   host: localHost,

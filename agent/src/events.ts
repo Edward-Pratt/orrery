@@ -2,10 +2,11 @@
 // game connection's messages, and the hub's say, notice and linkResult out, as the mod's RCON commands.
 import { createSocket, type RemoteInfo, type Socket } from 'node:dgram';
 import { EventEmitter } from 'node:events';
-import { constants, open, type FileHandle } from 'node:fs/promises';
 import type { ModMsg } from '../../hub/src/types.ts';
+import { head } from './files.ts';
 import type { UnitState } from './service.ts';
-import { LIMITS, type ToGame } from './wire.ts';
+import { parseStatus } from './status.ts';
+import { LIMITS, printable, type ToGame } from './wire.ts';
 
 /** The game connection's messages that come from the mod's datagrams. */
 export type GameEvent = Extract<ModMsg, { type: 'chat' | 'join' | 'leave' | 'death' | 'milestone' | 'link' | 'unlink' }>;
@@ -96,7 +97,7 @@ function toEvent(t: string, raw: Record<string, unknown>): GameEvent | string {
 }
 
 /** An engine line of the log (seconds since start, level, `File.cpp:N:`), so a chat line or a mod's `log()` can't pass for one. */
-const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
+export const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
 const FAILED = new RegExp(ENGINE + 'Opening Lua UDP Socket failed');
 
 /**
@@ -117,23 +118,51 @@ export function socketState(log: string, port: number): 'on' | 'off' | null {
 }
 
 /**
- * The head of Factorio's log if it was written at or after `freshAfter` (epoch ms), else null (or if it can't be
- * read). The container writes it, so no symlink is followed, nothing blocks, and only a regular file is read, up to
- * `HEAD_MAX` bytes.
+ * Game events the agent forwards to the hub, all kinds together: 5 a second sustained, 30 at once. The hub drops a
+ * connection's lines over 20 a second (100 at once) and closes one that stays over that for 10 s, so a player
+ * spamming chat can never take the game connection, and its heartbeats, down with it.
  */
-async function readHead(file: string, freshAfter: number): Promise<string | null> {
-  let handle: FileHandle | undefined;
-  try {
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const st = await handle.stat();
-    if (!st.isFile() || st.mtimeMs < freshAfter) return null;
-    const buf = Buffer.alloc(Math.min(st.size, HEAD_MAX));
-    const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
-    return buf.subarray(0, bytesRead).toString('utf8');
-  } catch {
-    return null;
-  } finally {
-    await handle?.close();
+export const EVENT_RATE = 5;
+export const EVENT_BURST = 30;
+/** The events dropped over the budget are counted in one log line a minute at most. */
+export const DROP_LOG_MS = 60_000;
+
+/**
+ * The game events' budget, `EVENT_RATE` a second and `EVENT_BURST` at once, on a monotonic clock (ms): a cell-rate
+ * check, so a full burst comes back after a quiet 6 s and nothing builds up past it. `take` says whether one more
+ * event goes now. What it refuses is counted: the first refusal starts a minute, at whose end (or at `flush`) one line
+ * logs the count.
+ */
+export class EventBudget {
+  #now: () => number;
+  /** When the next event would be on time; it may run up to `EVENT_BURST - 1` intervals ahead of the clock. */
+  #due = -Infinity;
+  #dropped = 0;
+  #timer: NodeJS.Timeout | undefined;
+
+  constructor(now: () => number = () => performance.now()) {
+    this.#now = now;
+  }
+
+  take(): boolean {
+    const now = this.#now();
+    const interval = 1000 / EVENT_RATE;
+    const due = Math.max(this.#due, now);
+    if (due - now <= (EVENT_BURST - 1) * interval) {
+      this.#due = due + interval;
+      return true;
+    }
+    if (this.#dropped++ === 0) this.#timer = setTimeout(() => this.flush(), DROP_LOG_MS);
+    return false;
+  }
+
+  /** Logs the count dropped since the minute started, if any, and ends that minute. */
+  flush(): void {
+    clearTimeout(this.#timer);
+    const n = this.#dropped;
+    if (n === 0) return;
+    this.#dropped = 0;
+    console.log(`[events] dropped ${n} game event${n === 1 ? '' : 's'} in the last minute: over ${EVENT_RATE} a second (${EVENT_BURST} at once)`);
   }
 }
 
@@ -150,9 +179,9 @@ export type EventsOptions = {
   factorioPort: number;
   /** `factorio-current.log` in the server's data folder. */
   log: string;
-  /** The players online at the latest `/orrery-status`: a link or unlink names one of them, or is dropped. */
+  /** The players online at the latest `/orrery-status`: a link or unlink names one of them, or a fresh one decides. */
   players: () => readonly string[];
-  /** Runs an RCON command (for `/orrery-hello`); rejects when RCON can't run it. */
+  /** Runs an RCON command (`/orrery-hello`, a fresh `/orrery-status`); rejects when RCON can't run it. */
   run: (command: string) => Promise<string>;
   /** How long after a start the log may take to show either line. */
   deadlineMs?: number;
@@ -161,6 +190,8 @@ export type EventsOptions = {
   helloMs?: number;
   /** Between attempts to listen when the port is taken. */
   retryMs?: number;
+  /** The event budget's monotonic clock (ms; `performance.now`). */
+  now?: () => number;
 };
 
 /**
@@ -170,9 +201,11 @@ export type EventsOptions = {
  * a restart between two readings, since the second after it became active) is the previous run's, which Factorio
  * has not replaced yet, so it is read again until it is. `Opening Lua UDP Socket failed`, or neither line within
  * 60 s, turns events off until the next start, logged once. A datagram over 4 KiB, or that isn't the mod's shape,
- * is dropped, and so is a `link` or `unlink` for a player not online; each kind of drop is logged once per start.
- * Gaps in `seq` are logged; its baseline is the `hello` datagram that `/orrery-hello` makes the mod send, once per
- * start after the gate opens and RCON answers. Emits each event as the game connection's message.
+ * is dropped, each kind of drop logged once per start. Gaps in `seq` are logged; its baseline is the `hello` datagram
+ * that `/orrery-hello` makes the mod send, once per start after the gate opens and RCON answers. Emits each event as
+ * the game connection's message, within `EventBudget` (5 a second, 30 at once; the rest dropped, counted in the log
+ * once a minute). A `link` or `unlink` for a player not online at the latest poll (who may have joined since) waits
+ * for a fresh `/orrery-status`, and is dropped, each one logged, if that doesn't have them online either.
  */
 export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
   #o: Required<EventsOptions>;
@@ -192,10 +225,12 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
   #hello: 'none' | 'sent' | 'answered' | 'came' = 'none';
   #last: number | null = null;
   #dropped = new Set<string>();
+  #budget: EventBudget;
 
   constructor(options: EventsOptions) {
     super();
-    this.#o = { deadlineMs: 60_000, pollMs: 1000, helloMs: 5000, retryMs: 10_000, ...options };
+    this.#o = { deadlineMs: 60_000, pollMs: 1000, helloMs: 5000, retryMs: 10_000, now: () => performance.now(), ...options };
+    this.#budget = new EventBudget(this.#o.now);
   }
 
   get gate(): Gate {
@@ -220,6 +255,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     this.#socket?.close();
     this.#socket = null;
     this.#bound = null;
+    this.#budget.flush();
   }
 
   /** The unit's state, on each change: a start (it became active, or its change time moved while active) opens a check of the log. */
@@ -246,7 +282,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
       (reply) => {
         if (run !== this.#run || this.#hello !== 'sent') return;
         this.#hello = 'answered';
-        if (!answeredOk(reply)) return console.error(`[events] /orrery-hello answered ${JSON.stringify(reply.slice(0, 200))}`);
+        if (!answeredOk(reply)) return console.error(`[events] /orrery-hello answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
         this.#helloTimer = setTimeout(() => {
           console.error(`[events] no hello datagram came on UDP 127.0.0.1:${this.#o.port}: the mod sends to 34199 from ${this.#o.factorioPort}; are the ports right?`);
         }, this.#o.helloMs);
@@ -302,9 +338,11 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     const run = this.#run;
     const until = Date.now() + this.#o.deadlineMs;
     const look = async (): Promise<void> => {
-      const head = await readHead(this.#o.log, freshAfter);
+      // The previous run's log (written before `freshAfter`) is no answer: read again until Factorio replaces it.
+      const text = await head(this.#o.log, HEAD_MAX, freshAfter);
       if (run !== this.#run) return;
-      const state = head === null ? null : socketState(head, this.#o.factorioPort);
+      const state = text === null ? null : socketState(text, this.#o.factorioPort);
+      // check.ts (S4) reads this line, the "off" one below, and the hello lines from agent.log: keep their wording.
       if (state === 'on') {
         this.#gate = 'on';
         return console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);
@@ -343,10 +381,32 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     this.#seq(d.seq, d.event === null);
     const event = d.event;
     if (!event) return;
-    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) {
-      return this.#drop('offline', `a ${event.type} for a player not online`);
-    }
+    // Over the budget: counted, and its seq taken above, so no gap is logged. Taken before a fresh /orrery-status
+    // too, so a flood of links for names not online can't flood RCON.
+    if (!this.#budget.take()) return;
+    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) return void this.#online(event);
     this.emit('event', event);
+  }
+
+  /**
+   * A link or unlink for a name not online at the latest poll, which is up to 5 s old: a player who just joined. A
+   * fresh `/orrery-status` decides (never the UDP `join`, which anyone in the container can send); not online there
+   * either, it is dropped and logged.
+   */
+  async #online(event: Extract<GameEvent, { type: 'link' | 'unlink' }>): Promise<void> {
+    const run = this.#run;
+    let online = false;
+    let why = 'not online at a fresh /orrery-status';
+    try {
+      const status = parseStatus(await this.#o.run('/orrery-status'));
+      if (status) online = status.players.includes(event.player);
+      else why = '/orrery-status gave no status';
+    } catch (err) {
+      why = `/orrery-status failed: ${printable((err as Error).message)}`;
+    }
+    if (run !== this.#run || this.#gate !== 'on') return; // the server stopped meanwhile
+    if (online) return void this.emit('event', event);
+    console.log(`[events] dropped ${event.type === 'link' ? 'a link' : 'an unlink'} for ${printable(event.player)}: ${why}`);
   }
 
   #seq(seq: number, hello: boolean): void {
@@ -407,7 +467,7 @@ export function toCommand(msg: ToGame): string {
 export async function toGame(run: (command: string) => Promise<string>, msg: ToGame): Promise<void> {
   try {
     const reply = await run(toCommand(msg));
-    if (!answeredOk(reply)) console.error(`[game] ${msg.type} was not shown: ${JSON.stringify(reply.slice(0, 200))}`);
+    if (!answeredOk(reply)) console.error(`[game] ${msg.type} was not shown: ${printable(JSON.stringify(reply.slice(0, 200)))}`);
   } catch (err) {
     console.error(`[game] ${msg.type} was not shown: ${(err as Error).message}`);
   }

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { constants, open, type FileHandle } from 'node:fs/promises';
 import { Rcon, RconTimeout } from './rcon.ts';
-import { LIMITS } from './wire.ts';
+import { LIMITS, printable } from './wire.ts';
 
 /**
  * `/orrery-status`'s answer (factorio/CLAUDE.md): `game.tick`, `game.tick_paused`, the online players' names, the
@@ -33,11 +33,14 @@ const SETTINGS_MAX = 1024 * 1024;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** The online players: names of 1 to 64 characters, at most 200 (the hub refuses a heartbeat with more). */
+/**
+ * The online players: names of 1 to 64 characters with no control character (no Factorio name has one), at most 200
+ * (the hub refuses a heartbeat with more).
+ */
 function names(v: unknown): string[] | null {
   if (isObject(v) && Object.keys(v).length === 0) return []; // table_to_json writes an empty table as {}
   if (!Array.isArray(v)) return null;
-  return v.filter((n): n is string => typeof n === 'string' && n.length > 0 && n.length <= LIMITS.player).slice(0, LIMITS.players);
+  return v.filter((n): n is string => typeof n === 'string' && n.length > 0 && n.length <= LIMITS.player && printable(n) === n).slice(0, LIMITS.players);
 }
 
 /**

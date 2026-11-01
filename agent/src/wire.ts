@@ -207,6 +207,14 @@ export type Request<T extends AgentRequest['type']> = Extract<AgentRequest, { ty
 
 // ---- Text cut to the hub's limits before it is sent.
 
+/**
+ * `text` safe to print on one line: every control character but a tab (C0, DEL, C1: newlines, terminal escapes) and
+ * the line and paragraph separators made `?`. For whatever RCON or a container-written file put in a line the agent
+ * logs or reports, so it can neither forge a line of `agent.log` nor drive a terminal. Tabs stay: Lua tracebacks in
+ * Factorio's log and in a `/c` error are indented with them.
+ */
+export const printable = (text: string): string => text.replace(/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]/g, '?');
+
 /** `text` cut to `max` characters (UTF-16 code units), never leaving half a surrogate pair. */
 export function cut(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -215,21 +223,21 @@ export function cut(text: string, max: number): string {
 }
 
 /**
- * An RCON reply as a `cmdResult`'s `output`: its lines (none for an empty reply), the first 500, each cut to 1 KiB,
- * as the hub would keep them anyway; so `encode` never has to drop any but in a reply of wide characters.
+ * An RCON reply as a `cmdResult`'s `output`: its lines (none for an empty reply), the first 500, each `printable` and
+ * cut to 1 KiB, as the hub would keep them anyway; so `encode` never has to drop any but in a reply of wide characters.
  */
 export function outputLines(reply: string): string[] {
   if (reply === '') return [];
-  return reply.split('\n', LIMITS.output).map((l) => cut(l.endsWith('\r') ? l.slice(0, -1) : l, LIMITS.line));
+  return reply.split('\n', LIMITS.output).map((l) => cut(printable(l.endsWith('\r') ? l.slice(0, -1) : l), LIMITS.line));
 }
 
 /**
- * Lines for a `log` or `journal` reply's `data`: the last `max` (at most 1000), each cut to 1 KiB, and the oldest
- * dropped until `{ lines }` serialised fits the hub's 256 KiB for a reply's `data` (the hub refuses the whole reply
- * otherwise; `encode`'s own trim only keeps the line under 1 MiB).
+ * Lines for a `log` or `journal` reply's `data`: the last `max` (at most 1000), each `printable` and cut to 1 KiB, and
+ * the oldest dropped until `{ lines }` serialised fits the hub's 256 KiB for a reply's `data` (the hub refuses the whole
+ * reply otherwise; `encode`'s own trim only keeps the line under 1 MiB).
  */
 export function replyLines(lines: string[], max: number = LIMITS.logLines): string[] {
-  const kept = lines.slice(-Math.min(max, LIMITS.logLines)).map((l) => cut(l, LIMITS.line));
+  const kept = lines.slice(-Math.min(max, LIMITS.logLines)).map((l) => cut(printable(l), LIMITS.line));
   let total = JSON.stringify({ lines: [] }).length;
   let from = kept.length;
   // Newest first: each line's JSON and its comma (one more than JSON has).

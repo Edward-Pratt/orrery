@@ -22,6 +22,12 @@ export type Packet = { id: number; type: number; body: Buffer };
 export class RconError extends Error {}
 /** The server took the connection but didn't answer in time: it may be busy (a blocking save) or frozen, not gone. */
 export class RconTimeout extends RconError {}
+/** A command was sent and got no answer in time: Factorio may still run it, once it answers again (a blocking save). */
+export class RconNoAnswer extends RconTimeout {}
+/** A command was never sent: its connection ended while it waited its turn, so it did not run. */
+export class RconNotSent extends RconError {}
+/** RCON refused the password (an auth answer with id -1): trying again can't help. */
+export class RconRefused extends RconError {}
 
 /** One packet: int32 LE length (of the rest), id and type, then the body and two NULs. */
 export function encode(id: number, type: number, body: string | Buffer): Buffer {
@@ -65,9 +71,10 @@ type Current = { onPacket: (p: Packet) => void; fail: (err: Error) => void };
  * Factorio never answers a packet with an empty body, so none is ever sent: no end marker, and an empty command is
  * refused.
  *
- * A command that times out ends the connection, since a server that stops answering is the caller's signal to
- * reconnect. Once authenticated, the connection ending for any reason but `close()` emits `close` once, with why;
- * a new connection is a new `Rcon`.
+ * A command that times out ends the connection (`RconNoAnswer`: it was sent, so it may still run), since a server
+ * that stops answering is the caller's signal to reconnect; the commands waiting behind it reject with `RconNotSent`.
+ * Once authenticated, the connection ending for any reason but `close()` emits `close` once, with why; a new
+ * connection is a new `Rcon`.
  */
 export class Rcon extends EventEmitter<{ close: [Error] }> {
   #socket: Socket;
@@ -126,7 +133,7 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
             resolve();
           } else {
             const refused = p.type === AUTH_RESPONSE && p.id === -1;
-            this.#end(new RconError(refused ? 'RCON password refused' : 'unexpected RCON auth answer'), false);
+            this.#end(refused ? new RconRefused('RCON password refused') : new RconError('unexpected RCON auth answer'), false);
           }
         },
         fail: (err) => {
@@ -141,9 +148,9 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
 
   #run(command: string, timeoutMs: number): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (this.#ended) return reject(new RconError('RCON connection closed'));
+      if (this.#ended) return reject(new RconNotSent('RCON connection closed before the command was sent'));
       const id = this.#id();
-      const timer = setTimeout(() => this.#end(new RconTimeout(`RCON command timed out after ${timeoutMs} ms`), true), timeoutMs);
+      const timer = setTimeout(() => this.#end(new RconNoAnswer(`RCON command timed out after ${timeoutMs} ms`), true), timeoutMs);
       this.#current = {
         onPacket: (p) => {
           if (p.id !== id || p.type !== RESPONSE) return; // not this command's reply: dropped
@@ -201,7 +208,9 @@ export class Rcon extends EventEmitter<{ close: [Error] }> {
 /**
  * Commands on one kept RCON connection of their own: opened on the first command, and again on the next one after it
  * ends (refused, timed out, closed by the server). Kept apart from the status poll's connection, so a command that
- * times out (a blocking save) never reads as Factorio gone there. Commands run in the order they were given.
+ * times out (a blocking save) never reads as Factorio gone there. Commands run in the order they were given; one that
+ * was never sent because the connection ended before its turn (`RconNotSent`) runs once more on a new connection, and
+ * one that was sent is never sent again.
  */
 export class RconSession {
   #host: string;
@@ -218,28 +227,22 @@ export class RconSession {
     this.#timeoutMs = timeoutMs;
   }
 
-  /** Runs a command and resolves with its reply; rejects if RCON can't be reached or doesn't answer in time. */
+  /**
+   * Runs a command and resolves with its reply; rejects if RCON can't be reached or doesn't answer in time
+   * (`RconNoAnswer`: sent, so it may still run).
+   */
   async exec(command: string): Promise<string> {
-    if (this.#closed) throw new RconError('RCON session closed');
-    let connecting = this.#rcon;
-    if (!connecting) {
-      const p = Rcon.connect(this.#host, this.#port, this.#password, this.#timeoutMs);
-      this.#rcon = connecting = p;
-      p.then(
-        (rcon) => {
-          if (this.#closed) rcon.close();
-          rcon.on('close', () => this.#forget(p));
-        },
-        () => this.#forget(p),
-      );
-    }
-    const rcon = await connecting;
-    try {
-      return await rcon.exec(command, this.#timeoutMs);
-    } catch (err) {
-      this.#forget(connecting);
-      rcon.close();
-      throw err;
+    for (let retried = false; ; retried = true) {
+      if (this.#closed) throw new RconError('RCON session closed');
+      const connecting = this.#connection();
+      const rcon = await connecting;
+      try {
+        return await rcon.exec(command, this.#timeoutMs);
+      } catch (err) {
+        this.#forget(connecting);
+        rcon.close();
+        if (!(err instanceof RconNotSent) || retried || this.#closed) throw err;
+      }
     }
   }
 
@@ -251,6 +254,21 @@ export class RconSession {
       () => {},
     );
     this.#rcon = null;
+  }
+
+  /** The kept connection, or a new one (another command may have opened it already: sharing it keeps their order). */
+  #connection(): Promise<Rcon> {
+    if (this.#rcon) return this.#rcon;
+    const p = Rcon.connect(this.#host, this.#port, this.#password, this.#timeoutMs);
+    this.#rcon = p;
+    p.then(
+      (rcon) => {
+        if (this.#closed) rcon.close();
+        rcon.on('close', () => this.#forget(p));
+      },
+      () => this.#forget(p),
+    );
+    return p;
   }
 
   #forget(p: Promise<Rcon>): void {

@@ -1,14 +1,14 @@
 // The server's saves as Backups (Factorio's `saves/` folder): listed with their kind and the current world, a named
 // save on the hub's request and every 6 h after play, pruning, and a restore by copy.
 import { EventEmitter } from 'node:events';
-import { constants, lstat, open, readdir, statfs, unlink, type FileHandle } from 'node:fs/promises';
+import { constants, link, lstat, open, readdir, statfs, unlink, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { AgentMsg, Save, SaveKind } from '../../hub/src/types.ts';
 import { head, openPlain } from './files.ts';
-import { RconTimeout } from './rcon.ts';
+import { RconNoAnswer } from './rcon.ts';
 import type { UnitState } from './service.ts';
-import { LIMITS } from './wire.ts';
+import { LIMITS, printable } from './wire.ts';
 
 /** A named save every 6 h, if anyone played since the last one. */
 export const SAVE_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -28,6 +28,9 @@ const HEAD_MAX = 1024 * 1024;
 
 /** The agent's own saves: `orrery-<time>.zip`, or before an update `orrery-pre-update-<from>-<time>.zip`. */
 const NAMED = /^orrery-(?:pre-update-\d+\.\d+\.\d+-)?\d{8}T\d{6}Z\.zip$/;
+
+/** A restore's copy while it is written (`restore`): `.restored-<time>-<name>.partial`, the name a listed save. */
+const PARTIAL = /^\.restored-\d{8}T\d{6}Z-.+\.zip\.partial$/;
 
 /** What kind of save a file is, by its name: the agent's (`named`), Factorio's autosave (`auto`), or anything else (`world`). */
 export const kindOf = (name: string): SaveKind => (NAMED.test(name) ? 'named' : name.startsWith('_autosave') ? 'auto' : 'world');
@@ -77,6 +80,8 @@ export type SavesOptions = {
 };
 
 const mb = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`;
+/** A unit no Factorio runs from: a restore copies only then. */
+const isStopped = (unit: UnitState) => unit.active === 'inactive' || unit.active === 'failed';
 const span = (ms: number) => (ms >= 60_000 ? `${ms / 60_000} minutes` : `${ms / 1000} s`);
 /** The saves of a kind past the newest `keep` (the list is newest first). */
 const past = (saves: Save[], kind: SaveKind, keep: number) => saves.filter((s) => s.kind === kind).slice(keep);
@@ -96,15 +101,18 @@ function saved(reply: string, name: string): boolean {
  * through the folder opened once, `O_DIRECTORY | O_NOFOLLOW`, as `/proc/self/fd/<fd>/<name>`; a file counts only if
  * it is a regular one on that folder's filesystem).
  *
- * - Lists every `*.zip`, newest first (500 at most), with its kind and `current` on the file Factorio last loaded
- *   (the log's last `Loading map` line, matched against the folder's own entries by path); emits `saves` with the
- *   free space on each change of the list (every 10 s, and after its own changes).
+ * - Lists every `*.zip` but a name with a control character (`printable`), newest first (500 at most), with its kind
+ *   and `current` on the file Factorio last loaded (the log's last `Loading map` line, matched against the folder's
+ *   own entries by path); emits `saves` with the free space on each change of the list (every 10 s, and after its own
+ *   changes).
  * - `save`: `/orrery-save orrery-<time>`, then waits until the file is there and its size and time held for 5 s (5
  *   minutes at most), and emits `backup`; one at a time. `played` makes one every 6 h if anyone played since the last.
  * - `prune` after each named save and restore: the newest 20 named saves and 3 world files stay; never the current
  *   world, nor a save `hold` keeps for a running update; autosaves are Factorio's.
  * - `restore`: copies a listed save, only while the unit is stopped, from its open handle to a new
- *   `restored-<time>-<name>` (never over a file) whose time is 2 s past every other file's, so the next start loads it.
+ *   `restored-<time>-<name>` (never over a file) whose time is 2 s past every other file's, so the next start loads it;
+ *   written under a name that is no save, and given its own name only once whole and the unit is still stopped.
+ *   `start` removes such a partial copy that an exit during a restore left behind, before the first listing.
  */
 export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResult] }> {
   #o: Required<SavesOptions>;
@@ -127,7 +135,9 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   start(): void {
     if (!this.#stopped) return;
     this.#stopped = false;
-    void this.#loop();
+    void this.#sweep().then(() => {
+      if (!this.#stopped) void this.#loop();
+    });
   }
 
   stop(): void {
@@ -151,7 +161,8 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
     return this.#within(async (base, dev) => {
       const saves: Save[] = [];
       for (const name of await readdir(base)) {
-        if (!name.endsWith('.zip') || name.length > LIMITS.text) continue;
+        // A name with a control character (a newline: a forged log line) is no save: Factorio and the agent make none.
+        if (!name.endsWith('.zip') || name.length > LIMITS.text || printable(name) !== name) continue;
         const st = await lstat(`${base}/${name}`).catch(() => null); // lstat: a symlink is not a file
         if (!st?.isFile() || st.dev !== dev) continue;
         saves.push({ name, size: st.size, mtime: Math.round(st.mtimeMs), kind: kindOf(name), current: name === current });
@@ -234,9 +245,9 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
       for (const s of doomed) {
         try {
           await unlink(`${base}/${s.name}`);
-          console.log(`[saves] pruned ${s.name}`);
+          console.log(`[saves] pruned ${printable(s.name)}`);
         } catch (err) {
-          console.error(`[saves] can't prune ${s.name}: ${(err as Error).message}`);
+          console.error(`[saves] can't prune ${printable(s.name)}: ${printable((err as Error).message)}`);
         }
       }
     }).catch((err: Error) => console.error(`[saves] can't prune: ${err.message}`));
@@ -245,20 +256,25 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   /**
    * Copies the listed save `name` to `restored-<time>-<name>`, newer than every other file by 2 s, which the next
    * start loads. Refused unless the unit is stopped now (inactive or failed), for a name not listed, a file that is not
-   * a regular one (a symlink swapped in), or an existing copy's name: nothing is ever overwritten.
+   * a regular one (a symlink swapped in), or an existing copy's name: nothing is ever overwritten. The copy is written
+   * as `.restored-<time>-<name>.partial` (no `.zip`: not a save, so a start meanwhile never loads half a file), then
+   * linked to its name (which fails if that exists) and that name removed. Just before, the unit is read again: if
+   * it started meanwhile, that start loaded the old world, whose next save would be newer than the copy, so the
+   * restore is refused and the partial file removed.
    */
   async restore(name: string): Promise<void> {
     const unit = await this.#o.unit();
-    if (unit.active !== 'inactive' && unit.active !== 'failed') throw new Error(`the server is ${unit.active || 'in an unknown state'}: stop it first`);
+    if (!isStopped(unit)) throw new Error(`the server is ${unit.active || 'in an unknown state'}: stop it first`);
     if (!(await this.list()).saves.some((s) => s.name === name)) throw new Error(`${name} is not a listed save`);
     const copy = `restored-${stamp(this.#o.now())}-${name}`;
+    const partial = `.${copy}.partial`;
     await this.#within(async (base) => {
       const src = await openPlain(`${base}/${name}`);
       if (!src) throw new Error(`${name} is not a regular file`);
       let out: FileHandle | undefined;
       try {
-        out = await open(`${base}/${copy}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644).catch((err: NodeJS.ErrnoException) => {
-          throw err.code === 'EEXIST' ? new Error(`${copy} exists already: nothing was overwritten`) : err;
+        out = await open(`${base}/${partial}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644).catch((err: NodeJS.ErrnoException) => {
+          throw err.code === 'EEXIST' ? new Error(`${partial} exists already: another restore is writing it`) : err;
         });
         const buf = Buffer.allocUnsafe(1024 * 1024);
         for (let pos = 0; ; ) {
@@ -270,23 +286,47 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
         await out.sync();
         let newest = 0;
         for (const other of await readdir(base)) {
-          if (other === copy) continue;
+          if (other === partial) continue;
           const st = await lstat(`${base}/${other}`).catch(() => null);
           if (st) newest = Math.max(newest, st.mtimeMs);
         }
-        const mtime = new Date(Math.max(this.#o.now(), newest + NEWER_MS));
+        const mtime = new Date(Math.max(this.#o.now(), newest + NEWER_MS)); // kept through the link: the same file
         await out.utimes(mtime, mtime);
-      } catch (err) {
-        if (out) await unlink(`${base}/${copy}`).catch(() => {}); // only a copy this call created
-        throw err;
+        const now = await this.#o.unit();
+        if (!isStopped(now)) throw new Error(`the server started during the restore (it is ${now.active || 'in an unknown state'}): nothing was restored`);
+        await link(`${base}/${partial}`, `${base}/${copy}`).catch((err: NodeJS.ErrnoException) => {
+          throw err.code === 'EEXIST' ? new Error(`${copy} exists already: nothing was overwritten`) : err;
+        });
       } finally {
         await out?.close();
         await src.fh.close();
+        if (out) await unlink(`${base}/${partial}`).catch(() => {}); // only the partial file this call created
       }
     });
-    console.log(`[saves] restored ${name} as ${copy}: the next start loads it`);
+    console.log(`[saves] restored ${printable(name)} as ${printable(copy)}: the next start loads it`);
     await this.prune();
     await this.refresh();
+  }
+
+  /**
+   * Removes every partial copy a restore left when the agent exited during it (a restart or a crash: `process.exit`
+   * skips its `finally`). No restore of this agent runs yet, and one started later takes a new name. Such a file is
+   * no save, so neither the list nor pruning would ever see it.
+   */
+  async #sweep(): Promise<void> {
+    await this.#within(async (base, dev) => {
+      for (const name of await readdir(base)) {
+        if (!PARTIAL.test(name) || printable(name) !== name) continue;
+        const st = await lstat(`${base}/${name}`).catch(() => null);
+        if (!st?.isFile() || st.dev !== dev) continue;
+        try {
+          await unlink(`${base}/${name}`);
+          console.log(`[saves] removed ${name}, left by a restore the agent's exit cut short`);
+        } catch (err) {
+          console.error(`[saves] can't remove ${name}: ${printable((err as Error).message)}`);
+        }
+      }
+    }).catch((err: Error) => console.error(`[saves] can't look for partial restores: ${printable(err.message)}`));
   }
 
   async #loop(): Promise<void> {
@@ -308,10 +348,11 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
   async #make(name: string): Promise<number> {
     try {
       const reply = await this.#o.run(`/orrery-save ${name}`);
-      if (!saved(reply, name)) throw new Error(`/orrery-save answered ${JSON.stringify(reply.slice(0, 200))}`);
+      if (!saved(reply, name)) throw new Error(`/orrery-save answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
     } catch (err) {
-      // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the file tells.
-      if (!(err instanceof RconTimeout)) throw err;
+      // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the command
+      // was sent, so the file tells. One never sent (RCON not reached, or no auth answer) did not run: it fails now.
+      if (!(err instanceof RconNoAnswer)) throw err;
     }
     return this.#written(`${name}.zip`);
   }

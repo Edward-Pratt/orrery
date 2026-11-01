@@ -36,11 +36,15 @@ export async function openPlain(path: string): Promise<Plain | null> {
   return null;
 }
 
-/** The first `max` bytes of a plain file as text; null if it isn't one (or can't be read). */
-export async function head(path: string, max: number): Promise<string | null> {
+/**
+ * The first `max` bytes of a plain file as text; null if it isn't one (or can't be read), or if it was last written
+ * before `freshAfter` (epoch ms): a log of an earlier run.
+ */
+export async function head(path: string, max: number, freshAfter = -Infinity): Promise<string | null> {
   const file = await openPlain(path).catch(() => null);
   if (!file) return null;
   try {
+    if (file.st.mtimeMs < freshAfter) return null;
     const buf = Buffer.alloc(Math.min(file.st.size, max));
     const { bytesRead } = await file.fh.read(buf, 0, buf.length, 0);
     return buf.subarray(0, bytesRead).toString('utf8');

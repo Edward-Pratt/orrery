@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { HubClient, backoff, type HubOptions } from '../src/hub.ts';
+import { RconNoAnswer, RconNotSent } from '../src/rcon.ts';
 import { StatusPoller, type Reading } from '../src/status.ts';
 import { LIMITS } from '../src/wire.ts';
 import { eventually, fakeHub, type Answer, type HubConn } from './fake-hub.ts';
@@ -59,9 +60,9 @@ test('agentHello first, nothing else before welcome; then serviceState, pings an
   assert.equal(hub.of('hello').length, 0, 'no game connection before a welcome');
 
   welcome = true; // the silent connection times out, the next is welcomed
-  const second = await eventually(() => hub.of('agentHello')[1]);
+  // The welcomed one, not the second by index: a slow machine may have opened (and timed out) another silent one first.
+  const second = await eventually(() => hub.of('agentHello').find((c) => c !== first && sent(c, 'ping').length >= 2), 2000, 'pings');
   assert.ok(first!.closed);
-  await eventually(() => sent(second, 'ping').length >= 2, 2000, 'pings');
   assert.deepEqual(sent(second, 'serviceState'), [
     { type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1_700_000_000_000, result: 'success' },
   ]);
@@ -89,10 +90,9 @@ test('reconnects with capped exponential backoff while the hub resets every conn
   await eventually(() => client.connected);
   const at = hub.conns.map((c) => c.at);
   const gaps = at.slice(1).map((a, i) => a - at[i]!);
+  // Lower bounds only (a timer is never early, a busy machine makes it late): they show the doubling, since a flat
+  // retry would wait 40 ms each time. The cap is `backoff`'s own test above: an upper bound here would race the machine.
   for (const [i, want] of [40, 80, 160, 160].entries()) assert.ok(gaps[i]! >= want - 5, `wait ${i} was ${gaps[i]} ms, want ${want}`);
-  const [a, b, c, d] = gaps as [number, number, number, number];
-  assert.ok(b > a * 1.5 && c > b * 1.5, `the waits double: ${gaps.join(', ')}`);
-  assert.ok(d < c * 1.5, `the waits stop at the cap: ${gaps.join(', ')}`);
   assert.equal(hub.of('agentHello').length, 5, 'every attempt opens with agentHello');
 });
 
@@ -114,14 +114,13 @@ test('the game connection: a hello with the agent token and the mod version, the
   client.status(READING);
   const game = await eventually(() => hub.of('hello')[0]);
   assert.deepEqual(game.lines[0], { type: 'hello', protocol: 1, serverId: 'factorio', token: TOKEN, modVersion: '0.1.0' });
-  await sleep(30);
-  client.status({ ups: 59.8, players: ['alice', 'bob'], paused: false, modVersion: '0.1.0' });
+  // Heartbeats start once the client has read the welcome: the first status again until one lands (RCON answers
+  // every 5 s), so the first heartbeat may come more than once.
+  const busy = { type: 'heartbeat', tps: 59.8, players: ['alice', 'bob'], paused: false };
+  await eventually(() => (client.status({ ups: 59.8, players: ['alice', 'bob'], paused: false, modVersion: '0.1.0' }), game.lines.length >= 2));
   client.status({ ups: 0.2, players: [], paused: true, modVersion: '0.1.0' });
-  await eventually(() => game.lines.length === 3);
-  assert.deepEqual(game.lines.slice(1), [
-    { type: 'heartbeat', tps: 59.8, players: ['alice', 'bob'], paused: false },
-    { type: 'heartbeat', tps: 0.2, players: [], paused: true },
-  ]);
+  await eventually(() => game.lines.at(-1)?.tps === 0.2);
+  assert.deepEqual(game.lines.slice(1), [...game.lines.slice(1, -1).map(() => busy), { type: 'heartbeat', tps: 0.2, players: [], paused: true }]);
 
   const agent = hub.of('agentHello')[0]!;
   await client.stop();
@@ -278,9 +277,8 @@ test('started once per run of the unit, after the game hello; not again for a ru
 
   game.socket.destroy(); // the hub dropped the game connection: the next one is the same run
   await eventually(() => game.closed);
-  await sleep(20);
-  client.status(READING);
-  const again = await eventually(() => hub.of('hello')[1], 2000, 'a new game connection');
+  // The next RCON answer opens a new one, once the client has seen the close too: answers until it has.
+  const again = await eventually(() => (client.status(READING), hub.of('hello')[1]), 2000, 'a new game connection');
   await sleep(50);
   assert.deepEqual(sent(again, 'started'), [], 'the same run: no second started');
   await client.stop();
@@ -311,7 +309,8 @@ test('a console cmd on the game connection runs through command and is answered 
   const ran: string[] = [];
   const command = async (c: string) => {
     ran.push(c);
-    if (c === '/slow') throw new Error('RCON command timed out after 4000 ms');
+    if (c === '/slow') throw new RconNoAnswer('RCON command timed out after 4000 ms'); // sent: Factorio may still run it
+    if (c === '/queued') throw new RconNotSent('RCON connection closed before the command was sent');
     return ['Online players (1):', '  alice (online)'];
   };
   const { hub, client } = await setup(t, undefined, { command });
@@ -323,13 +322,15 @@ test('a console cmd on the game connection runs through command and is answered 
   game.send({ type: 'cmd', id: 'c2', command: '/slow' });
   game.send({ type: 'cmd', id: 'c3', command: 'x'.repeat(LIMITS.text + 1) });
   game.send({ type: 'cmd', id: 'c4', command: '/c game.print(1)\n/c game.print(2)' });
-  await eventually(() => sent(game, 'cmdResult').length === 4, 2000, 'four results');
+  game.send({ type: 'cmd', id: 'c5', command: '/queued' });
+  await eventually(() => sent(game, 'cmdResult').length === 5, 2000, 'five results');
   const out = Object.fromEntries(sent(game, 'cmdResult').map((r) => [r.id, r.output as string[]]));
   assert.deepEqual(out.c1, ['Online players (1):', '  alice (online)']);
-  assert.deepEqual(out.c2, ['the command did not run: RCON command timed out after 4000 ms']);
+  assert.deepEqual(out.c2, ['no answer in time (Factorio may be saving): the command may still run (RCON command timed out after 4000 ms)']);
+  assert.deepEqual(out.c5, ['the command did not run: RCON connection closed before the command was sent']);
   assert.match(out.c3![0]!, /^refused/);
   assert.match(out.c4![0]!, /^refused/, 'one line only');
-  assert.deepEqual(ran, ['/players', '/slow'], 'only valid commands reach RCON');
+  assert.deepEqual(ran, ['/players', '/slow', '/queued'], 'only valid commands reach RCON');
   assert.deepEqual(game.invalid, []);
 });
 

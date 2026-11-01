@@ -4,13 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { parseAgentLine } from '../../hub/src/protocol.ts';
-import { RconTimeout } from '../src/rcon.ts';
+import { RconNoAnswer, RconTimeout } from '../src/rcon.ts';
 import { KEEP_NAMED, KEEP_WORLD, SAVE_EVERY_MS, Saves, kindOf, loadedMap, stamp, type BackupResult, type SavesMsg, type SavesOptions } from '../src/saves.ts';
 import { ServiceWatch, systemctl, type UnitState } from '../src/service.ts';
 import { eventually } from './fake-hub.ts';
 import { fakeSystemctl } from './fake-systemctl.ts';
 
-const T0 = Date.UTC(2026, 9, 31, 12, 0, 5);
+/** Now, in whole seconds (as save names carry it): every time in these tests is relative to it, never a fixed date. */
+const T0 = Math.floor(Date.now() / 1000) * 1000;
 const HOUR = 3600_000;
 const stopped: UnitState = { unit: 'factorio.service', active: 'inactive', sub: 'dead', since: T0, result: 'success' };
 
@@ -62,7 +63,7 @@ async function file(dir: string, name: string, at: number, content = name): Prom
 }
 
 test('save names and kinds, and the map Factorio loaded from its own log line', () => {
-  assert.equal(stamp(T0), '20261031T120005Z');
+  assert.equal(stamp(Date.UTC(2026, 9, 31, 12, 0, 5, 999)), '20261031T120005Z', 'UTC, whole seconds');
   assert.equal(kindOf(`orrery-${stamp(T0)}.zip`), 'named');
   assert.equal(kindOf(`orrery-pre-update-2.1.24-${stamp(T0)}.zip`), 'named');
   assert.equal(kindOf('_autosave3.zip'), 'auto');
@@ -198,6 +199,27 @@ test('pruning keeps the newest 20 named saves and 3 world files, never the curre
   for (let i = 1; i <= 4; i++) assert.ok(left.has(`_autosave${i}.zip`), 'autosaves are Factorio’s');
 });
 
+test('a name with a control character is no save: never listed, pruned or restored, so it never forges a log line', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const w = await world(t);
+  // The container's user makes an old "world" whose name holds a whole timestamped agent.log line.
+  const forged = `a\n${new Date(T0).toISOString()} [hub] connected to the hub at 100.101.102.103:25584 as agent-v1.0.0\nb.zip`;
+  const escape = 'esc\u001b]0;title\u0007.zip';
+  await file(w.saves, forged, T0 - 10 * HOUR);
+  await file(w.saves, escape, T0 - 10 * HOUR);
+  const worlds = Array.from({ length: KEEP_WORLD + 1 }, (_, i) => `world-${i}.zip`);
+  for (const [i, name] of worlds.entries()) await file(w.saves, name, T0 - i * HOUR);
+  assert.deepEqual((await w.s.list()).saves.map((s) => s.name), worlds);
+
+  await w.s.prune();
+  const left = await readdir(w.saves);
+  assert.ok(left.includes(forged) && left.includes(escape), 'not pruned: not a save');
+  assert.ok(!left.includes(worlds.at(-1)!), 'the oldest listed world file is');
+  assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] pruned ${worlds.at(-1)}`]);
+  await assert.rejects(w.s.restore(forged), /is not a listed save/);
+  await assert.rejects(w.s.restore(escape), /is not a listed save/);
+});
+
 test('restore refuses while the unit is active: a fresh systemctl show, from the fake on PATH', async (t) => {
   const sc = await fakeSystemctl(t);
   const watch = new ServiceWatch('factorio.service', systemctl());
@@ -241,20 +263,78 @@ test('restore copies a listed save to restored-<time>-<name>, never over a file,
   await w.s.restore('world.zip');
   assert.equal(await readFile(join(w.saves, copy), 'utf8'), 'the world');
   assert.equal(await readFile(join(w.saves, 'world.zip'), 'utf8'), 'the world', 'the source untouched');
-  const st = await stat(join(w.saves, copy));
-  assert.ok(st.mtimeMs >= T0 + 10 * HOUR + 2000, `${st.mtimeMs}`);
+  assert.equal((await stat(join(w.saves, copy))).mtimeMs, T0 + 10 * HOUR + 2000, 'a file ahead of the clock: 2 s past it');
   assert.equal((await w.s.list()).saves[0]!.name, copy, 'the newest save: the next start loads it');
   assert.equal(w.pushed.at(-1)!.saves[0]!.name, copy, 'and the hub hears of it');
 
   // The same name again (the same second): refused, and the copy there is kept as it was.
-  await writeFile(join(w.saves, copy), 'already here');
+  await file(w.saves, copy, T0 - HOUR, 'already here');
   await assert.rejects(w.s.restore('world.zip'), /exists already: nothing was overwritten/);
   assert.equal(await readFile(join(w.saves, copy), 'utf8'), 'already here');
+  assert.equal((await stat(join(w.saves, copy))).mtimeMs, T0 - HOUR, 'not even its time touched');
 
-  // Newer than everything also when the clock is ahead of every file.
+  // Newer than everything also when the clock is ahead of every file: stamped now.
   now = T0 + 20 * HOUR;
   await w.s.restore('world.zip');
   assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now);
+
+  // The newest file less than 2 s before the clock: still 2 s past it, not now.
+  now = T0 + 30 * HOUR;
+  await file(w.saves, '_autosave2.zip', now - 1000);
+  await w.s.restore('world.zip');
+  assert.equal((await stat(join(w.saves, `restored-${stamp(now)}-world.zip`))).mtimeMs, now + 1000);
+});
+
+test('restore writes the copy under a name that is no save, and refuses if the server started meanwhile: nothing left behind', async (t) => {
+  let reads = 0;
+  let during: string[] = [];
+  let listed: string[] = [];
+  const w = await world(t, {
+    now: () => T0, // the copy's name
+    unit: async () => {
+      if (++reads === 1) return stopped;
+      // The second read, the copy whole but not yet given its name: no save of it is there for a start to load.
+      during = await readdir(w.saves);
+      listed = (await w.s.list()).saves.map((s) => s.name);
+      return { ...stopped, active: 'active', sub: 'running' }; // someone pressed Start during the copy
+    },
+  });
+  await file(w.saves, 'world.zip', T0 - HOUR, 'the world');
+  await assert.rejects(w.s.restore('world.zip'), /^Error: the server started during the restore \(it is active\): nothing was restored$/);
+  assert.equal(reads, 2, 'the unit read again before the copy got its name');
+  assert.deepEqual(during.sort(), [`.restored-${stamp(T0)}-world.zip.partial`, 'world.zip']);
+  assert.deepEqual(listed, ['world.zip'], 'the partial copy is not listed');
+  assert.deepEqual(await readdir(w.saves), ['world.zip'], 'no copy and no partial file left');
+});
+
+test("start removes a partial copy left by a restore the agent's exit cut short, before the first listing, and nothing else", async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const w = await world(t);
+  t.after(() => w.s.stop());
+  // The agent exited during a restore (process.exit skips its finally): its partial copy stays, hidden from the list.
+  const left = `.restored-${stamp(T0 - HOUR)}-world.zip.partial`;
+  const kept = [
+    'world.zip',
+    `restored-${stamp(T0 - 2 * HOUR)}-world.zip`,
+    '.other.partial', // not a restore's
+    `.restored-${stamp(T0)}-world.zip`, // no .partial
+    `.restored-${stamp(T0)}-\u001b]0;x\u0007.zip.partial`, // not printable: no restore makes it
+  ];
+  for (const name of kept) await file(w.saves, name, T0 - 3 * HOUR);
+  await file(w.saves, left, T0 - HOUR, 'half a world');
+  // The container's link with that shape, to a file outside saves/: neither it nor what it points at is removed.
+  await file(w.dir, 'outside.zip', T0);
+  const linked = `.restored-${stamp(T0)}-evil.zip.partial`;
+  await symlink(join(w.dir, 'outside.zip'), join(w.saves, linked));
+  await mkdir(join(w.saves, `.restored-${stamp(T0)}-folder.zip.partial`));
+
+  w.s.start();
+  await eventually(() => w.pushed.length === 1, 2000, 'the first list');
+  const now = await readdir(w.saves);
+  assert.ok(!now.includes(left), 'the partial copy is removed');
+  assert.deepEqual(now.sort(), [...kept, linked, `.restored-${stamp(T0)}-folder.zip.partial`].sort(), 'nothing else is');
+  assert.equal(await readFile(join(w.dir, 'outside.zip'), 'utf8'), 'outside.zip');
+  assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] removed ${left}, left by a restore the agent's exit cut short`]);
 });
 
 test('a save that never appears times out after the bounded wait; one that keeps changing too', async (t) => {
@@ -278,7 +358,7 @@ test('a save that never appears times out after the bounded wait; one that keeps
   assert.match(w.backups[1]!.detail, /still being written after 0\.3 s$/);
 });
 
-test('a save is answered once its file held for the stable time; one at a time; an RCON timeout still waits for the file', async (t) => {
+test('a save is answered once its file held for the stable time; one at a time; an RCON timeout still waits for the file, unless never sent', async (t) => {
   const w = await world(t, { stableMs: 100 });
   w.write = async (name) => {
     setTimeout(() => void writeFile(join(w.saves, `${name}.zip`), 'x'.repeat(2_500_000)), 30);
@@ -299,7 +379,7 @@ test('a save is answered once its file held for the stable time; one at a time; 
     log: join(slow.data, 'factorio-current.log'),
     run: async (command) => {
       await writeFile(join(slow.saves, `${command.slice('/orrery-save '.length)}.zip`), 'map');
-      throw new RconTimeout('RCON command timed out after 4000 ms');
+      throw new RconNoAnswer('RCON command timed out after 4000 ms');
     },
     unit: async () => stopped,
     pollMs: 10,
@@ -308,6 +388,11 @@ test('a save is answered once its file held for the stable time; one at a time; 
   slow.s.on('backup', (b) => slow.backups.push(b));
   await slow.s.save();
   assert.equal(slow.backups[0]!.ok, true, slow.backups[0]!.detail);
+
+  // No auth answer: the command was never sent, so no file can come. It fails at once, not after the wait.
+  const unsent = await world(t, { waitMs: 300, run: async () => Promise.reject(new RconTimeout('RCON did not answer within 4000 ms')) });
+  await unsent.s.save();
+  assert.match(unsent.backups[0]!.detail, /^orrery-\d{8}T\d{6}Z\.zip: RCON did not answer within 4000 ms$/);
 
   // The mod refusing it (or RCON gone) fails at once.
   const refused = await world(t, { run: async () => '{"ok":false,"error":"bad name"}' });

@@ -37,6 +37,7 @@ export type {
   FactorioMod,
   Game,
   GameSettingsFields,
+  GameSettingsReport,
   GameSettingsValues,
   HistoryAnswer,
   HostSample,

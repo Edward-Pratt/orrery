@@ -675,7 +675,7 @@ class Checks {
    * S6: read-data/write-data put Factorio's files under the data folder (its log there, this run's and this uid's;
    * S1's save in saves/), and nothing under the release since it started. Two more names the notes don't confirm
    * Factorio writes (`NAMES`) are a warning at most: one under the release instead, or one that can't be looked up. One
-   * in neither place is only not written yet, so it goes on the ok line, never as outside the data folder.
+   * in neither place is only not written yet, so it goes on S6's ok or FAIL line, never as outside the data folder.
    */
   async #s6(): Promise<void> {
     const { data, install } = this.#c.server;
@@ -722,11 +722,10 @@ class Checks {
       else if (ver !== null && (await lstat(join(release, name)).then(() => true, () => false))) misplaced.push(name);
       else absent.push(name);
     }
-    if (problems.length > 0) this.#report.say('FAIL', `S6 ${problems.join('; ')}: fallback, mount the release read-write`);
-    else {
-      const notYet = absent.length > 0 ? `; ${absent.join(', ')} not written yet, in either` : '';
-      this.#report.say('ok', `S6 Factorio writes under ${data} (${found.join(', ')}), nothing under ${release}${notYet}`);
-    }
+    // Not written yet goes on S6's own line, whichever it is, so a FAIL still says it.
+    const notYet = absent.length > 0 ? `; ${absent.join(', ')} not written yet, in either` : '';
+    if (problems.length > 0) this.#report.say('FAIL', `S6 ${problems.join('; ')}: fallback, mount the release read-write${notYet}`);
+    else this.#report.say('ok', `S6 Factorio writes under ${data} (${found.join(', ')}), nothing under ${release}${notYet}`);
     if (misplaced.length > 0) this.#report.say('warn', `S6 under ${release}, not ${data} (names not verified, so no FAIL): ${misplaced.join(', ')}`);
     if (unreadable.length > 0) this.#report.say('warn', `S6 can't look in ${data} for: ${unreadable.join(', ')}`);
   }

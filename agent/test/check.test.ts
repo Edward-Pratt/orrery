@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
-import { appendFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -297,6 +297,7 @@ async function host(t: TestContext, s: Setup = {}) {
     shows: () => shows,
     agentLog,
     saves,
+    data,
   };
 }
 
@@ -524,6 +525,27 @@ test("check: S6 never calls a file the data folder lacks outside it: one not wri
   assert.equal(await linked.run(), true, linked.text());
   assert.deepEqual(linked.marks().filter((m) => m.endsWith(' S6')), ['ok S6']);
   assert.match(linked.line('S6'), /nothing under \S+\/releases\/2\.1\.24$/);
+});
+
+test('check: S6 still names a file not written yet when it fails, and a file it cannot look up is a warning, never on the ok line', async (t) => {
+  // The log under the release fails S6; the missing mod-settings.dat is said on that FAIL line all the same.
+  const failed = await host(t, { unwritten: ['mods/mod-settings.dat'], inRelease: ['factorio-current.log'] });
+  assert.equal(await failed.run(), false, failed.text());
+  assert.match(failed.line('S6'), /^FAIL S6 \S+\/releases\/2\.1\.24\/factorio-current\.log exists: fallback, mount the release read-write; mods\/mod-settings\.dat not written yet, in either$/);
+  assert.deepEqual(failed.marks().filter((m) => m.endsWith(' S6')), ['FAIL S6']);
+
+  // mods/ can't be searched (EACCES): neither absent nor under the release, but a warning of its own. Root can.
+  if (process.getuid!() === 0) return;
+  const locked = await host(t);
+  await chmod(join(locked.data, 'mods'), 0o000);
+  try {
+    await locked.run();
+  } finally {
+    await chmod(join(locked.data, 'mods'), 0o755);
+  }
+  assert.match(locked.line('S6'), /^ok {3}S6 Factorio writes under \S+ \(.*\), nothing under \S+\/releases\/2\.1\.24$/);
+  assert.match(locked.out.find((l) => l.startsWith('warn S6'))!, /^warn S6 can't look in \S+ for: mods\/mod-settings\.dat \(EACCES\)$/);
+  assert.deepEqual(locked.marks().filter((m) => m.endsWith(' S6')), ['ok S6', 'warn S6']);
 });
 
 test('check: the hub: a rejection since the agent started is quoted (no wait for a welcome); no hub listening is a warning', async (t) => {

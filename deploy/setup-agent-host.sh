@@ -527,7 +527,8 @@ else
   echo "created /srv/factorio/saves/world.zip"
 fi
 
-# ---- 12. The agent: the newest agent-v release, and this folder's files at the same tag.
+# ---- 12. The agent: the newest agent-v release, and this folder's files at the same tag, all downloaded and checked
+# (the Quadlet file dry-run too) before anything switches to them. The agent's current flips last, after its units.
 atag=$(newest agent) || die "GitHub has no agent-v release yet"
 [[ $atag =~ ^agent-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not an agent-vX.Y.Z tag: $atag"
 rel=$agent/releases/$atag
@@ -548,7 +549,6 @@ if [[ ! -f $rel/src/index.ts ]]; then
   as_factorio mv -T -- "$x" "$rel"
   echo "installed the agent $atag"
 fi
-flip "$agent" "releases/$atag"
 dl=$lib/.incoming/deploy
 rm -rf "$dl"
 install -d -m 700 "$dl"
@@ -556,6 +556,23 @@ for f in factorio.container orrery-agent.service orrery-agent-deploy@.service 60
   fetch "https://raw.githubusercontent.com/$REPO/$atag/deploy/$f" "$dl/$f"
   [[ -s $dl/$f ]] && managed "$dl/$f" || die "deploy/$f at $atag has no line \"$MARKER\""
 done
+# The Quadlet file from its template, dry-run: refused on any error or key this Podman lacks.
+filled=$(sed -e "s|^Image=.*|Image=$ref|" -e "s|<uid>|$uid|" -e "s|<gid>|$gid|" -e "s|<arch>|arm64|" "$dl/factorio.container")
+[[ -z $memory_max ]] || filled=$(sed "/^TimeoutStopSec=/a MemoryMax=$memory_max" <<< "$filled")
+placeholder='<[a-z]+>'
+[[ ! $filled =~ $placeholder ]] || die "factorio.container at $atag has a value this script doesn't fill: ${BASH_REMATCH[0]}"
+qd=$(mktemp -d "$lib/.incoming/quadlet.XXXXXX")
+printf '%s\n' "$filled" > "$qd/factorio.container"
+if ! out=$(QUADLET_UNIT_DIRS=$qd "$quadlet_gen" -dryrun 2>&1) || grep -qiE 'unsupported|error' <<< "$out" ||
+  ! grep -q '^ExecStart=' <<< "$out"; then
+  rm -rf "$qd"
+  die "Podman's Quadlet refuses factorio.container: no unit, agent config or secret was written, and the agent's current release is as it was. Its dry run said:
+$out"
+fi
+rm -rf "$qd"
+
+# ---- 13. The agent's config, and the secrets, root-only (mode 600 from the start: umask 077). Both secrets are kept on
+# a re-run.
 config root "$etc/orrery-agent/config.json" << EOF
 {
   "id": "$agent_id",
@@ -568,8 +585,6 @@ config root "$etc/orrery-agent/config.json" << EOF
   "mounts": ["/"]
 }
 EOF
-
-# ---- 13. Secrets, root-only (mode 600 from the start: umask 077). Both are kept on a re-run.
 if ((token_new)); then
   put "$etc/orrery-agent.env" 600 < <(
     echo "ORRERY_AGENT_TOKEN=$token"
@@ -584,20 +599,7 @@ if ! [[ $rcon =~ ^[A-Za-z0-9]{32}$ ]]; then
   put "$etc/orrery-factorio.env" 600 <<< "RCON_PASSWORD=$rcon"
 fi
 
-# ---- 14. Units. The Quadlet file from its template, dry-run first: refused on any error or key this Podman lacks.
-filled=$(sed -e "s|^Image=.*|Image=$ref|" -e "s|<uid>|$uid|" -e "s|<gid>|$gid|" -e "s|<arch>|arm64|" "$dl/factorio.container")
-[[ -z $memory_max ]] || filled=$(sed "/^TimeoutStopSec=/a MemoryMax=$memory_max" <<< "$filled")
-placeholder='<[a-z]+>'
-[[ ! $filled =~ $placeholder ]] || die "factorio.container at $atag has a value this script doesn't fill: ${BASH_REMATCH[0]}"
-qd=$(mktemp -d "$lib/.incoming/quadlet.XXXXXX")
-printf '%s\n' "$filled" > "$qd/factorio.container"
-if ! out=$(QUADLET_UNIT_DIRS=$qd "$quadlet_gen" -dryrun 2>&1) || grep -qiE 'unsupported|error' <<< "$out" ||
-  ! grep -q '^ExecStart=' <<< "$out"; then
-  rm -rf "$qd"
-  die "Podman's Quadlet refuses factorio.container: nothing installed. Its dry run said:
-$out"
-fi
-rm -rf "$qd"
+# ---- 14. Units: the Quadlet file checked above, and this tag's units.
 for d in "$etc/containers/systemd" "$etc/systemd/system" "$etc/polkit-1/rules.d"; do [[ -d $d ]] || install -d -m 755 "$d"; done
 active=0
 systemctl is-active --quiet factorio.service && active=1
@@ -609,9 +611,11 @@ put_managed "$etc/systemd/system/orrery-agent-deploy@.service" 644 < "$dl/orrery
 put_managed "$lib/deploy-agent.sh" 755 < "$dl/deploy-agent.sh"
 put_managed "$lib/setup-agent-host.sh" 755 < "${BASH_SOURCE[0]}"
 
-# ---- 15. polkit: factorio may run its own two units and its deploys, nothing else.
+# ---- 15. polkit: factorio may run its own two units and its deploys, nothing else. Then the agent's current release,
+# once its config and units are in place: a run stopped in the checks above leaves the agent as it was.
 put_managed "$etc/polkit-1/rules.d/60-orrery-agent.rules" 644 < "$dl/60-orrery-agent.rules"
 rm -rf "$dl"
+flip "$agent" "releases/$atag"
 # The image the last run pinned, once nothing uses it: by its exact id, never forced (Podman refuses while a container
 # uses it, the server's own included, or while it has other names).
 if [[ -n $old_ref && $old_ref != "$ref" ]]; then

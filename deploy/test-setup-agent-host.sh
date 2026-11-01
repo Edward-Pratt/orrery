@@ -288,6 +288,10 @@ MOD_ZIP=$DL/factorio-v0.1.0/orrery_0.1.0.zip
 mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/factorio-v0.1.0"
 tar -czf "$X/$AGENT_TGZ" -C "$B/agent" . # as ci.yml packs it
 echo "$(sha "$X/$AGENT_TGZ")  orrery-agent-v0.10.0.tar.gz" > "$X/$AGENT_TGZ.sha256"
+AGENT11_TGZ=$DL/agent-v0.11.0/orrery-agent-v0.11.0.tar.gz # a later release, for the re-run tests
+mkdir -p "$X/$DL/agent-v0.11.0"
+cp "$X/$AGENT_TGZ" "$X/$AGENT11_TGZ"
+echo "$(sha "$X/$AGENT11_TGZ")  orrery-agent-v0.11.0.tar.gz" > "$X/$AGENT11_TGZ.sha256"
 echo 'the orrery mod' > "$X/$MOD_ZIP"
 API=api.github.com/repos/Edward-Pratt/orrery/releases
 api() { # <zip digest>: a release list with drafts, other parts, and agent versions that sort wrong as text
@@ -698,6 +702,31 @@ check 'a run whose agent download fails stops there, before secrets, units and a
 rm -rf "$F/gone"
 check 'the next run finishes it: the same files as a clean run' 'run "${ARGS[@]}" && written | cmp -s - "$T/first"'
 
+# ---- A re-run at a new agent release switches to it only once its deploy/ files passed their checks and are in place.
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/v10"
+cp "$Q" "$R/etc/systemd/system/orrery-agent.service" "$R/etc/orrery-agent/config.json" "$T/v10/"
+api "$(sha "$X/$MOD_ZIP")" | sed '1a\  { "tag_name": "agent-v0.11.0", "draft": false, "assets": [] },' | override "$API"
+RAW11=raw.githubusercontent.com/Edward-Pratt/orrery/agent-v0.11.0/deploy
+as_v10() { # the agent's current release, its Quadlet file, unit and config as agent-v0.10.0's run left them; no start
+  [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 ]] && cmp -s "$T/v10/factorio.container" "$Q" &&
+    cmp -s "$T/v10/orrery-agent.service" "$R/etc/systemd/system/orrery-agent.service" &&
+    cmp -s "$T/v10/config.json" "$R/etc/orrery-agent/config.json" && ! called "$STARTED"
+}
+gone "$RAW11/factorio.container"
+check 'a new agent release whose deploy/ file fails to download is not switched to' '
+  ! IN= run "${ARGS[@]}" && says "can'\''t download https://$RAW11/factorio.container" && as_v10 &&
+  [[ -f $R/srv/orrery-agent/releases/agent-v0.11.0/src/index.ts ]]'
+rm -rf "$F/gone"
+touch "$F/quadlet-fails"
+check 'nor one whose Quadlet file fails its dry run, saying what stays as it was' '
+  ! IN= run "${ARGS[@]}" && says "no unit, agent config or secret was written, and the agent'\''s current release is as it was" && as_v10'
+rm -f "$F/quadlet-fails"
+check 'once its files pass, the re-run switches to it and restarts the agent' '
+  IN= run "${ARGS[@]}" && [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.11.0 ]] &&
+  called "^curl https://$RAW11/factorio.container$" && called "^systemctl restart orrery-agent.service$"'
+
 # ---- Links in factorio's trees, or at a unit, can't steer a write.
 fresh
 run "${ARGS[@]}" || true
@@ -806,6 +835,8 @@ refuses_late 'a release list that is not a JSON list' "GitHub's release list (pa
 refuses_late 'no agent release' 'GitHub has no agent-v release yet' 'grep -v "\"agent-v0" "$X/$API" | override "$API"' \
   "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'the Quadlet dry run failing' 'fake failure' 'touch "$F/quadlet-fails"' "$Q" "${ARGS[@]}"
+check 'and writes no agent config or secret, and no current for the agent' '
+  [[ ! -e $R/etc/orrery-agent/config.json && ! -e $R/etc/orrery-agent.env && ! -e $R/srv/orrery-agent/current ]]'
 refuses_late 'a Quadlet key Podman 4.6 lacks, even when the dry run exits 0' "unsupported key 'StopTimeout'" \
   'sed "s/^PodmanArgs=.*/StopTimeout=170/" "$HERE/factorio.container" | override "$RAW/factorio.container"' "$Q" "${ARGS[@]}"
 refuses_late 'a template value it does not fill' "doesn't fill: <hostname>" \

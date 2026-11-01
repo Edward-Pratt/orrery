@@ -458,7 +458,7 @@ export default class Settings {
     // Whether a save can go changes with deploys, the service starting or stopping, and the Agent leaving or coming back.
     events.pipe(filter((l) => ofTarget('deploy')(l) || ofTarget('service')(l) || agentNotice(l.event)), takeUntilDestroyed()).subscribe(() => this.#reload.next());
     events.pipe(filter(ofServer(this.#server.id)), takeUntilDestroyed()).subscribe(({ event: e }) => {
-      if ((e.type === 'notice' && (e.kind === 'settings' || e.kind.startsWith('packUpdate'))) || changesCard(e)) this.#reload.next();
+      if ((e.type === 'notice' && (e.kind === 'settings' || e.kind === 'packUpdateStarted' || e.kind === 'packUpdateFinished')) || changesCard(e)) this.#reload.next();
     });
   }
 

@@ -1,4 +1,4 @@
-import type { CatalogMod, FactorioRelease, GameModPick, ModBrowse, PortalCategory, PortalListing, PortalSort, UnresolvedDependency } from './api.ts';
+import type { CatalogMod, FactorioRelease, GameModPick, ModBrowse, ModCheck, PortalCategory, PortalListing, PortalSort, UnresolvedDependency } from './api.ts';
 import { LIMITS } from './protocol.ts';
 
 /**
@@ -22,9 +22,12 @@ export class GameRefused extends Error {
 /** An answer over its cap (502): a thumbnail's short page over it only means "no thumbnail". */
 class OverCap extends GameRefused {}
 
-/** A mod's name as the Agent accepts it (and no `..`): also every name taken from the portal. */
+/**
+ * A mod's name as the Agent accepts it, with no `..` and not `.` alone (a URL reads that as "this folder", so
+ * `/api/mods/./full` would be `/api/mods/full`): also every name taken from the portal.
+ */
 export const MOD_NAME = /^[A-Za-z0-9_. -]+$/;
-export const validName = (name: string) => name.length <= LIMITS.text && MOD_NAME.test(name) && !name.includes('..');
+export const validName = (name: string) => name.length <= LIMITS.text && MOD_NAME.test(name) && !name.includes('..') && name !== '.';
 /** A Factorio or mod version as the Agent accepts it. */
 export const VERSION = /^\d+\.\d+\.\d+$/;
 /**
@@ -71,6 +74,11 @@ const THUMB_NAMES = 10_000;
 const THUMB_IMAGES = 100;
 const THUMB_READS = 4;
 const THUMB_PATH = /^\/assets\/([0-9a-f]{40})\.thumb\.png$/;
+/**
+ * The Import mod list's check: how many names missing from a line's list are read one by one (`mod(name)`), to tell
+ * a mod with no release for the line (or a deprecated one, which the list leaves out) from one the portal hasn't got.
+ */
+const CHECK_READS = 20;
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** A portal category's id, as the browser's `category` takes it. */
 export const CATEGORY = /^[a-z0-9-]{1,32}$/;
@@ -420,6 +428,40 @@ export class FactorioCatalog {
     found.sort((a, b) => Number(isExact(b)) - Number(isExact(a)) || SORTS[sort](a, b));
     const mods = found.slice((page - 1) * BROWSE_PAGE, page * BROWSE_PAGE).map((m) => ({ ...m, category: m.category !== null && ids.has(m.category) ? m.category : null }));
     return { line, total: found.length, mods, categories };
+  }
+
+  /**
+   * The Import mod list's check of names (each already passed `validName`) for a Factorio line, in the order given:
+   * from the line's list the mod browser reads (the same cache, no read per name), `fits` with its title and newest
+   * release; a name not in it is read one by one (`mod(name)`, cached, sharing the thumbnails' `THUMB_READS` at once),
+   * the first `CHECK_READS` only: `fits` (a deprecated mod with a release for the line), `noRelease` or `missing`; a
+   * read that fails, and every name past the cap, is `unchecked`. Rejects (502) if the line's list can't be read.
+   */
+  async check(line: string, names: string[]): Promise<ModCheck[]> {
+    if (!LINE.test(line)) throw new GameRefused(400, `${line} isn't a Factorio line, like 2.1.`);
+    if (!names.length) return [];
+    const listed = new Map((await this.#list(line)).map((m) => [m.name, m]));
+    const unlisted = names.filter((n) => !listed.has(n)).slice(0, CHECK_READS);
+    const read = new Map(
+      await Promise.all(
+        unlisted.map(async (name): Promise<[string, ModCheck]> => {
+          let mod: PortalMod | null;
+          try {
+            mod = await this.#slot(() => this.mod(name));
+          } catch {
+            return [name, { name, found: 'unchecked', title: null, latest: null }];
+          }
+          if (!mod) return [name, { name, found: 'missing', title: null, latest: null }];
+          const newest = mod.releases.find((r) => r.line === line);
+          return [name, { name, found: newest ? 'fits' : 'noRelease', title: plain(mod.title, TITLE_MAX) || name, latest: newest?.version ?? null }];
+        }),
+      ),
+    );
+    return names.map((name) => {
+      const m = listed.get(name);
+      if (m) return { name, found: 'fits', title: m.title, latest: m.version };
+      return read.get(name) ?? { name, found: 'unchecked', title: null, latest: null };
+    });
   }
 
   /**

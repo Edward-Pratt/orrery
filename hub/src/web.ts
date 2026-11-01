@@ -22,6 +22,7 @@ import type {
   GameState,
   GameUpdateAnswer,
   ModBrowse,
+  ModCheckAnswer,
   Me,
   NewServerAnswer,
   PendingServers,
@@ -572,6 +573,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     );
     app.post('/servers/:id/game/update/cancel', (c) => game(c, async (sid, user) => gameUpdates.cancel(sid, actor(user), user.username)));
     // The mod browser: reads of the mod portal, through the hub (the dashboard never talks to it).
+    app.post('/servers/:id/game/check', (c) => game(c, async (sid) => (await gameUpdates.check(sid, await jsonBody(c.req))) satisfies ModCheckAnswer));
     app.get('/servers/:id/game/mods', (c) => game(c, async (sid) => (await gameUpdates.browse(sid, c.req.query())) satisfies ModBrowse));
     app.get('/servers/:id/game/mods/:name/thumbnail', async (c) => {
       const id = c.req.param('id');

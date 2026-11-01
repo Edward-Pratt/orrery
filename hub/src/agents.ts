@@ -33,7 +33,7 @@ export type AgentsOptions = {
 type Rate = { perSecond: number; burst: number; overMs: number };
 
 /** What an Agent pushes on its own, put on the `Agents` emitter as it came (a copy of only its schema's fields). */
-type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'reply' }>;
+type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'events' | 'reply' }>;
 
 /**
  * `Agents`' events, each with the Agent's id: `agentUp` (its Agent connection was welcomed, every time), `agentLost`
@@ -99,12 +99,15 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
   { name: 'heartbeat', types: ['heartbeat'], perSecond: 1, burst: 5 },
   // One per Save now, or per 6 h of play: each one is a notice posted to Discord.
   { name: 'backup', types: ['backup'], perSecond: 1 / 10, burst: 3 },
+  // Taken only by a change (a repeat, such as the one it sends on each connect, posts nothing and takes none): each
+  // change is a notice posted to Discord, and an Agent's come at most once per Factorio start.
+  { name: 'events on or off', types: ['events'], perSecond: 1 / 10, burst: 3 },
 ];
 const NEW_PLAYERS = { name: 'new players', perSecond: 1 / 10, burst: LIMITS.players };
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
 const SAME = new Set(['serviceState', 'saves', 'installed']);
 const SAMPLE_MS = 10_000;
-const HANDSHAKE_MS = 5_000;
+export const HANDSHAKE_MS = 5_000;
 /** What a Mod sends but an Agent's game connection never does (docs/protocol.md): dropped from it. */
 const NOT_FROM_AGENTS = new Set<string>(['cmdLate', 'quest', 'achievement'] satisfies ModMsg['type'][]);
 /** Connections at once from one peer address, handshaken or not: an Agent connection, a game connection, two spare. */
@@ -258,8 +261,9 @@ function readLines(socket: Socket, max: number, onLine: (line: string) => void):
  * that Agent is refused, the live one kept; a refused one gets its `reject`, then is closed within 2 s whatever the
  * peer does. A second Agent connection replaces the first. An Agent with no line for 20 s, or whose
  * connection closes without `bye`, is lost: its server is `lost`, and one `agentLost` host notice goes out, then
- * `agentBack` when it connects again; after `bye` the server is `lost` with nothing posted. Its host samples go to its
- * Host's monitor (`Hosts`, by the Agent's id), at most one per 10 s, stamped with the hub's clock.
+ * `agentBack` when it connects again; after `bye` the server is `lost` with nothing posted. Its `events` post an
+ * `eventsOff` or `eventsOn` host notice only on a change. Its host samples go to its Host's monitor (`Hosts`, by the
+ * Agent's id), at most one per 10 s, stamped with the hub's clock.
  */
 export class Agents extends EventEmitter<AgentEvents> {
   #hub: Pick<ServerHub, 'attach' | 'agentUp' | 'agentDown' | 'publishTarget' | 'get'>;
@@ -270,6 +274,7 @@ export class Agents extends EventEmitter<AgentEvents> {
   #conns = new Map<string, Conn>();
   #versions = new Map<string, string>();
   #lost = new Set<string>(); // lost (not after `bye`) and not back yet
+  #eventsOff = new Set<string>(); // the Agents whose game events are off, as the latest `events` each sent said
   #sockets = new Set<Socket>();
   #perPeer = new Map<string, number>(); // open connections by peer address, handshaken or not
   #sampled = new Map<string, number>(); // when each Agent's latest stored host sample came (the hub's clock)
@@ -356,17 +361,21 @@ export class Agents extends EventEmitter<AgentEvents> {
   /**
    * Sends a request to a connected Agent, with a fresh id (or `id`: an `update`'s, which its steps carry), and
    * resolves with its reply: the checked `data` for the requests that answer with data. Rejects when the Agent isn't
-   * connected, refuses (`AgentRefused`, with its `error`), doesn't answer in 30 s, leaves first, or answers with data
-   * that isn't the request's.
+   * connected, refuses (`AgentRefused`, with its `error`), doesn't answer in time (`timeoutMs`, else 30 s:
+   * `requestTimeoutMs`), leaves first, or answers with data that isn't the request's.
    */
-  request<C extends AgentCall>(agentId: string, call: C, id: string = randomUUID()): Promise<AgentAnswer<C['type']>> {
+  request<C extends AgentCall>(
+    agentId: string,
+    call: C,
+    { id = randomUUID(), timeoutMs }: { id?: string; timeoutMs?: number } = {},
+  ): Promise<AgentAnswer<C['type']>> {
     const conn = this.#conns.get(agentId);
     if (!conn) return Promise.reject(new Error(`agent ${agentId} is not connected`));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         conn.pending.delete(id);
         reject(new Error(`agent ${agentId} did not answer in time`));
-      }, this.#requestTimeoutMs);
+      }, timeoutMs ?? this.#requestTimeoutMs);
       conn.pending.set(id, { request: call.type, resolve: resolve as (data: unknown) => void, reject, timer });
       this.#send(conn.socket, { ...call, id } as AgentRequest);
     });
@@ -502,7 +511,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   #agentLine(cfg: AgentConfig, conn: Conn, line: string): void {
     conn.silence.refresh();
     const msg = parseAgentLine(line);
-    if (!msg || !conn.budgets.allows(msg)) return; // junk after the handshake is ignored; over its budget, dropped
+    // Junk after the handshake is ignored; over its budget, dropped (`events` takes from its own only on a change).
+    if (!msg || (msg.type !== 'events' && !conn.budgets.allows(msg))) return;
     switch (msg.type) {
       case 'agentHello':
       case 'hello': // first lines only
@@ -518,11 +528,30 @@ export class Agents extends EventEmitter<AgentEvents> {
         this.#sampled.set(cfg.id, now);
         return this.#hosts.get(cfg.id)?.record({ ...msg.sample, ts: now });
       }
+      case 'events':
+        return this.#events(cfg, conn, msg);
       case 'reply':
         return this.#reply(conn, msg);
       default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult
         (this.emit as (event: Pushed['type'], id: string, msg: Pushed) => boolean)(msg.type, cfg.id, msg);
     }
+  }
+
+  /**
+   * Its server's game events went off or came back on: one host notice per change the hub hears, within the `events`
+   * budget (one over it is dropped, so the hub hears of it at the next change or connect). A repeat (the Agent sends
+   * its state on each connect) posts nothing and takes no budget; the hub keeps what it heard while the Agent is away.
+   */
+  #events(cfg: AgentConfig, conn: Conn, msg: Extract<AgentMsg, { type: 'events' }>): void {
+    const off = this.#eventsOff.has(cfg.id);
+    if (msg.on !== off || !conn.budgets.allows(msg)) return; // no change, or over its budget
+    const at = { target: 'host', id: cfg.id, type: 'notice', name: cfg.name } as const;
+    if (msg.on) {
+      this.#eventsOff.delete(cfg.id);
+      return this.#hub.publishTarget({ ...at, severity: 'good', kind: 'eventsOn' });
+    }
+    this.#eventsOff.add(cfg.id);
+    this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'eventsOff', reason: msg.reason ?? 'no reason given' });
   }
 
   #reply(conn: Conn, msg: Extract<AgentMsg, { type: 'reply' }>): void {

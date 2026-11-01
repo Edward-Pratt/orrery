@@ -344,7 +344,7 @@ export class GameUpdates {
     this.#step(job, 'prepare', 'running', 'Sent to the Agent');
     this.#arm(job);
     try {
-      await this.#d.agents.request(job.agentId, { type: 'update', factorio, mods }, job.update);
+      await this.#d.agents.request(job.agentId, { type: 'update', factorio, mods }, { id: job.update });
     } catch (err) {
       if (this.#closed || this.#jobs.get(job.serverId) !== job) return;
       this.#step(job, 'prepare', 'failed', redact((err as Error).message));

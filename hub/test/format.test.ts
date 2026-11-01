@@ -542,6 +542,12 @@ test("an Agent's text in a notice or a topic is escaped: a backup's detail, a sa
   const host = { target: 'host', id: 'vm', type: 'notice' };
   assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${md(evil)}: 0 B free (limit 10 GB)`);
   assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${md(evil)} back to 0 B free`);
+  assert.equal(
+    target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: evil }),
+    `⚠️ Host vm: game events from agent Factorio VM are off: ${md(evil)}`,
+  );
+  assert.equal(target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: 'x'.repeat(2048) })!.length, 256); // an embed title's most
+  assert.equal(target({ ...host, severity: 'good', kind: 'eventsOn', name: 'Factorio VM' }), '✅ Host vm: game events from agent Factorio VM are on again');
   const deploy = { target: 'deploy', id: 'gtnh', type: 'notice', part: 'mod', from: evil, to: 'mod-v1.2.0' };
   assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${md(evil)} → mod-v1.2.0 (by web:a (1))`);
   assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${md(evil)}`);

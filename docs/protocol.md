@@ -32,7 +32,7 @@ Lengths count characters (UTF-16 code units).
 | chat and death `message`, a milestone's `text` | 1 KiB (1024 characters) |
 | `players[]` | 200 entries |
 | `output[]` (`cmdResult`, `cmdLate`) | 500 lines of 1 KiB (cut) |
-| `detail` (`backup`, cut; `updateStep`), a `reply`'s `error` | 2 KiB |
+| `detail` (`backup`, cut; `updateStep`), a `reply`'s `error`, an `events`' `reason` | 2 KiB |
 | `deployResult.log` | 16 KiB |
 | `reply.data` | 256 KiB as serialised JSON |
 | `lines[]` of a `log` or `journal` reply | 1000 lines of 1 KiB |
@@ -171,13 +171,18 @@ welcomed; the connection that one opened stays.
 | `updateStep` | `id`, `step` (`prepare`, `backup`, `stop`, `swap`, `gate` or `rollback`), `state` (`waiting`, `running`, `done` or `failed`), `detail` | during an update; `id` is the `update` request's |
 | `updateDone` | `id`, `outcome` (`ok`, `rolled back`, `failed in staging`, `failed before swap`, `failed` or `cancelled`), `from`, `to`, optional `backup` (the pre-update save) | at the end of an update |
 | `deployResult` | `tag`, `outcome` (`ok`, `failed` or `rolled back`), `log` | once per deploy (`ok` too), when its own deploy's unit is over (after the restart, on whichever release came back), from `deploy-status.json` |
+| `events` | `on` (boolean), optional `reason` (why they are off) | whether it forwards its server's game events: off until Factorio's next start once Factorio's log says its Lua UDP socket failed (127.0.0.1:34198 taken), or has no `Opening socket` line within 60 s of the start, or while the Agent can't listen on its own UDP port (34199) past one retry; on once a start's log shows the socket and the Agent listens. Sent on connect (once it has decided) and on each change. The hub posts one host notice per change it hears (`eventsOff` with the `reason`, `eventsOn`): a repeat posts nothing, and a hub that restarted while they were off posts `eventsOff` once more |
 | `reply` | `id`, `ok` (boolean), optional `error`, optional `data` | the answer to a request |
 
-The Agent never sends a URL query string in `detail`, `error` or `log`.
+The Agent never sends a URL query string in `detail`, `error`, `log` or `reason`.
+
+`events` came after the first Agents, without a protocol bump: a hub older than it parses the line as an unknown type
+and ignores it (it still counts as a line, so the Agent connection stays up), and posts nothing.
 
 ### Hub → Agent
 
-Every request carries a fresh `id` and is answered by a `reply` with that `id`, within 30 s.
+Every request carries a fresh `id` and is answered by a `reply` with that `id`, within 30 s; a `restore` within 10 min,
+since it copies the whole save first (the hub waits that long for it).
 
 | type | fields | effect | `reply.data` |
 |---|---|---|---|
@@ -185,7 +190,7 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `journal` | `id`, `unit` | the last 200 lines of that unit's log file (the server's unit: `factorio-current.log`; the Agent's own: `agent.log`) | `{ lines }` |
 | `logs` | `id` | lists the log files it serves (`factorio-current.log`, `factorio-previous.log`, `agent.log`) | `{ files: { name, size, modified }[] }` |
 | `log` | `id`, `name` | the last 1000 lines of a listed file; any other name is an error | `{ lines }` |
-| `restore` | `id`, `name` | copies a listed save as the newest file (`restored-<time>-<name>`), only while the unit is inactive; the next start loads it | — |
+| `restore` | `id`, `name` | copies a listed save as the newest file (`restored-<time>-<name>`), only while the unit is inactive; the next start loads it. Answered within 10 min | — |
 | `update` | `id`, `factorio` (`{ version, url, sha256 }`), `mods` (`{ name, version, sha1, url }[]`) | checks it and starts the update: `reply` means it passed the Agent's checks and started; the hashes are checked during `prepare` (a mismatch fails it); its steps follow as `updateStep` with this `id` | — |
 | `updateResume` | `id` | the update running continues after the hub's stop (the unit is inactive) | — |
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |
@@ -324,6 +329,7 @@ at the hub, without the Agent knowing.
 | `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
 | `heartbeat` | 1 a second, bursts of 5. Its names not on its server's player list yet (none are while the server is offline, so after a reconnect all are) at most 1 per 10 s, bursts of 200 (a full `players`): a name over it is left out of that heartbeat and comes with a later one |
 | `backup` | 1 per 10 s, bursts of 3 |
+| `events` | only a change takes from it (a repeat is free): 1 per 10 s, bursts of 3 |
 | any other | the line budget only (`updateDone` and `deployResult` are taken once each, the one its update or deploy waits for; the rest are ignored) |
 
 What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples

@@ -224,6 +224,10 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: agent ${e.name} is not connected`;
     case 'agentBack':
       return `✅ Host ${e.id}: agent ${e.name} is connected again`;
+    case 'eventsOff': // the Agent's words
+      return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${md(e.reason)}`;
+    case 'eventsOn':
+      return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
     // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':
       return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : md(e.from)} → ${e.to} (by ${e.by})`;

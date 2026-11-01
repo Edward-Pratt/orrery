@@ -52,8 +52,10 @@ export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string
 /**
  * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState
  * (`sub`), when that last changed (`since`, epoch ms) and Result (`result`, e.g. `success`, `exit-code`).
- * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `reply` answers a
- * request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it has any.
+ * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `events` says whether
+ * the Agent forwards its server's game events: off (`reason`: why) until Factorio's next start, or on again. `reply`
+ * answers a request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it
+ * has any.
  */
 export type AgentMsg =
   | { type: 'ping' }
@@ -65,13 +67,14 @@ export type AgentMsg =
   | ({ type: 'updateStep'; id: string } & PackStepState)
   | { type: 'updateDone'; id: string; outcome: PackFinished; from: string; to: string; backup?: string }
   | { type: 'deployResult'; tag: string; outcome: Exclude<DeployOutcome, 'running'>; log: string }
+  | { type: 'events'; on: boolean; reason?: string }
   | { type: 'reply'; id: string; ok: boolean; error?: string; data?: unknown };
 
 /**
  * The hub's requests to an Agent, each answered by a `reply` with its `id` (30 s unless noted). `serviceAct` runs
  * `systemctl <action> --no-block` on its own unit; `journal` is the last 200 lines of a unit's log file (`unit`: the
  * server's unit or the Agent's own); `logs` lists the log files it serves and `log` is the last 1000 lines of one;
- * `restore` copies a listed save as the newest while the unit is stopped; `update` starts a game update (the reply
+ * `restore` copies a listed save as the newest while the unit is stopped (10 min); `update` starts a game update (the reply
  * means accepted; its id is the update's), `updateResume` continues the running one after the hub's stop and
  * `updateCancel` cancels it before the swap; `deploy` starts the Agent's own deploy of a release (the reply means
  * started).
@@ -263,6 +266,9 @@ export type TargetNotice = { severity: Severity } & (
   /** About a Host (`id`: the Agent's): its Agent went silent or closed without `bye`, then came back. */
   | { kind: 'agentLost'; name: string }
   | { kind: 'agentBack'; name: string }
+  /** About a Host (`id`: the Agent's): its Agent turned its server's game events off (`reason`, the Agent's words), then on again. */
+  | { kind: 'eventsOff'; name: string; reason: string }
+  | { kind: 'eventsOn'; name: string }
   | { kind: 'deployStarted'; part: DeployPart; from: string | null; to: string; by: string }
   | { kind: 'deployFinished'; part: DeployPart; from: string | null; to: string; outcome: DeployOutcome }
 );

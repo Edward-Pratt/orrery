@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Message, Webhook } from 'discord.js';
-import { channelFor, COMMANDS, sendChat, shouldRelay } from '../src/discord.ts';
+import { channelFor, COMMANDS, relayAs, sendChat, shouldRelay } from '../src/discord.ts';
 import type { TargetEvent } from '../src/servers.ts';
 
 const msg = (over: { bot?: boolean; webhookId?: string | null; system?: boolean }) =>
@@ -84,4 +84,16 @@ test("only Discord's error about the username adds the name to refusedNames", as
   const gone = { send: async () => Promise.reject(Object.assign(new Error('Unknown Webhook'), { code: 10015 })) } as unknown as Webhook;
   await assert.rejects(sendChat(gone, refused, 'Alex', undefined, 'hi'), /Unknown Webhook/);
   assert.deepEqual([...refused], ['discordfan']);
+});
+
+test("the relay webhook's name: a factorio player's is tagged (Factorio), and one with whitespace or parentheses goes out as the bot", () => {
+  const chat = (player: string) => ({ serverId: 's', type: 'chat' as const, player, message: 'restart now' });
+  assert.deepEqual(relayAs(chat('Ann_2.b-c'), 'factorio'), { username: 'Ann_2.b-c (Factorio)' });
+  for (const name of ['Edward (dashboard)', 'Edward(dashboard)', 'Ed ward', 'Ed\tward', 'Orrery\u00a0Bot', ')']) {
+    assert.equal(relayAs(chat(name), 'factorio'), null, name);
+  }
+  // Unchanged: a minecraft player's name and skin, and a dashboard line's marked name and avatar.
+  assert.deepEqual(relayAs(chat('Steve'), 'minecraft'), { username: 'Steve', avatarURL: 'https://mc-heads.net/avatar/Steve/64' });
+  const say = { serverId: 's', type: 'say' as const, author: 'Edward', message: 'hi', source: 'dashboard' as const, avatar: 'https://cdn/a.png' };
+  assert.deepEqual(relayAs(say, 'factorio'), { username: 'Edward (dashboard)', avatarURL: 'https://cdn/a.png' });
 });

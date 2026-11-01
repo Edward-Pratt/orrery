@@ -118,6 +118,18 @@ describe('server rows', () => {
     expect(text('space', 'tps')).toBe('59.5');
   });
 
+  it("fetches the cards again when a factorio server's paused changes, with no join or leave", async () => {
+    const SPACE: ServerCard = { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 60 };
+    const { events, text, refetch } = await setup([SPACE]);
+    expect(text('space', 'tps')).toBe('60.0');
+    events.push(1, { serverId: 'space', type: 'paused', paused: true }); // an admin's pause, say
+    await refetch([{ ...SPACE, paused: true }]);
+    expect(text('space', 'tps')).toBe('Paused');
+    events.push(2, { serverId: 'space', type: 'paused', paused: false });
+    await refetch([SPACE]);
+    expect(text('space', 'tps')).toBe('60.0');
+  });
+
   it("fetches the cards again when a factorio server's Agent left (lost), which clears its players and rate", async () => {
     const SPACE: ServerCard = { ...GTNH, id: 'space', name: 'Space Age', game: 'factorio', rate: { label: 'UPS', max: 60 }, tps: 60, players: ['alice'] };
     const { events, text, refetch } = await setup([SPACE]);

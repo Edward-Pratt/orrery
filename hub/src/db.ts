@@ -14,6 +14,14 @@ const COPIES_KEPT = 7;
 const DEPLOY_COPIES_KEPT = 3;
 /** A server's chat and console entries kept for the live feed, in its memory and in the `feed` table. */
 export const FEED_KEPT = 500;
+/**
+ * A server's `feed` rows kept at most between nightly prunes, checked every `FEED_CAP_EVERY` of its inserts (so at
+ * most 10,099 rows, about 10 MB of 1 KiB chat lines). Only the newest `FEED_KEPT` are ever read, so the cap loses
+ * nothing anyone sees; it is 20 times that, so a Minecraft server (a few hundred lines a day) never reaches it, while
+ * an Agent's chat at its budget (2/s, up to ~170,000 rows a day) stays bounded until the prune.
+ */
+export const FEED_CAP = 10_000;
+export const FEED_CAP_EVERY = 100;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
@@ -46,6 +54,7 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
 /** SQLite store: server up/down transitions (uptime), player sessions (playtime), the audit log, recent chat and console (the live feed), and nightly upkeep. */
 export class Db {
   #db: DatabaseSync;
+  #feedInserts = new Map<string, number>(); // per server, since its last cap check
 
   constructor(path: string) {
     this.#db = new DatabaseSync(path);
@@ -345,9 +354,22 @@ export class Db {
       .map((r) => JSON.parse(r.sample as string) as HostSample);
   }
 
-  /** A live feed event (a chat line or console entry) under its feed id, kept as JSON. */
+  /**
+   * A live feed event (a chat line or console entry) under its feed id, kept as JSON. Every `FEED_CAP_EVERY` inserts of
+   * a server, its rows beyond the newest `FEED_CAP` are deleted.
+   */
   recordFeed(id: number, e: FeedEvent & { serverId: string }): void {
     this.#write('feed', 'INSERT INTO feed (id, server_id, at, event) VALUES (?, ?, ?, ?)', id, e.serverId, e.at, JSON.stringify(e));
+    const n = (this.#feedInserts.get(e.serverId) ?? 0) + 1;
+    this.#feedInserts.set(e.serverId, n % FEED_CAP_EVERY);
+    if (n < FEED_CAP_EVERY) return;
+    this.#write(
+      'cap feed',
+      'DELETE FROM feed WHERE server_id = ? AND id <= (SELECT id FROM feed WHERE server_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)',
+      e.serverId,
+      e.serverId,
+      FEED_CAP,
+    );
   }
 
   /** A server's newest `limit` stored feed events, oldest first. */

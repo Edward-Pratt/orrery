@@ -104,6 +104,26 @@ check 'the Factorio zip has the portal'\''s layout, without CLAUDE.md' \
 check 'the Factorio zip carries the version, the source keeps its own' \
   'unzip -p "$T/fdist/orrery_1.2.3.zip" orrery_1.2.3/info.json | jq -e ".name == \"orrery\" and .version == \"1.2.3\"" > /dev/null &&
    [[ $(jq -r .version "$T/factorio/info.json") == 0.0.0 ]]'
+# The agent's release asset: agent/ without node_modules/ and test/, file modes kept, the version in its package.json.
+agent_tarball() { bash "$HERE/agent-tarball.sh" "$T/agent" "$1" "$T/agent.tar.gz" > "$T/out" 2>&1; }
+mkdir -p "$T/agent/src" "$T/agent/test" "$T/agent/node_modules/x"
+check 'the agent tarball needs the agent'\''s package.json' '! agent_tarball 1.2.3 && says "want a package.json named orrery-agent"'
+printf '{\n  "name": "orrery-agent",\n  "version": "0.0.0",\n  "private": true\n}\n' > "$T/agent/package.json"
+check 'the agent tarball needs src/index.ts' '! agent_tarball 1.2.3 && says "want src/index.ts"'
+echo 'export {};' > "$T/agent/src/index.ts"
+printf '#!/bin/sh\n' > "$T/agent/src/run.sh"
+chmod 755 "$T/agent/src/run.sh"
+touch "$T/agent/test/index.test.ts" "$T/agent/node_modules/x/index.js" "$T/agent/CLAUDE.md"
+check 'the agent tarball needs a version X.Y.Z' \
+  '! agent_tarball 1.2 && says "want a version" && ! agent_tarball v1.2.3 && [[ ! -e $T/agent.tar.gz ]]'
+check 'the agent tarball holds the agent without node_modules/ and test/, members named ./..., modes kept' \
+  'agent_tarball 1.2.3 &&
+   diff <(tar -tzf "$T/agent.tar.gz" | grep -v "/$" | sort) \
+     <(printf "./%s\n" CLAUDE.md package.json src/index.ts src/run.sh) > /dev/null &&
+   tar -tvzf "$T/agent.tar.gz" ./src/run.sh | grep -q "^-rwxr-xr-x "'
+check 'the agent tarball carries the version (the agent reports agent-v1.2.3), the source keeps its own' \
+  'tar -xzOf "$T/agent.tar.gz" ./package.json | jq -e ".name == \"orrery-agent\" and .version == \"1.2.3\" and .private == true" > /dev/null &&
+   [[ $(jq -r .version "$T/agent/package.json") == 0.0.0 ]]'
 # The mod portal: factorio-publish.sh against a fake curl (on PATH for these runs only) that plays the portal. It keeps
 # each call's argv, one per line, then the headers it read from stdin after a `stdin:` line, in $P/<n>. Who answers:
 #   init_upload    UnknownMod when $P/state is "new", Forbidden when "forbidden", HTML when "down", else an upload_url;

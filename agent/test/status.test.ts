@@ -48,6 +48,7 @@ test('parseStatus treats RCON output as untrusted: anything off is no status; na
   const many = Array.from({ length: 250 }, (_, i) => `p${i}`);
   const s = parseStatus(reply({ players: ['ok', 7, '', 'x'.repeat(65), 'y'.repeat(64), ...many] }))!;
   assert.deepEqual(s.players.slice(0, 2), ['ok', 'y'.repeat(64)]);
+  assert.deepEqual(parseStatus(reply({ players: ['ok', 'two\nlines', 'esc\u001b[2J', 'c1\u009b'] }))!.players, ['ok'], 'no name with a control character');
   assert.equal(s.players.length, 200);
   const odd = parseStatus('{"ok":true,"tick":1,"players":[],"version":"2.1.24","mods":{"__proto__":"1.0.0","orrery":"0.1.0","bad":7}}')!;
   assert.deepEqual(Object.keys(odd.mods), ['__proto__', 'orrery']);

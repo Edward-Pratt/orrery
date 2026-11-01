@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { AUTH, AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, RconSession, RconTimeout, decode, encode } from '../src/rcon.ts';
+import { AUTH, AUTH_RESPONSE, EXEC, MAX_PACKET, RESPONSE, Rcon, RconNoAnswer, RconNotSent, RconSession, RconTimeout, decode, encode } from '../src/rcon.ts';
 import { PASSWORD, fakeRcon, type Reply } from './fake-rcon.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +57,11 @@ test('connect gives up when the server never answers', async (t) => {
   const server = createServer((s) => s.on('error', () => {}));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => server.close());
-  await assert.rejects(Rcon.connect('127.0.0.1', (server.address() as AddressInfo).port, PASSWORD, 100), (err) => err instanceof RconTimeout && /did not answer/.test(err.message));
+  await assert.rejects(
+    Rcon.connect('127.0.0.1', (server.address() as AddressInfo).port, PASSWORD, 100),
+    (err) => err instanceof RconTimeout && !(err instanceof RconNoAnswer) && /did not answer/.test(err.message),
+    'no command was sent: not RconNoAnswer',
+  );
 });
 
 test('reads a 5 MB reply, one packet over many TCP reads', async (t) => {
@@ -99,13 +103,14 @@ test('drops packets that are not the command reply: id 0, or its id with another
   rcon.close();
 });
 
-test('a command that times out ends the connection with a close signal', async (t) => {
+test('a command that times out ends the connection with a close signal: it was sent (RconNoAnswer), the next was not (RconNotSent)', async (t) => {
   const { server, rcon, closed } = await setup((cmd) => (cmd === '/hang' ? undefined : 'ok'));
   t.after(() => server.close());
   const queued = rcon.exec('/after');
-  await assert.rejects(rcon.exec('/hang', 100), (err) => err instanceof RconTimeout && /timed out/.test(err.message));
+  await assert.rejects(rcon.exec('/hang', 100), (err) => err instanceof RconNoAnswer && /timed out/.test(err.message));
   assert.equal(await queued, 'ok'); // queued before the hang, so it ran first
-  await assert.rejects(rcon.exec('/next'), /closed/);
+  await assert.rejects(rcon.exec('/next'), RconNotSent);
+  assert.deepEqual(server.commands(), ['/after', '/hang'], 'the next never sent');
   assert.equal(closed.length, 1);
   assert.match(closed[0]!.message, /timed out/);
   await assert.rejects(Rcon.connect('127.0.0.1', 1, PASSWORD, 1000), (err) => !(err instanceof RconTimeout)); // refused: gone, not a stall
@@ -120,7 +125,7 @@ test('the server closing mid-command rejects it and signals close once', async (
   const running = rcon.exec('/first');
   const waiting = rcon.exec('/second');
   await assert.rejects(running, /RCON connection (closed|failed)/);
-  await assert.rejects(waiting, /RCON connection closed/);
+  await assert.rejects(waiting, (err) => err instanceof RconNotSent && /RCON connection closed/.test(err.message));
   assert.deepEqual(server.commands(), ['/first']);
   await sleep(20);
   assert.equal(closed.length, 1);
@@ -197,7 +202,7 @@ test('RconSession: one kept connection, commands in order; a timeout or a closed
   assert.equal(auths(), 1, 'one connection for all three');
 
   hang = true; // a server that took the command but never answers
-  await assert.rejects(session.exec('/d'), RconTimeout);
+  await assert.rejects(session.exec('/d'), RconNoAnswer);
   hang = false;
   assert.equal(await session.exec('/e'), 'ran /e');
   assert.equal(auths(), 2, 'a new connection after the timeout');
@@ -209,4 +214,20 @@ test('RconSession: one kept connection, commands in order; a timeout or a closed
 
   session.close();
   await assert.rejects(session.exec('/h'), /closed/);
+});
+
+test('RconSession: a command queued behind one that timed out runs once on a new connection; the sent one is never sent again', async (t) => {
+  const server = await fakeRcon((cmd) => (cmd === '/hang' ? undefined : `ran ${cmd}`));
+  const session = new RconSession(server.port, PASSWORD, 200);
+  t.after(async () => {
+    session.close();
+    await server.close();
+  });
+  const auths = () => server.received.filter((p) => p.type === AUTH).length;
+  const hung = session.exec('/hang'); // a blocking save: sent, no answer in time
+  const queued = [session.exec('/b'), session.exec('/c')];
+  await assert.rejects(hung, RconNoAnswer);
+  assert.deepEqual(await Promise.all(queued), ['ran /b', 'ran /c']);
+  assert.deepEqual(server.commands(), ['/hang', '/b', '/c'], 'in order, the hung one once');
+  assert.equal(auths(), 2, 'both on one new connection');
 });

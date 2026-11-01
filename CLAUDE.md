@@ -25,7 +25,11 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
   `setup-agent-host.sh` sets up an Agent's Host (the friend runs it as root, and again at each new `agent-v` tag): Factorio in
   a rootful Podman Quadlet (`factorio.container`), the Agent as `orrery-agent.service` from the newest `agent-v*`
-  release, the newest `factorio-v*` release's mod when `mods/` has none, and `60-orrery-agent.rules`; tested by
+  release, the newest `factorio-v*` release's mod when `mods/` has none, `60-orrery-agent.rules`, and a random game
+  password in `server-settings.json` (kept on a re-run), shown only in the mode-600 `/srv/factorio/first-boot.txt`. A re-run
+  keeps the image, the Factorio version and `--memory-max` unless told otherwise. It switches Factorio's `current` and
+  image together with `factorio.container`, once that release passed `--version` in that image, and the agent's `current`
+  last, after its units are written, so a re-run that fails on its way leaves both as they were; tested by
   `test-setup-agent-host.sh`. `deploy-agent.sh` and `orrery-agent-deploy@.service` ship with it (an agent release next
   to the running one, rolled back if it won't connect; tested by `test-deploy-agent.sh`), but nothing starts them
   until agent deploys exist (release 2).
@@ -87,10 +91,10 @@ bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
 bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
-bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more
+bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more (needs jq)
 bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
+bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, agent-tarball.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
 ```
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
@@ -105,8 +109,9 @@ from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N 
 Never delete or move a tag; fix a failed release forward with the next patch.
 `.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`; an agent tag also runs the deploy tests, as the agent Host's setup ships at that tag), then creates the GitHub release. Its notes are
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
-(the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests
-as `orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
+(the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests,
+its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, tested by `test-release.sh`), as
+`orrery-agent-vX.Y.Z.tar.gz` plus its `.sha256`, and for the Factorio mod `orrery_<version>.zip`
 (`.github/factorio-zip.sh`), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
 `FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
@@ -132,7 +137,11 @@ By hand for the Factorio server, once, in this order:
    (the header of `deploy/orrery-hub.service` has the commands); install the changed `orrery-hub.service` (it waits for
    `tailscaled.service` and reads `/etc/orrery-factorio-account.env` if there is one); add `integrations.agents`, the
    `factorio` server and its Discord channel to `config.json`; `systemctl daemon-reload`; restart the hub. Rolling
-   the hub back below this release needs those config sections removed first, because the older hub refuses a server without a Mod token (the factorio server has none), so it would not start.
+   the hub back below this release: first roll the dashboard back to the previous `web-v` tag from Host > Releases,
+   while this hub still serves it (the dashboard reads new hub API without a guard, ADR 0001, so its server pages break
+   against an older hub; only its Releases rows don't, so a hub rolled back first can still be rolled forward from
+   there). Then remove those config sections (the older hub refuses a server without a Mod token, and the factorio
+   server has none, so it would not start), then roll the hub back.
 3. Cut and deploy `web-vX.Y.0`; cut `agent-v1.0.0` and `factorio-v1.0.0` (the setup installs both; the mod
    reaches the portal from the second). The friend runs `deploy/setup-agent-host.sh` from the agent tag (its header
    has the options; `--no-hub` while the hub doesn't listen yet), and again from each later `agent-v` tag.
@@ -149,7 +158,10 @@ alone: the deploy units load `/etc/orrery.env`, and their `npm ci` must never se
 `release.yml`'s portal step.
 On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's
 `config.json`; read by `orrery-agent.service`) and `/etc/orrery-factorio.env` (`RCON_PASSWORD`; read by the Agent's unit and the
-container). The friend's machine holds them; the owner never sees them.
+container). The friend's machine holds them; the owner never sees them. Setup also writes a random `game_password` into
+`/srv/factorio/config/server-settings.json` (kept on a re-run; its saved default in `/usr/local/lib/orrery/defaults/` is
+root-only) and shows it only in `/srv/factorio/first-boot.txt` (factorio's, mode 600), for the friend to share with the players;
+the owner sees it there too, as the friend sends that file.
 
 ## Issues and domain docs
 

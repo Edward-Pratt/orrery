@@ -296,6 +296,21 @@ test('after a hub restart an update the Agent echoes in a step is the one whose 
   await eventually(async () => (await h.game()).history[0]?.outcome === 'failed in staging');
 });
 
+test("an update's end is taken once: a flood of the same updateDone (only the line budget holds it) posts and stores nothing more", async (t) => {
+  const h = await ready(t, { unit: 'inactive' });
+  await h.json(h.req('POST', '/api/servers/space/game/update', PICK), 202);
+  const update = await h.answer();
+  h.done(update.id, 'ok');
+  await eventually(async () => (await h.game()).running === null);
+  const notices = h.notices.length;
+  const history = (await h.game()).history;
+  for (let i = 0; i < 20; i++) h.done(update.id, i % 2 ? 'failed' : 'ok');
+  h.agent.send({ type: 'ping' }); // the Agent connection still up after them
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(h.notices.length, notices, 'nothing announced again');
+  assert.deepEqual((await h.game()).history, history, 'the row as it was');
+});
+
 test("a new update ends the wait for the last one's end: a repeated end of the new one never lands on the old row", async (t) => {
   const cfg = gameConfig(t);
   const h1 = await ready(t, {}, { cfg });

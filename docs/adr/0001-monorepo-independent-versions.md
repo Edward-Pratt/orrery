@@ -13,5 +13,8 @@ and its game connection is a Mod connection (ADR 0004), so it has no protocol ve
 is the exception to "only compatibility contract": it never talks to the hub, only to its server's agent, so its
 contract is with the agent (`factorio/CLAUDE.md`). When a change ships in several parts, release them in this
 order, each in place before the next: the hub, the dashboard, the agent, and the Factorio mod last. The dashboard
-reads new hub API without a guard, and a Factorio mod release reaches its server by hand (a file in the server's `mods/`)
-until game updates exist (release 2), and then through a game update.
+reads new hub API without a guard (one exception: its Releases rows read an older hub's answer, which has no Agent
+part, so a hub rolled back below the Agent's release can still be rolled forward, or the dashboard back, from the
+dashboard; a rollback goes in the reverse order: the dashboard first, then the hub), and a Factorio mod release
+reaches its server by hand (a file in the server's `mods/`) until game updates exist (release 2), and then through a
+game update.

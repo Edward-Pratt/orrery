@@ -7,6 +7,10 @@ import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseModLine } from '../../hub/src/protocol.ts';
 import {
+  DROP_LOG_MS,
+  EVENT_BURST,
+  EVENT_RATE,
+  EventBudget,
   GameEvents,
   MAX_DATAGRAM,
   commandJson,
@@ -209,6 +213,39 @@ test('link for an offline name is dropped; for an online one it is relayed with 
   assert.deepEqual(s.got[2], { type: 'link', player: 'Mallory', uuid: '', code: 'XYZ999' });
 });
 
+test('a link from a player who joined since the last poll: a fresh /orrery-status decides; every drop is logged', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const asked: string[] = [];
+  const s = await setup(t, {
+    run: async (command) => {
+      asked.push(command);
+      // The fresh poll: Mallory joined after the last one, which had only Alice.
+      return command === '/orrery-status' ? JSON.stringify({ ok: true, tick: 1, players: ['Alice', 'Mallory'], version: '2.1.24', mods: { orrery: '0.1.0' } }) : '{"ok":true}';
+    },
+  });
+  await s.start([BANNER, opened(s.factorioPort)]);
+  await eventually(() => s.events.gate === 'on');
+  await s.send(s.factorio, { seq: 1, t: 'link', player: 'Mallory', code: 'ABC234' });
+  await eventually(() => s.got.length === 1, 2000, 'the link');
+  assert.deepEqual(s.got, [{ type: 'link', player: 'Mallory', uuid: '', code: 'ABC234' }]);
+  assert.deepEqual(asked, ['/orrery-status']);
+  await s.send(s.factorio, { seq: 2, t: 'unlink', player: 'Alice' }); // online at the last poll: no fresh one
+  await eventually(() => s.got.length === 2, 2000, 'the unlink');
+  assert.deepEqual(asked, ['/orrery-status']);
+
+  const drops = () => printed(log).filter((l) => l.startsWith('[events] dropped a'));
+  await s.send(s.factorio, { seq: 3, t: 'link', player: 'Bob\n2026 forged', code: 'ABC234' });
+  await s.send(s.factorio, { seq: 4, t: 'unlink', player: 'Bob' });
+  await s.send(s.factorio, { seq: 5, t: 'unlink', player: 'Bob' });
+  await eventually(() => drops().length === 3, 2000, 'every drop logged');
+  assert.deepEqual(drops(), [
+    '[events] dropped a link for Bob?2026 forged: not online at a fresh /orrery-status',
+    '[events] dropped an unlink for Bob: not online at a fresh /orrery-status',
+    '[events] dropped an unlink for Bob: not online at a fresh /orrery-status',
+  ]);
+  assert.equal(s.got.length, 2);
+});
+
 test('UDP seq gaps are logged; the hello datagram is the baseline, again after each start', async (t) => {
   const log = t.mock.method(console, 'log', () => {});
   const s = await setup(t);
@@ -234,8 +271,9 @@ test('UDP seq gaps are logged; the hello datagram is the baseline, again after e
 
 test('/orrery-hello once per start, after the gate opens and RCON answers; a hello datagram that never comes is logged', async (t) => {
   const error = t.mock.method(console, 'error', () => {});
-  t.mock.method(console, 'log', () => {});
-  const s = await setup(t);
+  const log = t.mock.method(console, 'log', () => {});
+  const helloMs = 200; // far over a datagram's way on loopback, so one sent in time is never late
+  const s = await setup(t, { helloMs });
   s.events.rconUp();
   await s.start([BANNER, opened(s.factorioPort)]);
   s.events.rconUp(); // still checking
@@ -252,8 +290,78 @@ test('/orrery-hello once per start, after the gate opens and RCON answers; a hel
   s.events.rconUp();
   await eventually(() => s.commands.length === 2);
   await s.send(s.factorio, { seq: 7, t: 'hello' }); // in time this time
-  await sleep(120);
+  await eventually(() => printed(log).includes("[events] the mod's hello came: seq 7"), 2000, 'the hello');
+  await sleep(helloMs + 50);
   assert.equal(printed(error).filter((l) => l.includes('no hello datagram came')).length, 1);
+});
+
+test('the event budget: 200 chat events in 1 s forward at most 30 at once and 5 a second after, the rest counted in one line a minute', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] }); // the minute of the log; the budget's own clock is `now`
+  const log = t.mock.method(console, 'log', () => {});
+  let now = 0;
+  const budget = new EventBudget(() => now);
+  const passed: number[] = [];
+  for (let i = 0; i < 200; i++) {
+    now = i * 5; // 200 in [0, 1 s)
+    if (budget.take()) passed.push(now);
+    assert.ok(passed.length <= EVENT_BURST + Math.floor((now * EVENT_RATE) / 1000), `${passed.length} by ${now} ms`);
+  }
+  assert.equal(passed.filter((at) => at < 150).length, EVENT_BURST, 'the burst: 30 at once');
+  assert.equal(passed.length, 34, 'then 5 a second');
+
+  // Still flooded, 50 a second for 10 s: exactly 5 in each second.
+  const perSecond = new Array<number>(10).fill(0);
+  for (now = 1000; now < 11_000; now += 20) if (budget.take()) perSecond[Math.floor(now / 1000) - 1]!++;
+  assert.deepEqual(perSecond, new Array(10).fill(EVENT_RATE));
+  const dropped = 200 - passed.length + 500 - 50;
+
+  assert.deepEqual(printed(log), [], 'nothing logged before the minute is up');
+  t.mock.timers.tick(DROP_LOG_MS);
+  assert.deepEqual(printed(log), [`[events] dropped ${dropped} game events in the last minute: over 5 a second (30 at once)`]);
+  t.mock.timers.tick(5 * DROP_LOG_MS);
+  assert.equal(printed(log).length, 1, 'one line, not one per minute while quiet');
+
+  // Normal play, one event a second (after a quiet minute): every one goes, nothing is logged.
+  now += DROP_LOG_MS;
+  for (let i = 0; i < 120; i++, now += 1000) assert.equal(budget.take(), true, `event ${i}`);
+  t.mock.timers.tick(DROP_LOG_MS);
+  assert.equal(printed(log).length, 1);
+
+  // A full burst comes back after a quiet 6 s; `flush` logs what is counted at once.
+  now += 6000;
+  for (let i = 0; i < EVENT_BURST; i++) assert.equal(budget.take(), true, `burst ${i}`);
+  assert.equal(budget.take(), false);
+  budget.flush();
+  assert.equal(printed(log)[1], '[events] dropped 1 game event in the last minute: over 5 a second (30 at once)');
+});
+
+test('GameEvents forwards within the budget: a chat flood from Factorio’s port is cut to 30, then 5 a second; the count is logged at stop', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  let now = 0; // frozen: the first 200 come at once
+  const s = await setup(t, { now: () => now });
+  await s.start([BANNER, opened(s.factorioPort)]);
+  await eventually(() => s.events.gate === 'on', 2000, 'the gate');
+  /**
+   * Sends chat datagrams `from` to `to` (seq), then `last` from the same socket: processed after them, the line it
+   * logs (`says`; a drop is logged once per start, the hello too) shows they all were.
+   */
+  const flood = async (from: number, to: number, last: object | Buffer, says: string) => {
+    for (let seq = from; seq <= to; seq++) await s.send(s.factorio, { seq, t: 'chat', player: 'Alice', message: `spam ${seq}` });
+    await s.send(s.factorio, last);
+    await eventually(() => printed(log).some((l) => l.startsWith(says)), 2000, `datagrams up to ${to}`);
+  };
+  const budgetLines = () => printed(log).filter((l) => /game events? (lost|in the last minute)|went back/.test(l));
+  await flood(1, 200, { seq: 200, t: 'hello' }, "[events] the mod's hello came: seq 200");
+  assert.equal(s.got.length, EVENT_BURST);
+  assert.deepEqual(s.got.at(-1), { type: 'chat', player: 'Alice', message: 'spam 30' });
+  now += 1000;
+  await flood(201, 210, Buffer.from('not json'), '[events] dropped a datagram: not JSON');
+  assert.equal(s.got.length, EVENT_BURST + EVENT_RATE, '5 more a second later');
+  assert.deepEqual(s.got.slice(EVENT_BURST).map((e) => e.type === 'chat' && e.message), ['spam 201', 'spam 202', 'spam 203', 'spam 204', 'spam 205']);
+  assert.deepEqual(budgetLines(), [], 'no seq gap for what the budget dropped; no count before the minute');
+
+  s.events.stop();
+  assert.deepEqual(budgetLines(), ['[events] dropped 175 game events in the last minute: over 5 a second (30 at once)']);
 });
 
 test('the mod’s datagrams map to the game connection’s messages, within the hub’s limits', () => {

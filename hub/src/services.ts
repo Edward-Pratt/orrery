@@ -18,6 +18,8 @@ const WATCH_MS = 5_000;
 const LOG_LINES = 200;
 /** The in-game countdown before a linked server with players online is stopped or restarted. */
 const CLEAN_STOP_MINUTES = 5;
+/** How long after its last `serviceFailed` notice an agent-backed service's next failure goes on the stream only. */
+export const FAILED_NOTICE_MS = 10 * 60_000;
 
 export const VERBS: ServiceVerb[] = ['start', 'stop', 'restart'];
 
@@ -39,7 +41,8 @@ type Backend = { act: (verb: ServiceVerb) => Promise<void>; logs: () => Promise<
  * restarting one whose linked server has players online runs the server's countdown first. Only listed units are
  * ever passed to `run`, after `--` or as `--unit=`. A service an Agent backs (the `service` of the server it runs) is
  * never passed to `run`: its state is what the Agent last pushed (`serviceState`), and its actions and logs are the
- * Agent's `serviceAct` and `journal` requests. Hub core.
+ * Agent's `serviceAct` and `journal` requests; its failures are a notice at most once per 10 min (`FAILED_NOTICE_MS`),
+ * so an Agent's pushes can't flood the alerts. Hub core.
  */
 export class Services {
   #hub: Hub;
@@ -51,6 +54,7 @@ export class Services {
   #agents: Pick<Agents, 'request'> | undefined;
   #agentOf = new Map<string, string>(); // service id -> the id of the Agent that backs it
   #states = new Map<string, { state: string; sub: string }>();
+  #failedTold = new Map<string, number>(); // agent-backed service id -> when its last serviceFailed notice went out
   #timer: NodeJS.Timeout | undefined;
   #watching = false;
 
@@ -227,8 +231,17 @@ export class Services {
     this.#states.set(s.id, now);
     const at = { target: 'service', id: s.id } as const;
     if (was ? was.state !== now.state || was.sub !== now.sub : first) this.#hub.publishTarget({ ...at, type: 'state', ...now });
-    if (now.state === 'failed' && was?.state !== 'failed') {
+    if (now.state === 'failed' && was?.state !== 'failed' && this.#tell(s.id)) {
       this.#hub.publishTarget({ ...at, type: 'notice', severity: 'problem', kind: 'serviceFailed', unit: s.unit });
     }
+  }
+
+  /** Whether a failure of service `id` is a notice now: always for a local unit, else once per `FAILED_NOTICE_MS`. */
+  #tell(id: string): boolean {
+    if (!this.#agentOf.has(id)) return true;
+    const now = Date.now();
+    if (now - (this.#failedTold.get(id) ?? -Infinity) < FAILED_NOTICE_MS) return false;
+    this.#failedTold.set(id, now);
+    return true;
   }
 }

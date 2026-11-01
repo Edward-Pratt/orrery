@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { TestContext } from 'node:test';
 import type { GameState, LiveEvent, ServerCard } from '../src/api.ts';
+import type { AgentsOptions } from '../src/agents.ts';
 import type { Config, ServerSettings } from '../src/config.ts';
 import type { DeploysOptions } from '../src/deploys.ts';
 import type { PortalFetch } from '../src/factorio.ts';
@@ -89,10 +90,21 @@ export function gameConfig(t: TestContext, integrations: Partial<Config['integra
   };
 }
 
-/** A whole hub on `cfg` (a fresh one by default), logged in, with every pack-update notice of `space` kept. */
+/**
+ * A whole hub on `cfg` (a fresh one by default), logged in, with every pack-update notice of `space` kept. Its Agent
+ * port welcomes a reconnect at once unless `agents.handshakeMs` says otherwise: the fake Agent comes back in
+ * milliseconds, a real one's deploy restart or Factorio's restart long after the 5 s throttle.
+ */
 export async function gameHub(
   t: TestContext,
-  { cfg = gameConfig(t), account = true, quietMs, releases = github, deploys }: { cfg?: Config; account?: boolean; quietMs?: number; releases?: HubDeps['github']; deploys?: DeploysOptions } = {},
+  {
+    cfg = gameConfig(t),
+    account = true,
+    quietMs,
+    releases = github,
+    deploys,
+    agents = { handshakeMs: 0 },
+  }: { cfg?: Config; account?: boolean; quietMs?: number; releases?: HubDeps['github']; deploys?: DeploysOptions; agents?: AgentsOptions } = {},
 ) {
   let restarts: RestartScheduler | undefined;
   const handle = await startHub(cfg, {
@@ -107,6 +119,7 @@ export async function gameHub(
     factorioAccount: account ? ACCOUNT : undefined,
     github: cfg.integrations.github ? releases : undefined,
     deploys,
+    agents,
     gameUpdates: { pollMs: 5, ...(quietMs && { quietMs }) },
   });
   let closed = false;

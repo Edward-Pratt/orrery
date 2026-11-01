@@ -40,6 +40,8 @@ jobs:
       - name: Name the agent's tarball and its checksum
         if: startsWith(github.ref_name, 'agent-v')
         run: | # the checksum names the bare file, so `sha256sum -c` works next to it
+          v=$(tar -xzOf agent-dist/agent-dist.tar.gz ./package.json | jq -r .version) # what the agent will report
+          [[ $v == "${GITHUB_REF_NAME#agent-v}" ]] || { echo "the agent's tarball says version $v, not $GITHUB_REF_NAME's"; exit 1; }
           mkdir -p dist && mv agent-dist/agent-dist.tar.gz "dist/orrery-$GITHUB_REF_NAME.tar.gz"
           cd dist && sha256sum "orrery-$GITHUB_REF_NAME.tar.gz" > "orrery-$GITHUB_REF_NAME.tar.gz.sha256"
       - uses: actions/download-artifact@v4

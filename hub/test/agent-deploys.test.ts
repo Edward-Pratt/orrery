@@ -4,7 +4,9 @@ import { test, type TestContext } from 'node:test';
 import type { AuditLog, DeploysAnswer, GameState, LiveEvent, ServerDetail, TargetEvent } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import type { GitHub, GitHubRelease } from '../src/deploys.ts';
-import { ACTOR, agentUp, eventually, gameConfig, gameHub, PICK } from './fake-agent.ts';
+import type { AgentsOptions } from '../src/agents.ts';
+import { ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, PICK } from './fake-agent.ts';
+import { fakeMod } from './fake-mod.ts';
 
 const release = (tag: string, publishedAt: number): GitHubRelease => ({
   tag,
@@ -36,8 +38,8 @@ function deployConfig(t: TestContext): Config {
  * A whole hub with the Agent deploys' routes, its deploy notices kept, once it has asked GitHub. `agentTimeoutMs`: how
  * long a deploy waits for the Agent's hello, then for its result.
  */
-async function deployHub(t: TestContext, cfg = deployConfig(t), agentTimeoutMs = 300) {
-  const h = await gameHub(t, { cfg, releases: github, deploys: { watchMs: 10, agentTimeoutMs } });
+async function deployHub(t: TestContext, cfg = deployConfig(t), agentTimeoutMs = 300, agents?: AgentsOptions) {
+  const h = await gameHub(t, { cfg, releases: github, deploys: { watchMs: 10, agentTimeoutMs }, ...(agents && { agents }) });
   const notices: TargetEvent[] = [];
   h.live.on('event', (_, { at: _at, ...e }: LiveEvent) => {
     if ('target' in e && e.target === 'deploy') notices.push(e);
@@ -123,6 +125,24 @@ test('an Agent deploy: the Agent is sent `deploy`, and the row is ok once it say
     audit.map(({ actor, target, details }) => ({ actor, target, details })),
     [{ actor: ACTOR, target: 'vm', details: `agent agent-v1.1.0 → ${TAG}` }],
   );
+});
+
+test("the restarted Agent's hello is throttled like any reconnect: refused under the window after its last welcome, then welcomed and the deploy ok", async (t) => {
+  // A real deploy restart comes long after the 5 s window; this one comes back at once, so the window is 1 s.
+  const h = await deployHub(t, deployConfig(t), 10_000, { handshakeMs: 1000 });
+  const a = await connected(h);
+  await started(h, a);
+  a.agent.send({ type: 'bye' });
+  await a.agent.closed;
+  const early = fakeMod(h.agentPort);
+  early.send({ type: 'agentHello', protocol: 1, agentId: 'vm', token: AGENT_TOKEN, agentVersion: TAG });
+  assert.deepEqual(await early.next(), { type: 'reject', reason: 'reconnecting too fast' });
+  await early.closed;
+  assert.equal((await h.rows())[0]!.outcome, 'running', 'the deploy still waits for its hello');
+  // The Agent tries again after its backoff, past the window: welcomed as the new release.
+  await new Promise((r) => setTimeout(r, 1000));
+  await connected(h, { version: TAG });
+  await eventually(async () => (await h.rows())[0]!.outcome === 'ok');
 });
 
 test('ok only on a matching agentVersion: back on the old release with no result, the deploy fails once its time is up', async (t) => {

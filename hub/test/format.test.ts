@@ -22,6 +22,7 @@ import {
   formatTop,
   formatTopic,
   formatTps,
+  md,
   TOPIC_MIN_GAP_MS,
   topicDue,
   type Post,
@@ -366,7 +367,7 @@ test("formatEvent posts lag and backup notices with today's wording and severity
     embeds: [{ title: '⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)', color: COLORS.orange }],
   });
   assert.deepEqual(post({ severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)' }), {
-    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }],
+    embeds: [{ title: '✅ Backup finished (12\\.3 seconds (1.2GB))', color: COLORS.green }], // escaped as a list's number; Discord shows "12.3"
   });
   assert.deepEqual(post({ severity: 'problem', kind: 'backupFailed', detail: 'disk full' }), {
     embeds: [{ title: '❌ Backup failed: disk full', color: COLORS.red }],
@@ -527,4 +528,22 @@ test('the /link hint names each game that has a server, in a fixed order', () =>
     formatLinkHint('ABC234', ['factorio', 'minecraft']),
     'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. Within 10 minutes.',
   );
+});
+
+test("an Agent's text in a notice or a topic is escaped: a backup's detail, a save's name, a refusal, a mount, a version, players", () => {
+  const evil = '[pay](https://evil.example) # **x** ||y|| <#1>';
+  assert.notEqual(md(evil), evil);
+  const notice = (n: Notice) => (formatEvent({ ...n, type: 'notice', serverId: 'space' }) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  assert.equal(notice({ severity: 'good', kind: 'backupFinished', detail: evil }), `✅ Backup finished (${md(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'backupFailed', detail: evil }), `❌ Backup failed: ${md(evil)}`);
+  assert.equal(notice({ severity: 'warning', kind: 'backupOverdue', hours: 13, newest: evil }), `⚠️ No new backup for 13 h (newest: ${md(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'restartFailed', error: evil }), `❌ Restart failed: ${md(evil)}`);
+  const target = (e: object) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  const host = { target: 'host', id: 'vm', type: 'notice' };
+  assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${md(evil)}: 0 B free (limit 10 GB)`);
+  assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${md(evil)} back to 0 B free`);
+  const deploy = { target: 'deploy', id: 'gtnh', type: 'notice', part: 'mod', from: evil, to: 'mod-v1.2.0' };
+  assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${md(evil)} → mod-v1.2.0 (by web:a (1))`);
+  assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${md(evil)}`);
+  assert.equal(formatTopic({ ...online, game: 'factorio', tps: 60, players: [evil] }), `🟢 Online · 60 UPS · 1 player: ${md(evil)}`);
 });

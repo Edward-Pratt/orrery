@@ -45,7 +45,11 @@ take it down. So, on top of the address check (details in `docs/protocol.md`, "F
   first and never cutting JSON.
 - **Field limits.** Every field of every message has a maximum, on the Mod port and the Agent port alike.
 - **Schema-only parsing.** The hub keeps only the fields a message's schema lists; unknown fields never reach events.
-- **A rate limit per connection.** Over it, lines are dropped and logged once; 10 s over it closes the connection.
+- **Budgets per connection and per message type** (`docs/protocol.md`, "Rate rules"). Lines over a connection's line
+  budget are dropped, and 10 s over it closes the connection; a message over its type's budget is dropped and the
+  connection stays. Both are kept across reconnects, so reconnecting never starts a fresh burst; each kind of
+  connection is welcomed at most once per 5 s, and one address has at most 4 connections at once. Drops are logged at
+  most once a minute, with a count.
 - **One server per Agent.** An Agent speaks only for the one server listed under it, whose game connection is
   accepted only while that Agent's connection is up.
 

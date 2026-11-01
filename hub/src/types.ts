@@ -210,9 +210,15 @@ export type HubEvent = { serverId: string } & (
   | Announcement
   | HubOutput
   | Tps
+  | Paused
 );
 /** A server's TPS, from heartbeats, only when it moved by 0.1 or more. The live feed keeps just the latest. */
 export type Tps = { type: 'tps'; tps: number };
+/**
+ * A factorio server's heartbeat changed its `paused` (a Mod's never does): the dashboard fetches its card again. The
+ * live feed keeps just the latest.
+ */
+export type Paused = { type: 'paused'; paused: boolean };
 
 /**
  * `GET /api/checks` (only with the checks integration): each check's current state. `up` and the rest are null

@@ -38,14 +38,21 @@ export function folderRestore(run: RunRestore, dir: string, backupDir: string): 
 }
 
 /**
+ * How long an Agent's `restore` may take to answer: it copies the whole save first (a few hundred MB on a slow disk),
+ * so the 30 s of the other requests would report a restore failed that still goes on.
+ */
+export const AGENT_RESTORE_MS = 10 * 60_000;
+
+/**
  * A server an Agent runs: its `restore` request (the Agent checks the name against its own listing and that its unit
- * is stopped, then copies the save as the newest, which the next start loads), over the saves it pushed (`list`).
+ * is stopped, then copies the save as the newest, which the next start loads), over the saves it pushed (`list`),
+ * answered within `AGENT_RESTORE_MS`.
  */
 export function agentRestore(agents: Pick<Agents, 'request'>, agentId: string, list: () => Promise<Backup[]>): RestoreSource {
   return {
     list,
     run: async (name) => {
-      await agents.request(agentId, { type: 'restore', name });
+      await agents.request(agentId, { type: 'restore', name }, { timeoutMs: AGENT_RESTORE_MS });
       return `${name} is copied as the newest save: the server loads it on its next start.`;
     },
   };

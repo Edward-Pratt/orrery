@@ -430,6 +430,19 @@ test('requests carry fresh ids, answer with checked data, and fail on refusal, b
   await assert.rejects(dropped, /disconnected/);
 });
 
+test("a request's own timeout outlives the default one: a long restore is not reported failed while it goes on", async (t) => {
+  const { agents, port } = await setup(t, { agents: { requestTimeoutMs: 50 } });
+  const agent = await agentUp(port);
+  const restore = agents.request('vm', { type: 'restore', name: 'x.zip' }, { timeoutMs: 5_000 });
+  const asked = (await agent.next()) as { id: string };
+  await sleep(200); // well past the default 50 ms
+  agent.send({ type: 'reply', id: asked.id, ok: true });
+  assert.equal(await restore, undefined);
+  const short = agents.request('vm', { type: 'restore', name: 'x.zip' }, { timeoutMs: 50 });
+  await agent.next();
+  await assert.rejects(short, /did not answer in time/);
+});
+
 test('a line whose handling throws ends only its own connection; a deeply nested reply is just refused', async (t) => {
   const errors = t.mock.method(console, 'error', () => {});
   const { agents, port } = await setup(t);

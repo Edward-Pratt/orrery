@@ -71,7 +71,7 @@ export type AgentMsg =
  * The hub's requests to an Agent, each answered by a `reply` with its `id` (30 s unless noted). `serviceAct` runs
  * `systemctl <action> --no-block` on its own unit; `journal` is the last 200 lines of a unit's log file (`unit`: the
  * server's unit or the Agent's own); `logs` lists the log files it serves and `log` is the last 1000 lines of one;
- * `restore` copies a listed save as the newest while the unit is stopped; `update` starts a game update (the reply
+ * `restore` copies a listed save as the newest while the unit is stopped (10 min); `update` starts a game update (the reply
  * means accepted; its id is the update's), `updateResume` continues the running one after the hub's stop and
  * `updateCancel` cancels it before the swap; `deploy` starts the Agent's own deploy of a release (the reply means
  * started).

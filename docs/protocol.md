@@ -176,7 +176,8 @@ The Agent never sends a URL query string in `detail`, `error` or `log`.
 
 ### Hub → Agent
 
-Every request carries a fresh `id` and is answered by a `reply` with that `id`, within 30 s.
+Every request carries a fresh `id` and is answered by a `reply` with that `id`, within 30 s; a `restore` within 10 min,
+since it copies the whole save first (the hub waits that long for it).
 
 | type | fields | effect | `reply.data` |
 |---|---|---|---|
@@ -184,7 +185,7 @@ Every request carries a fresh `id` and is answered by a `reply` with that `id`, 
 | `journal` | `id`, `unit` | the last 200 lines of that unit's log file (the server's unit: `factorio-current.log`; the Agent's own: `agent.log`) | `{ lines }` |
 | `logs` | `id` | lists the log files it serves (`factorio-current.log`, `factorio-previous.log`, `agent.log`) | `{ files: { name, size, modified }[] }` |
 | `log` | `id`, `name` | the last 1000 lines of a listed file; any other name is an error | `{ lines }` |
-| `restore` | `id`, `name` | copies a listed save as the newest file (`restored-<time>-<name>`), only while the unit is inactive; the next start loads it | — |
+| `restore` | `id`, `name` | copies a listed save as the newest file (`restored-<time>-<name>`), only while the unit is inactive; the next start loads it. Answered within 10 min | — |
 | `update` | `id`, `factorio` (`{ version, url, sha256 }`), `mods` (`{ name, version, sha1, url }[]`) | validates it, checks every hash itself, then starts the update: `reply` means accepted; its steps follow as `updateStep` with this `id` | — |
 | `updateResume` | `id` | the update running continues after the hub's stop (the unit is inactive) | — |
 | `updateCancel` | `id` | the update running is cancelled, only before the swap | — |

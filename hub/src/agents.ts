@@ -353,9 +353,9 @@ export class Agents extends EventEmitter<AgentEvents> {
   /**
    * Sends a request to a connected Agent, with a fresh id, and resolves with its reply: the checked `data` for the
    * requests that answer with data. Rejects when the Agent isn't connected, refuses (with its `error`), doesn't answer
-   * in 30 s, leaves first, or answers with data that isn't the request's.
+   * in time (`timeoutMs`, else 30 s: `requestTimeoutMs`), leaves first, or answers with data that isn't the request's.
    */
-  request<C extends AgentCall>(agentId: string, call: C): Promise<AgentAnswer<C['type']>> {
+  request<C extends AgentCall>(agentId: string, call: C, { timeoutMs }: { timeoutMs?: number } = {}): Promise<AgentAnswer<C['type']>> {
     const conn = this.#conns.get(agentId);
     if (!conn) return Promise.reject(new Error(`agent ${agentId} is not connected`));
     const id = randomUUID();
@@ -363,7 +363,7 @@ export class Agents extends EventEmitter<AgentEvents> {
       const timer = setTimeout(() => {
         conn.pending.delete(id);
         reject(new Error(`agent ${agentId} did not answer in time`));
-      }, this.#requestTimeoutMs);
+      }, timeoutMs ?? this.#requestTimeoutMs);
       conn.pending.set(id, { request: call.type, resolve: resolve as (data: unknown) => void, reject, timer });
       this.#send(conn.socket, { ...call, id } as AgentRequest);
     });

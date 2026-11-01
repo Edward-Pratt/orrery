@@ -6,7 +6,7 @@ import { posix } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { AgentMsg, Save, SaveKind } from '../../hub/src/types.ts';
 import { head, openPlain } from './files.ts';
-import { RconTimeout } from './rcon.ts';
+import { RconNoAnswer } from './rcon.ts';
 import type { UnitState } from './service.ts';
 import { LIMITS, printable } from './wire.ts';
 
@@ -312,8 +312,9 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
       const reply = await this.#o.run(`/orrery-save ${name}`);
       if (!saved(reply, name)) throw new Error(`/orrery-save answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
     } catch (err) {
-      // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the file tells.
-      if (!(err instanceof RconTimeout)) throw err;
+      // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the command
+      // was sent, so the file tells. One never sent (RCON not reached, or no auth answer) did not run: it fails now.
+      if (!(err instanceof RconNoAnswer)) throw err;
     }
     return this.#written(`${name}.zip`);
   }

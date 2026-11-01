@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { HubClient, backoff, type HubOptions } from '../src/hub.ts';
+import { RconNoAnswer, RconNotSent } from '../src/rcon.ts';
 import { StatusPoller, type Reading } from '../src/status.ts';
 import { LIMITS } from '../src/wire.ts';
 import { eventually, fakeHub, type Answer, type HubConn } from './fake-hub.ts';
@@ -309,7 +310,8 @@ test('a console cmd on the game connection runs through command and is answered 
   const ran: string[] = [];
   const command = async (c: string) => {
     ran.push(c);
-    if (c === '/slow') throw new Error('RCON command timed out after 4000 ms');
+    if (c === '/slow') throw new RconNoAnswer('RCON command timed out after 4000 ms'); // sent: Factorio may still run it
+    if (c === '/queued') throw new RconNotSent('RCON connection closed before the command was sent');
     return ['Online players (1):', '  alice (online)'];
   };
   const { hub, client } = await setup(t, undefined, { command });
@@ -321,13 +323,15 @@ test('a console cmd on the game connection runs through command and is answered 
   game.send({ type: 'cmd', id: 'c2', command: '/slow' });
   game.send({ type: 'cmd', id: 'c3', command: 'x'.repeat(LIMITS.text + 1) });
   game.send({ type: 'cmd', id: 'c4', command: '/c game.print(1)\n/c game.print(2)' });
-  await eventually(() => sent(game, 'cmdResult').length === 4, 2000, 'four results');
+  game.send({ type: 'cmd', id: 'c5', command: '/queued' });
+  await eventually(() => sent(game, 'cmdResult').length === 5, 2000, 'five results');
   const out = Object.fromEntries(sent(game, 'cmdResult').map((r) => [r.id, r.output as string[]]));
   assert.deepEqual(out.c1, ['Online players (1):', '  alice (online)']);
-  assert.deepEqual(out.c2, ['the command did not run: RCON command timed out after 4000 ms']);
+  assert.deepEqual(out.c2, ['no answer in time (Factorio may be saving): the command may still run (RCON command timed out after 4000 ms)']);
+  assert.deepEqual(out.c5, ['the command did not run: RCON connection closed before the command was sent']);
   assert.match(out.c3![0]!, /^refused/);
   assert.match(out.c4![0]!, /^refused/, 'one line only');
-  assert.deepEqual(ran, ['/players', '/slow'], 'only valid commands reach RCON');
+  assert.deepEqual(ran, ['/players', '/slow', '/queued'], 'only valid commands reach RCON');
   assert.deepEqual(game.invalid, []);
 });
 

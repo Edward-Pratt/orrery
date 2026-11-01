@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { parseAgentLine } from '../../hub/src/protocol.ts';
-import { RconTimeout } from '../src/rcon.ts';
+import { RconNoAnswer, RconTimeout } from '../src/rcon.ts';
 import { KEEP_NAMED, KEEP_WORLD, SAVE_EVERY_MS, Saves, kindOf, loadedMap, stamp, type BackupResult, type SavesMsg, type SavesOptions } from '../src/saves.ts';
 import { ServiceWatch, systemctl, type UnitState } from '../src/service.ts';
 import { eventually } from './fake-hub.ts';
@@ -306,7 +306,7 @@ test('a save that never appears times out after the bounded wait; one that keeps
   assert.match(w.backups[1]!.detail, /still being written after 0\.3 s$/);
 });
 
-test('a save is answered once its file held for the stable time; one at a time; an RCON timeout still waits for the file', async (t) => {
+test('a save is answered once its file held for the stable time; one at a time; an RCON timeout still waits for the file, unless never sent', async (t) => {
   const w = await world(t, { stableMs: 100 });
   w.write = async (name) => {
     setTimeout(() => void writeFile(join(w.saves, `${name}.zip`), 'x'.repeat(2_500_000)), 30);
@@ -327,7 +327,7 @@ test('a save is answered once its file held for the stable time; one at a time; 
     log: join(slow.data, 'factorio-current.log'),
     run: async (command) => {
       await writeFile(join(slow.saves, `${command.slice('/orrery-save '.length)}.zip`), 'map');
-      throw new RconTimeout('RCON command timed out after 4000 ms');
+      throw new RconNoAnswer('RCON command timed out after 4000 ms');
     },
     unit: async () => stopped,
     pollMs: 10,
@@ -336,6 +336,11 @@ test('a save is answered once its file held for the stable time; one at a time; 
   slow.s.on('backup', (b) => slow.backups.push(b));
   await slow.s.save();
   assert.equal(slow.backups[0]!.ok, true, slow.backups[0]!.detail);
+
+  // No auth answer: the command was never sent, so no file can come. It fails at once, not after the wait.
+  const unsent = await world(t, { waitMs: 60_000, run: async () => Promise.reject(new RconTimeout('RCON did not answer within 4000 ms')) });
+  await unsent.s.save();
+  assert.match(unsent.backups[0]!.detail, /^orrery-\d{8}T\d{6}Z\.zip: RCON did not answer within 4000 ms$/);
 
   // The mod refusing it (or RCON gone) fails at once.
   const refused = await world(t, { run: async () => '{"ok":false,"error":"bad name"}' });

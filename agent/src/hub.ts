@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { AgentMsg, AgentRequest, HostSample } from '../../hub/src/types.ts';
 import type { Config } from './config.ts';
 import type { GameEvent } from './events.ts';
+import { RconNoAnswer } from './rcon.ts';
 import type { BackupResult, SavesMsg } from './saves.ts';
 import { RunWatch, type RunEnd, type UnitState } from './service.ts';
 import type { Reading } from './status.ts';
@@ -411,8 +412,13 @@ export class HubClient {
     }
   }
 
+  /** A console command's `cmdResult`: its output, or why there is none; one sent but not answered in time may still run. */
   async #cmd(link: Link, id: string, command: string): Promise<void> {
-    const output = await this.#command(command).catch((err: Error) => [`the command did not run: ${err.message}`]);
+    const output = await this.#command(command).catch((err: Error) => [
+      err instanceof RconNoAnswer
+        ? `no answer in time (Factorio may be saving): the command may still run (${err.message})`
+        : `the command did not run: ${err.message}`,
+    ]);
     if (this.#game === link) link.send({ type: 'cmdResult', id, output });
   }
 

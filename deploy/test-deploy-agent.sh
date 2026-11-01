@@ -106,7 +106,13 @@ untouched() { # <tag>
 }
 fail=0
 check() {
-  if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     /' "$T/out"; fail=1; fi
+  if eval "$2"; then echo "ok   $1"; else
+    echo "FAIL $1"; sed 's/^/     /' "$T/out"
+    # What the fakes saw, for a failure only CI shows: the connected file, the agent script left, the restarts.
+    for f in "$R/connected" "$F/agent" "$F/calls"; do echo "     -- $f: $(tr '\n' '|' < "$f" 2> /dev/null)"; done
+    echo "     -- now $(date +%s%3N)"
+    fail=1
+  fi
 }
 
 agent ok

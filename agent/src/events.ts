@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { constants, open, type FileHandle } from 'node:fs/promises';
 import type { ModMsg } from '../../hub/src/types.ts';
 import type { UnitState } from './service.ts';
+import { parseStatus } from './status.ts';
 import { LIMITS, printable, type ToGame } from './wire.ts';
 
 /** The game connection's messages that come from the mod's datagrams. */
@@ -199,9 +200,9 @@ export type EventsOptions = {
   factorioPort: number;
   /** `factorio-current.log` in the server's data folder. */
   log: string;
-  /** The players online at the latest `/orrery-status`: a link or unlink names one of them, or is dropped. */
+  /** The players online at the latest `/orrery-status`: a link or unlink names one of them, or a fresh one decides. */
   players: () => readonly string[];
-  /** Runs an RCON command (for `/orrery-hello`); rejects when RCON can't run it. */
+  /** Runs an RCON command (`/orrery-hello`, a fresh `/orrery-status`); rejects when RCON can't run it. */
   run: (command: string) => Promise<string>;
   /** How long after a start the log may take to show either line. */
   deadlineMs?: number;
@@ -221,10 +222,11 @@ export type EventsOptions = {
  * a restart between two readings, since the second after it became active) is the previous run's, which Factorio
  * has not replaced yet, so it is read again until it is. `Opening Lua UDP Socket failed`, or neither line within
  * 60 s, turns events off until the next start, logged once. A datagram over 4 KiB, or that isn't the mod's shape,
- * is dropped, and so is a `link` or `unlink` for a player not online; each kind of drop is logged once per start.
- * Gaps in `seq` are logged; its baseline is the `hello` datagram that `/orrery-hello` makes the mod send, once per
- * start after the gate opens and RCON answers. Emits each event as the game connection's message, within
- * `EventBudget` (5 a second, 30 at once; the rest dropped, counted in the log once a minute).
+ * is dropped, each kind of drop logged once per start. Gaps in `seq` are logged; its baseline is the `hello` datagram
+ * that `/orrery-hello` makes the mod send, once per start after the gate opens and RCON answers. Emits each event as
+ * the game connection's message, within `EventBudget` (5 a second, 30 at once; the rest dropped, counted in the log
+ * once a minute). A `link` or `unlink` for a player not online at the latest poll (who may have joined since) waits
+ * for a fresh `/orrery-status`, and is dropped, each one logged, if that doesn't have them online either.
  */
 export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
   #o: Required<EventsOptions>;
@@ -398,11 +400,32 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
     this.#seq(d.seq, d.event === null);
     const event = d.event;
     if (!event) return;
-    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) {
-      return this.#drop('offline', `a ${event.type} for a player not online`);
-    }
-    if (!this.#budget.take()) return; // over the budget: counted, and its seq taken above, so no gap is logged
+    // Over the budget: counted, and its seq taken above, so no gap is logged. Taken before a fresh /orrery-status
+    // too, so a flood of links for names not online can't flood RCON.
+    if (!this.#budget.take()) return;
+    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) return void this.#online(event);
     this.emit('event', event);
+  }
+
+  /**
+   * A link or unlink for a name not online at the latest poll, which is up to 5 s old: a player who just joined. A
+   * fresh `/orrery-status` decides (never the UDP `join`, which anyone in the container can send); not online there
+   * either, it is dropped and logged.
+   */
+  async #online(event: Extract<GameEvent, { type: 'link' | 'unlink' }>): Promise<void> {
+    const run = this.#run;
+    let online = false;
+    let why = 'not online at a fresh /orrery-status';
+    try {
+      const status = parseStatus(await this.#o.run('/orrery-status'));
+      if (status) online = status.players.includes(event.player);
+      else why = '/orrery-status gave no status';
+    } catch (err) {
+      why = `/orrery-status failed: ${printable((err as Error).message)}`;
+    }
+    if (run !== this.#run || this.#gate !== 'on') return; // the server stopped meanwhile
+    if (online) return void this.emit('event', event);
+    console.log(`[events] dropped ${event.type === 'link' ? 'a link' : 'an unlink'} for ${printable(event.player)}: ${why}`);
   }
 
   #seq(seq: number, hello: boolean): void {

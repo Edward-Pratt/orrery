@@ -331,8 +331,9 @@ at the hub, without the Agent knowing.
   one over it is dropped from all three alike, and the latest dropped goes out when the next one fits (at most 3 min
   on, unless a later event went out first), so the recorded state is never wrong for longer. The hub's own state of the
   server (online, players, as the API's server list gives it) is right all along, but what follows the stream may lag
-  until a dropped event goes out: the dashboard's card (fetched again only on a card event) and its latest rate, and a
-  restart countdown, which a dropped `stopped`, `crashed` or `lost` does not cancel. A Mod's server has no such budget.
+  until a dropped event goes out: the dashboard's card (fetched again only on a card event) and its latest rate. A
+  restart countdown is still cancelled by a dropped `stopped`, `crashed` or `lost`: it checks whether the server went
+  down since it began at the server's every event, each warning and its end. A Mod's server has no such budget.
 - **Message types**, each within its own connection: a message over its budget is dropped and the connection stays.
 
 | type | budget |

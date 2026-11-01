@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import type { Socket } from 'node:net';
+import { PassThrough } from 'node:stream';
 import { test, type TestContext } from 'node:test';
 import { RestartScheduler } from '../src/restarts.ts';
-import type { HubEvent, Notice, ServerHub, ServerState } from '../src/servers.ts';
+import { ServerHub, type HubEvent, type Notice, type ServerState } from '../src/servers.ts';
 
 process.env.TZ = 'Europe/London'; // daily-restart assertions are in UK local time, across a DST change
 
@@ -21,7 +23,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const audit: string[] = []; // "command|by"
   const log: string[] = []; // "actor|action|target|details", from hub.audit
   const notices: Notice[] = []; // published on the hub's event stream
-  const state = { online: true, stopError: null as Error | null, paused: null as string | null, game: 'minecraft', restartError: null as Error | null };
+  const state = { online: true, downs: 0, stopError: null as Error | null, paused: null as string | null, game: 'minecraft', restartError: null as Error | null };
   const restarted: string[] = []; // "serverId|by", the `restart` a factorio server's countdown ends in
   const runCommand = async (id: string, command: string, by: string) => {
     commands.push(command);
@@ -33,6 +35,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
   const hub = {
     on: (name: 'event', fn: (e: HubEvent) => void) => events.on(name, fn),
     get: (id: string) => (state.online ? ({ id, online: true, game: state.game } as ServerState) : undefined),
+    downs: () => state.downs,
     runCommand,
     // What ServerHub.broadcast does on a Mod's server.
     broadcast: async (id: string, text: string, by: string) => void (await runCommand(id, `say ${text}`, by)),
@@ -41,7 +44,7 @@ function setup(t: TestContext, now = Date.UTC(2026, 8, 24, 12, 0)) {
       notices.push(notice);
       events.emit('event', { ...notice, type: 'notice', serverId });
     },
-  } as unknown as Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'publish' | 'audit'>;
+  } as unknown as Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'downs' | 'publish' | 'audit'>;
   const restart = async (id: string, by: string) => {
     restarted.push(`${id}|${by}`);
     if (state.restartError) throw state.restartError;
@@ -125,6 +128,77 @@ test('the server going down (or its Agent leaving) first cancels; its own stop d
   assert.deepEqual(notices.slice(1), [DOWN]);
   t.mock.timers.tick(10 * MIN);
   assert.equal(commands.filter((c) => c === 'stop').length, 1); // only the earlier countdown's
+});
+
+test('a server that went down with no down event (dropped over its budget) cancels at its next event, warning or the end', (t) => {
+  const { restarts, events, commands, notices, state, restarted } = setup(t);
+  state.game = 'factorio';
+  // At the end: the last warning is out, then it goes down and back with nothing on the stream.
+  restarts.schedule('space', 1, 'alice');
+  t.mock.timers.tick(50_000);
+  state.downs++;
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(restarted, []);
+  assert.deepEqual(notices, [scheduled(1, 'alice'), DOWN]);
+  assert.equal(restarts.pending('space'), undefined);
+  // At a warning: none is said.
+  notices.length = 0;
+  restarts.schedule('space', 5, 'alice');
+  const said = commands.length;
+  state.downs++;
+  t.mock.timers.tick(MIN);
+  assert.equal(commands.length, said);
+  assert.deepEqual(notices, [scheduled(5, 'alice'), DOWN]);
+  // At its next event (its `connected`), before any warning.
+  notices.length = 0;
+  restarts.schedule('space', 5, 'alice');
+  state.downs++;
+  events.emit('event', { serverId: 'space', type: 'connected' });
+  assert.deepEqual(notices, [scheduled(5, 'alice'), DOWN]);
+  t.mock.timers.tick(10 * MIN);
+  assert.deepEqual(restarted, []);
+});
+
+test("a factorio server's countdown with its lifecycle budget spent: a crash and a reconnect, both dropped, still cancel it", async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.UTC(2026, 8, 24, 12, 0) });
+  t.mock.method(console, 'error', () => {});
+  const hub = new ServerHub([{ id: 'space', name: 'Space Age', game: 'factorio' }]);
+  t.after(() => hub.close());
+  const restarted: string[] = [];
+  const restarts = new RestartScheduler(hub, { restart: async (id, by) => void restarted.push(`${id}|${by}`) });
+  t.after(() => restarts.stop());
+  const lifecycle: string[] = [];
+  const notices: string[] = [];
+  hub.on('event', (e) => (e.type === 'notice' ? notices.push(e.kind) : lifecycle.push(e.type)));
+  const attach = () => {
+    const socket = new PassThrough();
+    socket.resume(); // the countdown's lines to the Agent go nowhere
+    hub.attach(socket as unknown as Socket, 'space', '1.0.0');
+    return socket;
+  };
+  const closed = () => new Promise((r) => setImmediate(r)); // a destroyed stream's 'close' comes on a later tick
+  // An Agent's token holder churning connections spends the budget: 20 events, then none goes out.
+  hub.agentUp('space');
+  for (let i = 0; i < 10; i++) {
+    attach(); // connected
+    hub.agentDown('space'); // lost
+    hub.agentUp('space');
+  }
+  let game = attach();
+  assert.equal(lifecycle.length, 20);
+  assert.equal(hub.get('space')?.online, true);
+
+  restarts.schedule('space', 5, 'alice');
+  game.destroy();
+  await closed();
+  t.mock.timers.tick(5_000); // crashed, once its Agent connection outlived the settle wait: dropped
+  game = attach(); // back: its connected dropped too
+  assert.equal(lifecycle.length, 20, 'the crash and the reconnect are over the budget');
+  assert.equal(hub.get('space')?.online, true);
+  t.mock.timers.tick(5 * MIN);
+  assert.deepEqual(restarted, [], 'the server that came back is not restarted');
+  assert.deepEqual(notices, ['restartScheduled', 'restartCancelledDown']);
+  assert.equal(restarts.pending('space'), undefined);
 });
 
 test('stop failing with a disconnect is success; a timeout is reported', async (t) => {

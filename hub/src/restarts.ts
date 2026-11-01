@@ -1,8 +1,9 @@
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 
-type Hub = Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'publish' | 'audit'>;
-type Pending = { at: number; by: string; byName: string; stop: boolean; fire?: () => Promise<void>; timers: NodeJS.Timeout[] };
+type Hub = Pick<ServerHub, 'runCommand' | 'broadcast' | 'on' | 'get' | 'downs' | 'publish' | 'audit'>;
+/** `downs`: the server's `ServerHub.downs` when the countdown began. */
+type Pending = { at: number; by: string; byName: string; stop: boolean; fire?: () => Promise<void>; timers: NodeJS.Timeout[]; downs: number };
 /**
  * A stop countdown (`stop`), and what it runs at the end instead of the `stop` command (`fire`). A countdown with its
  * own `fire` is audited by whoever owns that action, not here.
@@ -32,7 +33,9 @@ export type Restart = (serverId: string, by: string) => Promise<void>;
 /**
  * Countdown restarts: in-game warnings, then `stop` (systemd's Restart=always brings the server back); a factorio
  * server's ends in `restart` instead (its unit restarts only on failure, so a stop would leave it down). A countdown
- * can instead be a stop that ends in its own action (stopping the server's service, so it stays down).
+ * can instead be a stop that ends in its own action (stopping the server's service, so it stays down). A server that
+ * goes down cancels its countdown (`restartCancelledDown`): by its `stopped`, `crashed` or `lost`, or, should that be
+ * dropped, by `ServerHub.downs` having moved at its next event, warning or the end.
  * Lives in the hub core so the web dashboard can use it too; its notices go on the hub's event stream. Pending
  * restarts are in memory only.
  */
@@ -59,9 +62,9 @@ export class RestartScheduler {
     this.#restart = restart;
     hub.on('event', (e) => {
       // `lost`: its Agent left, taking the game connection the countdown speaks through.
-      if ((e.type === 'stopped' || e.type === 'crashed' || e.type === 'lost') && this.#clear(e.serverId)) {
-        hub.publish(e.serverId, { severity: 'info', kind: 'restartCancelledDown' });
-      }
+      if (e.type === 'stopped' || e.type === 'crashed' || e.type === 'lost') this.#cancelDown(e.serverId);
+      // Any other (its `connected`, its heartbeats' `tps`): a factorio server's down event may have been dropped.
+      else this.#wentDown(e.serverId);
     });
   }
 
@@ -78,7 +81,7 @@ export class RestartScheduler {
     const delay = minutes * 60_000;
     const timers = WARNINGS_MS.filter((w) => w <= delay).map((w) => setTimeout(() => this.#warn(serverId, w), delay - w));
     timers.push(setTimeout(() => this.#fire(serverId), delay));
-    this.#pending.set(serverId, { at: Date.now() + delay, by, byName, stop, fire, timers });
+    this.#pending.set(serverId, { at: Date.now() + delay, by, byName, stop, fire, timers, downs: this.#hub.downs(serverId) });
     if (!fire) this.#hub.audit(by, 'restart', serverId, `in ${minutes} min`);
     if (delay) this.#hub.publish(serverId, { severity: 'info', kind: 'restartScheduled', ms: delay, by: byName, ...this.#stop(stop) });
   }
@@ -129,6 +132,24 @@ export class RestartScheduler {
     return true;
   }
 
+  /** Ends a server's countdown because it went down, with its notice; nothing if none was pending. */
+  #cancelDown(serverId: string): void {
+    if (this.#clear(serverId)) this.#hub.publish(serverId, { severity: 'info', kind: 'restartCancelledDown' });
+  }
+
+  /**
+   * Cancels a countdown (true) whose server went down since it began (`ServerHub.downs`), even though the stream never
+   * said so: a factorio server's `stopped`, `crashed` or `lost` can be dropped over its lifecycle budget, and its
+   * countdown would then restart a server that already went down and came back. A Mod's server never gets here first:
+   * its down event always follows at once.
+   */
+  #wentDown(serverId: string): boolean {
+    const p = this.#pending.get(serverId);
+    if (!p || this.#hub.downs(serverId) === p.downs) return false;
+    this.#cancelDown(serverId);
+    return true;
+  }
+
   /** A countdown's line in game (`ServerHub.broadcast`). */
   #say(serverId: string, text: string): void {
     this.#hub
@@ -142,12 +163,13 @@ export class RestartScheduler {
   }
 
   #warn(serverId: string, msLeft: number): void {
+    if (this.#wentDown(serverId)) return;
     this.#say(serverId, `Server ${words(this.#pending.get(serverId)?.stop).going} in ${countdownText(msLeft)}`);
   }
 
   #fire(serverId: string): void {
     const p = this.#pending.get(serverId);
-    if (!p) return;
+    if (!p || this.#wentDown(serverId)) return;
     this.#clear(serverId); // first, so the `stopped` event this causes isn't reported as a cancellation
     this.#hub.publish(serverId, { severity: 'info', kind: 'restartNow', ...this.#stop(p.stop) });
     // Factorio's own stop would leave its unit down: its service restarts instead, with no second countdown.

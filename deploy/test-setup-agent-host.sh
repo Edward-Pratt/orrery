@@ -3,9 +3,9 @@
 # (dnf, rpm, useradd, getent, id, install's owner flags, runuser, systemctl, firewall-cmd, ip, selinuxenabled,
 # getenforce, semanage, restorecon, tailscale, uname, ss, df, podman, curl) and a fake Quadlet generator under the
 # prefix. curl serves local fixtures, and this folder's factorio.container, units and polkit file as the release's.
-# tar, xz, sha256sum and node are real, and the hub is a real local TCP listener. In the script's runs only, mv,
-# mktemp, tar, ln, rm and mkdir are logging wrappers around the real ones, noting who runs them, so the test sees
-# which writes run as factorio.
+# tar, xz, sha256sum, node and jq are real (the agent's releases are packed by .github/agent-tarball.sh), and the hub is
+# a real local TCP listener. In the script's runs only, mv, mktemp, tar, ln, rm and mkdir are logging wrappers around the
+# real ones, noting who runs them, so the test sees which writes run as factorio.
 #   bash deploy/test-setup-agent-host.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -14,7 +14,8 @@ hub_pid=''
 trap '[[ -z $hub_pid ]] || kill "$hub_pid" 2> /dev/null || true; rm -rf "$T"' EXIT
 R=$T/root F=$T/fake X=$T/fixtures S=$T/setup-agent-host.sh
 REAL_NODE=$(command -v node) REAL_INSTALL=$(command -v install) REAL_ID=$(command -v id) REAL_UNAME=$(command -v uname)
-export F X R HERE REAL_NODE REAL_INSTALL REAL_ID REAL_UNAME SETUP_ROOT=$R LC_ALL=C
+CHECK_ENV=$T/check-env # the agent check's environment, kept out of $F (it holds the token and the RCON password)
+export F X R HERE REAL_NODE REAL_INSTALL REAL_ID REAL_UNAME SETUP_ROOT=$R LC_ALL=C CHECK_ENV
 mkdir -p "$T/bin" "$X"
 
 # ---- Fakes. Each notes its call in $F/calls; flag files in $F steer them. Commands with their own argv are logged
@@ -38,8 +39,8 @@ echo 'factorio:x:986:986::/srv/factorio:/sbin/nologin' >> "$F/passwd"
 EOF
 cat > "$T/bin/getent" << 'EOF'
 #!/usr/bin/env bash
-[[ $1 == passwd ]] || exit 2
-grep "^$2:" "$F/passwd" 2> /dev/null || exit 2
+[[ $1 == passwd || $1 == group ]] || exit 2
+grep "^$2:" "$F/$1" 2> /dev/null || exit 2
 EOF
 cat > "$T/bin/id" << 'EOF'
 #!/usr/bin/env bash
@@ -159,11 +160,15 @@ case $1 in
     if [[ $a == *' sh -c '* ]]; then
       if [[ $a == *debian* ]]; then echo 2.41-12; else echo 2.39; fi
     elif [[ $a == *' --version '* ]]; then
-      if [[ -e $F/glibc ]]; then
-        echo "/opt/factorio/current/bin/arm64/factorio: /lib64/libc.so.6: version \`GLIBC_2.38' not found" >&2
+      # The binary is the word before --version. $F/glibc makes every one need a newer glibc than the image's, or only
+      # the release it names (X.Y.Z in it).
+      bin=${a% --version *}
+      bin=${bin##* }
+      if [[ -e $F/glibc && (! -s $F/glibc || $bin == */releases/$(cat "$F/glibc")/*) ]]; then
+        echo "$bin: /lib64/libc.so.6: version \`GLIBC_2.38' not found" >&2
         exit 1
       fi
-      exec "$SETUP_ROOT/opt/factorio/current/bin/arm64/factorio" --version
+      exec "$SETUP_ROOT$bin" --version
     elif [[ $a == *' --create '* ]]; then
       w=${a##* --create }
       echo world > "$SETUP_ROOT${w%% *}"
@@ -192,6 +197,8 @@ echo "curl $url" >> "$F/calls"
 [[ -z $out ]] || echo "as ${FAKE_AS:-root} curl -o $out" >> "$F/calls"
 path=${url#https://}
 path=${path%%\?*}
+page_re='[?&]page=([0-9]+)' # page N > 1 of a list is served from <path>.pageN
+if [[ $url =~ $page_re ]] && ((BASH_REMATCH[1] > 1)); then path+=.page${BASH_REMATCH[1]}; fi
 [[ $path != */ ]] || path+=index
 src=$X/$path
 [[ $path != raw.githubusercontent.com/Edward-Pratt/orrery/*/deploy/* ]] || src=$HERE/${path##*/}
@@ -238,40 +245,59 @@ done
 # GitHub release list.
 NV=$(sed -n 's/^NODE_VERSION=//p' "$HERE/setup-agent-host.sh")
 B=$T/build
-mkdir -p "$B/node-v$NV-linux-arm64/bin" "$B/factorio/bin/arm64" "$B/factorio/data/base" "$B/agent/src"
+mkdir -p "$B/node-v$NV-linux-arm64/bin" "$B/agent/src"
 printf '#!/bin/sh\nexec "$REAL_NODE" "$@"\n' > "$B/node-v$NV-linux-arm64/bin/node"
-printf '#!/usr/bin/env bash\n[[ $1 != --version ]] || echo "Version: 2.1.24 (build 87808, linux-arm64, headless)"\n' > "$B/factorio/bin/arm64/factorio"
-chmod 755 "$B/node-v$NV-linux-arm64/bin/node" "$B/factorio/bin/arm64/factorio"
+chmod 755 "$B/node-v$NV-linux-arm64/bin/node"
+for v in 2.1.24 2.1.25; do # Factorio's headless tarballs: one top folder factorio/
+  mkdir -p "$B/factorio-$v/factorio/bin/arm64" "$B/factorio-$v/factorio/data/base"
+  printf '#!/usr/bin/env bash\n[[ $1 != --version ]] || echo "Version: %s (build 87808, linux-arm64, headless)"\n' "$v" > "$B/factorio-$v/factorio/bin/arm64/factorio"
+  chmod 755 "$B/factorio-$v/factorio/bin/arm64/factorio"
+done
 cat > "$B/agent/src/index.ts" << 'EOF'
-// The agent, for the test: its check notes what it got (whether each secret was set, never a value).
+// The agent, for the test: its check notes what it got (whether each secret was set, never a value), and its whole
+// environment in $CHECK_ENV, outside $F, to show the game password never reaches it.
 const fs = require('fs');
 if (process.argv[2] === 'check') {
   const e = process.env;
   const got = { args: process.argv.slice(2), home: e.HOME, rcon: /^[A-Za-z0-9]{32}$/.test(e.RCON_PASSWORD || ''), token: (e.ORRERY_AGENT_TOKEN || '').length >= 32 };
   fs.writeFileSync(e.F + '/check-ran', JSON.stringify(got) + '\n');
+  fs.writeFileSync(e.CHECK_ENV, JSON.stringify(e) + '\n');
+  if (fs.existsSync(e.F + '/check-waits')) { // a check still waiting for RCON: its line must reach the terminal now
+    fs.writeSync(1, 'first-boot check (fixture): waiting for RCON\n');
+    const end = Date.now() + 10_000;
+    while (!fs.existsSync(e.F + '/seen') && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    if (!fs.existsSync(e.F + '/seen')) process.exitCode = 1;
+  }
   console.log('first-boot check (fixture): every check ran');
-  process.exitCode = fs.existsSync(e.F + '/check-fails') ? 1 : 0;
+  if (fs.existsSync(e.F + '/check-fails')) process.exitCode = 1;
 }
 EOF
-mkdir -p "$X/nodejs.org/dist/v$NV" "$X/www.factorio.com/get-download/2.1.24/headless" "$X/www.factorio.com/download/sha256sums" \
-  "$X/factorio.com/api" "$X/api.github.com/repos/Edward-Pratt/orrery"
+mkdir -p "$X/nodejs.org/dist/v$NV" "$X/www.factorio.com/get-download/2.1.24/headless" \
+  "$X/www.factorio.com/get-download/2.1.25/headless" "$X/www.factorio.com/download/sha256sums" "$X/factorio.com/api" \
+  "$X/api.github.com/repos/Edward-Pratt/orrery"
 NODE_TGZ=nodejs.org/dist/v$NV/node-v$NV-linux-arm64.tar.xz
 tar -cJf "$X/$NODE_TGZ" -C "$B" "node-v$NV-linux-arm64"
 FACTORIO_TGZ=www.factorio.com/get-download/2.1.24/headless/linux-arm64
-tar -cJf "$X/$FACTORIO_TGZ" -C "$B" factorio
+tar -cJf "$X/$FACTORIO_TGZ" -C "$B/factorio-2.1.24" factorio
+tar -cJf "$X/www.factorio.com/get-download/2.1.25/headless/linux-arm64" -C "$B/factorio-2.1.25" factorio
 SUMS=www.factorio.com/download/sha256sums/index
 sha() { sha256sum < "$1" | cut -c1-64; }
 {
   echo "c49b66cff90aceff87b30f2973af0df7f51712cb2ee3153e0169d9bed46a964f  factorio-headless_linux_2.1.24.tar.xz"
   echo "$(sha "$X/$FACTORIO_TGZ")  factorio-headless_linux-arm64_2.1.24.tar.xz"
+  echo "$(sha "$X/www.factorio.com/get-download/2.1.25/headless/linux-arm64")  factorio-headless_linux-arm64_2.1.25.tar.xz"
 } > "$X/$SUMS"
 echo '{"experimental":{"headless":"2.1.25"},"stable":{"headless":"2.1.24"}}' > "$X/factorio.com/api/latest-releases"
 DL=github.com/Edward-Pratt/orrery/releases/download
 AGENT_TGZ=$DL/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz # release.yml: orrery-$GITHUB_REF_NAME.tar.gz
 MOD_ZIP=$DL/factorio-v0.1.0/orrery_0.1.0.zip
-mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/factorio-v0.1.0"
-tar -czf "$X/$AGENT_TGZ" -C "$B/agent" . # as ci.yml packs it
-echo "$(sha "$X/$AGENT_TGZ")  orrery-agent-v0.10.0.tar.gz" > "$X/$AGENT_TGZ.sha256"
+AGENT11_TGZ=$DL/agent-v0.11.0/orrery-agent-v0.11.0.tar.gz # a later release, for the re-run tests
+mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/agent-v0.11.0" "$X/$DL/factorio-v0.1.0"
+echo '{ "name": "orrery-agent", "version": "0.0.0" }' > "$B/agent/package.json"
+for v in 0.10.0 0.11.0; do # packed as ci.yml packs it
+  bash "$HERE/../.github/agent-tarball.sh" "$B/agent" "$v" "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz"
+  echo "$(sha "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz")  orrery-agent-v$v.tar.gz" > "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz.sha256"
+done
 echo 'the orrery mod' > "$X/$MOD_ZIP"
 API=api.github.com/repos/Edward-Pratt/orrery/releases
 api() { # <zip digest>: a release list with drafts, other parts, and agent versions that sort wrong as text
@@ -302,6 +328,7 @@ TOKEN='Tok3n+with/base64=chars.0123456789abcdefXYZ' NEW_TOKEN=fedcba9876543210fe
 DIGEST1=$(printf one | sha256sum | cut -c1-64) DIGEST2=$(printf two | sha256sum | cut -c1-64)
 OL=container-registry.oracle.com/os/oraclelinux:10-slim DEBIAN=docker.io/library/debian:trixie-slim
 ARGS=(--agent-id factorio-vm --hub "$HUB" --admins Alice,Bob)
+MARKER_LINE='Managed by orrery deploy/setup-agent-host.sh. Do not edit: re-run the script.'
 Q=$R/etc/containers/systemd/factorio.container
 fresh() { # an OL9 aarch64 VM with Podman 5.2, no factorio user, nothing of ours
   rm -rf "$R" "$F"
@@ -313,22 +340,33 @@ fresh() { # an OL9 aarch64 VM with Podman 5.2, no factorio user, nothing of ours
 }
 override() { mkdir -p "$(dirname "$F/x/$1")"; cat > "$F/x/$1"; } # <host/path>: this test's version of a download
 gone() { mkdir -p "$(dirname "$F/gone/$1")"; touch "$F/gone/$1"; } # <host/path>: a 404
-run() { # [args…]: the script with $IN (default: the token) on stdin, its output in $T/out
+run() { # [args…]: the script with $IN (default: the token) on stdin, its output in $T/out; TRACE=1 runs it under bash -x
   local r=0
   : > "$F/calls"
-  PATH=$T/wrap:$PATH bash "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
+  PATH=$T/wrap:$PATH bash ${TRACE:+-x} "${SCRIPT:-$S}" "$@" < <(printf '%s\n' "${IN-$TOKEN}") > "$T/out" 2>&1 || r=$?
   cat "$F/calls" >> "$T/all-calls"
   return $r
 }
 says() { grep -qF -- "$1" "$T/out"; }
 called() { grep -qE -- "$1" "$F/calls"; }
-# Everything the script wrote, for comparing runs: paths, modes, link targets, contents (the env files' keys only).
+# The game password in server-settings.json (a regular file only), or nothing.
+GP_OF() {
+  local f=$R/srv/factorio/config/server-settings.json
+  [[ -f $f && ! -L $f ]] || return 0
+  node -e 'try { const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).game_password; if (typeof p === "string") process.stdout.write(p); } catch {}' "$f"
+}
+# Everything the script wrote, for comparing runs: paths, modes, link targets, contents (the env files' keys only; the
+# game password, random per VM, as a placeholder: the checks that it is kept compare it on their own).
 written() {
+  local gp
+  gp=$(GP_OF)
   (cd "$R" && find . -path ./usr/libexec -prune -o -path ./etc/os-release -prune -o -print) | sort | while IFS= read -r p; do
     f=$R/${p#./}
     if [[ -L $f ]]; then echo "$p -> $(readlink "$f")"
     elif [[ -d $f ]]; then echo "$p/ $(stat -c %a "$f")"
     elif [[ $p == ./etc/orrery-*.env ]]; then echo "$p $(stat -c %a "$f") $(cut -d= -f1 "$f" | tr '\n' ' ')"
+    elif [[ $gp =~ ^[A-Za-z0-9]+$ ]] && grep -qF -- "$gp" "$f"; then
+      echo "$p $(stat -c %a "$f") $(sed "s/$gp/<game password>/g" "$f" | sha256sum | cut -c1-64)"
     else echo "$p $(stat -c %a "$f") $(sha "$f")"; fi
   done
 }
@@ -342,7 +380,7 @@ settings_ok() {
     const ok = s.visibility.public === false && s.visibility.lan === false && s.require_user_verification === true &&
       s.auto_pause === true && s.autosave_interval === 10 && s.autosave_slots === 5 && s.non_blocking_saving === false &&
       s.allow_commands === "admins-only" && /setup-agent-host\.sh/.test(s._comment) &&
-      !["username", "password", "token", "game_password"].some((k) => k in s);
+      /^[A-Za-z0-9]{20,}$/.test(s.game_password) && !["username", "password", "token"].some((k) => k in s);
     process.exit(ok ? 0 : 1);' "$1"
 }
 canon() { node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))))' "$1"; }
@@ -395,8 +433,8 @@ check 'installs the newest stable Factorio, checked against sha256sums/, and poi
   called "^curl https://www.factorio.com/download/sha256sums/$" && called "^curl https://www.factorio.com/get-download/2.1.24/headless/linux-arm64$" &&
   [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -x $R/opt/factorio/releases/2.1.24/bin/arm64/factorio ]] &&
   [[ -z $(ls -A "$R/opt/factorio/.incoming") ]]'
-check 'runs Factorio --version in the pinned image, as factorio, read-only' '
-  called "^podman run --rm --network=none --user 986:986 --cap-drop=all --security-opt=no-new-privileges --read-only -v $R/opt/factorio:/opt/factorio:ro,z $OL@sha256:$DIGEST1 /opt/factorio/current/bin/arm64/factorio --version$"'
+check 'runs the release'\''s Factorio --version in the pinned image, as factorio, read-only' '
+  called "^podman run --rm --network=none --user 986:986 --cap-drop=all --security-opt=no-new-privileges --read-only -v $R/opt/factorio:/opt/factorio:ro,z $OL@sha256:$DIGEST1 /opt/factorio/releases/2.1.24/bin/arm64/factorio --version$"'
 check 'pulls the image by its full name and records the pin and its glibc in image.json' '
   called "^podman pull $OL$" &&
   [[ $(canon "$R/etc/orrery-agent/image.json") == "{\"image\":\"$OL@sha256:$DIGEST1\",\"glibc\":\"2.39\"}" ]] &&
@@ -404,7 +442,7 @@ check 'pulls the image by its full name and records the pin and its glibc in ima
 check 'writes config.ini with the read-only data and the writable /srv/factorio' '
   grep -qx "read-data=/opt/factorio/current/data" "$R/srv/factorio/config/config.ini" &&
   grep -qx "write-data=/srv/factorio" "$R/srv/factorio/config/config.ini"'
-check 'writes server-settings.json: private, verified users, auto-pause, no credentials, the _comment' 'settings_ok "$R/srv/factorio/config/server-settings.json"'
+check 'writes server-settings.json: private, verified users, auto-pause, a game password, no factorio.com credentials, the _comment' 'settings_ok "$R/srv/factorio/config/server-settings.json"'
 check 'writes the admin list and the mod list' '
   [[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\"]" ]] &&
   [[ $(node -e "console.log(JSON.parse(require(\"fs\").readFileSync(process.argv[1])).mods.map((m) => m.name + (m.enabled ? \"\" : \"-off\")).join(\" \"))" "$R/srv/factorio/mods/mod-list.json") == "base space-age quality elevated-rails recycler orrery" ]]'
@@ -414,6 +452,7 @@ check 'creates a world in a one-off container, as factorio, with its mods' '
   called "^podman run --rm --network=none --user 986:986 .* -e HOME=/srv/factorio -v $R/opt/factorio:/opt/factorio:ro,z -v $R/srv/factorio:/srv/factorio:z .* --config /srv/factorio/config/config.ini --mod-directory /srv/factorio/mods --create /srv/factorio/saves/world.zip$"'
 check 'installs the newest agent release by version (not a draft, not by text), checked against its .sha256' '
   [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 && -f $R/srv/orrery-agent/releases/agent-v0.10.0/src/index.ts ]] &&
+  [[ $(node -p "require(process.argv[1]).version" "$R/srv/orrery-agent/releases/agent-v0.10.0/package.json") == 0.10.0 ]] &&
   called "^curl https://github.com/Edward-Pratt/orrery/releases/download/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz.sha256$"'
 check 'takes the units, the polkit file and deploy-agent.sh from the same agent tag' '
   [[ $(grep -c "^curl https://$RAW/" "$F/calls") == 5 ]] && ! grep "^curl https://raw" "$F/calls" | grep -vq "/agent-v0.10.0/"'
@@ -474,9 +513,25 @@ check 'runs the agent check as factorio with its units'\'' HOME (not factorio'\'
   [[ $(cat "$F/check-ran") == "{\"args\":[\"check\"],\"home\":\"/srv/orrery-agent\",\"rcon\":true,\"token\":true}" ]] &&
   grep -q "^setup-agent-host: agent factorio-vm (agent-v0.10.0), Factorio 2.1.24, image $OL@sha256:$DIGEST1 (glibc 2.39)" "$R/srv/factorio/first-boot.txt" &&
   grep -qx "first-boot check (fixture): every check ran" "$R/srv/factorio/first-boot.txt" && says "every check ran"'
+GP=$(GP_OF)
+SET=$R/srv/factorio/config/server-settings.json BOOT=$R/srv/factorio/first-boot.txt
+check 'the game password: 20 random letters and digits, in server-settings.json, mode 600, written as factorio' '
+  [[ $GP =~ ^[A-Za-z0-9]{20,}$ && $(stat -c %a "$SET") == 600 ]] &&
+  grep -qE "^as factorio mv -T $R/srv/factorio/config/\.server-settings\.json\.[A-Za-z0-9]{6} $SET$" "$F/calls"'
+check 'first-boot.txt shows the game password, says to share it only with the players; mode 600, written as factorio' '
+  grep -qx "game password: $GP" "$BOOT" && grep -qx "share the game password only with the players: anyone who has it and the VM'\''s address can join" "$BOOT" &&
+  [[ $(stat -c %a "$BOOT") == 600 && $(stat -c %a "$R/srv/factorio") == 750 ]] &&
+  grep -qE "^as factorio mv -T $R/srv/factorio/\.first-boot\.txt\.[A-Za-z0-9]{6} $BOOT$" "$F/calls" &&
+  says "the game password is in /srv/factorio/first-boot.txt (not shown here)"'
+check 'the game password is printed nowhere else: not the output, no argv, not the agent check'\''s environment; on disk only in its three root- or factorio-only files' '
+  [[ -s $CHECK_ENV ]] && ! grep -rqF -e "$GP" "$F" "$T/out" "$CHECK_ENV" &&
+  [[ $(grep -rlF -e "$GP" "$R" | sort) == "$SET
+$BOOT
+$R/usr/local/lib/orrery/defaults/server-settings.json" ]] &&
+  [[ $(stat -c %a "$R/usr/local/lib/orrery/defaults/server-settings.json") == 600 ]]'
 check 'with firewalld and SELinux off: no firewall-cmd, no SELinux tools; the OCI ingress reminder' '
   ! called "^(firewall-cmd|semanage|restorecon)" && says "reminder: players reach the server only if" && says "firewalld isn'\''t running"'
-check 'leaves no temp file behind' '[[ -z $(find "$R" -name ".*" ! -name .incoming) ]]'
+check 'leaves no temp file behind' '[[ -z $(find "$R" -name ".*" ! -name .incoming) && -z $(ls -A "$R/usr/local/lib/orrery/.incoming") ]]'
 written > "$T/first"
 cp "$R/etc/orrery-agent.env" "$R/etc/orrery-factorio.env" "$T/"
 
@@ -486,8 +541,9 @@ echo '{"stable":{"headless":"2.1.30"}}' | override factorio.com/api/latest-relea
 check 'a second run succeeds without a token on stdin (it keeps the one it has)' 'IN= run "${ARGS[@]}"'
 check 'a second run changes nothing' 'written | cmp -s - "$T/first" && cmp -s "$T/orrery-agent.env" "$R/etc/orrery-agent.env" && cmp -s "$T/orrery-factorio.env" "$R/etc/orrery-factorio.env"'
 check 'a second run downloads only the release list and the deploy/ files, pulls nothing, installs nothing' '
-  [[ -z $(grep ^curl "$F/calls" | grep -vxE "curl https://($API\?per_page=100|$RAW/.*)") ]] &&
+  [[ -z $(grep ^curl "$F/calls" | grep -vxE "curl https://($API\?per_page=100&page=1|$RAW/.*)") ]] &&
   ! called "^(dnf|useradd|podman pull)" && ! says wrote'
+check 'a second run keeps the game password' '[[ $(GP_OF) == "$GP" ]] && grep -qx "game password: $GP" "$BOOT"'
 check 'a second run keeps the installed Factorio rather than the newest' '! called latest-releases && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 ]]'
 check 'a second run still restarts the agent (its new release or unit applies)' 'called "^systemctl restart orrery-agent.service$"'
 
@@ -499,6 +555,8 @@ check 'keeps a hand-edited server-settings.json and agent config, and says so' '
   IN= run --agent-id factorio-vm --hub 127.0.0.2:1 --no-hub --admins Alice,Bob,Carol &&
   cmp -s "$T/server-settings.json" "$R/srv/factorio/config/server-settings.json" && cmp -s "$T/config.json" "$R/etc/orrery-agent/config.json" &&
   says "kept /srv/factorio/config/server-settings.json: edited by hand" && says "kept /etc/orrery-agent/config.json: edited by hand"'
+check 'keeps the game password of a hand-edited server-settings.json, and still shows it' '
+  [[ $(GP_OF) == "$GP" ]] && grep -qx "game password: $GP" "$BOOT" && ! says "warning: no game_password"'
 check 'rewrites a config still at its previous default: the new admins' '[[ $(canon "$R/srv/factorio/config/server-adminlist.json") == "[\"Alice\",\"Bob\",\"Carol\"]" ]]'
 
 # ---- A config write that fails is finished by the next run: its saved default changes only after the file does.
@@ -522,6 +580,7 @@ OLD_ID=$(printf '%s' "$OL@sha256:$DIGEST1" | sha256sum | cut -c1-64)
 check '--refresh-image pulls again, pins the new digest in image.json and the Quadlet file' '
   IN= run "${ARGS[@]}" --refresh-image && called "^podman pull $OL$" &&
   grep -qx "Image=$OL@sha256:$DIGEST2" "$Q" && grep -qF "$OL@sha256:$DIGEST2" "$R/etc/orrery-agent/image.json"'
+check '--refresh-image keeps the game password' '[[ $(GP_OF) == "$GP" ]]'
 check '--refresh-image removes the old image by its id only' '[[ $(grep "^podman image rm" "$F/calls") == "podman image rm $OLD_ID" ]]'
 touch "$F/active-factorio.service"
 echo "$DIGEST1" > "$F/digest"
@@ -537,6 +596,56 @@ for p in u-34197 u-34198 u-34199 t-27015; do
   echo "UNCONN 0 0 127.0.0.1:${p#*-} 0.0.0.0:* uid:986 ino:1 sk:1 cgroup:/system.slice/factorio.service <->" > "$F/ss-$p"
 done
 check 'ports held by factorio (its own container or agent) are no reason to refuse' 'IN= run "${ARGS[@]}"'
+
+# ---- A Factorio release the image can't run never becomes current: the server keeps its own, so a plain re-run works.
+echo 2.1.25 > "$F/glibc"
+check 'a --factorio release the image can'\''t run is refused before current points at it' '
+  ! IN= run "${ARGS[@]}" --factorio 2.1.25 && says "Factorio 2.1.25 can'\''t run in $OL, whose glibc is too old" &&
+  called "^podman run .* /opt/factorio/releases/2.1.25/bin/arm64/factorio --version$" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -d $R/opt/factorio/releases/2.1.25 ]]'
+check 'a plain re-run then keeps the Factorio the server runs' '
+  IN= run "${ARGS[@]}" && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 ]]'
+rm -f "$F/glibc"
+touch "$F/active-factorio.service"
+check 'a --factorio release it can run becomes current; a running server is told it runs it from its next restart' '
+  IN= run "${ARGS[@]}" --factorio 2.1.25 && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.25 ]] &&
+  says "factorio.service was running: it runs Factorio 2.1.25 from its next restart" && ! called "^systemctl (stop|restart) factorio"'
+rm -f "$F/active-factorio.service"
+
+# ---- A new release and a new image switch only together, with the Quadlet file: a re-run that stops on its way leaves
+# the server on the release and the image it had (else its next restart runs the new release in the old image).
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/ol"
+cp "$Q" "$R/etc/orrery-agent/image.json" "$T/ol/"
+gone "$RAW/orrery-agent.service"
+check 'a re-run with a new --factorio and --image that stops on its way switches none of current, the Quadlet file and image.json' '
+  ! IN= run "${ARGS[@]}" --factorio 2.1.25 --image "$DEBIAN" && says "can'\''t download https://$RAW/orrery-agent.service" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -d $R/opt/factorio/releases/2.1.25 ]] &&
+  cmp -s "$T/ol/factorio.container" "$Q" && cmp -s "$T/ol/image.json" "$R/etc/orrery-agent/image.json" && ! called "^podman image rm"'
+rm -rf "$F/gone"
+check 'the next run switches all three, to the release checked in that image' '
+  IN= run "${ARGS[@]}" --factorio 2.1.25 --image "$DEBIAN" &&
+  called "^podman run .* $DEBIAN@sha256:$DIGEST1 /opt/factorio/releases/2.1.25/bin/arm64/factorio --version$" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.25 ]] && grep -qx "Image=$DEBIAN@sha256:$DIGEST1" "$Q" &&
+  [[ $(canon "$R/etc/orrery-agent/image.json") == "{\"image\":\"$DEBIAN@sha256:$DIGEST1\",\"glibc\":\"2.41\"}" ]]'
+
+# ---- The game password on a VM set up before it existed, and in a file edited by hand without one.
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/old"
+printf '{\n  "_comment": "an older default of setup-agent-host.sh",\n  "auto_pause": true\n}\n' > "$T/old/server-settings.json"
+cp "$T/old/server-settings.json" "$SET"
+cp "$T/old/server-settings.json" "$R/usr/local/lib/orrery/defaults/server-settings.json"
+check 'a server-settings.json still at the previous default, without a game password, gets the new default with one' '
+  IN= run "${ARGS[@]}" && settings_ok "$SET" && GP2=$(GP_OF) && [[ $GP2 != "$GP" ]] && grep -qx "game password: $GP2" "$BOOT" &&
+  cmp -s "$SET" "$R/usr/local/lib/orrery/defaults/server-settings.json" && [[ $(stat -c %a "$R/usr/local/lib/orrery/defaults/server-settings.json") == 600 ]]'
+node -e 'const f = process.argv[1], s = JSON.parse(require("fs").readFileSync(f)); delete s.game_password; require("fs").writeFileSync(f, JSON.stringify(s))' "$SET"
+cp "$SET" "$T/old/edited.json"
+check 'a hand-edited server-settings.json without a game password is kept, and the report warns, without failing the run' '
+  IN= run "${ARGS[@]}" && cmp -s "$T/old/edited.json" "$SET" && says "kept /srv/factorio/config/server-settings.json: edited by hand" &&
+  says "warning: no game_password found in /srv/factorio/config/server-settings.json" &&
+  grep -q "^warning: no game_password found" "$BOOT" && ! grep -q "^game password:" "$BOOT"'
 
 # ---- SELinux and firewalld on.
 fresh
@@ -561,6 +670,11 @@ check '--memory-max adds MemoryMax= to [Service]; --world copies the world in, w
   [[ $(grep -A1 "^TimeoutStopSec=200$" "$Q" | tail -n 1) == MemoryMax=6G ]] &&
   cmp -s "$T/old-world.zip" "$R/srv/factorio/saves/world.zip" && ! called " --create "'
 check 'a re-run with saves in place ignores --world' 'IN= run "${ARGS[@]}" --world "$T/old-world.zip" && says "--world ignored"'
+check 'a re-run without --memory-max keeps the cap the Quadlet file has' '
+  IN= run "${ARGS[@]}" && [[ $(grep -c "^MemoryMax=" "$Q") == 1 && $(grep -A1 "^TimeoutStopSec=200$" "$Q" | tail -n 1) == MemoryMax=6G ]]'
+check 'another --memory-max replaces the cap' 'IN= run "${ARGS[@]}" --memory-max 50% && [[ $(grep "^MemoryMax=" "$Q") == MemoryMax=50% ]]'
+check '--memory-max none drops the cap, and a re-run without it adds none back' '
+  IN= run "${ARGS[@]}" --memory-max none && ! grep -q "^MemoryMax=" "$Q" && IN= run "${ARGS[@]}" && ! grep -q "^MemoryMax=" "$Q"'
 fresh
 check '--image pins another image, with its own glibc' '
   run "${ARGS[@]}" --image "$DEBIAN" && grep -qx "Image=$DEBIAN@sha256:$DIGEST1" "$Q" &&
@@ -568,9 +682,36 @@ check '--image pins another image, with its own glibc' '
 fresh
 check '--no-hub only warns when the hub is unreachable' 'run --agent-id factorio-vm --hub 127.0.0.1:1 --admins Alice --no-hub && says "warning: can'\''t reach the hub"'
 fresh
+check 'under bash -x, no secret reaches the trace: the script turns xtrace off' '
+  TRACE=1 run "${ARGS[@]}" && head -n 3 "$T/out" | grep -q "^+ " && GP3=$(GP_OF) && [[ -n $GP3 ]] &&
+  ! grep -qF -e "$GP3" -e "$TOKEN" -e "$(RCON_OF)" "$T/out"'
+fresh
 touch "$F/missing-podman"
 check 'installs a missing Podman, then checks it' '
   run "${ARGS[@]}" && [[ $(grep ^dnf "$F/calls") == "dnf install -y podman" ]] && called "^podman --version$"'
+fresh
+touch "$F/check-waits"
+check 'says the check may take 5 minutes, then shows its report as it runs, and saves all of it' '
+  { run "${ARGS[@]}" & } && pid=$! &&
+  for _ in $(seq 600); do ! grep -q "waiting for RCON" "$T/out" || break; sleep 0.1; done && touch "$F/seen" && wait "$pid" &&
+  [[ $(grep -n -e "^running the first-boot check (up to 5 minutes while Factorio loads)" -e "waiting for RCON$" "$T/out" | cut -d: -f2-) == "running the first-boot check (up to 5 minutes while Factorio loads)...
+first-boot check (fixture): waiting for RCON" ]] &&
+  grep -qx "first-boot check (fixture): waiting for RCON" "$BOOT" && grep -qx "first-boot check (fixture): every check ran" "$BOOT" &&
+  says "done: send /srv/factorio/first-boot.txt to the owner (it is factorio'\''s: sudo cat /srv/factorio/first-boot.txt)"'
+# Ctrl-C during the check: SIGINT to the run's whole process group (set -m gives the background run its own, and keeps
+# SIGINT from being ignored in it), over the report of a run whose checks all passed.
+fresh
+run "${ARGS[@]}" || true
+touch "$F/check-waits"
+check 'a run stopped during the check saves the report so far, saying so, over the older one; and leaves no temp file' '
+  set -m && { IN= run "${ARGS[@]}" & } && pid=$! && set +m &&
+  for _ in $(seq 600); do ! grep -q "waiting for RCON" "$T/out" || break; sleep 0.1; done && kill -INT -- "-$pid" && ! wait "$pid" &&
+  grep -qx "first-boot check (fixture): waiting for RCON" "$BOOT" && ! grep -q "every check ran" "$BOOT" &&
+  grep -qx "setup-agent-host: stopped before the first-boot check ended, so this report is cut short" "$BOOT" &&
+  grep -qx "game password: $(GP_OF)" "$BOOT" && [[ $(stat -c %a "$BOOT") == 600 ]] && ! says "done:" &&
+  [[ -z $(find "$R" -name ".first-boot.txt.*") && ! -e $R/usr/local/lib/orrery/.incoming/first-boot.txt ]]'
+set +m
+cat "$F/calls" >> "$T/all-calls" # the run's own copy died with it
 fresh
 touch "$F/check-fails"
 check 'a failing first-boot check fails the run, with the report saved' '
@@ -580,6 +721,26 @@ touch "$F/start-fails"
 check 'a unit that will not start still gets the report, and fails the run' '
   ! run "${ARGS[@]}" && says "warning: factorio.service didn'\''t start" && grep -q "every check ran" "$R/srv/factorio/first-boot.txt"'
 
+# ---- The release list, page by page: a part's newest release is found behind 100 newer releases of other parts.
+hub_page() { # <n> <one more release, JSON>: a release list of n hub releases, then that one
+  local i
+  echo '['
+  for ((i = 1; i <= $1; i++)); do echo "  { \"tag_name\": \"hub-v1.0.$i\", \"draft\": false, \"assets\": [] },"; done
+  echo "  $2"
+  echo ']'
+}
+fresh
+hub_page 99 '{ "tag_name": "hub-v2.0.0", "draft": false, "assets": [] }' | override "$API"
+api "$(sha "$X/$MOD_ZIP")" | override "$API.page2"
+check 'reads the release list page by page until it holds the agent'\''s and the mod'\''s releases' '
+  run "${ARGS[@]}" && called "^curl https://$API\?per_page=100&page=2$" && ! called "page=3" &&
+  [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 && -f $R/srv/factorio/mods/orrery_0.1.0.zip ]]'
+hub_page 99 '{ "tag_name": "agent-v0.10.0", "draft": false, "assets": [] }' | override "$API"
+gone "$API.page2"
+check 'stops at the first page holding what the run needs: with the mod in mods/, the agent'\''s release alone' '
+  IN= run "${ARGS[@]}" && called "^curl https://$API\?per_page=100&page=1$" && ! called "page=2"'
+rm -rf "$F/gone"
+
 # ---- A half-failed run (the agent's download fails) is finished by the next.
 fresh
 gone "$AGENT_TGZ"
@@ -588,6 +749,31 @@ check 'a run whose agent download fails stops there, before secrets, units and a
   [[ ! -e $R/etc/orrery-agent.env && ! -e $Q && -d $R/opt/factorio/releases/2.1.24 ]]'
 rm -rf "$F/gone"
 check 'the next run finishes it: the same files as a clean run' 'run "${ARGS[@]}" && written | cmp -s - "$T/first"'
+
+# ---- A re-run at a new agent release switches to it only once its deploy/ files passed their checks and are in place.
+fresh
+run "${ARGS[@]}" || true
+mkdir -p "$T/v10"
+cp "$Q" "$R/etc/systemd/system/orrery-agent.service" "$R/etc/orrery-agent/config.json" "$T/v10/"
+api "$(sha "$X/$MOD_ZIP")" | sed '1a\  { "tag_name": "agent-v0.11.0", "draft": false, "assets": [] },' | override "$API"
+RAW11=raw.githubusercontent.com/Edward-Pratt/orrery/agent-v0.11.0/deploy
+as_v10() { # the agent's current release, its Quadlet file, unit and config as agent-v0.10.0's run left them; no start
+  [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 ]] && cmp -s "$T/v10/factorio.container" "$Q" &&
+    cmp -s "$T/v10/orrery-agent.service" "$R/etc/systemd/system/orrery-agent.service" &&
+    cmp -s "$T/v10/config.json" "$R/etc/orrery-agent/config.json" && ! called "$STARTED"
+}
+gone "$RAW11/factorio.container"
+check 'a new agent release whose deploy/ file fails to download is not switched to' '
+  ! IN= run "${ARGS[@]}" && says "can'\''t download https://$RAW11/factorio.container" && as_v10 &&
+  [[ -f $R/srv/orrery-agent/releases/agent-v0.11.0/src/index.ts ]]'
+rm -rf "$F/gone"
+touch "$F/quadlet-fails"
+check 'nor one whose Quadlet file fails its dry run, saying what stays as it was' '
+  ! IN= run "${ARGS[@]}" && says "no unit, agent config or secret was written, and the agent'\''s current release is as it was" && as_v10'
+rm -f "$F/quadlet-fails"
+check 'once its files pass, the re-run switches to it and restarts the agent' '
+  IN= run "${ARGS[@]}" && [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.11.0 ]] &&
+  called "^curl https://$RAW11/factorio.container$" && called "^systemctl restart orrery-agent.service$"'
 
 # ---- Links in factorio's trees, or at a unit, can't steer a write.
 fresh
@@ -605,7 +791,7 @@ precious
 precious" && $(cat "$T/elsewhere-4") == "# Managed by orrery deploy/setup-agent-host.sh" ]] &&
   [[ -L $R/srv/factorio/config/server-settings.json && -L $R/srv/factorio/mods/mod-list.json ]] &&
   [[ ! -L $R/srv/factorio/first-boot.txt && ! -L $R/etc/systemd/system/orrery-agent.service ]] &&
-  cmp -s "$R/etc/systemd/system/orrery-agent.service" "$HERE/orrery-agent.service"'
+  cmp -s "$R/etc/systemd/system/orrery-agent.service" "$HERE/orrery-agent.service" && says "warning: no game_password found"'
 
 # ---- Refusals in preflight: nothing written, nothing run that changes anything.
 refuses() { # <what> <why it says> <setup> [args…]
@@ -632,6 +818,7 @@ refuses 'a port held by root' 'port 27015/tcp is in use' "echo 'LISTEN 0 4096 12
 refuses 'a port held by another user while factorio exists' 'port 34197/udp is in use' \
   "echo 'factorio:x:986:986::/srv/factorio:/sbin/nologin' > \"\$F/passwd\"; echo 'UNCONN 0 0 0.0.0.0:34197 0.0.0.0:* uid:1000 <->' > \"\$F/ss-u-34197\"" "${ARGS[@]}"
 refuses 'a factorio user it did not make' 'a user factorio exists' "echo 'factorio:x:1001:1001::/home/factorio:/bin/bash' > \"\$F/passwd\"" "${ARGS[@]}"
+refuses 'a factorio group without the user' 'a group factorio exists without the user' "echo 'factorio:x:1001:' > \"\$F/group\"" "${ARGS[@]}"
 refuses 'a foreign factorio.service' 'factorio.service exists' 'printf "LoadState=loaded\nSourcePath=\n" > "$F/show-factorio.service"' "${ARGS[@]}"
 refuses 'a masked factorio.service' 'factorio.service exists (masked' 'printf "LoadState=masked\n" > "$F/show-factorio.service"' "${ARGS[@]}"
 refuses 'a foreign orrery-agent.service' 'orrery-agent.service exists' \
@@ -661,6 +848,8 @@ refuses 'a short image name' 'bad image' '' "${ARGS[@]}" --image oraclelinux:10-
 refuses 'an image with no tag' 'bad image' '' "${ARGS[@]}" --image docker.io/library/debian
 refuses 'an image with a digest' 'bad image' '' "${ARGS[@]}" --image "$OL@sha256:$DIGEST1"
 refuses 'a bad --memory-max' 'bad --memory-max' '' "${ARGS[@]}" --memory-max '6 G'
+refuses 'a MemoryMax= in the Quadlet file it does not write, without --memory-max' 'has MemoryMax=infinity, which this script doesn' \
+  'mkdir -p "$R/etc/containers/systemd"; printf "# x\n# %s\nMemoryMax=infinity\n" "$MARKER_LINE" > "$Q"' "${ARGS[@]}"
 refuses 'a relative --world' 'absolute plain path' '' "${ARGS[@]}" --world world.zip
 refuses 'a missing --world' 'no world file' '' "${ARGS[@]}" --world /nonexistent/world.zip
 refuses 'an unknown flag' 'usage:' '' "${ARGS[@]}" --force
@@ -689,9 +878,13 @@ refuses_late 'an agent download not matching its .sha256' "doesn't match its .sh
   'echo "$DIGEST2  orrery-agent-v0.10.0.tar.gz" | override "$AGENT_TGZ.sha256"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'a mod download not matching its listed sha256' "doesn't match the sha256 GitHub lists" \
   'api "$DIGEST2" | override "$API"' "$R/srv/factorio/mods/orrery_0.1.0.zip" "${ARGS[@]}"
+refuses_late 'a release list that is not a JSON list' "GitHub's release list (page 1) isn't a JSON list" \
+  'echo "{ \"message\": \"Not Found\" }" | override "$API"' "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'no agent release' 'GitHub has no agent-v release yet' 'grep -v "\"agent-v0" "$X/$API" | override "$API"' \
   "$R/srv/orrery-agent/current" "${ARGS[@]}"
 refuses_late 'the Quadlet dry run failing' 'fake failure' 'touch "$F/quadlet-fails"' "$Q" "${ARGS[@]}"
+check 'and writes no agent config or secret, and no current for the agent' '
+  [[ ! -e $R/etc/orrery-agent/config.json && ! -e $R/etc/orrery-agent.env && ! -e $R/srv/orrery-agent/current ]]'
 refuses_late 'a Quadlet key Podman 4.6 lacks, even when the dry run exits 0' "unsupported key 'StopTimeout'" \
   'sed "s/^PodmanArgs=.*/StopTimeout=170/" "$HERE/factorio.container" | override "$RAW/factorio.container"' "$Q" "${ARGS[@]}"
 refuses_late 'a template value it does not fill' "doesn't fill: <hostname>" \

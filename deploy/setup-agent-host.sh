@@ -10,7 +10,8 @@
 #   --image <name:tag>     the image (default container-registry.oracle.com/os/oraclelinux:10-slim; fallback
 #                          docker.io/library/debian:trixie-slim)
 #   --refresh-image        pull the image again and pin its new digest (best while the server is stopped)
-#   --memory-max <size>    MemoryMax= for the container (e.g. 6G or 50%); no cap without it
+#   --memory-max <size>    MemoryMax= for the container (e.g. 6G or 50%); a re-run without it keeps the cap the
+#                          installed factorio.container has, and --memory-max none drops it (no cap by default)
 #   --world <path.zip>     the first world, when saves/ is empty (else a new one is created)
 #   --no-hub               the hub check only warns: for the run before the hub listens (the agent then only logs)
 #   --new-token            ask for the agent token again (a re-run keeps the one it has)
@@ -32,16 +33,25 @@
 #
 # Safe to run again. Unit, polkit, .container and shell files it writes carry the "Managed by" line above, and it
 # refuses to overwrite one without it. Config files are written only when missing or still its own previous default
-# (kept in /usr/local/lib/orrery/defaults/), so hand edits stay. Everything else is written only when it differs, so a
-# second run finishes a half-failed one. Root never writes inside factorio's trees: those writes run as factorio,
-# and every write goes to a new temp file in the target's folder, then a rename, so a link left there steers nothing.
+# (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
+# game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
+# factorio's), never on the terminal, in an argv or in a trace. Everything else but that report is written only when it
+# differs, so a second run finishes a half-failed one. On a re-run the Quadlet file, then Factorio's current link and
+# image.json switch, one right after another and after every download and check (Factorio's --version runs in the image
+# the Quadlet file gets); the agent's current link switches last, once its deploy/ files passed the Quadlet dry run and
+# its config and units are written. So a re-run that stops on its way (a failed download or check) leaves the server on
+# the release and the image it had, and the agent on its release. A first install points Factorio's current at its
+# release first: the world is made from it, and no unit exists yet.
+# Root never writes inside factorio's trees: those writes run as factorio, and every write goes to a new temp file in the
+# target's folder, then a rename, so a link left there steers nothing.
 # SETUP_ROOT exists for deploy/test-setup-agent-host.sh only: it prefixes every path the script reads or writes (/etc,
 # /opt, /srv, /usr/local, and /usr/libexec for the Quadlet generator). The files it writes still name the real paths.
 set -euo pipefail
+{ set +x; } 2> /dev/null # the token and the passwords pass through variables: never in a trace (bash -x)
 die() { echo "setup-agent-host: $*" >&2; exit 1; }
 usage() {
   echo "usage: $0 --agent-id <id> --hub <ipv4>:<port> --admins <name>[,<name>...] [--factorio <version>]" \
-    "[--image <name:tag>] [--refresh-image] [--memory-max <size>] [--world <path.zip>] [--no-hub] [--new-token]" >&2
+    "[--image <name:tag>] [--refresh-image] [--memory-max <size>|none] [--world <path.zip>] [--no-hub] [--new-token]" >&2
   exit 2
 }
 umask 077
@@ -89,8 +99,9 @@ fi
 [[ -z $factorio || $factorio =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bad Factorio version: $factorio (want X.Y.Z)"
 [[ -z $image || ($image =~ ^[a-z0-9.-]+\.[a-z]+(:[0-9]+)?/[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$ && $image != *..*) ]] ||
   die "bad image: $image (want a full name with its registry and a tag, like $FALLBACK_IMAGE)"
-[[ -z $memory_max || $memory_max =~ ^[1-9][0-9]*[KMGT]?$ || $memory_max =~ ^[1-9][0-9]?%$ ]] ||
-  die "bad --memory-max: $memory_max (want systemd's MemoryMax=, like 6G or 50%)"
+memory_ok() { [[ $1 =~ ^[1-9][0-9]*[KMGT]?$ || $1 =~ ^[1-9][0-9]?%$ ]]; } # systemd's MemoryMax=, of the kinds this writes
+[[ -z $memory_max || $memory_max == none ]] || memory_ok "$memory_max" ||
+  die "bad --memory-max: $memory_max (want systemd's MemoryMax=, like 6G or 50%, or none)"
 if [[ -n $world ]]; then
   [[ $world =~ ^/[A-Za-z0-9._/-]+\.zip$ && $world != *..* ]] || die "the world must be an absolute plain path to a .zip: $world"
   [[ -f $world ]] || die "no world file $world"
@@ -147,6 +158,8 @@ if pw=$(getent passwd factorio); then
   IFS=: read -r _ _ fuid _ _ fhome fshell <<< "$pw"
   [[ $fuid =~ ^[0-9]+$ ]] && ((fuid > 0 && fuid < 1000)) && [[ $fhome == /srv/factorio && $fshell == */nologin ]] ||
     die "a user factorio exists that this script didn't make (uid $fuid, home $fhome, shell $fshell): it needs a system user with home /srv/factorio and shell nologin"
+elif getent group factorio > /dev/null; then # useradd --user-group would refuse it, after the packages and Node went in
+  die "a group factorio exists without the user factorio: this script makes both, so remove or rename the group first"
 fi
 # A port is ours only when the socket is factorio's (the agent, or Factorio in its container: no user namespace).
 for p in udp:34197 udp:34198 udp:34199 tcp:27015; do
@@ -161,6 +174,14 @@ for f in "$etc/containers/systemd/factorio.container" "$etc/systemd/system/orrer
   "$lib/setup-agent-host.sh" "$lib/deploy-agent.sh"; do
   managed "$f" || die "${f#"$R"} exists without the line \"$MARKER\": it isn't this script's, so move it away first"
 done
+# Without --memory-max, the cap stays what the installed factorio.container has (this script's file, checked above).
+quadlet=$etc/containers/systemd/factorio.container
+if [[ -z $memory_max && -f $quadlet ]]; then
+  while IFS= read -r line; do [[ $line != MemoryMax=* ]] || memory_max=${line#MemoryMax=}; done < "$quadlet"
+  [[ -z $memory_max ]] || memory_ok "$memory_max" ||
+    die "factorio.container has MemoryMax=$memory_max, which this script doesn't write: give --memory-max <size> or --memory-max none"
+fi
+[[ $memory_max != none ]] || memory_max=''
 # unit_from <unit> <property> <path>: the unit is unknown, or systemd loads it from this script's file.
 unit_from() {
   local k v load='' from=''
@@ -221,7 +242,8 @@ fput() {
   echo "wrote ${1#"$R"}"
 }
 # config <root|factorio> <file>: stdin is this script's default for <file>. Written when <file> is missing or still the
-# previous default (kept in defaults/), so a file edited by hand (or a link put there) is kept as it is.
+# previous default (kept in defaults/, root-only: server-settings.json's holds the game password), so a file edited by
+# hand (or a link put there) is kept as it is.
 config() {
   local saved=$lib/defaults/${2##*/} new cur=''
   new=$(cat)
@@ -236,7 +258,7 @@ config() {
   fi
   # The target first: a run stopped between the two finds it equal to the new default, so the next run saves it.
   if [[ $1 == factorio ]]; then fput "$2" <<< "$new"; else put "$2" 644 <<< "$new"; fi
-  put "$saved" 644 <<< "$new"
+  put "$saved" 600 <<< "$new"
 }
 fsha() { local h; h=$(as_factorio sha256sum -- "$1"); printf '%s' "${h%% *}"; }
 fetch() { "${CURL[@]}" -o "$2" "$1" || die "can't download ${1%%\?*}"; }
@@ -371,17 +393,25 @@ if [[ ! -d $opt/releases/$ver ]]; then
   as_factorio mv -T -- "$x" "$opt/releases/$ver"
   echo "installed Factorio $ver in ${opt#"$R"}/releases/$ver"
 fi
-flip "$opt" "releases/$ver"
-# The image must run this Factorio: its glibc is the reason for the container.
+# The image must run this Factorio: its glibc is the reason for the container. Checked on the release itself, before
+# current points at it, so a release that can't run never becomes the one the server starts.
 hardened=(--rm --network=none --user "$uid:$gid" --cap-drop=all --security-opt=no-new-privileges --read-only)
-out=$(podman run "${hardened[@]}" -v "$opt:/opt/factorio:ro,z" "$ref" /opt/factorio/current/bin/arm64/factorio --version 2>&1) || {
+out=$(podman run "${hardened[@]}" -v "$opt:/opt/factorio:ro,z" "$ref" "/opt/factorio/releases/$ver/bin/arm64/factorio" --version 2>&1) || {
   [[ $out != *GLIBC_* ]] || die "Factorio $ver can't run in ${ref%@*}, whose glibc is too old: $out
 Run this again with --image $FALLBACK_IMAGE"
   die "Factorio $ver --version failed in ${ref%@*}: $out"
 }
 [[ $out == *"Version: $ver "* ]] || die "Factorio --version in ${ref%@*} didn't say $ver: $out"
+old_factorio=$(readlink "$opt/current" 2> /dev/null) || old_factorio=''
 [[ -d $etc/orrery-agent ]] || install -d -m 755 "$etc/orrery-agent"
-put "$img_file" 644 <<< "{ \"image\": \"$ref\", \"glibc\": \"$glibc\" }"
+# switch_factorio: Factorio's current at this release, and image.json at this image. On a re-run it runs with the
+# Quadlet file's write (section 14), after every download and check, so the server never starts a release in an image
+# it wasn't checked in. On a first install current comes now: the world is made from it, and no unit exists yet.
+switch_factorio() {
+  flip "$opt" "releases/$ver"
+  put "$img_file" 644 <<< "{ \"image\": \"$ref\", \"glibc\": \"$glibc\" }"
+}
+[[ -e $opt/current ]] || switch_factorio
 
 # ---- 9. Configuration, kept on a re-run unless still this script's default.
 config factorio "$srv/config/config.ini" << 'EOF'
@@ -390,9 +420,29 @@ config factorio "$srv/config/config.ini" << 'EOF'
 read-data=/opt/factorio/current/data
 write-data=/srv/factorio
 EOF
-config factorio "$srv/config/server-settings.json" << 'EOF'
+# game_password <file>: the game_password in factorio's server-settings.json (read as factorio, never through a link,
+# and only through stdin), or nothing.
+game_password() {
+  [[ ! -L $1 ]] || return 0
+  as_factorio cat -- "$1" 2> /dev/null | "$node" -e '
+    try {
+      const p = JSON.parse(require("fs").readFileSync(0, "utf8")).game_password;
+      if (typeof p === "string") process.stdout.write(p);
+    } catch {}' || true
+}
+# The game password: the one the file holds, when it is of this script's kind (so a re-run never changes it), else a new
+# random one, which reaches the file only when the file is missing or still the previous default.
+settings=$srv/config/server-settings.json
+game_pw=$(game_password "$settings")
+if ! [[ $game_pw =~ ^[A-Za-z0-9]{20,}$ ]]; then
+  game_pw=$(LC_ALL=C tr -dc A-Za-z0-9 < <(head -c 4096 /dev/urandom))
+  game_pw=${game_pw:0:20}
+  ((${#game_pw} == 20)) || die "can't make a game password"
+fi
+config factorio "$settings" << EOF
 {
-  "_comment": "Written by orrery deploy/setup-agent-host.sh, and kept on a re-run once edited. A private server: not listed, no username, password or token.",
+  "_comment": "Written by orrery deploy/setup-agent-host.sh, and kept on a re-run once edited. A private server: not listed, joined with its game_password (random, kept on a re-run); no factorio.com username, password or token.",
+  "game_password": "$game_pw",
   "visibility": { "public": false, "lan": false },
   "require_user_verification": true,
   "auto_pause": true,
@@ -402,6 +452,7 @@ config factorio "$srv/config/server-settings.json" << 'EOF'
   "allow_commands": "admins-only"
 }
 EOF
+game_pw=$(game_password "$settings") # the one the server uses: a file edited by hand may hold another, or none
 list=''
 IFS=, read -ra names <<< "$admins"
 for n in "${names[@]}"; do list+="${list:+, }\"$n\""; done
@@ -420,7 +471,26 @@ config factorio "$srv/mods/mod-list.json" << 'EOF'
 EOF
 
 # ---- 10. The orrery mod, when mods/ has none; later versions go in by hand until Game updates exist (release 2).
-releases=$(fetch_text "https://api.github.com/repos/$REPO/releases?per_page=100")
+# GitHub's release list, all parts together, newest first and 100 a page: read page by page until it holds a release of
+# each part this run needs (the agent's, and the mod's when mods/ has none) or ends; at most 20 pages, inside GitHub's 60
+# requests an hour without a token. Each part's newest is then among them: release.sh tags only above a part's latest.
+need=(agent)
+compgen -G "$srv/mods/orrery_*.zip" > /dev/null || need+=(factorio)
+releases='[]'
+for ((page = 1; page <= 20; page++)); do
+  more=$(fetch_text "https://api.github.com/repos/$REPO/releases?per_page=100&page=$page")
+  # Kept of each release: its tag, draft flag and assets' names and digests. Through stdin only: a page outgrows an argv.
+  out=$(printf '%s\x1e%s' "$releases" "$more" | "$node" -e '
+    const [had, page] = require("fs").readFileSync(0, "utf8").split("\x1e").map((s) => JSON.parse(s));
+    const all = had.concat(page.map((r) => ({
+      tag_name: r.tag_name, draft: r.draft, assets: (r.assets ?? []).map((a) => ({ name: a.name, digest: a.digest })),
+    })));
+    const has = (part) => all.some((r) => !r.draft && new RegExp(`^${part}-v\\d+\\.\\d+\\.\\d+$`).test(r.tag_name));
+    console.log(page.length < 100 || process.argv.slice(1).every(has) ? "done" : "more");
+    console.log(JSON.stringify(all));' "${need[@]}") || die "GitHub's release list (page $page) isn't a JSON list of releases"
+  releases=${out#*$'\n'}
+  [[ ${out%%$'\n'*} != done ]] || break
+done
 newest() { # <part>: the newest <part>-vX.Y.Z release on GitHub (by version, drafts left out)
   "$node" -e '
     const re = new RegExp(`^${process.argv[1]}-v(\\d+)\\.(\\d+)\\.(\\d+)$`);
@@ -469,7 +539,8 @@ else
   echo "created /srv/factorio/saves/world.zip"
 fi
 
-# ---- 12. The agent: the newest agent-v release, and this folder's files at the same tag.
+# ---- 12. The agent: the newest agent-v release, and this folder's files at the same tag, all downloaded and checked
+# (the Quadlet file dry-run too) before anything switches to them. The agent's current flips last, after its units.
 atag=$(newest agent) || die "GitHub has no agent-v release yet"
 [[ $atag =~ ^agent-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not an agent-vX.Y.Z tag: $atag"
 rel=$agent/releases/$atag
@@ -490,7 +561,6 @@ if [[ ! -f $rel/src/index.ts ]]; then
   as_factorio mv -T -- "$x" "$rel"
   echo "installed the agent $atag"
 fi
-flip "$agent" "releases/$atag"
 dl=$lib/.incoming/deploy
 rm -rf "$dl"
 install -d -m 700 "$dl"
@@ -498,6 +568,23 @@ for f in factorio.container orrery-agent.service orrery-agent-deploy@.service 60
   fetch "https://raw.githubusercontent.com/$REPO/$atag/deploy/$f" "$dl/$f"
   [[ -s $dl/$f ]] && managed "$dl/$f" || die "deploy/$f at $atag has no line \"$MARKER\""
 done
+# The Quadlet file from its template, dry-run: refused on any error or key this Podman lacks.
+filled=$(sed -e "s|^Image=.*|Image=$ref|" -e "s|<uid>|$uid|" -e "s|<gid>|$gid|" -e "s|<arch>|arm64|" "$dl/factorio.container")
+[[ -z $memory_max ]] || filled=$(sed "/^TimeoutStopSec=/a MemoryMax=$memory_max" <<< "$filled")
+placeholder='<[a-z]+>'
+[[ ! $filled =~ $placeholder ]] || die "factorio.container at $atag has a value this script doesn't fill: ${BASH_REMATCH[0]}"
+qd=$(mktemp -d "$lib/.incoming/quadlet.XXXXXX")
+printf '%s\n' "$filled" > "$qd/factorio.container"
+if ! out=$(QUADLET_UNIT_DIRS=$qd "$quadlet_gen" -dryrun 2>&1) || grep -qiE 'unsupported|error' <<< "$out" ||
+  ! grep -q '^ExecStart=' <<< "$out"; then
+  rm -rf "$qd"
+  die "Podman's Quadlet refuses factorio.container: no unit, agent config or secret was written, and the agent's current release is as it was. Its dry run said:
+$out"
+fi
+rm -rf "$qd"
+
+# ---- 13. The agent's config, and the secrets, root-only (mode 600 from the start: umask 077). Both secrets are kept on
+# a re-run.
 config root "$etc/orrery-agent/config.json" << EOF
 {
   "id": "$agent_id",
@@ -510,8 +597,6 @@ config root "$etc/orrery-agent/config.json" << EOF
   "mounts": ["/"]
 }
 EOF
-
-# ---- 13. Secrets, root-only (mode 600 from the start: umask 077). Both are kept on a re-run.
 if ((token_new)); then
   put "$etc/orrery-agent.env" 600 < <(
     echo "ORRERY_AGENT_TOKEN=$token"
@@ -526,34 +611,25 @@ if ! [[ $rcon =~ ^[A-Za-z0-9]{32}$ ]]; then
   put "$etc/orrery-factorio.env" 600 <<< "RCON_PASSWORD=$rcon"
 fi
 
-# ---- 14. Units. The Quadlet file from its template, dry-run first: refused on any error or key this Podman lacks.
-filled=$(sed -e "s|^Image=.*|Image=$ref|" -e "s|<uid>|$uid|" -e "s|<gid>|$gid|" -e "s|<arch>|arm64|" "$dl/factorio.container")
-[[ -z $memory_max ]] || filled=$(sed "/^TimeoutStopSec=/a MemoryMax=$memory_max" <<< "$filled")
-placeholder='<[a-z]+>'
-[[ ! $filled =~ $placeholder ]] || die "factorio.container at $atag has a value this script doesn't fill: ${BASH_REMATCH[0]}"
-qd=$(mktemp -d "$lib/.incoming/quadlet.XXXXXX")
-printf '%s\n' "$filled" > "$qd/factorio.container"
-if ! out=$(QUADLET_UNIT_DIRS=$qd "$quadlet_gen" -dryrun 2>&1) || grep -qiE 'unsupported|error' <<< "$out" ||
-  ! grep -q '^ExecStart=' <<< "$out"; then
-  rm -rf "$qd"
-  die "Podman's Quadlet refuses factorio.container: nothing installed. Its dry run said:
-$out"
-fi
-rm -rf "$qd"
+# ---- 14. Units: the Quadlet file checked above, with Factorio's current and image.json right after it, and this tag's
+# units.
 for d in "$etc/containers/systemd" "$etc/systemd/system" "$etc/polkit-1/rules.d"; do [[ -d $d ]] || install -d -m 755 "$d"; done
 active=0
 systemctl is-active --quiet factorio.service && active=1
 changed=0
-put_managed "$etc/containers/systemd/factorio.container" 644 <<< "$filled"
+put_managed "$quadlet" 644 <<< "$filled"
 quadlet_changed=$changed
+switch_factorio
 put_managed "$etc/systemd/system/orrery-agent.service" 644 < "$dl/orrery-agent.service"
 put_managed "$etc/systemd/system/orrery-agent-deploy@.service" 644 < "$dl/orrery-agent-deploy@.service"
 put_managed "$lib/deploy-agent.sh" 755 < "$dl/deploy-agent.sh"
 put_managed "$lib/setup-agent-host.sh" 755 < "${BASH_SOURCE[0]}"
 
-# ---- 15. polkit: factorio may run its own two units and its deploys, nothing else.
+# ---- 15. polkit: factorio may run its own two units and its deploys, nothing else. Then the agent's current release,
+# once its config and units are in place: a run stopped in the checks above leaves the agent as it was.
 put_managed "$etc/polkit-1/rules.d/60-orrery-agent.rules" 644 < "$dl/60-orrery-agent.rules"
 rm -rf "$dl"
+flip "$agent" "releases/$atag"
 # The image the last run pinned, once nothing uses it: by its exact id, never forced (Podman refuses while a container
 # uses it, the server's own included, or while it has other names).
 if [[ -n $old_ref && $old_ref != "$ref" ]]; then
@@ -593,15 +669,46 @@ systemctl restart orrery-agent.service || { started=0; echo "warning: orrery-age
 if ((active && quadlet_changed)); then
   echo "factorio.service was running: it uses the new factorio.container from its next restart (from the dashboard)"
 fi
+if ((active)) && [[ $old_factorio != "releases/$ver" ]]; then
+  echo "factorio.service was running: it runs Factorio $ver from its next restart (from the dashboard)"
+fi
 
 # ---- 18. The first-boot report, by the agent's own check (run as factorio; the secrets go in its environment only).
 # HOME as its units set it: runuser sets factorio's own, /srv/factorio, which the container can write, and nothing
-# native may read a dotfile from there.
-report=$(
+# native may read a dotfile from there. The report shows on the terminal as it comes (the check waits up to 5 minutes for
+# RCON), root keeps it as it comes in its own .incoming/, and then it goes, with the game password note, into
+# first-boot.txt as factorio. A run stopped during the check (Ctrl-C, a lost SSH session) saves what came, with a line
+# saying so, rather than leave an older run's report there.
+# The game password goes in first-boot.txt only: factorio's, mode 600 (mktemp's) in its 750 home. It reaches the writer
+# through a pipe, never an argv, and neither the check nor root's copy ever has it.
+if [[ -n $game_pw ]]; then
+  pw_note="game password: $game_pw
+share the game password only with the players: anyone who has it and the VM's address can join"
+else
+  pw_note="warning: no game_password found in /srv/factorio/config/server-settings.json (edited by hand): without one, anyone who finds the server can join"
+fi
+report=$lib/.incoming/first-boot.txt
+# save_report [line]: the report so far, then the line and the password note, into first-boot.txt; then root's copy goes.
+save_report() {
+  { cat -- "$report"; [[ -z ${1:-} ]] || printf '%s\n' "$1"; printf '%s\n' "$pw_note"; } | fwrite "$srv/first-boot.txt" &&
+    rm -f -- "$report"
+}
+echo "running the first-boot check (up to 5 minutes while Factorio loads)..."
+trap 'save_report "setup-agent-host: stopped before the first-boot check ended, so this report is cut short" || true' EXIT
+set +e
+{
   echo "setup-agent-host: agent $agent_id ($atag), Factorio $ver, image $ref (glibc $glibc), $(podman --version)"
   RCON_PASSWORD=$rcon ORRERY_AGENT_TOKEN=$token runuser -u factorio -- env HOME=/srv/orrery-agent "$node" "$agent/current/src/index.ts" check 2>&1
-) && ok=1 || ok=0
-printf '%s\n' "$report"
-fput "$srv/first-boot.txt" <<< "$report"
-((ok && started)) || die "the first-boot check found a problem: send /srv/factorio/first-boot.txt to the owner"
-echo "done: send /srv/factorio/first-boot.txt to the owner"
+} | tee -- "$report"
+st=("${PIPESTATUS[@]}")
+set -e
+trap - EXIT
+save_report && ((st[1] == 0)) || die "can't write /srv/factorio/first-boot.txt"
+if [[ -n $game_pw ]]; then
+  echo "the game password is in /srv/factorio/first-boot.txt (not shown here): share it only with the players"
+else
+  echo "$pw_note" >&2
+fi
+how='it is factorio'\''s: sudo cat /srv/factorio/first-boot.txt'
+((st[0] == 0 && started)) || die "the first-boot check found a problem: send /srv/factorio/first-boot.txt to the owner ($how)"
+echo "done: send /srv/factorio/first-boot.txt to the owner ($how)"

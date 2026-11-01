@@ -289,7 +289,10 @@ export class GameUpdates {
 
   // The update itself.
 
-  /** The update's mods and what it changes: the mod diff, by portal mods (the game's own come with its version). */
+  /**
+   * The update's mods and what it changes: the mod diff, by portal mods (the game's own come with its version, enabled
+   * as they are); from and to count every enabled mod.
+   */
   async #plan(req: GameUpdateRequest, installed: Installed): Promise<Plan> {
     const gameMods = new Set(installed.mods.filter((m) => GAME_MODS.has(m.name)).map((m) => m.name));
     const resolved = await this.#d.catalog.resolve(req.factorio, req.mods, gameMods);
@@ -302,7 +305,7 @@ export class GameUpdates {
     }
     const picked = new Set(req.mods.map((p) => p.name)); // one that can't be resolved isn't removed: it is unresolved
     for (const w of was) if (!resolved.mods.some((m) => m.name === w.name) && !picked.has(w.name)) changes.push(`Removed: ${w.name} ${w.version}`);
-    return { ...resolved, changes, from: gameLabel(installed.factorio, was.length), to: gameLabel(req.factorio, resolved.mods.length) };
+    return { ...resolved, changes, from: gameLabel(installed.factorio, installed.mods.length), to: gameLabel(req.factorio, gameMods.size + resolved.mods.length) };
   }
 
   async #begin(job: Job, factorio: FactorioDownload, mods: FactorioModDownload[]): Promise<void> {

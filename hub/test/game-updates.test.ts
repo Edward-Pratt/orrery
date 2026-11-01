@@ -258,14 +258,14 @@ test('a game update: the hub resolves it, the Agent gets signed links only, the 
   assert.equal(g.installed?.mods.length, 7);
   const { finished, started, log, ...row } = g.history[0]!;
   assert.ok(finished! >= started);
-  assert.deepEqual(row, { id, from: '2.1.24 · 1 mod', to: '2.1.24 · 3 mods', changes: ['Added: helmod 2.0.0', 'Added: flib 0.16.2'], by: 'alex', outcome: 'ok', step: 'gate', backup: null });
+  assert.deepEqual(row, { id, from: '2.1.24 · 5 mods', to: '2.1.24 · 7 mods', changes: ['Added: helmod 2.0.0', 'Added: flib 0.16.2'], by: 'alex', outcome: 'ok', step: 'gate', backup: null });
   assert.ok(!/secure=|token=|username=owner/.test(log), log);
   assert.ok(log.includes(`prepare: done: Staged 3 mods from https://dl-mod.factorio.com/files/`), log);
   assert.deepEqual(kinds(h.notices), ['packUpdateStarted', 'packUpdateFinished']);
-  assert.deepEqual(h.notices[0], { severity: 'info', kind: 'packUpdateStarted', from: '2.1.24 · 1 mod', to: '2.1.24 · 3 mods', by: 'alex' });
+  assert.deepEqual(h.notices[0], { severity: 'info', kind: 'packUpdateStarted', from: '2.1.24 · 5 mods', to: '2.1.24 · 7 mods', by: 'alex' });
   assert.deepEqual(webAudit(await h.json<AuditLog>(h.req('GET', '/api/audit'))), [
-    ['game update', '2.1.24 · 1 mod → 2.1.24 · 3 mods: ok'],
-    ['game update', '2.1.24 · 1 mod → 2.1.24 · 3 mods: Added: helmod 2.0.0, Added: flib 0.16.2'],
+    ['game update', '2.1.24 · 5 mods → 2.1.24 · 7 mods: ok'],
+    ['game update', '2.1.24 · 5 mods → 2.1.24 · 7 mods: Added: helmod 2.0.0, Added: flib 0.16.2'],
   ]);
 });
 
@@ -282,7 +282,7 @@ test('an update starts on a stopped server: no stop is asked, the Agent goes on 
   h.done(update.id, 'ok');
   await eventually(async () => (await h.game()).running === null);
   const row = (await h.game()).history[0]!;
-  assert.deepEqual([row.outcome, row.from, row.to, row.changes], ['ok', '2.1.24 · 1 mod', '2.1.24 · 0 mods', ['Removed: orrery 0.1.0']]);
+  assert.deepEqual([row.outcome, row.from, row.to, row.changes], ['ok', '2.1.24 · 5 mods', '2.1.24 · 4 mods', ['Removed: orrery 0.1.0']]);
   assert.ok(row.log.includes('stop: done: Already stopped'), row.log);
   assert.ok(!h.got.some((m) => m.type === 'serviceAct'));
 });
@@ -322,8 +322,8 @@ test('cancel before the swap: while the Agent prepares it is told to cancel; aft
     severity: 'problem',
     kind: 'packUpdateFinished',
     outcome: 'rolled back',
-    from: '2.1.24 · 1 mod',
-    to: '2.1.24 · 3 mods',
+    from: '2.1.24 · 5 mods',
+    to: '2.1.24 · 7 mods',
     ms: (h.notices.at(-1) as { ms: number }).ms,
     backup: 'orrery-pre-update-2.1.24-20261101T120000Z.zip',
   });
@@ -438,7 +438,7 @@ test("Packs.start closes only pack updates; a game update's row is left to GameU
   t.after(() => db.close());
   const row = { changes: null, by: 'alex', started: 1 };
   const pack = db.startPackUpdate('gtnh', { from: '2.7.4', to: '2.7.5', ...row });
-  const game = db.startPackUpdate('space', { from: '2.1.24 · 1 mod', to: '2.1.24 · 3 mods', ...row });
+  const game = db.startPackUpdate('space', { from: '2.1.24 · 5 mods', to: '2.1.24 · 7 mods', ...row });
   const servers = [
     { id: 'gtnh', name: 'GTNH', game: 'minecraft', dir: join(dir, 'gtnh'), backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched', service: 'gtnh' },
     { id: 'space', name: 'Space Age', game: 'factorio', backupMinFreeGB: 10, lag: { tps: 50, minutes: 2, enabled: true }, quests: 'batched', service: 'factorio' },
@@ -484,7 +484,7 @@ test('the game routes: 404 for a server no Agent runs, 400 for bad input, 409 wi
   const needy = await h.json<GameCatalog>(h.req('POST', '/api/servers/space/game/catalog', { factorio: '2.1.24', mods: [{ name: 'needy', version: null }] }));
   assert.deepEqual(needy.unresolved, [{ mod: 'needy', dependency: 'nowhere', reason: 'Not on the mod portal.' }]);
   await refused('update', { factorio: '2.1.24', mods: [{ name: 'needy', version: null }] }, 409, 'Unmet dependencies: needy needs nowhere: Not on the mod portal.');
-  await refused('update', { factorio: '2.1.24', mods: [{ name: 'orrery', version: null }] }, 409, 'Nothing to change: Space Age runs 2.1.24 · 1 mod already.');
+  await refused('update', { factorio: '2.1.24', mods: [{ name: 'orrery', version: null }] }, 409, 'Nothing to change: Space Age runs 2.1.24 · 5 mods already.');
   await refused('update', { factorio: '2.1.99', mods: [{ name: 'orrery', version: null }] }, 400, "factorio.com lists no headless build of Factorio 2.1.99 for the Agent's machine.");
   await refused('update/cancel', {}, 409, 'No game update is running on Space Age.');
   assert.ok(!a.got.some((m) => m.type === 'update'));

@@ -395,5 +395,5 @@ function failure(err: unknown): string {
   return typeof e?.cause?.code === 'string' ? e.cause.code : 'the request failed';
 }
 
-/** A Factorio version and the portal mods it runs, as an update's history row names them: "2.1.24 · 5 mods". */
+/** A Factorio version and how many mods it runs enabled (the game's own too), as an update's history row names them: "2.1.24 · 5 mods". */
 export const gameLabel = (factorio: string, mods: number) => `${factorio} · ${plural(mods, 'mod')}`;

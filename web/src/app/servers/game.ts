@@ -1,9 +1,9 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, inject, signal } from '@angular/core';
+import { afterNextRender, Component, computed, inject, Injector, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideLock, lucidePlus, lucideX } from '@ng-icons/lucide';
+import { lucideArrowLeft, lucideCheck, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -12,6 +12,8 @@ import { catchError, debounceTime, EMPTY, filter, firstValueFrom, map, of, start
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { changesCard } from './changes';
+import type { BrowseStatus } from './mod-browser';
+import { ModBrowser } from './mod-browser';
 import ServerPage from './server';
 import { failedPrep, PACK_STEPS, UpdateHistory, UpdateSteps } from './update-steps';
 
@@ -38,8 +40,8 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
  */
 @Component({
   selector: 'app-server-game',
-  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, UpdateHistory, UpdateSteps],
-  viewProviders: [provideIcons({ lucideCheck, lucideLock, lucidePlus, lucideX })],
+  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, UpdateHistory, UpdateSteps],
+  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideLock, lucidePlus, lucideSearch, lucideX })],
   template: `
     @if (state(); as g) {
       <div class="flex max-w-4xl flex-col gap-8">
@@ -95,9 +97,36 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
       <hlm-sheet side="right" state="open" (closed)="sheet.set(false)">
         <hlm-sheet-content *hlmSheetPortal="let ctx" class="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
           <hlm-sheet-header>
-            <h2 hlmSheetTitle>Update game</h2>
+            @if (browsing()) {
+              <div class="flex items-center gap-1">
+                <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeBrowse()" data-browse-back>
+                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                </button>
+                <h2 hlmSheetTitle>Browse mods</h2>
+              </div>
+            } @else {
+              <h2 hlmSheetTitle>Update game</h2>
+            }
           </hlm-sheet-header>
-          <div class="flex flex-col gap-4 px-4 pb-4 text-sm">
+          @defer (when browsing(); prefetch on idle) {
+            @if (browsing()) {
+              <app-mod-browser
+                class="text-sm"
+                [base]="base"
+                [factorio]="factorio()"
+                [picks]="pickNames()"
+                [installed]="installedNames()"
+                [required]="required()"
+                [status]="browseStatus()"
+                (add)="add($event)"
+                (back)="closeBrowse()"
+              />
+            }
+          } @error {
+            <!-- a deploy replaced the build under this open page, so the browser's chunk is gone -->
+            <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
+          }
+          <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing()" data-update-view>
             <label
               >Factorio version
               <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="setFactorio($any($event.target).value)" data-factorio>
@@ -164,6 +193,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 <span class="text-xs text-muted-foreground" data-add-error>{{ e }}</span>
               }
             </form>
+            <button hlmBtn variant="ghost" class="-mt-2 self-start" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
             @if (catalogError(); as e) {
               <p class="text-destructive" data-catalog-error>{{ e }}</p>
             }
@@ -211,7 +241,8 @@ export default class Game {
   readonly #server = inject(ServerPage);
   readonly #http = inject(HttpClient);
   readonly #feedback = inject(Feedback);
-  readonly #base = `/api/servers/${encodeURIComponent(this.#server.id)}/game`;
+  readonly #injector = inject(Injector);
+  protected readonly base = `/api/servers/${encodeURIComponent(this.#server.id)}/game`;
   protected readonly steps = STEPS;
   protected readonly flow = FLOW;
   protected readonly orrery = ORRERY;
@@ -232,6 +263,10 @@ export default class Game {
   protected readonly adding = signal('');
   protected readonly addError = signal<string | null>(null);
   protected readonly checking = signal(false);
+  /** The Browse view is shown in place of the update view (which stays in the page, as it was). */
+  protected readonly browsing = signal(false);
+  /** Where Browse was opened from, and how far the update view was scrolled, for Back. */
+  #browseFrom: { button: HTMLElement; scroller: HTMLElement | null; top: number } | null = null;
   protected readonly catalogError = signal<string | null>(null);
   /** The latest catalog answer and the request it answered, as JSON. */
   readonly #catalog = signal<{ asked: string; answer: GameCatalog } | null>(null);
@@ -265,6 +300,14 @@ export default class Game {
       .map((m) => m.name)
       .join(', '),
   );
+  // What the Browse view needs to say each mod's standing and the footer's count.
+  protected readonly pickNames = computed(() => this.picks().map((p) => p.name));
+  protected readonly installedNames = computed(() => (this.state()?.installed?.mods ?? []).map((m) => m.name));
+  protected readonly required = computed(() => new Map(this.dependencies().map((m) => [m.name, m.requiredBy!])));
+  protected readonly browseStatus = computed<BrowseStatus>(() => {
+    const c = this.current();
+    return { checking: this.checking(), changes: c ? c.changes.length : null, unresolved: c?.unresolved.length ?? 0 };
+  });
   /** Why Update can't go ahead now; null: it can. */
   protected readonly startWhy = computed(() => {
     const g = this.state();
@@ -282,7 +325,7 @@ export default class Game {
         debounceTime(50),
         startWith(undefined),
         switchMap(() =>
-          this.#http.get<GameState>(this.#base).pipe(
+          this.#http.get<GameState>(this.base).pipe(
             catchError((err: HttpErrorResponse) => {
               if (!this.state()) this.missing.set(err.status === 404 ? 'This server has no game updates.' : `The hub didn't answer (HTTP ${err.status}).`);
               return EMPTY;
@@ -301,7 +344,7 @@ export default class Game {
         switchMap((req) => {
           this.checking.set(true);
           this.catalogError.set(null);
-          return this.#http.post<GameCatalog>(`${this.#base}/catalog`, req).pipe(
+          return this.#http.post<GameCatalog>(`${this.base}/catalog`, req).pipe(
             map((answer) => ({ asked: JSON.stringify(req), answer })),
             catchError((err: HttpErrorResponse) => (this.catalogError.set(`The catalog: ${why(err)}`), of(null))),
           );
@@ -352,6 +395,7 @@ export default class Game {
     this.picks.set(i.mods.filter((m) => !GAME_MODS.has(m.name)).map((m) => ({ name: m.name, version: m.version })));
     this.adding.set('');
     this.addError.set(null);
+    this.browsing.set(false);
     this.sheet.set(true);
     this.#ask();
   }
@@ -375,15 +419,41 @@ export default class Game {
     this.#ask();
   }
 
-  /** Adds a portal mod by name at the newest version that fits; the catalog says if the portal has no such mod. */
-  protected add(): void {
-    const name = this.adding().trim();
+  /**
+   * Adds a portal mod by name (typed, or from the Browse view) at the newest version that fits; the catalog says if
+   * the portal has no such mod, and adds its required dependencies.
+   */
+  protected add(name = this.adding().trim()): void {
     if (!name) return;
     if (GAME_MODS.has(name)) return this.addError.set(`${name} comes with Factorio.`);
     if (this.picks().some((p) => p.name === name)) return this.addError.set(`${name} is in the list already.`);
     this.picks.update((picks) => [...picks, { name, version: null }]);
-    this.adding.set('');
+    if (name === this.adding().trim()) this.adding.set('');
+    this.addError.set(null);
     this.#ask();
+  }
+
+  /** Shows the Browse view; the update view keeps its picks and scroll position for Back. */
+  protected openBrowse(event: Event): void {
+    const button = event.currentTarget as HTMLElement;
+    const scroller = button.closest<HTMLElement>('[data-sheet]');
+    this.#browseFrom = { button, scroller, top: scroller?.scrollTop ?? 0 };
+    if (scroller) scroller.scrollTop = 0;
+    this.browsing.set(true);
+  }
+
+  /** Back to the update view, where Browse was, with the focus on it. */
+  protected closeBrowse(): void {
+    this.browsing.set(false);
+    const from = this.#browseFrom;
+    if (!from) return;
+    afterNextRender(
+      () => {
+        if (from.scroller) from.scroller.scrollTop = from.top;
+        from.button.focus();
+      },
+      { injector: this.#injector },
+    );
   }
 
   #confirmText(): string {
@@ -407,12 +477,12 @@ export default class Game {
     });
     // Cancelled: back to the sheet as it was.
     if (!ok) return this.sheet.set(true);
-    const answer = await this.#request('Starting the update', () => firstValueFrom(this.#http.post<GameUpdateAnswer>(`${this.#base}/update`, req)));
+    const answer = await this.#request('Starting the update', () => firstValueFrom(this.#http.post<GameUpdateAnswer>(`${this.base}/update`, req)));
     if (answer) this.#reload.next();
   }
 
   protected async cancel(): Promise<void> {
-    const done = await this.#request('Cancelling the update', () => firstValueFrom(this.#http.post(`${this.#base}/update/cancel`, {})));
+    const done = await this.#request('Cancelling the update', () => firstValueFrom(this.#http.post(`${this.base}/update/cancel`, {})));
     if (done !== undefined) this.#feedback.ok('Cancelling: nothing is swapped.');
   }
 

@@ -55,9 +55,27 @@ export const SHA256 = sha('factorio-2.1.24', 'sha256');
 /** A signed link as dl-mod.factorio.com's: its only query key `secure`. */
 export const signed = (name: string) => `https://dl-mod.factorio.com/files/${sha(name).slice(0, 2)}/${name}.zip?secure=sig-${name},1730393211`;
 
+/** The mod browser's: the portal's list for 2.1 (each row the newest release for it), and the thumbnails. */
+export const LISTED = [
+  { name: 'helmod', title: 'Helmod', owner: 'Helfima', summary: 'Plan your factory.', downloads_count: 500_000, category: 'tweaks', latest_release: { version: '2.0.0', released_at: '2026-10-02T00:00:00.000Z', info_json: { factorio_version: '2.1' } } },
+  { name: 'flib', title: 'Factorio Library', owner: 'raiguard', summary: 'A library.', downloads_count: 1_080_000, category: 'internal', latest_release: { version: '0.16.2', released_at: '2026-10-01T00:00:00.000Z', info_json: { factorio_version: '2.1' } } },
+  { name: 'Squeak Through', title: 'Squeak Through', owner: 'someone', summary: 'Squeeze.', downloads_count: 3, category: 'tweaks', latest_release: { version: '1.0.0', info_json: { factorio_version: '2.1' } } },
+];
+export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('a thumbnail')]);
+const THUMB = `/assets/${'a'.repeat(40)}.thumb.png`;
+
 /** factorio.com and the mod portal: a download link only with the account, as a redirect. */
 export const portal: PortalFetch = async (url, init) => {
   if (url === 'https://factorio.com/api/latest-releases') return Response.json({ stable: { headless: '2.1.24' }, experimental: { headless: '2.1.25' } });
+  if (url === 'https://mods.factorio.com/api/mods?page_size=max&version=2.1&hide_deprecated=true') return Response.json({ pagination: null, results: LISTED });
+  if (url === 'https://mods.factorio.com/api/categories') return Response.json([['tweaks', 'Tweaks', ''], ['internal', 'Internal', ''], ['mod-packs', 'Mod packs', '']]);
+  const short = /^https:\/\/mods\.factorio\.com\/api\/mods\/([^/]+)$/.exec(url);
+  if (short) {
+    const name = decodeURIComponent(short[1]!);
+    if (name === 'down') return new Response('', { status: 503 });
+    return LISTED.some((m) => m.name === name) ? Response.json({ name, ...(name !== 'flib' && { thumbnail: THUMB }) }) : new Response('', { status: 404 });
+  }
+  if (url === `https://assets-mod.factorio.com${THUMB}`) return new Response(new Uint8Array(PNG), { headers: { 'content-type': 'image/png' } });
   if (url === 'https://www.factorio.com/download/sha256sums/') return new Response(`${SHA256}  factorio-headless_linux-arm64_2.1.24.tar.xz\n`);
   const mod = /^https:\/\/mods\.factorio\.com\/api\/mods\/([^/]+)\/full$/.exec(url);
   if (mod) return MODS[mod[1]!] ? Response.json({ name: mod[1], title: mod[1], releases: MODS[mod[1]!] }) : new Response('', { status: 404 });

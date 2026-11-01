@@ -1,12 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import { DeferBlockState, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import type { CatalogMod, GameCatalog, GameState, Notice, PackUpdateRow, RunningGameUpdate, ServerCard, ServerDetail, TargetEvent } from '@hub/api';
+import type { CatalogMod, GameCatalog, GameState, ModBrowse, Notice, PackUpdateRow, RunningGameUpdate, ServerCard, ServerDetail, TargetEvent } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle } from '../testing';
+import { dialog, dialogButton, fakeEvents, settle, until } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -204,9 +204,134 @@ describe('server game tab', () => {
     expect(text(q('[data-game-mods]'))).toBe('Comes with Factorio: base, elevated-rails, quality, space-age');
     expect(document.querySelector('[data-pick=orrery] [data-remove]')).toBeNull(); // the Agent needs it
     expect(document.querySelector('[data-pick=orrery] [data-locked]')).not.toBeNull();
-    expect(text(q('[data-changes]'))).toContain('Nothing yet.');
+    expect(text(q('[data-changes]'))).toContain('Nothing: the server runs these already. Add a mod or pick other versions.');
     expect(go().disabled).toBe(true);
-    expect(text(q('[data-update-go-why]'))).toBe('Nothing to change yet.');
+    expect(text(q('[data-update-go-why]'))).toBe('Nothing to change: the server runs these already.');
+  });
+
+  it('labels a release factorio.com lists on both channels as stable, whatever the order', async () => {
+    const both = (versions: GameCatalog['versions']) => ({ ...SAME, versions });
+    const stableFirst: GameCatalog['versions'] = [
+      { version: '2.1.24', channel: 'stable' },
+      { version: '2.1.24', channel: 'experimental' },
+    ];
+    const experimentalFirst = [...stableFirst].reverse();
+    for (const versions of [stableFirst, experimentalFirst]) {
+      const running = await setup();
+      await running.open(both(versions));
+      expect(running.all('[data-factorio] option').map(running.text)).toEqual(['2.1.24 · stable (running)']);
+      TestBed.resetTestingModule();
+      document.body.innerHTML = '';
+      const older = await setup({ ...STATE, installed: { ...STATE.installed!, factorio: '2.1.23' } });
+      older.q('[data-update]').click();
+      await older.render();
+      await older.catalog(both(versions), PICKS, '2.1.23');
+      expect(older.all('[data-factorio] option').map(older.text)).toEqual(['2.1.23 (running)', '2.1.24 · stable']);
+      TestBed.resetTestingModule();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('browses the mod portal for the picked version: Add puts a mod pack in the picks, its mods follow, and Back keeps them', async () => {
+    const { q, text, all, open, catalog, choose, render, backend } = await setup();
+    await open();
+    await choose('[data-factorio]', '2.1.25');
+    await catalog({ ...SAME, changes: ['Factorio 2.1.24 → 2.1.25'] }, PICKS, '2.1.25');
+    const sheet = q('[data-sheet]');
+    q('[data-browse]').click();
+    await render();
+    await until(() => !!document.querySelector('[data-browse-search]'), () => render());
+    expect(text(q('[data-sheet] [hlmSheetTitle]'))).toBe('Browse mods');
+    expect(q('[data-update-view]').hidden).toBe(true);
+    expect(document.activeElement).toBe(q('[data-browse-search]'));
+    const read = backend.expectOne((r) => r.url === '/api/servers/space/game/mods');
+    expect(read.request.urlWithParams).toBe('/api/servers/space/game/mods?factorio=2.1.25&sort=downloads&page=1');
+    const pack = { name: 'se-pack', title: 'SE pack', owner: 'Earendel', summary: '', downloads: 9, version: '0.7.3', updated: null, category: 'mod-packs', spaceAge: false, page: 'https://mods.factorio.com/mod/se-pack' };
+    read.flush({ line: '2.1', total: 2, mods: [pack, { ...pack, name: 'flib', title: 'Flib', category: null }], categories: [{ id: 'mod-packs', title: 'Mod packs' }] } satisfies ModBrowse);
+    await render();
+    const button = (name: string) => q<HTMLButtonElement>(`[data-listing="${name}"] [data-add-mod]`);
+    expect(text(button('flib'))).toBe('Installed');
+    expect(text(q('[data-browse-changes]'))).toBe('1 change');
+    button('se-pack').click();
+    await render();
+    expect(text(q('[data-browse-changes]'))).toBe('Checking with the mod portal…');
+    const withPack = [...PICKS, { name: 'se-pack', version: null }];
+    await catalog(
+      {
+        ...SAME,
+        mods: [...SAME.mods, mod('se-pack', ['0.7.3']), mod('space-exploration', ['0.7.40'], { requiredBy: 'se-pack' })],
+        changes: ['Factorio 2.1.24 → 2.1.25', 'Added: se-pack 0.7.3', 'Added: space-exploration 0.7.40'],
+      },
+      withPack,
+      '2.1.25',
+    );
+    expect(text(button('se-pack'))).toBe('Added');
+    expect(text(q('[data-browse-changes]'))).toBe('3 changes');
+    q('[data-browse-back]').click();
+    await render();
+    expect(document.querySelector('[data-browse-search]')).toBeNull();
+    expect(q('[data-update-view]').hidden).toBe(false);
+    expect(text(q('[data-sheet] [hlmSheetTitle]'))).toBe('Update game');
+    expect(document.activeElement).toBe(q('[data-browse]'));
+    expect(q<HTMLSelectElement>('[data-factorio]').value).toBe('2.1.25');
+    expect(all('[data-pick]').map((p) => p.getAttribute('data-pick'))).toEqual(['orrery', 'flib', 'RateCalculator', 'se-pack']);
+    expect(text(q('[data-dependency=space-exploration]'))).toContain('required by se-pack');
+    expect(sheet.isConnected).toBe(true);
+    // Review the update goes back too.
+    q('[data-browse]').click();
+    await until(() => !!document.querySelector('[data-browse-review]'), () => render());
+    backend.expectOne((r) => r.url === '/api/servers/space/game/mods').flush({ line: '2.1', total: 0, mods: [], categories: [] } satisfies ModBrowse);
+    await render();
+    q('[data-browse-review]').click();
+    await render();
+    expect(q('[data-update-view]').hidden).toBe(false);
+  });
+
+  it('puts a mod the server runs back at the version it runs, typed or from Browse: Remove then Add back changes nothing', async () => {
+    const { q, text, open, catalog, type, render, backend, go } = await setup();
+    await open();
+    q('[data-pick=RateCalculator] [data-remove]').click();
+    await render();
+    const without = PICKS.filter((p) => p.name !== 'RateCalculator');
+    await catalog({ ...SAME, mods: SAME.mods.slice(0, 2), changes: ['Removed: RateCalculator 3.3.2'] }, without);
+    await type('[data-add-name]', 'RateCalculator');
+    q('[data-add]').click();
+    await render();
+    await catalog(SAME, [...without, { name: 'RateCalculator', version: '3.3.2' }]);
+    expect(q<HTMLSelectElement>('[data-pick=RateCalculator] [data-version]').value).toBe('3.3.2');
+    expect(go().disabled).toBe(true); // what it runs: nothing to change
+    // From Browse, the same.
+    q('[data-pick=RateCalculator] [data-remove]').click();
+    await render();
+    await catalog({ ...SAME, mods: SAME.mods.slice(0, 2), changes: ['Removed: RateCalculator 3.3.2'] }, without);
+    q('[data-browse]').click();
+    await until(() => !!document.querySelector('[data-browse-search]'), () => render());
+    const listing = { name: 'RateCalculator', title: 'Rate Calculator', owner: '', summary: '', downloads: 9, version: '3.3.3', updated: null, category: null, spaceAge: false, page: 'https://mods.factorio.com/mod/RateCalculator' };
+    backend.expectOne((r) => r.url === '/api/servers/space/game/mods').flush({ line: '2.1', total: 1, mods: [listing], categories: [] } satisfies ModBrowse);
+    await render();
+    const button = q<HTMLButtonElement>('[data-listing=RateCalculator] [data-add-mod]');
+    expect(text(button)).toBe('Add back');
+    button.click();
+    await render();
+    await catalog(SAME, [...without, { name: 'RateCalculator', version: '3.3.2' }]);
+    expect(text(button)).toBe('Installed');
+  });
+
+  it("says to reload only in the Browse view when its chunk failed to load, never in the update view", async () => {
+    const { harness, q, open, render } = await setup();
+    await open();
+    const blocks = await harness.fixture.getDeferBlocks();
+    expect(blocks).toHaveLength(1);
+    await blocks[0]!.render(DeferBlockState.Error);
+    await render();
+    expect(document.querySelector('[data-stale]')).toBeNull(); // the update view, as it was
+    q('[data-browse]').click();
+    await render();
+    expect(document.querySelector('[data-stale]')).not.toBeNull();
+    q('[data-browse-back]').click();
+    await render();
+    expect(document.querySelector('[data-stale]')).toBeNull();
+    expect(q('[data-update-view]').hidden).toBe(false);
   });
 
   it('asks the catalog on every change, shows the dependencies it added, and an unmet one stops the update until fixed', async () => {

@@ -120,7 +120,8 @@ New method `FactorioCatalog.updates(factorio, mods, gameMods)` in `hub/src/facto
 class next to `check`:
 
 1. `line = lineOf(factorio)`. The names are the installed mods that aren't `GAME_MODS` (so `orrery` counts: it is a
-   portal mod).
+   portal mod). The Agent's `installed` names pass only the wire's length limit, so a name that fails `validName` is
+   never sent to the portal: it goes straight to `unchecked`. Nothing from the Agent becomes a portal URL's path.
 2. `check(line, names)`. That reads the line's list (`#list`, kept `LIST_MS`, 15 minutes, the two most recent lines,
    shared with the mod browser), and reads one by one the first `CHECK_READS` (20) names the list lacks. Each name is
    then `fits` with `latest`, `noRelease`, `missing` or `unchecked`.
@@ -252,6 +253,7 @@ reads "1 portal mod update fits …".
   - a mod not in the list goes through `check`'s one-by-one read; `missing` and `noRelease` become `gone`;
   - 25 candidates: 20 read, 5 `unchecked`;
   - game mods are never asked; `orrery` is;
+  - an installed name holding `..` or `/` is `unchecked`, with no fetch;
   - the fetch spy counts one list read for two calls within 15 minutes, and no mod read for a mod with no candidate.
 - `hub/test/mod-updates.test.ts`, the whole hub with `test/fake-agent.ts` and a fake portal:
   - `GET` without a session is 401, a Minecraft server 404; the state before and after `installed`;
@@ -308,7 +310,8 @@ Moderation                                            [Ban a player…] [Refresh
 **The dialogs** (`moderate-dialog.ts`, a spartan alert dialog with a form, in the same chunk):
 
 - **Ban** (the confirm the owner asked for): title "Ban griefer_1?". Body: "They are disconnected if they are online,
-  and can't join again until unbanned. Factorio shows them the reason." Then **Reason** (optional), with a counter
+  and can't join again until unbanned. Factorio shows them the reason." (Unchecked so far: the production smoke step
+  confirms it, or the wording changes.) Then **Reason** (optional), with a counter
   "0/200", and **Cancel** and **Ban** (destructive). With verification off, the body adds the warning below.
 - **Kick**: title "Kick bob?", body "They are disconnected and can join again at once.", the same optional reason, and
   **Kick**.
@@ -626,6 +629,9 @@ The other rules, all kept:
 - **Admins.** Both features change `server-adminlist.json` through `/promote` and `/demote`. The Agent's
   `Moderation` calls `GameSettings` to read again and push `settings` after its own promote or demote (step 7). Until
   fa/world-settings is merged, that call isn't there, and nothing else needs it.
+- **User verification.** `server-settings.json` can hold a value the running server doesn't have yet (fa/world-settings'
+  `startedWith`). For the "a ban stops no one" line, the running value is the one that counts. Once merged,
+  `Moderation` takes `verification` from `GameSettings`' `startedWith`; until then, from the file.
 - **The Players tab** isn't touched by fa/world-settings, and the Game tab is touched only by this branch.
 
 ---
@@ -648,7 +654,8 @@ Shipped together with Settings (fa/world-settings stage A). Both branches merge 
    - Promote and demote a made-up name, and watch the Settings tab follow.
    - **With the friend online** (the steps this note couldn't check):
      - kick them with a reason: do they see it, and does the section show `done`?
-     - ban them: are they disconnected at once, and do they see the reason when they try again? Then unban.
+     - ban them: are they disconnected at once, and do they see the reason when they try again? Then unban. If
+       either answer is no, change the Ban and Kick dialogs' wording to match.
      - after each, check that `game.console_command_used` is still `false` (as the smoke notes read it).
    - If user verification is off by then: the amber line shows.
 

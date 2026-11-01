@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import type { AuditLog, DeploysAnswer, GameCatalog, ModBrowse, ServerCard } from '../src/api.ts';
+import type { AuditLog, DeploysAnswer, GameCatalog, ModBrowse, ModCheckAnswer, ServerCard } from '../src/api.ts';
 import type { ServerSettings } from '../src/config.ts';
 import { Db } from '../src/db.ts';
 import { fitsLine, GameUpdates, redact } from '../src/game-updates.ts';
@@ -637,5 +637,44 @@ test('the mod browser: a page of the portal\'s mods for the version\'s line thro
   const down = await h.req('GET', `${mods}/down/thumbnail`);
   assert.deepEqual([down.status, down.headers.get('cache-control'), await down.text()], [502, null, "The mod portal can't be read: HTTP 503."]);
   const old = await h.req('GET', `${mods}?factorio=2.0.0`);
+  assert.deepEqual([old.status, await old.text()], [502, "The mod portal can't be read: HTTP 404."]);
+});
+
+test("Import mod list's check: each name on the portal for the version's line or not, the body checked before any portal read", async (t) => {
+  const h = await gameHub(t);
+  const check = '/api/servers/space/game/check';
+  const body = { factorio: '2.1.24', names: ['helmod', 'Squeak Through', 'needy', 'gone'] };
+  // A session is needed, as for every route; a server no Agent runs has none; no Agent connected is fine (a read).
+  assert.equal((await h.app.request(check, { method: 'POST', body: JSON.stringify(body) })).status, 401);
+  assert.equal((await h.req('POST', '/api/servers/gtnh/game/check', body)).status, 404);
+  // helmod and Squeak Through from the list, needy read on its own (not listed), gone not on the portal.
+  assert.deepEqual(await h.json<ModCheckAnswer>(h.req('POST', check, body)), {
+    line: '2.1',
+    mods: [
+      { name: 'helmod', found: 'fits', title: 'Helmod', latest: '2.0.0' },
+      { name: 'Squeak Through', found: 'fits', title: 'Squeak Through', latest: '1.0.0' },
+      { name: 'needy', found: 'fits', title: 'needy', latest: '1.0.0' },
+      { name: 'gone', found: 'missing', title: null, latest: null },
+    ],
+  });
+  assert.deepEqual(await h.json<ModCheckAnswer>(h.req('POST', check, { factorio: '2.1.24', names: [] })), { line: '2.1', mods: [] });
+  for (const [bad, why] of [
+    [{ names: ['helmod'] }, 'Give a Factorio version, like 2.1.24.'],
+    [{ factorio: '2.1', names: ['helmod'] }, 'Give a Factorio version, like 2.1.24.'],
+    [{ factorio: '2.1.24' }, `Give the mods to check by name (names, at most ${LIMITS.mods}).`],
+    [{ factorio: '2.1.24', names: 'helmod' }, `Give the mods to check by name (names, at most ${LIMITS.mods}).`],
+    [{ factorio: '2.1.24', names: Array.from({ length: LIMITS.mods + 1 }, (_, i) => `m${i}`) }, `Give the mods to check by name (names, at most ${LIMITS.mods}).`],
+    [{ factorio: '2.1.24', names: ['../etc'] }, 'Give each mod by its name on the mod portal.'],
+    [{ factorio: '2.1.24', names: ['<script>'] }, 'Give each mod by its name on the mod portal.'],
+    [{ factorio: '2.1.24', names: ['x'.repeat(LIMITS.text + 1)] }, 'Give each mod by its name on the mod portal.'],
+    [{ factorio: '2.1.24', names: [7] }, 'Give each mod by its name on the mod portal.'],
+    [{ factorio: '2.1.24', names: ['space-age'] }, "space-age comes with Factorio: it isn't on the mod portal."],
+    [{ factorio: '2.1.24', names: ['helmod', 'helmod'] }, 'helmod is given twice.'],
+  ] as const) {
+    const res = await h.req('POST', check, bad);
+    assert.deepEqual([res.status, await res.text()], [400, why], JSON.stringify(bad).slice(0, 80));
+  }
+  // The portal has no list for 2.0 here: 502 with why.
+  const old = await h.req('POST', check, { factorio: '2.0.0', names: ['helmod'] });
   assert.deepEqual([old.status, await old.text()], [502, "The mod portal can't be read: HTTP 404."]);
 });

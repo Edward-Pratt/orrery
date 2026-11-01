@@ -614,3 +614,17 @@ export type PortalListing = {
  * (404 when it has none).
  */
 export type ModBrowse = { line: string; total: number; mods: PortalListing[]; categories: PortalCategory[] };
+/**
+ * `POST /api/servers/:id/game/check`: the Import mod list's question, before anything is picked: does the portal have
+ * these mods (by name, at most 500, none the game's own or given twice) for the Factorio version's line?
+ */
+export type ModCheckRequest = { factorio: string; names: string[] };
+/**
+ * One name's answer: `fits` (the portal has a release for the line: `latest` is the newest, `title` its title),
+ * `noRelease` (on the portal, none for the line), `missing` (the portal has no such mod) or `unchecked` (not in the
+ * line's list, and past the hub's cap on reading mods one by one: add it by name to find out). Titles are the portal's,
+ * checked and cut: show them as text.
+ */
+export type ModCheck = { name: string; found: 'fits' | 'noRelease' | 'missing' | 'unchecked'; title: string | null; latest: string | null };
+/** The answer to `POST …/game/check`: the line asked about and each name's `ModCheck`, in the order asked. 400 for a bad body, 502 if the portal can't be read. */
+export type ModCheckAnswer = { line: string; mods: ModCheck[] };

@@ -534,3 +534,44 @@ test('at most 4 portal reads for thumbnails run at once', async () => {
   assert.ok(peak <= 4, `peak ${peak}`);
   assert.equal(peak, 4);
 });
+
+// The Import mod list's check.
+test("the mod list check answers from the line's list, reads only the names missing from it, one by one, and at most 20 of them", async () => {
+  const unlisted = Array.from({ length: 25 }, (_, i) => `gone-${String(i).padStart(2, '0')}`);
+  const { fetch, asked } = portal(
+    {
+      [LIST()]: { body: { results: [row('flib', { title: 'Factorio Library' }, { version: '0.16.2' }), row('Squeak Through')] } },
+      [`${MODS}flaky/full`]: { status: 503 },
+    },
+    {
+      // Deprecated, so the list leaves it out, but it has a 2.1 release; old has 2.0 releases only.
+      retired: { title: 'Retired‮ mod', releases: [rel('retired', '1.0.0', '2.0'), rel('retired', '1.1.0')] },
+      old: { releases: [rel('old', '0.1.0', '2.0')] },
+    },
+  );
+  const catalog = new FactorioCatalog(fetch);
+  const names = ['flib', 'retired', 'old', 'nowhere', 'flaky', 'Squeak Through', ...unlisted];
+  const answer = await catalog.check('2.1', names);
+  assert.deepEqual(answer.slice(0, 6), [
+    { name: 'flib', found: 'fits', title: 'Factorio Library', latest: '0.16.2' },
+    { name: 'retired', found: 'fits', title: 'Retired mod', latest: '1.1.0' },
+    { name: 'old', found: 'noRelease', title: 'old', latest: null },
+    { name: 'nowhere', found: 'missing', title: null, latest: null },
+    { name: 'flaky', found: 'unchecked', title: null, latest: null },
+    { name: 'Squeak Through', found: 'fits', title: 'Squeak Through', latest: '1.0.0' },
+  ]);
+  // 4 unlisted names above, then 16 of the 25: the other 9 aren't read.
+  assert.deepEqual(answer.slice(6).map((m) => m.found), [...Array(16).fill('missing'), ...Array(9).fill('unchecked')]);
+  const full = asked.filter((a) => a.url.endsWith('/full')).map((a) => decodeURIComponent(a.url.slice(MODS.length, -'/full'.length)));
+  assert.deepEqual(full.sort(), ['flaky', 'nowhere', 'old', 'retired', ...unlisted.slice(0, 16)].sort());
+  assert.equal(asked.filter((a) => a.url === LIST()).length, 1);
+  assert.ok(asked.every((a) => a.redirect === 'manual'));
+  // The list is the mod browser's, kept: a second check reads it no more, and the mods read are cached too.
+  asked.length = 0;
+  await catalog.check('2.1', ['flib', 'old']);
+  assert.deepEqual(asked, []);
+  await assert.rejects(catalog.check('2.1.24', ['flib']), (err: GameRefused) => err.status === 400);
+  // The list failing fails the check.
+  const down = new FactorioCatalog(async () => new Response('', { status: 503 }));
+  await assert.rejects(down.check('2.1', ['flib']), (err: GameRefused) => err.status === 502 && err.message === "The mod portal can't be read: HTTP 503.");
+});

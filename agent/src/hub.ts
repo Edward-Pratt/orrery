@@ -8,6 +8,7 @@ import type { GameEvent } from './events.ts';
 import type { BackupResult, SavesMsg } from './saves.ts';
 import { RunWatch, type RunEnd, type UnitState } from './service.ts';
 import type { Reading } from './status.ts';
+import type { InstalledMsg } from './update.ts';
 import { LIMITS, LineReader, PROTOCOL_VERSION, encode, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
 
 /** What answers a request: resolves with its reply's `data` (undefined: none); a throw is the reply's `error`. */
@@ -25,6 +26,8 @@ export type HubOptions = {
   command?: (command: string) => Promise<string[]>;
   /** The game connection's `save`: makes a named save, whose outcome comes back through `backup`. */
   save?: () => void;
+  /** After each welcome, once the state pushed on connect is out: a game update's step and outcome go again. */
+  welcomed?: () => void;
   pingMs?: number;
   /** For the TCP connect and the hub's answer to a hello. */
   handshakeMs?: number;
@@ -106,10 +109,10 @@ class Link {
 
 /**
  * The agent's two connections to the hub (docs/protocol.md, "Agent connection"). The Agent connection opens with
- * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state and the saves (on
- * connect and on change) and host samples, and answers each request by its id. It reconnects after any close, with
- * capped exponential backoff and jitter, logging once per change of state, so with no hub reachable the agent just
- * keeps trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
+ * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state, the saves and what is
+ * installed (on connect and on change) and host samples, carries a game update's steps (`send`), and answers each
+ * request by its id. It reconnects after any close, with capped exponential backoff and jitter, logging once per
+ * change of state, so with no hub reachable the agent just keeps trying. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
  *
  * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
  * and the orrery mod's version, `started` once per run of the unit, then a heartbeat per `/orrery-status` answer, the
@@ -126,6 +129,7 @@ export class HubClient {
   #toGame: (msg: ToGame) => void;
   #command: (command: string) => Promise<string[]>;
   #save: () => void;
+  #onWelcome: () => void;
   #pingMs: number;
   #handshakeMs: number;
   #backoffMs: number;
@@ -140,6 +144,8 @@ export class HubClient {
   #reading: Reading | null = null;
   #service: UnitState | null = null;
   #saves: SavesMsg | null = null;
+  #installed: InstalledMsg | null = null;
+  #installedKey = '';
   #runs = new RunWatch();
   /** The change time of the run whose end the hub was told (or is being told): no game connection until the next run. */
   #ended: number | null = null;
@@ -156,6 +162,7 @@ export class HubClient {
     this.#toGame = o.toGame ?? (() => {});
     this.#command = o.command ?? (() => Promise.reject(new Error('console commands are not supported')));
     this.#save = o.save ?? (() => console.error('[game] save is not supported'));
+    this.#onWelcome = o.welcomed ?? (() => {});
     this.#pingMs = o.pingMs ?? 10_000;
     this.#handshakeMs = o.handshakeMs ?? 10_000;
     this.#backoffMs = o.backoffMs ?? 1000;
@@ -167,6 +174,11 @@ export class HubClient {
   /** Whether the Agent connection is up: welcomed and not closed. */
   get connected(): boolean {
     return this.#agent?.welcomed === true;
+  }
+
+  /** Whether the game connection is up: welcomed and not closed (a game update's health gate). */
+  get gameUp(): boolean {
+    return this.#game?.welcomed === true && !this.#stopping;
   }
 
   start(): void {
@@ -225,6 +237,25 @@ export class HubClient {
   saves(msg: SavesMsg): void {
     this.#saves = msg;
     if (this.connected) this.#agent!.send({ type: 'saves', ...msg });
+  }
+
+  /**
+   * What the server runs, as `/orrery-status` last said: sent when it changed and on every connect (never the same
+   * twice in a row, so each answer costs the hub nothing).
+   */
+  installed(msg: InstalledMsg): void {
+    const key = JSON.stringify(msg);
+    if (key === this.#installedKey) return;
+    this.#installedKey = key;
+    this.#installed = msg;
+    if (this.connected) this.#agent!.send({ type: 'installed', ...msg });
+  }
+
+  /** A message on the Agent connection (a game update's `updateStep`, `updateDone`): false while it isn't up. */
+  send(msg: AgentMsg): boolean {
+    if (!this.connected || this.#stopping) return false;
+    this.#agent!.send(msg);
+    return true;
   }
 
   /** A save's outcome, as the game connection's `backup` (dropped while it isn't up, like a Mod's). */
@@ -318,6 +349,8 @@ export class HubClient {
     this.#ping = setInterval(() => link.send({ type: 'ping' }), this.#pingMs);
     if (this.#service) link.send({ type: 'serviceState', ...this.#service });
     if (this.#saves) link.send({ type: 'saves', ...this.#saves });
+    if (this.#installed) link.send({ type: 'installed', ...this.#installed });
+    this.#onWelcome();
     if (this.#reading) this.#openGame(this.#reading.modVersion);
   }
 

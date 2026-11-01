@@ -36,6 +36,7 @@ import type { Links } from './links.ts';
 import type { RestartScheduler } from './restarts.ts';
 import type { HubEvent, LiveEvent, ServerHub } from './servers.ts';
 import type { Period, Stats } from './stats.ts';
+import type { Game } from './types.ts';
 
 export type DiscordFrontend = {
   client: Client;
@@ -125,6 +126,19 @@ export function postTargets(hub: ServerHub, cfg: DiscordConfig, post: (channelId
     if (!channelId || !message) return;
     post(channelId, message).catch((err) => console.error(`[discord] alert for ${e.target} ${e.id} failed:`, err));
   });
+}
+
+/**
+ * Who a chat line is posted as through the relay webhook, or null to post it as the bot (`formatEvent`, the name
+ * escaped). A dashboard line: `<admin> (dashboard)` with their avatar. A minecraft player: their name with their skin.
+ * A factorio player: `<name> (Factorio)`, so a line can never pass for a dashboard one or the bot, and only for a name
+ * with no whitespace or parentheses: any text can come as a name from the game's mods or the Agent, and `Edward
+ * (dashboard)` would look like the owner's line.
+ */
+export function relayAs(e: Extract<HubEvent, { type: 'chat' | 'say' }>, game: Game | undefined): { username: string; avatarURL?: string } | null {
+  if (e.type === 'say') return { username: `${e.author} (dashboard)`, avatarURL: e.avatar };
+  if (game === 'factorio') return /[\s()]/.test(e.player) ? null : { username: `${e.player} (Factorio)` };
+  return { username: e.player, avatarURL: game === 'minecraft' ? `https://mc-heads.net/avatar/${encodeURIComponent(e.player)}/64` : undefined };
 }
 
 const errorCode = (err: unknown) => (err as { code?: number }).code;
@@ -227,16 +241,13 @@ export async function startDiscord(
     post(serverId, message).catch((err) => console.error(`[discord] post for ${serverId} failed:`, err));
   };
 
-  // Game chat (the player's name, and skin on a minecraft server) and dashboard lines (the admin's name and avatar,
-  // marked) go through the channel's webhook; falls back to the bot.
+  // Game chat and dashboard lines go through the channel's webhook, under the name `relayAs` gives; falls back to the bot.
   async function relayChat(e: Extract<HubEvent, { type: 'chat' | 'say' }>): Promise<void> {
-    const skin = (player: string) =>
-      hub.get(e.serverId)?.game === 'minecraft' ? `https://mc-heads.net/avatar/${encodeURIComponent(player)}/64` : undefined;
-    const [username, avatarURL] = e.type === 'chat' ? [e.player, skin(e.player)] : [`${e.author} (dashboard)`, e.avatar];
+    const as = relayAs(e, hub.get(e.serverId)?.game);
     const hook = webhooks.get(e.serverId);
-    if (hook && !refusedNames.has(username)) {
+    if (hook && as && !refusedNames.has(as.username)) {
       try {
-        await sendChat(hook, refusedNames, username, avatarURL, e.message);
+        await sendChat(hook, refusedNames, as.username, as.avatarURL, e.message);
         return;
       } catch (err) {
         // A deleted webhook is forgotten (and a refused name remembered, by sendChat), so neither is retried per message.

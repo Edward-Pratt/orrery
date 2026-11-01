@@ -179,6 +179,7 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'backup': // the BackupWatcher publishes it as a notice
     case 'console': // the /cmd reply shows it to whoever ran it
     case 'tps': // for the dashboard; /tps and lag notices cover Discord
+    case 'paused': // for the dashboard's card
       return null;
   }
 }

@@ -83,7 +83,7 @@ the hub drops them from it), plus these:
 | `heartbeat` | adds optional `paused` (boolean) | after each `/orrery-status` RCON round trip (5 s); `paused` while auto-paused with nobody on, or `tick_paused`, or a stalled tick with players on. The hub ignores `tps` while paused |
 | `milestone` | `kind` (`research`, `rocket`, `platform` or `landing`), `text`, optional `player`, optional `force` | a research finished (not by script), or a force's first rocket, first space platform, or first landing on each planet |
 | `link` | `uuid` is `""` | in-game `/orrery-link <code>`: Factorio has no player UUIDs |
-| `backup` | `ok`, `detail` | the save a `save` asked for is written (its size stable for 5 s), or failed |
+| `backup` | `ok`, `detail` | a named save is written (its size stable for 5 s), or failed: one a `save` asked for, or the Agent's own every 6 h after play |
 
 While disconnected the mod drops everything except `started`/`stopping`, so
 a hub outage never replays stale chat into Discord.
@@ -93,7 +93,7 @@ a hub outage never replays stale chat into Discord.
 | type | fields | effect |
 |---|---|---|
 | `say` | `author`, `message`, `source` (optional: `discord` or `dashboard`, where the line was typed) | broadcast `[Dashboard] <author> message` (gold) for `dashboard`, else `[Discord] <author> message` (blue), in MC chat. `source` was added without a protocol bump: an older mod ignores it and prints `[Discord]` |
-| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept |
+| `cmd` | `id`, `command` | run as console-level sender, reply with `cmdResult`. For a Mod the hub strips a leading `/`; a factorio server's `command` is as typed in its console (`/players`), the leading `/` kept, and 1 to 256 characters: the hub refuses a longer one before sending it, and the Agent refuses one too |
 | `linkResult` | `player`, `ok` (boolean), `message` | answer to `link`/`unlink`, shown to that player |
 | `notice` | `message` | Factorio only (the Agent's game connection): a system line in game, such as a countdown. A Mod gets `cmd` `say …` instead |
 | `save` | — | Factorio only: the Agent makes a named save (`orrery-<time>`), then sends `backup` |

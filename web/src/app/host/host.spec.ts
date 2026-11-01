@@ -316,6 +316,18 @@ describe('host page releases', () => {
     expect(row('web').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false);
   });
 
+  it("still lists the hub, the dashboard and each Mod for a hub below release 1, whose answer has no agent part", async () => {
+    const { agent: _, ...older } = ANSWER;
+    const { el, row, deploy, backend, render } = await releases(older as DeploysAnswer);
+    expect([...el.querySelectorAll('[data-row]')].map((r) => r.getAttribute('data-row'))).toEqual(['hub', 'web', 'mod:gtnh']);
+    expect(row('hub').querySelector<HTMLButtonElement>('[data-deploy]')!.disabled).toBe(false); // rolled forward from here
+    await deploy('web', 'web-v0.4.1'); // or the dashboard back, to one that reads the older hub's API
+    dialogButton('ok').click();
+    await render();
+    const req = backend.expectOne((r) => r.method === 'POST' && r.url === '/api/deploys');
+    expect(req.request.body).toEqual({ part: 'web', tag: 'web-v0.4.1' });
+  });
+
   const AGENTS: DeploysAnswer = {
     ...ANSWER,
     agent: {

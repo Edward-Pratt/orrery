@@ -17,6 +17,7 @@ export type {
   Lifecycle,
   LiveEvent,
   Notice,
+  Paused,
   ServerState,
   ServiceStatus,
   ServiceVerb,
@@ -88,6 +89,12 @@ export function tokenMatches(expected: string, got: string): boolean {
   const b = Buffer.from(got);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/**
+ * A console command its server's game connection would not take, refused before it is audited or sent: a factorio
+ * server's over `LIMITS.text` (256) characters, which its Agent refuses (docs/protocol.md, `cmd`).
+ */
+export class CommandRefused extends Error {}
 
 /** Why a hello's protocol version is refused (the same range for a Mod's hello and an Agent's), or null. */
 export function protocolRefusal(p: number): string | null {
@@ -263,16 +270,21 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
 
   /**
    * Runs a console command, control characters taken out; a Mod's without a leading `/`, a factorio server's as typed
-   * (`/players`: Factorio's console takes plain text as chat). `by` names who asked, for the audit log. `onLate` gets
-   * output that arrives after the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also
-   * goes on the event stream.
+   * (`/players`: Factorio's console takes plain text as chat) and at most `LIMITS.text` (256) characters, as its Agent
+   * takes no longer one (else `CommandRefused`). `by` names who asked, for the audit log. `onLate` gets output that
+   * arrives after the result (e.g. spark's profiler link), for 15 minutes. The output, late or not, also goes on the
+   * event stream.
    */
   runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
     const conn = this.#conns.get(id);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
     const typed = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
-    const cmd = this.#states.get(id)!.game === 'factorio' ? typed : typed.replace(/^\//, '');
+    const factorio = this.#states.get(id)!.game === 'factorio';
+    const cmd = factorio ? typed : typed.replace(/^\//, '');
     if (!cmd) return Promise.reject(new Error('empty command'));
+    if (factorio && cmd.length > LIMITS.text) {
+      return Promise.reject(new CommandRefused(`A Factorio console command is at most ${LIMITS.text} characters`));
+    }
     this.audit(by, 'command', id, cmd);
     const cmdId = randomUUID();
     return new Promise((resolve, reject) => {
@@ -418,7 +430,11 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     switch (msg.type) {
       case 'heartbeat':
         conn.lastBeat = Date.now(); // paused or not: a frozen game stops them, so hung detection stays on
-        state.paused = msg.paused === true;
+        if ((msg.paused === true) !== state.paused) {
+          // Only an Agent's heartbeat has `paused`; the card shows it, so a change goes on the stream.
+          state.paused = msg.paused === true;
+          this.emit('event', { serverId: id, type: 'paused', paused: state.paused });
+        }
         if (!state.paused) {
           // While paused the rate means nothing: it is left out of the state and the stream (and so of lag and history).
           if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {

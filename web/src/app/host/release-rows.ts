@@ -25,7 +25,12 @@ export type ReleaseRow = {
 
 const DAY = 24 * 60 * 60_000;
 
+/**
+ * The rows of an answer. A hub below release 1 (the Factorio Agent's) sends no `agent` part: its answer has no Agent
+ * rows, so its Releases can still roll the hub forward or the dashboard back (the one guard for an older hub, ADR 0001).
+ */
 export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
+  const agent: DeploysAnswer['agent'] = a.agent ?? { latest: null, releases: [], hosts: [] };
   /** A Mod's or an Agent's deploy has its server or Agent as its target. */
   const running = (part: DeployPart, target?: string) => a.history.find((h) => h.outcome === 'running' && h.part === part && (!target || h.target === target));
   const row = (key: string, label: string, part: DeployPart, run: string | null, latest: string | null, releases: Release[], why: string | null, more: { server?: string; host?: string } = {}): ReleaseRow => ({
@@ -46,8 +51,8 @@ export function releaseRows(a: DeploysAnswer): ReleaseRow[] {
     ...a.mod.servers.map((s) =>
       row(`mod:${s.id}`, `Mod on ${s.name}`, 'mod', s.running, a.mod.latest, a.mod.releases, a.packing.includes(s.id) ? `A pack update is running on ${s.name}.` : null, { server: s.id }),
     ),
-    ...a.agent.hosts.map((h) =>
-      row(`agent:${h.id}`, `Agent on ${h.name}`, 'agent', h.running, a.agent.latest, a.agent.releases, a.packing.includes(h.server) ? `A game update is running on ${h.server}.` : null, { host: h.id }),
+    ...agent.hosts.map((h) =>
+      row(`agent:${h.id}`, `Agent on ${h.name}`, 'agent', h.running, agent.latest, agent.releases, a.packing.includes(h.server) ? `A game update is running on ${h.server}.` : null, { host: h.id }),
     ),
   ];
 }

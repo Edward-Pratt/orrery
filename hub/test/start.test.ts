@@ -2149,6 +2149,20 @@ test("a factorio server's console command keeps its leading slash; control chara
   assert.deepEqual(await (await pending).json(), { output: ['Online players (1):', '  Ann (online)'] } satisfies CommandOutput);
 });
 
+test("a factorio console command over the Agent's 256 characters is refused with why, before it is audited or sent", async (t) => {
+  const { app, cookie, get, game } = await agentServicesHub(t, []);
+  const long = `/c ${'x'.repeat(254)}`; // 257
+  const res = await post(app, cookie, '/api/servers/space/command', { command: ` ${long}\u0007 ` }); // what is cut is not counted
+  assert.equal(res.status, 400);
+  assert.equal(await res.text(), 'A Factorio console command is at most 256 characters');
+  assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')).filter((e) => e.action === 'command'), []);
+  const pending = post(app, cookie, '/api/servers/space/command', { command: long.slice(0, 256) });
+  const cmd = (await game.next()) as { id: string; command: string }; // the first the game connection gets
+  assert.equal(cmd.command, long.slice(0, 256));
+  game.send({ type: 'cmdResult', id: cmd.id, output: [] });
+  assert.equal((await pending).status, 200);
+});
+
 test("a factorio server's logs are the files its Agent serves, newest first; a log is read only by a name it lists", async (t) => {
   const { app, cookie, get, agent, agentGot, answer } = await agentServicesHub(t, []);
   const request = (path: string) => app.request(path, { headers: { cookie } });

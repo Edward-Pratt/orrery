@@ -49,7 +49,7 @@ import { UploadRefused, type Uploads } from './uploads.ts';
 import type { RestartScheduler } from './restarts.ts';
 import { RestoreRefused, type Restores } from './restore.ts';
 import { CountdownRunning, VERBS, type Services } from './services.ts';
-import { mcText, type FeedEvent, type ServerHub, type ServerState } from './servers.ts';
+import { CommandRefused, mcText, type FeedEvent, type ServerHub, type ServerState } from './servers.ts';
 import type { Stats } from './stats.ts';
 
 /** A user's membership in a guild. */
@@ -565,6 +565,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'empty command') return c.text('Give a command', 400);
+      if (err instanceof CommandRefused) return c.text(message, 400);
       return c.text(message, 502); // timed out, or the server went away
     }
   };

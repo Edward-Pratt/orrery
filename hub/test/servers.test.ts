@@ -82,11 +82,12 @@ test('relays game messages with serverId and ignores junk after the handshake', 
 });
 
 test('heartbeat updates tps and players', async (t) => {
-  const { hub, port } = await setup(t);
+  const { hub, port, types } = await setup(t);
   const mod = await online(port);
   mod.send({ type: 'heartbeat', tps: 19.5, players: ['Steve', 'Alex'] });
   await until(() => hub.get('gtnh')?.tps === 19.5);
   assert.deepEqual(hub.get('gtnh')?.players, ['Steve', 'Alex']);
+  assert.deepEqual(types(), ['connected', 'tps']); // a Mod's heartbeat has no `paused`, so no paused event
 });
 
 test('runCommand round-trips through the mod', async (t) => {
@@ -109,6 +110,14 @@ test('commands sent, and only those, go to the audit log', async (t) => {
   void hub.runCommand('gtnh', '/backup start', 'discord:alice (123)').catch(() => {});
   await mod.next();
   assert.deepEqual(audit, [{ actor: 'discord:alice (123)', action: 'command', target: 'gtnh', details: 'backup start' }]);
+});
+
+test("a Mod's command has no length cap of the Agent's (256 characters)", async (t) => {
+  const { hub, port } = await setup(t);
+  const mod = await online(port);
+  const long = 'x'.repeat(1000);
+  void hub.runCommand('gtnh', long, 'test').catch(() => {});
+  assert.equal(((await mod.next()) as { command: string }).command, long);
 });
 
 test('runCommand fails fast offline, times out, ignores late results, and fails on disconnect', async (t) => {

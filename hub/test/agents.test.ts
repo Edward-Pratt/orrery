@@ -356,11 +356,29 @@ test('a frozen game while paused is reported hung: its Agent pings on, its heart
   const pings = setInterval(() => agent.send({ type: 'ping' }), 50);
   t.after(() => clearInterval(pings));
   await until(() => types().includes('hung'));
-  assert.deepEqual(types(), ['connected', 'hung']); // no tps event while paused
+  assert.deepEqual(types(), ['connected', 'paused', 'hung']); // no tps event while paused
   game.send({ type: 'heartbeat', tps: 59.5, players: ['Ann'], paused: false });
   await until(() => types().includes('recovered'));
   assert.deepEqual(hub.get('space'), { id: 'space', name: 'Space Age', game: 'factorio', online: true, hung: false, paused: false, tps: 59.5, players: ['Ann'], dims: [] });
-  assert.deepEqual(types(), ['connected', 'hung', 'tps', 'recovered']);
+  assert.deepEqual(types(), ['connected', 'paused', 'hung', 'paused', 'tps', 'recovered']);
+});
+
+test("a change in a factorio server's paused goes on the stream, once per change, before its rate", async (t) => {
+  const { hub, port, events } = await setup(t);
+  await agentUp(port);
+  const game = await gameUp(port);
+  const beat = (paused: boolean | undefined, tps = 60) => game.send({ type: 'heartbeat', tps, players: [], ...(paused === undefined ? {} : { paused }) });
+  beat(false); // as it was: not paused
+  beat(true);
+  beat(true);
+  beat(undefined, 59); // no `paused` is not paused
+  beat(false, 59);
+  beat(true, 59);
+  await until(() => events.filter((e) => e.type === 'paused').length === 3);
+  await sleep(50);
+  const seen = () => events.flatMap((e) => (e.type === 'paused' ? [`paused ${e.paused}`] : e.type === 'tps' ? [`tps ${e.tps}`] : []));
+  assert.deepEqual(seen(), ['tps 60', 'paused true', 'paused false', 'tps 59', 'paused true']);
+  assert.equal(hub.get('space')?.paused, true);
 });
 
 test("each Agent's host samples go to its own Host's monitor", async (t) => {

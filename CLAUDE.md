@@ -132,7 +132,11 @@ By hand for the Factorio server, once, in this order:
    (the header of `deploy/orrery-hub.service` has the commands); install the changed `orrery-hub.service` (it waits for
    `tailscaled.service` and reads `/etc/orrery-factorio-account.env` if there is one); add `integrations.agents`, the
    `factorio` server and its Discord channel to `config.json`; `systemctl daemon-reload`; restart the hub. Rolling
-   the hub back below this release needs those config sections removed first, because the older hub refuses a server without a Mod token (the factorio server has none), so it would not start.
+   the hub back below this release: first roll the dashboard back to the previous `web-v` tag from Host > Releases,
+   while this hub still serves it (the dashboard reads new hub API without a guard, ADR 0001, so its server pages break
+   against an older hub; only its Releases rows don't, so a hub rolled back first can still be rolled forward from
+   there). Then remove those config sections (the older hub refuses a server without a Mod token, and the factorio
+   server has none, so it would not start), then roll the hub back.
 3. Cut and deploy `web-vX.Y.0`; cut `agent-v1.0.0` and `factorio-v1.0.0` (the setup installs both; the mod
    reaches the portal from the second). The friend runs `deploy/setup-agent-host.sh` from the agent tag (its header
    has the options; `--no-hub` while the hub doesn't listen yet), and again from each later `agent-v` tag.

@@ -419,6 +419,7 @@ describe('server console section', () => {
       [409, 'GTNH is offline', 'GTNH is offline: the command wasn\'t run.'],
       [502, 'Command timed out', 'No answer from GTNH: Command timed out'],
       [400, 'Give a command', 'Give a command.'],
+      [400, 'A Factorio console command is at most 256 characters', 'A Factorio console command is at most 256 characters.'], // the hub's why
     ] as const) {
       submit(el, 'list');
       backend.expectOne('/api/servers/gtnh/command').flush(body, { status, statusText: 'Error' });

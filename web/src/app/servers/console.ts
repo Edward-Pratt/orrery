@@ -179,7 +179,7 @@ export default class Console {
             : err.status === 502
               ? `No answer from ${name}: ${why}`
               : err.status === 400
-                ? 'Give a command.'
+                ? `${typeof err.error === 'string' ? err.error : 'Give a command'}.` // the hub's why: empty, or too long for a factorio server
                 : `The command wasn't run (${why}).`,
         );
       },

@@ -122,3 +122,28 @@ test("a server's latest TPS is dropped when it stops, crashes or its Agent leave
   ]);
   db.close();
 });
+
+test("a server's paused changes: only the latest is replayed, beside its TPS, and none after it stops, crashes or its Agent leaves", () => {
+  const db = new Db(':memory:');
+  const hub = hubOf('space', 'a', 'b', 'c');
+  const live = new LiveFeed(hub, db);
+  hub.emit('event', { serverId: 'space', type: 'tps', tps: 60 });
+  for (let i = 0; i < 1000; i++) hub.emit('event', { serverId: 'space', type: 'paused', paused: i % 2 === 0 }); // no chat pushed out
+  hub.emit('event', { serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' });
+  assert.deepEqual(unstamped(live.since()), [
+    { serverId: 'space', type: 'tps', tps: 60 },
+    { serverId: 'space', type: 'paused', paused: false },
+    { serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' },
+  ]);
+  assert.deepEqual(unstamped(db.feed('space')), [{ serverId: 'space', type: 'chat', player: 'Ann', message: 'hi' }]);
+  for (const [serverId, down] of [['a', 'stopped'], ['b', 'crashed'], ['c', 'lost']] as const) {
+    hub.emit('event', { serverId, type: 'paused', paused: true });
+    hub.emit('event', { serverId, type: down });
+  }
+  assert.deepEqual(unstamped(live.since()).slice(3), [
+    { serverId: 'a', type: 'stopped' },
+    { serverId: 'b', type: 'crashed' },
+    { serverId: 'c', type: 'lost' },
+  ]);
+  db.close();
+});

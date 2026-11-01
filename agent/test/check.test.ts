@@ -81,6 +81,12 @@ type Setup = {
   hub?: 'welcomed' | 'rejected' | 'none';
   /** polkit refuses every stop, start and restart. */
   refuse?: boolean;
+  /** Files S6 looks for that Factorio has not written in the data folder (relative to it). */
+  unwritten?: string[];
+  /** Of those, the ones under the release instead, written before the run. */
+  inRelease?: string[];
+  /** mods/ is a link to a folder outside the data folder (another mount, say). */
+  modsLinked?: boolean;
 };
 
 /**
@@ -100,7 +106,11 @@ async function host(t: TestContext, s: Setup = {}) {
   const log = join(data, 'factorio-current.log');
   const agentLog = join(root, 'agent.log');
   const uid = process.getuid!();
-  for (const d of [saves, join(data, 'config'), join(data, 'mods'), root, join(proc, 'net'), join(dir, 'gen'), join(dir, 'quadlet')]) await mkdir(d, { recursive: true });
+  for (const d of [saves, join(data, 'config'), root, join(proc, 'net'), join(dir, 'gen'), join(dir, 'quadlet')]) await mkdir(d, { recursive: true });
+  if (s.modsLinked) {
+    await mkdir(join(dir, 'mods-mount'));
+    await symlink(join(dir, 'mods-mount'), join(data, 'mods'));
+  } else await mkdir(join(data, 'mods'));
 
   // The running agent holds its UDP port; with it down the port is free (found by binding, then let go).
   const agentSock = await free();
@@ -122,8 +132,15 @@ async function host(t: TestContext, s: Setup = {}) {
   await writeFile(join(data, 'config', 'server-settings.json'), JSON.stringify({ auto_pause: s.autoPause ?? true }));
   const enabled = s.modList ?? Object.keys(MODS);
   await writeFile(join(data, 'mods', 'mod-list.json'), JSON.stringify({ mods: [...enabled.map((name) => ({ name, enabled: true })), { name: 'off-mod', enabled: false }] }));
-  await writeFile(join(data, 'player-data.json'), '{}');
-  await writeFile(join(data, 'mods', 'mod-settings.dat'), 'x');
+  for (const name of ['player-data.json', 'mods/mod-settings.dat']) {
+    if (!s.unwritten?.includes(name)) await writeFile(join(data, name), 'x');
+  }
+  for (const name of s.inRelease ?? []) {
+    await mkdir(join(release, name, '..'), { recursive: true });
+    await writeFile(join(release, name), 'x');
+    await utimes(join(release, name), old, old);
+  }
+  for (const p of [join(release, 'mods'), release]) await utimes(p, old, old).catch(() => {});
   await writeFile(join(saves, 'world.zip'), '1000');
 
   // /proc: Factorio as this uid (its environment holds a secret the report must never show), the agent's label.
@@ -487,6 +504,26 @@ test('check: S29 fails on a mod enabled but not loaded and on a version other th
   );
   assert.match(h.line('S6'), /no run of Factorio 2\.1\.23 was seen/);
   clean(h.text());
+});
+
+test("check: S6 never calls a file the data folder lacks outside it: one not written yet goes on the ok line, one under the release is a warning", async (t) => {
+  // The friend's VM: mods/ is the data folder's, and Factorio had written no mod-settings.dat there (nor anywhere).
+  const vm = await host(t, { unwritten: ['mods/mod-settings.dat'] });
+  assert.equal(await vm.run(), true, vm.text());
+  assert.match(vm.line('S6'), /^ok {3}S6 Factorio writes under \S+ \(factorio-current\.log \(uid \d+\), saves\/orrery-\S+\.zip\), nothing under \S+; mods\/mod-settings\.dat not written yet, in either$/);
+  assert.ok(!vm.out.some((l) => / S6 not in /.test(l)), vm.text());
+  assert.deepEqual(vm.marks().filter((m) => m.endsWith(' S6')), ['ok S6']);
+
+  const release = await host(t, { unwritten: ['player-data.json', 'mods/mod-settings.dat'], inRelease: ['player-data.json'] });
+  assert.equal(await release.run(), true, release.text());
+  assert.match(release.line('S6'), /; mods\/mod-settings\.dat not written yet, in either$/);
+  assert.match(release.out.find((l) => l.startsWith('warn S6'))!, /^warn S6 under \S+\/releases\/2\.1\.24, not \S+ \(names not verified, so no FAIL\): player-data\.json$/);
+
+  // mods/ another mount, linked in: its files are the data folder's.
+  const linked = await host(t, { modsLinked: true });
+  assert.equal(await linked.run(), true, linked.text());
+  assert.deepEqual(linked.marks().filter((m) => m.endsWith(' S6')), ['ok S6']);
+  assert.match(linked.line('S6'), /nothing under \S+\/releases\/2\.1\.24$/);
 });
 
 test('check: the hub: a rejection since the agent started is quoted (no wait for a welcome); no hub listening is a warning', async (t) => {

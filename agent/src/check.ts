@@ -66,6 +66,9 @@ export type CheckOptions = {
   read?: HostReaders;
 };
 
+/** S6: files the notes don't confirm Factorio writes in the data folder, relative to it. */
+const NAMES = ['player-data.json', 'mods/mod-settings.dat'];
+
 /** The mods setup's mod-list.json enables (S29). */
 const SETUP_MODS = ['base', 'space-age', 'quality', 'elevated-rails', 'recycler', 'orrery'];
 /**
@@ -670,7 +673,10 @@ class Checks {
 
   /**
    * S6: read-data/write-data put Factorio's files under the data folder (its log there, this run's and this uid's;
-   * S1's save in saves/), and nothing under the release since it started.
+   * S1's save in saves/), and nothing under the release since it started. Two more names the notes don't confirm
+   * Factorio writes (`NAMES`) are a warning at most: one under the release instead, or one that can't be looked up. One
+   * in neither place is only not written yet (a world with no mod settings may never write `mods/mod-settings.dat`), so
+   * it goes on the ok line, never as outside the data folder.
    */
   async #s6(): Promise<void> {
     const { data, install } = this.#c.server;
@@ -706,14 +712,24 @@ class Checks {
         if (changed.count > 0) problems.push(`${changed.count} entries under ${release} changed since Factorio started, ${printable(changed.first!)} first`);
       }
     }
-    if (problems.length > 0) this.#report.say('FAIL', `S6 ${problems.join('; ')}: fallback, mount the release read-write`);
-    else this.#report.say('ok', `S6 Factorio writes under ${data} (${found.join(', ')}), nothing under ${release}`);
-    // Names the notes don't confirm Factorio writes: a warning at most.
-    const missing: string[] = [];
-    for (const name of ['player-data.json', 'mods/mod-settings.dat']) {
-      if (!(await lstat(join(data, name)).then(() => true, () => false))) missing.push(name);
+    // NAMES: in the data folder (through mods/ wherever it is mounted or linked), else under the release, else not yet.
+    const absent: string[] = [];
+    const misplaced: string[] = [];
+    const unreadable: string[] = [];
+    for (const name of NAMES) {
+      const err = await lstat(join(data, name)).then(() => null, (e: NodeJS.ErrnoException) => e);
+      if (!err) continue;
+      if (err.code !== 'ENOENT') unreadable.push(`${name} (${err.code ?? printable(err.message)})`);
+      else if (ver !== null && (await lstat(join(release, name)).then(() => true, () => false))) misplaced.push(name);
+      else absent.push(name);
     }
-    if (missing.length > 0) this.#report.say('warn', `S6 not in ${data} (names not verified, so no FAIL): ${missing.join(', ')}`);
+    if (problems.length > 0) this.#report.say('FAIL', `S6 ${problems.join('; ')}: fallback, mount the release read-write`);
+    else {
+      const notYet = absent.length > 0 ? `; ${absent.join(', ')} not written yet, in either` : '';
+      this.#report.say('ok', `S6 Factorio writes under ${data} (${found.join(', ')}), nothing under ${release}${notYet}`);
+    }
+    if (misplaced.length > 0) this.#report.say('warn', `S6 under ${release}, not ${data} (names not verified, so no FAIL): ${misplaced.join(', ')}`);
+    if (unreadable.length > 0) this.#report.say('warn', `S6 can't look in ${data} for: ${unreadable.join(', ')}`);
   }
 
   /** S8: a reply over Source RCON's 4096-byte split arrives whole, as Factorio's one packet. */

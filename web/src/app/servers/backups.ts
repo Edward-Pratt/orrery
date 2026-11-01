@@ -200,7 +200,7 @@ export default class Backups {
       verb: `Restore ${name}`,
       description:
         this.#server.card()!.game === 'factorio'
-          ? `This copies the save as the newest one (restored-<time>-${name}), which ${server} loads when it next starts. Nothing is overwritten: every other save stays as it is. Start the server again afterwards.`
+          ? `This copies the save as the newest one (restored-<time>-${name.replace(/^(?:restored-\d{8}T\d{6}Z-)+/, '')}), which ${server} loads when it next starts. Nothing is overwritten: every other save stays as it is. Start the server again afterwards.`
           : `This puts the backup back as ${server}'s world. The current world isn't deleted: it's kept next to it as a pre-restore copy (World.pre-restore-<time>), to remove by hand later. Start the server again afterwards.`,
       destructive: true,
       typeName: server,

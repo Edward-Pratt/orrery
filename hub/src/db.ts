@@ -507,6 +507,11 @@ export class Db {
     this.#write('finish deploy', "UPDATE deploys SET outcome = ?, log = ?, finished = ? WHERE id = ? AND outcome = 'running'", outcome, log, finished, id);
   }
 
+  /** Rewrites a deploy closed `ok` with how it really ended (an Agent's own deploy, after its hello); any other row stays. */
+  amendDeploy(id: number, outcome: Exclude<DeployOutcome, 'running'>, log: string, finished = Date.now()): void {
+    this.#write('amend deploy', "UPDATE deploys SET outcome = ?, log = ?, finished = ? WHERE id = ? AND outcome = 'ok'", outcome, log, finished, id);
+  }
+
   /** The newest `limit` deploys, newest first: only those older than the row `before`, of `part`, with `outcome` (`running`: still running). */
   deploys(limit: number, { before, part, outcome, running }: { before?: number; part?: DeployRow['part']; outcome?: DeployOutcome; running?: true } = {}): DeployRow[] {
     return this.#db

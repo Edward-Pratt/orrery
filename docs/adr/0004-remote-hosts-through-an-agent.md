@@ -4,8 +4,10 @@ The Factorio server runs on a friend's Oracle Linux 9 aarch64 VM, which also run
 owner never logs in to. The hub stays the owner of all state, on the owner's host (ADR 0002). Everything local to the
 remote Host (RCON, the Factorio mod's events, `factorio.service`, saves, host samples) belongs to an **Agent**: a small
 Node/TypeScript service (`agent/`) that runs natively there, dials out to the hub and carries out the hub's requests.
-Game updates and the Agent's own deploys will too (release 2, `docs/ROADMAP.md`); until then the friend re-runs the
-setup at a new `agent-v` tag, or with `--factorio` for another Factorio version, and mods are put in by hand.
+So do game updates and the Agent's own deploys (release 2, `docs/ROADMAP.md`): the hub picks the versions and the
+release, the Agent carries them out. Release 1's Agent (`agent-v1.0.0`) had neither, so the friend re-runs the setup
+once, at `agent-v1.1.0` or later; after that he re-runs it only for what it installs (the units, polkit file,
+`factorio.container`, `deploy-agent.sh`, the image).
 
 - **The Agent dials out**, like the Mod, to the hub's Agent port (25584, `integrations.agents.listen`), a listener of
   its own bound to the hub's tailnet address. The Mod port (25580) and the web API stay on loopback, so "the hub binds

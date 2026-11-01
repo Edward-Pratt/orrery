@@ -103,7 +103,7 @@ const OTHERS: readonly string[] = [
   'S27 players: a landing raises on_cargo_pod_finished_descending with player_index',
   'S28 players: a first platform leaves starter_pack_on_the_way',
   'S30 players: a death names its cause',
-  "S31 owner: a newer Factorio's save does not load in an older one (release 2's forced rollback)",
+  "S31 owner: a newer Factorio's save does not load in an older one (a game update's forced rollback)",
   "S32 players: an admin's pause with players on stops the tick",
 ];
 

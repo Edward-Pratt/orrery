@@ -10,7 +10,7 @@ import { check, enabledMods, shutdownOf, udpOwner, type CheckOptions, type WAITS
 import type { Config } from '../src/config.ts';
 import { AUTH } from '../src/rcon.ts';
 import type { Systemctl, UnitState } from '../src/service.ts';
-import { PASSWORD, fakeRcon } from './fake-rcon.ts';
+import { PASSWORD, fakeRcon, savedAs } from './fake-rcon.ts';
 
 const TOKEN = 't'.repeat(40);
 const VER = '2.1.24';
@@ -163,7 +163,7 @@ async function host(t: TestContext, s: Setup = {}) {
     if (command === '/help') return Array.from({ length: 200 }, (_, i) => `/command-${i}: what it does, at some length`);
     const save = /^\/orrery-save (\S+)$/.exec(command);
     if (save) {
-      if (s.saveWrites !== false) await writeFile(join(saves, `${save[1]}.zip`), String(tick));
+      if (s.saveWrites !== false) await writeFile(join(saves, savedAs(save[1]!)), String(tick));
       return JSON.stringify({ ok: true, name: save[1] });
     }
     return [];

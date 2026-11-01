@@ -2,9 +2,10 @@
 // ORRERY_AGENT_CONFIG and ORRERY_AGENT_ROOT move the config file and the agent's folder, for tests and the local dev
 // loop only; on the Host they are unset.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { check } from './check.ts';
 import { AGENT_ROOT, CONFIG_PATH, loadConfig, type Config } from './config.ts';
+import { Deploys } from './deploy.ts';
 import { GameEvents, toGame } from './events.ts';
 import { HostSampler } from './host.ts';
 import { HubClient } from './hub.ts';
@@ -13,6 +14,7 @@ import { RconSession } from './rcon.ts';
 import { Saves } from './saves.ts';
 import { ServiceWatch } from './service.ts';
 import { StatusPoller } from './status.ts';
+import { Updates, installedOf } from './update.ts';
 import { outputLines } from './wire.ts';
 
 /** This release as the hub and deploys name it: `agent-v` and package.json's version (0.0.0 outside a release). */
@@ -22,14 +24,17 @@ function agentVersion(): string {
   return `agent-v${version}`;
 }
 
-const load = (): Config =>
-  loadConfig(process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH, process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
+/** The config file; setup's `image.json` sits beside it. */
+const configPath = (): string => process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH;
+const load = (): Config => loadConfig(configPath(), process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
 
 /**
  * Runs until SIGTERM or SIGINT. With no hub reachable it keeps running: RCON, the unit, game events, saves and host
  * samples go on, and the hub client retries. Every RCON command (`/orrery-hello`, `/orrery-save`, the hub's say,
  * notice, linkResult and console commands) runs on an RCON connection of its own, apart from the status poll's.
- * Everything logged also goes to `<root>/agent.log`, URL query strings stripped.
+ * Everything logged also goes to `<root>/agent.log`, URL query strings stripped. A game update that a restart cut
+ * short ends first thing (`Updates.start`: failed before its swap, rolled back after). A deploy's outcome
+ * (`deploy-status.json`) goes to the hub once its unit has ended (`Deploys`).
  */
 function run(): void {
   const config = load();
@@ -42,20 +47,49 @@ function run(): void {
   const service = new ServiceWatch(config.server.unit);
   const logs = new Logs({ data, root: config.root, unit: config.server.unit });
   const saves = new Saves({ dir: join(data, 'saves'), log: join(data, 'factorio-current.log'), run, unit: () => service.read() });
-  const hub = new HubClient({
+  const hub: HubClient = new HubClient({
     config,
     version,
     toGame: (msg) => void toGame(run, msg),
     command: async (command) => outputLines(await run(command)),
     save: () => void saves.save(),
+    welcomed: () => {
+      updates.connected();
+      deploys.connected();
+    },
     handlers: {
       serviceAct: ({ action }) => service.act(action),
       logs: () => logs.list(),
       log: ({ name }) => logs.log(name),
       journal: ({ unit }) => logs.journal(unit),
-      restore: ({ name }) => saves.restore(name),
+      // Neither during a game update nor during a deploy, whose restart of the agent would cut it short.
+      restore: async ({ name }) => {
+        if (updates.busy) throw new Error('a game update is running');
+        await deploys.idle();
+        return saves.restore(name);
+      },
+      update: (req) => updates.update(req),
+      // Their request ids are their own (docs/protocol.md): each acts on the one update running.
+      updateResume: () => updates.resume(),
+      updateCancel: () => updates.cancel(),
+      deploy: ({ tag }) => deploys.deploy(tag),
     },
   });
+  const updates: Updates = new Updates({
+    install: config.server.install,
+    data,
+    state: config.state,
+    image: join(dirname(configPath()), 'image.json'),
+    unit: service,
+    saves,
+    send: (msg) => hub.send(msg),
+    deliver: (msg) => hub.deliver(msg),
+    gameUp: () => hub.gameUp,
+    connected: () => hub.connected,
+    installed: () => hub.latestInstalled,
+    idle: () => deploys.idle(),
+  });
+  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.deliver(msg) });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,
@@ -74,10 +108,12 @@ function run(): void {
     events.service(s);
   });
   service.on('stopping', () => hub.stopping());
-  status.on('status', (r) => {
+  status.on('status', (r, s) => {
     hub.status(r);
     events.rconUp();
     saves.played(r.players.length > 0);
+    updates.status(s);
+    hub.installed(installedOf(s));
   });
   saves.on('saves', (m) => hub.saves(m));
   saves.on('backup', (b) => hub.backup(b));
@@ -97,6 +133,8 @@ function run(): void {
   status.start();
   events.start();
   saves.start();
+  void updates.start();
+  deploys.start();
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -108,6 +146,8 @@ function run(): void {
     service.stop();
     events.stop();
     saves.stop();
+    updates.stop();
+    deploys.stop();
     commands.close();
     void hub.stop().then(() => process.exit(0));
   };

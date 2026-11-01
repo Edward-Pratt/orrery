@@ -21,7 +21,7 @@ out='' url=''
 while (($#)); do
   case $1 in
     -o) out=$2; shift 2 ;;
-    --proto | --proto-redir | --retry) shift 2 ;;
+    --proto | --proto-redir | --retry | --connect-timeout | --speed-limit | --speed-time | --max-filesize) shift 2 ;;
     -H | --header | -u | --user | -K | --config | --oauth2-bearer) echo "fake curl: sends a credential: $1" >&2; exit 2 ;;
     https://*) url=$1; shift ;;
     -*) shift ;;
@@ -170,7 +170,7 @@ check 'leaves no temporary links or files in the root' '[[ $(ls -A "$R" | tr "\n
   -z $(ls -A "$R/.incoming") ]]'
 check 'the old status file is gone before every restart' '! grep -rq "old status" "$F/calls" "$T/all"'
 check 'only restarts orrery-agent.service' '! grep -q refused "$F/calls"'
-check 'downloads only from the public release, with no token or header' '[[ -s $F/curl && -s $T/all ]] &&
-  ! grep -qvE "^curl -q -fsSL --proto =https --proto-redir =https --retry 2 (-o [^ ]+ )?https://github.com/Edward-Pratt/orrery/releases/download/agent-v[0-9.]+/orrery-agent-v[0-9.]+\.tar\.gz(\.sha256)?$" "$F/curl" &&
+check 'downloads only from the public release, with no token or header, stopping a stalled or oversized transfer' '[[ -s $F/curl && -s $T/all ]] &&
+  ! grep -qvE "^curl -q -fsSL --proto =https --proto-redir =https --retry 2 --connect-timeout 30 --speed-limit 1 --speed-time 60 --max-filesize 67108864 (-o [^ ]+ )?https://github.com/Edward-Pratt/orrery/releases/download/agent-v[0-9.]+/orrery-agent-v[0-9.]+\.tar\.gz(\.sha256)?$" "$F/curl" &&
   ! grep -qF "$GITHUB_TOKEN" "$F/curl" "$T/all" "$R/deploy-status.json"'
 exit $fail

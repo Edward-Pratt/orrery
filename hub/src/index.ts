@@ -33,6 +33,15 @@ if (github && !githubToken) {
   process.exit(1);
 }
 
+// The owner's factorio.com account, for the mods' download links in game updates (/etc/orrery-factorio-account.env,
+// read only by the hub's unit). Without it the hub runs; only game updates are refused (each has mods: orrery at least), saying why.
+const factorioUsername = process.env.FACTORIO_USERNAME;
+const factorioToken = process.env.FACTORIO_TOKEN;
+const factorioAccount = factorioUsername && factorioToken ? { username: factorioUsername, token: factorioToken } : undefined;
+if (config.integrations.agents && !factorioAccount) {
+  console.warn('[hub] FACTORIO_USERNAME and FACTORIO_TOKEN are not set: game updates are refused');
+}
+
 const handle = await startHub(config, {
   startFrontend: async (hub, stats, restarts, links, cfg) => {
     const discord = await startDiscord(hub, stats, restarts, links, cfg, token ?? '');
@@ -44,6 +53,7 @@ const handle = await startHub(config, {
   restore: execRestore,
   github: github && githubToken ? githubReader(github.repo, githubToken) : undefined,
   githubToken: githubToken || undefined,
+  factorioAccount,
   oauth: web && clientSecret ? discordOAuth(web.clientId, clientSecret) : undefined,
 });
 

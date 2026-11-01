@@ -36,7 +36,9 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
   await writeFile(join(dir, 'config.json'), JSON.stringify(config));
   await writeFile(
     join(dir, 'bin', 'systemctl'),
-    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in *orrery-agent.service) exit 1;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
+    // A deploy unit has ended (its oneshot is inactive); orrery-agent.service can't be read; every other unit runs.
+    // list-units prints `<dir>/units` (none: no deploy unit known).
+    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in list-units*) cat "${dir}/units" 2>/dev/null; exit 0;; *orrery-agent-deploy@*) echo ActiveState=inactive; exit 0;; *orrery-agent.service) exit 1;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
   );
   await chmod(join(dir, 'bin', 'systemctl'), 0o755);
   const env = {
@@ -93,6 +95,88 @@ test('the agent connects both ways, pushes its saves, carries out serviceAct wit
   assert.equal(hub.conns.length, 2, 'no reconnect after SIGTERM');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'connected'), 'utf8')).version, 'agent-v0.0.0');
   assert.deepEqual([...agent.invalid, ...game.invalid], []);
+});
+
+test('deploy: starts its own deploy unit (the reply means started), and reports the outcome deploy-agent.sh left once', async (t) => {
+  const rcon = await fakeRcon(status);
+  const hub = await fakeHub();
+  t.after(async () => {
+    await rcon.close();
+    await hub.close();
+  });
+  const { dir, root, env } = await world(t, rcon.port, hub.port);
+  // A deploy that ended while this agent was starting: rolled back, its log 40 lines at most.
+  const log = Array.from({ length: 45 }, (_, i) => `line ${i}`).join('\n');
+  const left = { tag: 'agent-v1.2.4', from: 'agent-v0.0.0', outcome: 'rolled back', finished: new Date().toISOString(), log };
+  await writeFile(join(root, 'deploy-status.json'), JSON.stringify(left) + '\n');
+  const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  t.after(() => child.kill('SIGKILL'));
+
+  const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
+  const result = await eventually(() => agent.lines.find((m) => m.type === 'deployResult'), 5000, 'the deployResult');
+  assert.deepEqual(result, { type: 'deployResult', tag: 'agent-v1.2.4', outcome: 'rolled back', log: log.split('\n').slice(-40).join('\n') });
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^show --property=ActiveState -- orrery-agent-deploy@agent-v1\.2\.4\.service$/m);
+
+  agent.send({ type: 'deploy', id: 'd0', tag: 'agent-v0.0.0' });
+  assert.deepEqual(await eventually(() => agent.lines.find((m) => m.id === 'd0'), 5000, 'the reply'), { type: 'reply', id: 'd0', ok: false, error: 'agent-v0.0.0 is already running' });
+  agent.send({ type: 'deploy', id: 'd1', tag: 'agent-v1.2.5' });
+  assert.deepEqual(await eventually(() => agent.lines.find((m) => m.id === 'd1'), 5000, 'the reply'), { type: 'reply', id: 'd1', ok: true });
+  // Before it starts one, it asks systemd for any deploy unit still running.
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^list-units --all --plain --no-legend --full -- orrery-agent-deploy@\*\.service\nstart --no-block -- orrery-agent-deploy@agent-v1\.2\.5\.service$/m);
+  assert.doesNotMatch(await readFile(join(dir, 'systemctl.log'), 'utf8'), /orrery-agent-deploy@agent-v0\.0\.0/);
+  assert.equal(agent.lines.filter((m) => m.type === 'deployResult').length, 1, 'once');
+  child.kill('SIGTERM');
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, out);
+  assert.deepEqual(agent.invalid, []);
+});
+
+test('restore and update are refused while a deploy unit of the agent runs (its restart would cut them short); not once it ended', async (t) => {
+  const rcon = await fakeRcon(status);
+  const hub = await fakeHub();
+  t.after(async () => {
+    await rcon.close();
+    await hub.close();
+  });
+  const { dir, env } = await world(t, rcon.port, hub.port);
+  const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => child.kill('SIGKILL'));
+  const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
+  await eventually(() => agent.lines.some((m) => m.type === 'serviceState'), 5000, 'serviceState');
+  const ask = async (msg: Record<string, unknown>) => {
+    agent.send(msg);
+    return eventually(() => agent.lines.find((m) => m.type === 'reply' && m.id === msg.id), 5000, `the reply to ${msg.id as string}`);
+  };
+  const update = (id: string) => ({
+    type: 'update',
+    id,
+    factorio: { version: '2.1.25', url: 'https://www.factorio.com/get-download/2.1.25/headless/linux64', sha256: 'a'.repeat(64) },
+    mods: [{ name: 'orrery', version: '0.2.0', sha1: 'b'.repeat(40), url: 'https://dl-mod.factorio.com/files/orrery_0.2.0.zip?secure=x' }],
+  });
+
+  for (const active of ['activating', 'active', 'reloading', 'deactivating']) {
+    await writeFile(join(dir, 'units'), `orrery-agent-deploy@agent-v1.2.5.service loaded ${active} start Deploy orrery agent agent-v1.2.5\n`);
+    const error = `a deploy is running (orrery-agent-deploy@agent-v1.2.5.service is ${active})`;
+    assert.deepEqual(await ask({ type: 'restore', id: `r-${active}`, name: 'world.zip' }), { type: 'reply', id: `r-${active}`, ok: false, error });
+    assert.deepEqual(await ask(update(`u-${active}`)), { type: 'reply', id: `u-${active}`, ok: false, error });
+  }
+
+  // Ended (failed): no longer the reason. The restore meets the running server, the update a Host with no release.
+  await writeFile(join(dir, 'units'), 'orrery-agent-deploy@agent-v1.2.5.service loaded failed failed Deploy orrery agent agent-v1.2.5\n');
+  const restore = await ask({ type: 'restore', id: 'r-ended', name: 'world.zip' });
+  assert.equal(restore.ok, false);
+  assert.doesNotMatch(String(restore.error), /deploy/);
+  const updated = await ask(update('u-ended'));
+  assert.equal(updated.ok, false);
+  assert.match(String(updated.error), /does not point at a release/);
+  assert.doesNotMatch(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^start/m, 'nothing started');
+  assert.deepEqual(agent.invalid, []);
+  child.kill('SIGTERM'); // and wait for its exit, so it writes no more into the folder the test removes
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
 });
 
 test('with no hub reachable the agent keeps running, logs that once, and connects when the hub comes up', async (t) => {

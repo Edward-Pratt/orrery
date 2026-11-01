@@ -9,6 +9,8 @@ import { RconNoAnswer } from './rcon.ts';
 import type { BackupResult, SavesMsg } from './saves.ts';
 import { RunWatch, type RunEnd, type UnitState } from './service.ts';
 import type { Reading } from './status.ts';
+import type { InstalledMsg } from './update.ts';
+import { redact } from './logs.ts';
 import { LIMITS, LineReader, PROTOCOL_VERSION, cut, encode, printable, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
 
 /** What answers a request: resolves with its reply's `data` (undefined: none); a throw is the reply's `error`. */
@@ -26,6 +28,8 @@ export type HubOptions = {
   command?: (command: string) => Promise<string[]>;
   /** The game connection's `save`: makes a named save, whose outcome comes back through `backup`. */
   save?: () => void;
+  /** After each welcome, once the state pushed on connect is out: a game update's step and outcome, and a deploy's outcome, go again. */
+  welcomed?: () => void;
   pingMs?: number;
   /** For the TCP connect and the hub's answer to a hello. */
   handshakeMs?: number;
@@ -57,6 +61,9 @@ export function backoff(failures: number, base: number, max: number, random: () 
   const full = Math.min(max, base * 2 ** failures);
   return full / 2 + (full / 2) * random();
 }
+
+/** How long `deliver` waits for its write to go out before it counts as not delivered (it goes again on a connect). */
+const DELIVER_MS = 30_000;
 
 /** One TCP connection to the hub's Agent port: its hello sent on connect, lines read under the cap, lines sent under it. */
 class Link {
@@ -102,15 +109,18 @@ class Link {
     clearTimeout(this.#handshake);
   }
 
-  /** Sends one line, if it fits the cap (`encode` trims what it can); a message that can't fit is logged, not sent. */
-  send(msg: OutMsg, then?: () => void): void {
-    if (!this.socket.writable) return then?.();
+  /**
+   * Sends one line, if it fits the cap (`encode` trims what it can); a message that can't fit is logged, not sent.
+   * `then` gets whether the write succeeded (false: not writable, too big, or the write failed).
+   */
+  send(msg: OutMsg, then?: (written: boolean) => void): void {
+    if (!this.socket.writable) return then?.(false);
     const line = encode(msg);
     if (line === null) {
       console.error(`[hub] a ${msg.type} over ${LIMITS.lineBytes} bytes was not sent`);
-      return then?.();
+      return then?.(false);
     }
-    this.socket.write(line, () => then?.());
+    this.socket.write(line, (err) => then?.(!err));
   }
 
   /** Closes after what was sent is flushed. */
@@ -127,10 +137,13 @@ class Link {
 
 /**
  * The agent's two connections to the hub (docs/protocol.md, "Agent connection"). The Agent connection opens with
- * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state and the saves (on
- * connect and on change), whether game events reach the hub (`events`, the same) and host samples, and answers each request by its id. It reconnects after any close, with
- * capped exponential backoff and jitter, logging once per change of state, so with no hub reachable the agent just
- * keeps trying; a hello the hub refuses as `reconnecting too fast` is no failure: the next waits out the hub's 5 s. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
+ * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state, the saves, what is
+ * installed and whether game events reach the hub (`events`) (on connect and on change) and host samples, carries a
+ * game update's steps and a deploy's outcome (`send`), and answers each request by its id. It reconnects after any
+ * close, with capped exponential backoff and jitter, logging once per change of state, so with no hub reachable the
+ * agent just keeps trying; a hello the hub refuses as `reconnecting too fast` is no failure: the next waits out the
+ * hub's 5 s. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate
+ * (deploy/deploy-agent.sh).
  *
  * The game connection opens only while the Agent connection is up and RCON answers: a `hello` with the agent's token
  * and the orrery mod's version, `started` once per run of the unit, then a heartbeat per `/orrery-status` answer, the
@@ -147,6 +160,7 @@ export class HubClient {
   #toGame: (msg: ToGame) => void;
   #command: (command: string) => Promise<string[]>;
   #save: () => void;
+  #onWelcome: () => void;
   #pingMs: number;
   #handshakeMs: number;
   #backoffMs: number;
@@ -164,6 +178,11 @@ export class HubClient {
   #reading: Reading | null = null;
   #service: UnitState | null = null;
   #saves: SavesMsg | null = null;
+  /** What the server runs, as `/orrery-status` last said, kept in `<state>/installed.json` across restarts. */
+  #installed: InstalledMsg | null;
+  #installedKey: string;
+  /** Writes of `installed.json`, one after another (they share a temp file). */
+  #saving: Promise<void> = Promise.resolve();
   /** Whether game events reach the hub: `GameEvents`' latest `state`. */
   #events: EventsState | null = null;
   #runs = new RunWatch();
@@ -182,6 +201,7 @@ export class HubClient {
     this.#toGame = o.toGame ?? (() => {});
     this.#command = o.command ?? (() => Promise.reject(new Error('console commands are not supported')));
     this.#save = o.save ?? (() => console.error('[game] save is not supported'));
+    this.#onWelcome = o.welcomed ?? (() => {});
     this.#pingMs = o.pingMs ?? 10_000;
     this.#handshakeMs = o.handshakeMs ?? 10_000;
     this.#backoffMs = o.backoffMs ?? 1000;
@@ -189,11 +209,23 @@ export class HubClient {
     this.#random = o.random ?? Math.random;
     this.#welcomeGapMs = o.welcomeGapMs ?? HUB_WELCOME_GAP_MS;
     this.#started = readStarted(join(o.config.state, 'started.json'));
+    this.#installed = readInstalled(join(o.config.state, INSTALLED));
+    this.#installedKey = this.#installed ? JSON.stringify(this.#installed) : '';
   }
 
   /** Whether the Agent connection is up: welcomed and not closed. */
   get connected(): boolean {
     return this.#agent?.welcomed === true;
+  }
+
+  /** The latest `installed`, sent or to be sent, kept across restarts (a game update's `from` and `to`); null before one. */
+  get latestInstalled(): InstalledMsg | null {
+    return this.#installed;
+  }
+
+  /** Whether the game connection is up: welcomed and not closed (a game update's health gate). */
+  get gameUp(): boolean {
+    return this.#game?.welcomed === true && !this.#stopping;
   }
 
   start(): void {
@@ -252,6 +284,48 @@ export class HubClient {
   saves(msg: SavesMsg): void {
     this.#saves = msg;
     if (this.connected) this.#agent!.send({ type: 'saves', ...msg });
+  }
+
+  /**
+   * What the server runs, as `/orrery-status` last said: sent when it changed and on every connect (never the same
+   * twice in a row, so each answer costs the hub nothing). Kept in `<state>/installed.json`, so a restarted agent
+   * sends it on connect while the server is stopped too.
+   */
+  installed(msg: InstalledMsg): void {
+    const key = JSON.stringify(msg);
+    if (key === this.#installedKey) return;
+    this.#installedKey = key;
+    this.#installed = msg;
+    if (this.connected) this.#agent!.send({ type: 'installed', ...msg });
+    const file = join(this.#config.state, INSTALLED);
+    this.#saving = this.#saving
+      .then(() => mkdir(this.#config.state, { recursive: true }))
+      .then(() => writeAtomic(file, key + '\n'))
+      .catch((err: Error) => console.error(`[hub] can't write ${file}: ${err.message}`));
+  }
+
+  /** A message on the Agent connection (a game update's `updateStep`, `updateDone`; `deployResult`): false while it isn't up. */
+  send(msg: AgentMsg): boolean {
+    if (!this.connected || this.#stopping) return false;
+    this.#agent!.send(msg);
+    return true;
+  }
+
+  /**
+   * An outcome the hub must not miss (a game update's `updateDone`, `deployResult`): resolves true once its write on
+   * the Agent connection succeeded, false while it isn't up, when the write failed, or when it hasn't gone out within
+   * `DELIVER_MS` (a hub that stopped reading). The caller keeps it until true, and sends it again on the next connect
+   * (the hub ignores a repeat).
+   */
+  deliver(msg: AgentMsg): Promise<boolean> {
+    if (!this.connected || this.#stopping) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), DELIVER_MS).unref();
+      this.#agent!.send(msg, (written) => {
+        clearTimeout(timer);
+        resolve(written);
+      });
+    });
   }
 
   /**
@@ -352,7 +426,8 @@ export class HubClient {
         const data = await handler(req);
         reply = data === undefined ? { type: 'reply', id: req.id, ok: true } : { type: 'reply', id: req.id, ok: true, data };
       } catch (err) {
-        reply = { type: 'reply', id: req.id, ok: false, error: String(err instanceof Error ? err.message : err).slice(0, LIMITS.detail) };
+        // No URL query string in an error (docs/protocol.md), and within the hub's limit for one.
+        reply = { type: 'reply', id: req.id, ok: false, error: cut(redact(String(err instanceof Error ? err.message : err)), LIMITS.detail) };
       }
     }
     if (this.#agent === link) link.send(reply);
@@ -367,7 +442,9 @@ export class HubClient {
     this.#ping = setInterval(() => link.send({ type: 'ping' }), this.#pingMs);
     if (this.#service) link.send({ type: 'serviceState', ...this.#service });
     if (this.#saves) link.send({ type: 'saves', ...this.#saves });
+    if (this.#installed) link.send({ type: 'installed', ...this.#installed });
     this.#tellEvents();
+    this.#onWelcome();
     if (this.#reading) this.#openGame(this.#reading.modVersion);
   }
 
@@ -492,10 +569,33 @@ export class HubClient {
 }
 
 /** Writes `file` whole or not at all: a temp file beside it, then a rename. */
-async function writeAtomic(file: string, content: string): Promise<void> {
+export async function writeAtomic(file: string, content: string): Promise<void> {
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, content);
   await rename(tmp, file);
+}
+
+/** `installed`'s file in the agent's state folder. */
+const INSTALLED = 'installed.json';
+
+/**
+ * What the server ran last, from `<state>/installed.json` (the agent's own folder), as `installed` sends it: checked
+ * against the hub's limits and copied field by field; null if none or not that.
+ */
+function readInstalled(file: string): InstalledMsg | null {
+  const text = (v: unknown): v is string => typeof v === 'string' && v.length <= LIMITS.text;
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { factorio?: unknown; mods?: unknown };
+    if (!text(raw.factorio) || !Array.isArray(raw.mods) || raw.mods.length > LIMITS.mods) return null;
+    const mods: InstalledMsg['mods'] = [];
+    for (const m of raw.mods as { name?: unknown; version?: unknown }[]) {
+      if (typeof m !== 'object' || m === null || !text(m.name) || !text(m.version)) return null;
+      mods.push({ name: m.name, version: m.version });
+    }
+    return { factorio: raw.factorio, mods };
+  } catch {
+    return null;
+  }
 }
 
 /** The run last announced with `started`, from `<state>/started.json` (the agent's own folder); null if none. */

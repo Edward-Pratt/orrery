@@ -294,7 +294,10 @@ export class Packs {
     this.#o = { gateMs: 10 * 60_000, backupMs: 30 * 60_000, pollMs: 2_000, stopMs: 15 * 60_000, compareMs: 60 * 60_000, ...o };
   }
 
-  /** Clears Compare's leftover scratch, and closes updates the last hub left running as interrupted. */
+  /**
+   * Clears Compare's leftover scratch, and closes the updates the last hub left running as interrupted, but a factorio
+   * server's (game updates: `GameUpdates`').
+   */
   async start(): Promise<void> {
     this.#d.hub.on('event', this.#started);
     // A Pending server whose id is in config now: the setup script ran, so it is a server.
@@ -320,6 +323,8 @@ export class Packs {
     for (const old of ['downloads', 'staging']) await rm(join(this.#d.dataDir, old), { recursive: true, force: true });
     for (const s of this.#d.servers) await rm(this.#work(s.id), { recursive: true, force: true });
     for (const row of this.#d.db.packUpdates(undefined, 1000)) {
+      // A factorio server's rows are game updates, which GameUpdates closes: an Agent runs every factorio server.
+      if (this.#settings(row.serverId)?.game === 'factorio') continue;
       const dir = this.#settings(row.serverId)?.dir;
       const swapped = ['swap', 'gate', 'rollback'].includes(row.step);
       const pre = swapped && dir ? (await readdir(dir).catch(() => [])).filter((f) => f.startsWith(PRE)).sort().at(-1) : undefined;

@@ -53,6 +53,8 @@ export const LIMITS = {
   /** A host sample's mounts, and the files a `logs` reply lists. */
   disks: 32,
   logFiles: 32,
+  /** An `update`'s download URLs (a mod's signed link is longer than `text`). */
+  url: 2048,
   text: 256,
   /**
    * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line

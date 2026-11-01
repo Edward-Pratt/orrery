@@ -338,7 +338,7 @@ export async function startDiscord(
       relayChat(e).catch((err) => console.error('[discord] chat relay failed:', err));
       return;
     }
-    const message = formatEvent(e);
+    const message = formatEvent(e, hub.get(e.serverId)?.game);
     if (!message) return;
     if (e.type === 'crashed') postCrash(e.serverId, message).catch((err) => console.error('[discord] crash post failed:', err));
     else postSafe(e.serverId, message);

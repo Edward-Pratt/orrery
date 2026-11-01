@@ -3,6 +3,8 @@ import { Agents, type AgentsOptions } from './agents.ts';
 import { BackupWatcher } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
+import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './factorio.ts';
+import { GameUpdates, type GameUpdatesOptions } from './game-updates.ts';
 import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
 import { Packs, type PacksOptions } from './packs.ts';
@@ -56,6 +58,15 @@ export type HubDeps = {
   githubToken?: string;
   /** Shorter pack update timings, for tests. */
   packs?: PacksOptions;
+  /** factorio.com's and the mod portal's requests, for game updates (default: `fetch`). */
+  portal?: PortalFetch;
+  /**
+   * `FACTORIO_USERNAME` and `FACTORIO_TOKEN`: the mods' download links are asked with them, of mods.factorio.com only.
+   * Without them a game update is refused at that step (each has mods: `orrery` at least); everything else works.
+   */
+  factorioAccount?: FactorioAccount;
+  /** Shorter game update timings, for tests. */
+  gameUpdates?: GameUpdatesOptions;
   /** How long an upload is kept after its last chunk (default an hour), for tests. */
   uploadIdleMs?: number;
   /** Shorter liveness timings of the game connections, for tests. */
@@ -102,12 +113,18 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
 
   let deploys: Deploys | undefined;
   let packs: Packs | undefined;
+  let gameUpdates: GameUpdates | undefined;
   let library: Library | undefined;
   let services: Services | undefined;
+  // The one check of an update running (on a server, or any): what kind, for each refusal's words.
+  const updating = (id?: string) => (packs?.busy(id) ? 'pack update' : gameUpdates?.busy(id) ? 'game update' : null);
   const serviceOf = new Map(config.servers.flatMap((s) => (s.service ? [[s.id, s.service]] : [])));
   const restarts = new RestartScheduler(hub, {
-    // A daily countdown during a pack update would clash with its Stop; the update restarts the server anyway.
-    paused: (id) => (packs?.busy(id) ? 'a pack update is running' : null),
+    // A daily countdown during an update would clash with its stop; the update restarts the server anyway.
+    paused: (id) => {
+      const what = updating(id);
+      return what && `a ${what} is running`;
+    },
     // A factorio server's countdown ends in its service's restart (config gives it one, and systemd), looked up late:
     // Services is built after RestartScheduler, which it counts down with.
     restart: async (id, by) => {
@@ -171,11 +188,30 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const restores =
     services && restoreSources.size
       ? new Restores(hub, services, restoreSources, {
-          deploying: () => deploys?.busy() ?? false,
-          packing: (id) => packs?.busy(id) ?? false,
+          deploying: (id) => (deploys?.busy() ? 'hub' : agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!) ? 'agent' : null),
+          updating,
           restored: (id) => packs?.restored(id),
         })
       : undefined;
+  // Game updates, with an Agent's server: started (its interrupted rows closed, the Agents heard) before any can connect.
+  gameUpdates =
+    agents &&
+    services &&
+    new GameUpdates(
+      {
+        hub,
+        db,
+        agents,
+        services,
+        restarts,
+        catalog: new FactorioCatalog(deps.portal ?? fetch, deps.factorioAccount),
+        servers: config.servers,
+        restoring: (id) => restores?.busy(id) ?? false,
+        deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
+      },
+      deps.gameUpdates,
+    );
+  gameUpdates?.start();
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   deploys =
     github &&
@@ -190,8 +226,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         environment: config.environment,
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
-        restoring: () => restores?.busy() ?? false,
-        packing: (id) => packs?.busy(id) ?? false,
+        agents,
+        restoring: (id) => restores?.busy(id) ?? false,
+        updating,
         libraryAdding: () => library?.busy() ?? false,
         installing: () => packs?.installRunning() ?? false,
         mcOf: (id) => {
@@ -256,7 +293,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -279,6 +316,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       services?.stop();
       deploys?.stop();
       packs?.stop();
+      gameUpdates?.stop();
       library?.stop();
       uploads?.stop();
       stopSummaries();

@@ -21,6 +21,9 @@
 # .sha256, and this folder's factorio.container, orrery-agent.service, orrery-agent-deploy@.service,
 # 60-orrery-agent.rules and deploy-agent.sh at that same tag) and, when mods/ has none, the newest factorio-v*
 # release's orrery_<ver>.zip (checked against the sha256 GitHub lists for it). All public on GitHub, no token.
+# From agent-v1.1.0 on, the dashboard deploys later agent releases (orrery-agent-deploy@.service, which changes only
+# /srv/orrery-agent) and game updates change Factorio and its mods. Run this again to leave agent-v1.0.0, or for a
+# release that changes the other files above, a new image or --memory-max.
 #
 # It touches only: the user and group factorio; /opt/factorio, /srv/factorio, /srv/orrery-agent, /usr/local/lib/orrery,
 # /etc/orrery-agent/, /etc/orrery-agent.env, /etc/orrery-factorio.env; /etc/containers/systemd/factorio.container,
@@ -474,7 +477,7 @@ config factorio "$srv/mods/mod-list.json" << 'EOF'
 }
 EOF
 
-# ---- 10. The orrery mod, when mods/ has none; later versions go in by hand until Game updates exist (release 2).
+# ---- 10. The orrery mod, when mods/ has none; later versions come with game updates (agent-v1.1.0 on; by hand before).
 # GitHub's release list, all parts together, newest first and 100 a page: read page by page until it holds a release of
 # each part this run needs (the agent's, and the mod's when mods/ has none) or ends; at most 20 pages, inside GitHub's 60
 # requests an hour without a token. Each part's newest is then among them: release.sh tags only above a part's latest.
@@ -518,7 +521,7 @@ asset_sha() { # <tag> <name>: the sha256 GitHub lists for that release asset
     process.stdout.write(d.slice(7));' "$1" "$2" <<< "$releases"
 }
 if compgen -G "$srv/mods/orrery_*.zip" > /dev/null; then
-  echo "kept the orrery mod in /srv/factorio/mods (update it by hand until Game updates exist)"
+  echo "kept the orrery mod in /srv/factorio/mods (a Game update from the dashboard updates it)"
 else
   ftag=$(newest factorio) || die "GitHub has no factorio-v release of the orrery mod yet"
   [[ $ftag =~ ^factorio-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a factorio-vX.Y.Z tag: $ftag"

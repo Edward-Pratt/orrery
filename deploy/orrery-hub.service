@@ -37,8 +37,9 @@ User=opc
 # DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web, GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
-# FACTORIO_USERNAME=... and FACTORIO_TOKEN=... (the owner's factorio.com account, for mod downloads), root-only and
-# read by this unit alone: the deploy units load /etc/orrery.env, and their npm ci must never see the account.
+# FACTORIO_USERNAME=... and FACTORIO_TOKEN=... (the owner's factorio.com account, for game updates' mod download
+# links), root-only and read by this unit alone: the deploy units load /etc/orrery.env, and their npm ci must never
+# see the account.
 #   sudo install -m 600 -o root -g root /dev/null /etc/orrery-factorio-account.env && sudoedit /etc/orrery-factorio-account.env
 # The leading - : a hub without the Factorio server starts without the file.
 EnvironmentFile=-/etc/orrery-factorio-account.env

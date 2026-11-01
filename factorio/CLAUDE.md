@@ -30,9 +30,10 @@ file is the contract between the mod and the agent.
   release in place: fix forward with the next patch.
 - Every player who joins a server with the mod must download that exact version from the portal, so release
   rarely: batch changes rather than shipping each one.
-- A release reaches the server by hand until game updates exist (release 2): `deploy/setup-agent-host.sh` installs the
-  newest `factorio-v*` release's zip only when `/srv/factorio/mods` has no `orrery_*.zip`, and keeps one that is there.
-  To put a new release on the server, replace the zip in that folder and restart `factorio.service`.
+- A release reaches the server through a game update: pick `orrery`'s new version on the mod portal in the server's
+  Game tab (with its Agent at `agent-v1.1.0` or later). `deploy/setup-agent-host.sh` installs the newest `factorio-v*`
+  release's zip only when `/srv/factorio/mods` has no `orrery_*.zip`, and keeps one that is there. On an Agent before
+  game updates (`agent-v1.0.0`), replace the zip in that folder by hand and restart `factorio.service`.
 
 ## Rules (do not weaken)
 
@@ -110,7 +111,7 @@ is `{}`, not `[]`, when nobody is online.
 | `/orrery-reply {json}` | `{player, ok, message}`, printed to that player only as `[Discord] message`, green if `ok` is `true`, else red | `{"ok":true}`; `not online: <player>` if they are not connected |
 | `/orrery-status` | none | `{"ok":true, tick, tick_paused, players, version, mods, loaded}`: `game.tick`, `game.tick_paused`, the online players' names, `helpers.game_version`, `script.active_mods` (name to version), and `loaded`, `true` once the mod's `storage` is set up in the loaded map |
 | `/orrery-hello` | none | sends the `hello` datagram, then `{"ok":true,"seq":N}` with the same `seq`. Writes nothing to `storage` |
-| `/orrery-save <name>` | a plain name: a letter or digit, then letters, digits, `.`, `_`, `-`, at most 100 (so never `_autosave…`); `game.server_save(name)` writes `saves/<name>.zip` | `{"ok":true,"name":"<name>"}` |
+| `/orrery-save <name>` | a plain name: a letter or digit, then letters, digits, `.`, `_`, `-`, at most 100 (so never `_autosave…`); `game.server_save(name)` writes `saves/<name>` with whatever follows its last `.` made `zip` (`a` and `a.zip` → `a.zip`, but `a.b` → `a.zip`, seen on 2.1.24), so the agent sends `<name>.zip` | `{"ok":true,"name":"<name>"}` |
 
 Player commands: `/orrery-link <CODE>` (sends `link`, tells the player "Linking…") and `/orrery-unlink` (sends
 `unlink`). Over RCON they answer `{"ok":false,"error":"/orrery-link is for players"}`.

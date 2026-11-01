@@ -126,12 +126,12 @@ export type RconState = 'up' | 'stalled' | 'down';
 
 /**
  * Polls `/orrery-status` over RCON every 5 s, on one RCON connection kept open (a new one after it ends). Emits
- * `status` after each successful round trip, and only then: the heartbeat follows RCON, never a timer. A server that
+ * `status` (the `Reading`, and the `Status` it came from) after each successful round trip, and only then: the heartbeat follows RCON, never a timer. A server that
  * took the connection but doesn't answer in time (a blocking save, or frozen), or answers without a status, has
  * `stalled`: no heartbeat, so the hub's hung detection sees it, but the game connection stays. RCON refused, reset or
  * closed by the server means Factorio is gone: `down`. Each emits once per change; each change is logged once.
  */
-export class StatusPoller extends EventEmitter<{ status: [Reading]; stalled: [string]; down: [string] }> {
+export class StatusPoller extends EventEmitter<{ status: [Reading, Status]; stalled: [string]; down: [string] }> {
   #o: Required<PollerOptions>;
   #rcon: Rcon | null = null;
   #prev: Previous | null = null;
@@ -200,7 +200,7 @@ export class StatusPoller extends EventEmitter<{ status: [Reading]; stalled: [st
     this.#prev = { tick: status.tick, at };
     this.#players = r.players;
     this.#change('up', '');
-    this.emit('status', r);
+    this.emit('status', r, status);
   }
 
   #change(state: RconState, why: string): void {

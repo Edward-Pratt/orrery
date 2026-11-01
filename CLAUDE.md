@@ -23,16 +23,19 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
   `add-server.sh` (run as root from its root-owned copy in `/usr/local/lib/orrery`) finishes a Pending server: its
   `config.json` entry, token and service link (checked as the hub user, `config.json.bak` kept), `<id>.service` and
   `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.
-  `setup-agent-host.sh` sets up an Agent's Host (the friend runs it as root, and again at each new `agent-v` tag): Factorio in
+  `setup-agent-host.sh` sets up an Agent's Host (the friend runs it as root, and again only as "Releases" says: to leave `agent-v1.0.0`, or for a release that changes the files it installs): Factorio in
   a rootful Podman Quadlet (`factorio.container`), the Agent as `orrery-agent.service` from the newest `agent-v*`
   release, the newest `factorio-v*` release's mod when `mods/` has none, `60-orrery-agent.rules`, and a random game
   password in `server-settings.json` (kept on a re-run), shown only in the mode-600 `/srv/factorio/first-boot.txt`. A re-run
-  keeps the image, the Factorio version and `--memory-max` unless told otherwise. It switches Factorio's `current` and
+  keeps the image, the Factorio version (a game update's too) and `--memory-max` unless told otherwise. It switches Factorio's `current` and
   image together with `factorio.container`, once that release passed `--version` in that image, and the agent's `current`
   last, after its units are written, so a re-run that fails on its way leaves both as they were; tested by
-  `test-setup-agent-host.sh`. `deploy-agent.sh` and `orrery-agent-deploy@.service` ship with it (an agent release next
-  to the running one, rolled back if it won't connect; tested by `test-deploy-agent.sh`), but nothing starts them
-  until agent deploys exist (release 2).
+  `test-setup-agent-host.sh`. `deploy-agent.sh` (setup's root-owned copy in `/usr/local/lib/orrery`) and
+  `orrery-agent-deploy@.service` ship with it: the hub starts an Agent deploy through the Agent, whose `deploy` handler
+  runs `systemctl start --no-block orrery-agent-deploy@<tag>.service` (allowed by `60-orrery-agent.rules`), and the unit
+  runs the script as factorio. It puts the release next to the running one, flips `/srv/orrery-agent/current`, restarts
+  the Agent and rolls back unless the new one writes its `connected` file within 60 s; its `deploy-status.json` goes
+  back to the hub as `deployResult`. It writes only `/srv/orrery-agent`; tested by `test-deploy-agent.sh`.
 - `docs/protocol.md` — the wire protocol (living, authoritative).
 - `docs/notes/` — designs and build plans, one Markdown file per piece of work, in whatever shape fits it (no
   `/to-spec` or `/to-tickets`, no GitHub-issue specs). Releases up to Packs v2 were specced as GitHub issues, which
@@ -115,46 +118,60 @@ its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, teste
 (`.github/factorio-zip.sh`, refusing a version that isn't `factorio/changelog.txt`'s top section), which `.github/factorio-publish.sh` then puts on the mod portal as `orrery` with the
 `FACTORIO_API_KEY` repo secret (both tested by `test-release.sh`). Deploy from the dashboard's Host page
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
-place at the end of the server's countdown. Only `hub-v2.6.0` / `web-v0.5.0` and later deploy (`FLOOR` in
-`hub/src/deploys.ts`). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
+place at the end of the server's countdown, and an Agent deploy (a row per Host) sends its Agent `deploy`, which starts
+`orrery-agent-deploy@<tag>` on that Host. Only `hub-v2.6.0` / `web-v0.5.0` / `agent-v1.1.0` and later deploy (`FLOOR` in
+`hub/src/deploys.ts`; an Agent running a release below `agent-v1.1.0` is refused too, as it can't deploy itself). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
 `install-web.sh` and `add-server.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
+On an Agent's Host, an Agent deploy changes only the Agent's code: a release that changes `orrery-agent.service`,
+`orrery-agent-deploy@.service`, `60-orrery-agent.rules`, `factorio.container` or `deploy-agent.sh` still needs the
+friend to re-run `setup-agent-host.sh` from its tag, as do a new image (`--image`, `--refresh-image`) and `--memory-max`.
 
 When a change ships in several parts, release them in this order, each in place before the next: hub, dashboard, agent,
 Factorio mod. The Factorio server ships in two releases (the owner's decision of 2026-10-31; `docs/ROADMAP.md`).
-**Release 1**: the Agent connection, status with UPS and paused, the VM as a second Host, chat, events, milestones and
-linking, the console and logs, start, stop and restart with countdowns, and saves as Backups with restore. **Release 2**:
-game updates and agent deploys from the dashboard. So in release 1 nothing is deployed to the Agent's Host from the
-dashboard: the dashboard has no Game tab and no Agent rows under Releases (`FLOOR` already holds `agent-v1.0.0`), the
-friend re-runs `setup-agent-host.sh` as root at the new `agent-v` tag (it updates the agent, its units and its polkit
-file; `--factorio <version>` changes the Factorio version), and mods, a new `orrery` release included, are put in
-`/srv/factorio/mods` by hand. The mod must reach the portal in release 1, as players download it when they join, so
-`FACTORIO_API_KEY` is needed then. The setup stops without a `factorio-v*` release to install unless `mods/` already
-holds the `orrery` mod.
+**Release 1**, shipped 2026-11-01 as `hub-v2.14.0`, `web-v0.12.0`, `agent-v1.0.0` and `factorio-v1.0.0`: the Agent
+connection, status with UPS and paused, the VM as a second Host, chat, events, milestones and linking, the console and
+logs, start, stop and restart with countdowns, and saves as Backups with restore. **Release 2**, cut as the next hub
+and dashboard minors and `agent-v1.1.0`, in that order: game updates (a factorio server's Game tab: the Factorio
+version and its portal mods, a new `orrery` release included) and Agent deploys from Host > Releases. Production
+deploys that hub first, then the dashboard: both features need the new hub (`hub-v2.14.0` reports `features.update`
+false and lists no Agent hosts). `agent-v1.0.0` has neither an `update` nor a `deploy` handler, so `FLOOR` holds
+`agent-v1.1.0`: the dashboard refuses to deploy a release below it, and any deploy onto an Agent running one, whose
+Game tab says it has no game updates; those two name the setup re-run. So an Agent on release 1 reaches release 2 once
+by hand: the friend re-runs `setup-agent-host.sh` as root from the `agent-v1.1.0` tag (it updates the agent, its units,
+its polkit file and `deploy-agent.sh`); from there on, Agent releases deploy from the dashboard. `--factorio <version>`
+still picks the Factorio version on a setup run, but a game update is the way to change it, and the mods, later. The
+mod had to reach the portal in release 1, as players download it when they join, so `FACTORIO_API_KEY` was needed
+then. The setup stops without a `factorio-v*` release to install unless `mods/` already holds the `orrery` mod.
 
 By hand for the Factorio server, once, in this order:
 1. Cut and deploy `hub-vX.Y.0` **with the old `config.json`**; confirm the deploy is `ok`.
 2. On the hub host: join the friend's tailnet as `tag:orrery-hub` and put `tailscale0` in the firewalld zone `tailnet`
    (the header of `deploy/orrery-hub.service` has the commands); install the changed `orrery-hub.service` (it waits for
-   `tailscaled.service` and reads `/etc/orrery-factorio-account.env` if there is one); add `integrations.agents`, the
+   `tailscaled.service` and reads `/etc/orrery-factorio-account.env` if there is one, which game updates need: see Secrets); add `integrations.agents`, the
    `factorio` server and its Discord channel to `config.json`; `systemctl daemon-reload`; restart the hub. Rolling
    the hub back below this release: first roll the dashboard back to the previous `web-v` tag from Host > Releases,
    while this hub still serves it (the dashboard reads new hub API without a guard, ADR 0001, so its server pages break
    against an older hub; only its Releases rows don't, so a hub rolled back first can still be rolled forward from
    there). Then remove those config sections (the older hub refuses a server without a Mod token, and the factorio
    server has none, so it would not start), then roll the hub back.
-3. Cut and deploy `web-vX.Y.0`; cut `agent-v1.0.0` and `factorio-v1.0.0` (the setup installs both; the mod
-   reaches the portal from the second). The friend runs `deploy/setup-agent-host.sh` from the agent tag (its header
-   has the options; `--no-hub` while the hub doesn't listen yet), and again from each later `agent-v` tag.
+3. Cut and deploy `web-vX.Y.0`; cut the `agent-v*` and `factorio-v*` releases (release 1: `agent-v1.0.0` and
+   `factorio-v1.0.0`; the setup installs the newest of each, and the mod reaches the portal from the second). The
+   friend runs `deploy/setup-agent-host.sh` from the newest agent tag (its header has the options; `--no-hub` while the
+   hub doesn't listen yet). After that, Agent releases deploy from Host > Releases (from `agent-v1.1.0` on), and the
+   friend re-runs the setup only as above: to leave `agent-v1.0.0`, or for a release that changes the files it installs.
 
 ## Secrets
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`, `DISCORD_CLIENT_SECRET`) are git-ignored. Never commit them.
 `GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
 the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
-`FACTORIO_USERNAME` and `FACTORIO_TOKEN` (the owner's factorio.com account, for the mod portal downloads of game updates,
-release 2; nothing reads them in release 1) live in the root-only `/etc/orrery-factorio-account.env`, read by `orrery-hub.service`
-alone: the deploy units load `/etc/orrery.env`, and their `npm ci` must never see the account. Never commit them or put them in
-`config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
+`FACTORIO_USERNAME` and `FACTORIO_TOKEN` (the owner's factorio.com account: a game update asks `mods.factorio.com` with them
+for each mod's signed download link, and the links sent to the Agent carry no credential, only `secure`; without both
+the hub warns at start, the catalog still answers, and every game update is refused (409), naming the file) live in the
+root-only `/etc/orrery-factorio-account.env`, read by `orrery-hub.service` alone through its
+`EnvironmentFile=-/etc/orrery-factorio-account.env` (the leading `-`: a hub without the file starts; `test-deploy.sh` checks
+that no other unit names it): the deploy units load `/etc/orrery.env`, and their `npm ci` must never see the account.
+Staging has no Agent and no such file. Never commit them or put them in `config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
 `release.yml`'s portal step.
 On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's
 `config.json`; read by `orrery-agent.service`) and `/etc/orrery-factorio.env` (`RCON_PASSWORD`; read by the Agent's unit and the

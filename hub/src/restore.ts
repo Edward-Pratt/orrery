@@ -59,10 +59,15 @@ export function agentRestore(agents: Pick<Agents, 'request'>, agentId: string, l
 }
 
 /**
- * What else a restore must not race: a hub deploy (`deploying`: its restart would kill a restore halfway) and a pack
- * update on the server (`packing`); `restored` hears of each one done.
+ * What else a restore must not race: a deploy (`deploying`: a hub deploy, whose restart would kill a restore halfway,
+ * or the server's Agent's own, which restarts it; null for none) and a pack or game update on the server (`updating`:
+ * which, null for none); `restored` hears of each one done.
  */
-export type RestoreChecks = { deploying?: () => boolean; packing?: (serverId: string) => boolean; restored?: (serverId: string) => void };
+export type RestoreChecks = {
+  deploying?: (serverId: string) => 'hub' | 'agent' | null;
+  updating?: (serverId: string) => string | null;
+  restored?: (serverId: string) => void;
+};
 
 /** Why a restore wasn't run: 404 (no such server or backup) or 409 (not now). */
 export class RestoreRefused extends Error {
@@ -88,7 +93,7 @@ export class Restores {
   /** `sources`: each server that can be restored, by id. */
   constructor(hub: Pick<ServerHub, 'get' | 'audit'>, services: Pick<Services, 'ofServer'>, sources: Map<string, RestoreSource>, o: RestoreChecks = {}) {
     this.#hub = hub;
-    this.#o = { deploying: () => false, packing: () => false, restored: () => {}, ...o };
+    this.#o = { deploying: () => null, updating: () => null, restored: () => {}, ...o };
     this.#services = services;
     this.#sources = sources;
   }
@@ -131,13 +136,16 @@ export class Restores {
     if (!source) throw new RestoreRefused(409, `${serverName} has no server folder.`);
     // Only a name the hub listed itself (its folder's, or its Agent's latest saves) reaches the script or the Agent.
     if (!(await source.list()).some((b) => b.name === name)) throw new RestoreRefused(404, `No backup ${name}.`);
-    if (this.#o.packing(serverId)) throw new RestoreRefused(409, `A pack update is running on ${serverName}: restore once it is done.`);
+    const updating = this.#o.updating(serverId);
+    if (updating) throw new RestoreRefused(409, `A ${updating} is running on ${serverName}: restore once it is done.`);
     if (service.state !== 'inactive' && service.state !== 'failed') {
       throw new RestoreRefused(409, `${service.unit} is ${service.state ?? 'not read yet'}: stop it first.`);
     }
     // Checked after the last await, and marked running in the same turn, so two requests can't both pass.
     if (this.#running.has(serverId)) throw new RestoreRefused(409, `A restore is already running on ${serverName}.`);
-    if (this.#o.deploying()) throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
+    const deploying = this.#o.deploying(serverId);
+    if (deploying === 'hub') throw new RestoreRefused(409, 'A hub deploy is running: restore once it is done.');
+    if (deploying === 'agent') throw new RestoreRefused(409, `${serverName}'s Agent is being deployed: restore once it is done.`);
     return () => source.run(name, service.unit);
   }
 }

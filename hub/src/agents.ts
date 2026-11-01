@@ -36,10 +36,10 @@ type Rate = { perSecond: number; burst: number; overMs: number };
 type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'events' | 'reply' }>;
 
 /**
- * `Agents`' events, each with the Agent's id: `agentLost` (it went silent, or closed without `bye`) and `agentBack`
- * (it connected again after that), and what it pushes.
+ * `Agents`' events, each with the Agent's id: `agentUp` (its Agent connection was welcomed, every time), `agentLost`
+ * (it went silent, or closed without `bye`) and `agentBack` (it connected again after that), and what it pushes.
  */
-export type AgentEvents = { agentLost: [agentId: string]; agentBack: [agentId: string] } & {
+export type AgentEvents = { agentUp: [agentId: string]; agentLost: [agentId: string]; agentBack: [agentId: string] } & {
   [T in Pushed['type']]: [agentId: string, msg: Extract<Pushed, { type: T }>];
 };
 
@@ -51,6 +51,26 @@ const WITH_DATA = new Set<string>(['journal', 'logs', 'log'] satisfies (keyof Ag
 
 /** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
+
+/**
+ * The first Agent release with game updates and its own deploys (release 2, `docs/ROADMAP.md`): `agent-v1.0.0` has
+ * neither, and updates only by the friend re-running `setup-agent-host.sh` at a newer `agent-v` tag.
+ */
+export const AGENT_FLOOR = 'agent-v1.1.0';
+
+/**
+ * Whether an Agent's release (its hello's `agentVersion`, `agent-vX.Y.Z` or a bare version) is older than
+ * `AGENT_FLOOR`. `agent-v0.0.0` is the repo's own version (the dev loop, which has both) and is not; nor is anything
+ * that isn't a version.
+ */
+export function beforeAgentFloor(version: string | null): boolean {
+  const m = version === null ? null : /^(?:agent-v)?(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!m) return false;
+  const v = m.slice(1).map(Number);
+  if (v.every((n) => n === 0)) return false;
+  const floor = AGENT_FLOOR.slice('agent-v'.length).split('.').map(Number);
+  return v[0]! - floor[0]! < 0 || (v[0] === floor[0] && (v[1]! - floor[1]! < 0 || (v[1] === floor[1] && v[2]! < floor[2]!)));
+}
 
 type Waiting = { request: AgentRequest['type']; resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
 type Budgets = ReturnType<typeof connBudgets>;
@@ -68,8 +88,8 @@ type Next = { lines: Budget['lines']; onLine: (line: string) => void };
  * - `TYPES`: a message type's own token bucket within its connection, shared by the types listed together (the game
  *   events), one each otherwise. A message over it is dropped and its connection stays. A type not listed has only
  *   `LINES`, and none of those makes the hub post or store per line: `started` counts once per connection, `stopping`
- *   only marks its close a stop, `cmdResult` and `reply` only answer what waits for them, and nothing takes
- *   `updateDone` or `deployResult` yet.
+ *   only marks its close a stop, `cmdResult` and `reply` only answer what waits for them, and `updateDone` and
+ *   `deployResult` are each taken once: the one its update (by id) or deploy (by tag) waits for, then no more.
  * - `NEW_PLAYERS`: names a game connection's heartbeat adds to its server's player list (not on it already), each a
  *   playtime session row: one over it is left out of that heartbeat, to come in a later one. Its burst is a full list,
  *   so a reconnect's first heartbeat (the list is empty while offline) passes whole.
@@ -116,6 +136,9 @@ const PEER_SOCKETS = 4;
 const END_MS = 2_000;
 const LOG_MS = 60_000;
 const ignore = () => {};
+
+/** A request the Agent answered with `ok: false`: it got it and said no (not a timeout or a dropped connection). */
+export class AgentRefused extends Error {}
 
 /** How long ago `stamp` was by the hub's clock, `now`: as long ago as can be if the clock has stepped back past it. */
 const ago = (now: number, stamp: number) => (now < stamp ? Infinity : now - stamp);
@@ -375,14 +398,18 @@ export class Agents extends EventEmitter<AgentEvents> {
   }
 
   /**
-   * Sends a request to a connected Agent, with a fresh id, and resolves with its reply: the checked `data` for the
-   * requests that answer with data. Rejects when the Agent isn't connected, refuses (with its `error`), doesn't answer
-   * in time (`timeoutMs`, else 30 s: `requestTimeoutMs`), leaves first, or answers with data that isn't the request's.
+   * Sends a request to a connected Agent, with a fresh id (or `id`: an `update`'s, which its steps carry), and
+   * resolves with its reply: the checked `data` for the requests that answer with data. Rejects when the Agent isn't
+   * connected, refuses (`AgentRefused`, with its `error`), doesn't answer in time (`timeoutMs`, else 30 s:
+   * `requestTimeoutMs`), leaves first, or answers with data that isn't the request's.
    */
-  request<C extends AgentCall>(agentId: string, call: C, { timeoutMs }: { timeoutMs?: number } = {}): Promise<AgentAnswer<C['type']>> {
+  request<C extends AgentCall>(
+    agentId: string,
+    call: C,
+    { id = randomUUID(), timeoutMs }: { id?: string; timeoutMs?: number } = {},
+  ): Promise<AgentAnswer<C['type']>> {
     const conn = this.#conns.get(agentId);
     if (!conn) return Promise.reject(new Error(`agent ${agentId} is not connected`));
-    const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         conn.pending.delete(id);
@@ -465,6 +492,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     this.#versions.set(cfg.id, hello.agentVersion);
     this.#send(socket, { type: 'welcome' });
     this.#hub.agentUp(cfg.server);
+    this.emit('agentUp', cfg.id);
     if (this.#lost.delete(cfg.id)) {
       this.#hub.publishTarget({ target: 'host', id: cfg.id, type: 'notice', severity: 'good', kind: 'agentBack', name: cfg.name });
       this.emit('agentBack', cfg.id);
@@ -570,7 +598,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     if (!waiting) return; // late or unknown
     conn.pending.delete(msg.id);
     clearTimeout(waiting.timer);
-    if (!msg.ok) return waiting.reject(new Error(msg.error ?? `${waiting.request} refused`));
+    if (!msg.ok) return waiting.reject(new AgentRefused(msg.error ?? `${waiting.request} refused`));
     if (!WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
     const data = parseReplyData(waiting.request as keyof AgentReplyData, msg.data);
     if (data === null) return waiting.reject(new Error(`the agent's ${waiting.request} reply is malformed`));

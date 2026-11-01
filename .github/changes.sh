@@ -20,6 +20,11 @@ else
       # The web build type-checks against exactly these two hub files, and the agent imports types.ts;
       # types.ts imports nothing. If api.ts or types.ts ever import another hub file, add it here.
       hub/src/api.ts | hub/src/types.ts) hub=true web=true agent=true ;;
+      # The agent's tests load these at runtime, to check the agent's copies against them: protocol.ts (the
+      # parsers and LIMITS), factorio.ts (GAME_MODS) and agents.ts (HANDSHAKE_MS). agents.ts loads servers.ts and
+      # its imports too, but no constant the agent compares lives there: a change to them that breaks loading
+      # fails the hub's own tests, so they stay hub-only.
+      hub/src/protocol.ts | hub/src/factorio.ts | hub/src/agents.ts) hub=true agent=true ;;
       hub/*) hub=true ;;
       web/*) web=true ;;
       mod/*) mod=true ;;

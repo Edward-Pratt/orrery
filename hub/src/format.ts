@@ -91,8 +91,9 @@ const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning
 /** A countdown's words: a restart's, or a stop's (of a server's service). */
 const COUNTDOWN = { restart: { in: '🔄 Restart in', now: '🔄 Restarting now' }, stop: { in: '🛑 Stop in', now: '🛑 Stopping now' } };
 
-/** A notice's title; null for one that isn't posted. */
-function noticeText(n: Notice): string | null {
+/** A notice's title; null for one that isn't posted. A factorio server's updates are game updates (it has no pack). */
+function noticeText(n: Notice, game: Game): string | null {
+  if (game === 'factorio' && (n.kind === 'packUpdateStarted' || n.kind === 'packUpdateFinished')) return gameUpdateText(n);
   switch (n.kind) {
     case 'restartScheduled':
       return `${COUNTDOWN[n.stop ? 'stop' : 'restart'].in} ${countdownText(n.ms)} (by ${n.by})`;
@@ -144,8 +145,32 @@ function noticeText(n: Notice): string | null {
   }
 }
 
-/** The Discord post for a hub event, or null for events that aren't announced. */
-export function formatEvent(e: HubEvent): Post | null {
+/**
+ * A game update's start and end. `from` names the Factorio version the Agent reported (`installed`) and the pre-update
+ * save is named in the game's folder: both `inline()`, as they go mid-line in the embed title. `to` is the version the
+ * admin picked, checked as `X.Y.Z`.
+ */
+function gameUpdateText(n: Extract<Notice, { kind: 'packUpdateStarted' | 'packUpdateFinished' }>): string {
+  const from = inline(n.from);
+  if (n.kind === 'packUpdateStarted') return `📦 Updating the game: ${from} → ${n.to} (by ${n.by})`;
+  switch (n.outcome) {
+    case 'ok':
+      return `✅ Game updated to ${n.to} (${formatDuration(n.ms)})`;
+    case 'rolled back':
+      return `❌ Game update to ${n.to} rolled back: ${from} is running again.${n.backup ? ` Pre-update save: ${inline(n.backup)}` : ''}`;
+    case 'failed':
+      return `❌ Game update to ${n.to} failed: the server didn't come back, even after a rollback`;
+    case 'failed before swap':
+      return `❌ Game update to ${n.to} failed after the stop, before anything changed: ${from} is starting again`;
+    case 'failed in staging':
+      return `⚠️ Game update to ${n.to} failed while preparing: the server wasn't touched`;
+    case 'cancelled':
+      return `❎ Game update to ${n.to} cancelled before the swap: nothing was changed`;
+  }
+}
+
+/** The Discord post for a hub event, or null for events that aren't announced. `game`: the server's (it words updates). */
+export function formatEvent(e: HubEvent, game: Game = 'minecraft'): Post | null {
   switch (e.type) {
     case 'chat':
       return plain(`**${md(e.player)}**: ${md(e.message)}`);
@@ -172,7 +197,7 @@ export function formatEvent(e: HubEvent): Post | null {
     case 'recovered':
       return embed({ title: '✅ Server responding again', color: COLORS.green });
     case 'notice': {
-      const text = noticeText(e);
+      const text = noticeText(e, game);
       return text === null ? null : embed({ title: title(text), color: SEVERITY_COLORS[e.severity] });
     }
     case 'questBatch':
@@ -219,8 +244,8 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
     case 'eventsOn':
       return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
+    // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':
-      // `from` can be a hello's version (a game connection's `modVersion`, an Agent's `agentVersion`).
       return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : inline(e.from)} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
       if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
@@ -229,7 +254,7 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
   }
 }
 
-/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh". */
+/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh", "the agent on factorio-vm". */
 const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
 
 /**

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { Socket } from 'node:net';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -213,13 +214,16 @@ test('a line from the hub over 1 MiB closes the connection cleanly, then it reco
   assert.equal(second.kind, 'agentHello');
 });
 
-test('every request gets a reply by its id: invalid, unknown and unsupported ones ok: false', async (t) => {
+test('every request gets a reply by its id: invalid, unknown and unsupported ones ok: false; an error redacted and cut', async (t) => {
   const seen: unknown[] = [];
   const { hub, client } = await setup(t, undefined, {
     handlers: {
       journal: async (req) => (seen.push(req), { lines: ['one', 'two'] }),
       log: async () => {
         throw new Error('no such log');
+      },
+      restore: async () => {
+        throw new Error(`can't fetch https://dl.factorio.com/x1.zip?secure=abc&expires=1 ${'😀'.repeat(LIMITS.detail)}`);
       },
     },
   });
@@ -234,6 +238,7 @@ test('every request gets a reply by its id: invalid, unknown and unsupported one
     { type: 'logs', id: 'e' },
     { type: 'journal', id: 'f', unit: 'factorio.service', extra: 'dropped' },
     { type: 'log', id: 'g', name: 'agent.log' },
+    { type: 'restore', id: 'h', name: 'world.zip' },
   ];
   conn.socket.write('not json\n' + JSON.stringify({ id: 'no-type' }) + '\n' + JSON.stringify({ type: 'logs', id: 'x'.repeat(LIMITS.text + 1) }) + '\n');
   for (const r of requests) conn.send(r);
@@ -246,9 +251,32 @@ test('every request gets a reply by its id: invalid, unknown and unsupported one
   assert.deepEqual(replies.e, { type: 'reply', id: 'e', ok: false, error: `logs is not supported by ${VERSION}` });
   assert.deepEqual(replies.f, { type: 'reply', id: 'f', ok: true, data: { lines: ['one', 'two'] } });
   assert.deepEqual(replies.g, { type: 'reply', id: 'g', ok: false, error: 'no such log' });
+  const h = replies.h!.error as string;
+  assert.ok(h.startsWith("can't fetch https://dl.factorio.com/x1.zip 😀"), 'no query string');
+  assert.ok(h.length <= LIMITS.detail && !/[\uD800-\uDBFF]$/.test(h), 'cut to 2 KiB, never half a surrogate pair');
   assert.deepEqual(seen, [{ type: 'journal', id: 'f', unit: 'factorio.service' }], 'a handler gets only the documented fields');
   assert.equal(conn.closed, false, 'lines with no usable id are dropped; the connection stays');
   assert.deepEqual(conn.invalid, []);
+});
+
+test('deliver: false while not connected; true once the line is written; false when its write fails', async (t) => {
+  const { hub, client } = await setup(t);
+  const done = { type: 'updateDone', id: 'u1', outcome: 'ok', from: '2.1.24 · 3 mods', to: '2.1.25 · 4 mods' } as const;
+  assert.equal(await client.deliver(done), false, 'no connection yet');
+  client.start();
+  await eventually(() => client.connected);
+  const agent = hub.of('agentHello')[0]!;
+  assert.equal(await client.deliver(done), true);
+  await eventually(() => sent(agent, 'updateDone').length === 1);
+  // A write that fails, as on a connection that drops while the line goes out.
+  t.mock.method(Socket.prototype, 'write', function (this: Socket, _line: string, cb?: (err?: Error) => void) {
+    process.nextTick(() => cb?.(new Error('write EPIPE')));
+    return false;
+  });
+  assert.equal(await client.deliver(done), false);
+  t.mock.restoreAll();
+  await client.stop();
+  assert.equal(await client.deliver(done), false, 'stopping');
 });
 
 test('a reject is retried with backoff and logged once', async (t) => {
@@ -366,6 +394,33 @@ test('started once per run of the unit, after the game hello; not again for a ru
   const fourth = await eventually(() => hub.of('hello')[3], 2000, 'the next run’s game connection');
   await eventually(() => sent(fourth, 'started').length === 1, 2000, 'started for the next run');
   assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
+});
+
+test("a game hello the hub refuses as reconnecting too fast is tried again on the next RCON answer, every time (an update's gate waits for it), never given up", async (t) => {
+  let refused = 0;
+  const { hub, client } = await setup(t, (hello) => {
+    if (hello.type === 'hello' && refused < 4) {
+      refused++;
+      return { reject: 'reconnecting too fast' };
+    }
+    return 'welcome';
+  });
+  const logged: string[] = [];
+  t.mock.method(console, 'log', (line: string) => logged.push(line));
+  client.service(unit(T0)); // the swap started the unit: a new run
+  client.start();
+  await eventually(() => client.connected);
+  // RCON answers, as the status poll does every 5 s while the new Factorio runs.
+  const poll = setInterval(() => client.status(READING), 20);
+  t.after(() => clearInterval(poll));
+  await eventually(() => client.gameUp, 3000, 'the game connection, after four refusals');
+  clearInterval(poll);
+  assert.equal(refused, 4);
+  const hellos = hub.of('hello');
+  assert.equal(hellos.length, 5, 'one hello per try: four refused, the fifth welcomed');
+  for (const c of hellos.slice(0, 4)) await eventually(() => c.closed, 2000, 'a refused one closed');
+  assert.equal(hub.of('agentHello').length, 1, 'the Agent connection stayed');
+  assert.ok(!logged.some((l) => l.startsWith('[hub]') && l.includes('(rejected: ')), 'no [hub] rejection, which the first-boot check stops at');
 });
 
 test('a console cmd on the game connection runs through command and is answered by cmdResult; one the agent won’t run is answered too', async (t) => {

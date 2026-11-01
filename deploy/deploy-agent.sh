@@ -76,6 +76,7 @@ fetch() { # downloads the release into $inc, checks it, and unpacks it into $inc
 
 connected() { # <version> <since, epoch ms>: true once <root>/connected names <version> with a time from <since> on
   local end=$((SECONDS + gate))
+  echo "waiting ${gate}s for $1 to connect (a connected file from $2 on)"
   while :; do
     if node -e '
       const [, file, version, since] = process.argv;
@@ -86,7 +87,7 @@ connected() { # <version> <since, epoch ms>: true once <root>/connected names <v
       echo "$1 connected"
       return 0
     fi
-    if ((SECONDS >= end)); then echo "$1 didn't connect within ${gate}s"; return 1; fi
+    if ((SECONDS >= end)); then echo "$1 didn't connect within ${gate}s (connected: $(tr -d '\n' < "$root/connected" 2> /dev/null))"; return 1; fi
     sleep "$poll"
   done
 }

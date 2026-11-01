@@ -82,8 +82,8 @@ export type DeploysOptions = {
   state: string;
   /** This release, `agent-vX.Y.Z`: a deploy of it is refused. */
   version: string;
-  /** Whether a game update runs: a deploy is refused then. */
-  busy: () => boolean;
+  /** Why a deploy is refused now (a game update runs, or a game settings save), else null. */
+  busy: () => string | null;
   /** `deployResult` on the Agent connection (`HubClient.deliver`): true once its write succeeded. */
   send: (msg: DeployResultMsg) => Promise<boolean>;
   run?: Systemctl;
@@ -93,7 +93,7 @@ export type DeploysOptions = {
 
 /**
  * The agent's deploys. `deploy(tag)`: a well-formed tag only, refused for the release running, while a game update
- * runs, and while a deploy unit (any tag's) hasn't ended (deploy-agent.sh would exit before writing its status, so the
+ * or a game settings save runs (`busy`), and while a deploy unit (any tag's) hasn't ended (deploy-agent.sh would exit before writing its status, so the
  * hub would never hear its end), then `systemctl start --no-block -- orrery-agent-deploy@<tag>.service` (resolves once
  * systemd took the job: the reply means started). The outcome: every `pollMs` (and on each connect, `connected`)
  * `<root>/deploy-status.json` is read; one not sent yet goes out as `deployResult` once its unit has ended (systemctl
@@ -124,9 +124,11 @@ export class Deploys {
   async deploy(tag: string): Promise<void> {
     if (!isTag(tag)) throw new Error(`${JSON.stringify(tag)} is not an agent-vX.Y.Z tag`);
     if (tag === this.#o.version) throw new Error(`${tag} is already running`);
-    if (this.#o.busy()) throw new Error('a game update is running');
+    const busy = this.#o.busy();
+    if (busy) throw new Error(busy);
     await this.idle();
-    if (this.#o.busy()) throw new Error('a game update is running'); // one began while the units were listed
+    const began = this.#o.busy(); // one began while the units were listed
+    if (began) throw new Error(began);
     const unit = deployUnit(tag);
     try {
       await this.#o.run(deployArgs(tag));

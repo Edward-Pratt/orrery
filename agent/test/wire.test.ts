@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as hub from '../../hub/src/protocol.ts';
-import { LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, outputLines, printable, readAgentLine, readGameLine, replyLines } from '../src/wire.ts';
+import { GAME_SETTINGS, LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, outputLines, printable, readAgentLine, readGameLine, replyLines } from '../src/wire.ts';
 
 test('the constants are the hub contract: the protocol version and every field limit; the line cap is 1 MiB', () => {
   assert.equal(PROTOCOL_VERSION, hub.PROTOCOL_VERSION);
   assert.deepEqual(LIMITS, hub.LIMITS, 'every limit, the line cap included');
+  assert.deepEqual(GAME_SETTINGS, hub.GAME_SETTINGS, "the game settings' rules: ranges and patterns");
   // An update's URLs have their own limit: a signed dl-mod.factorio.com link is longer than `text`.
   assert.equal(LIMITS.url, 2048);
   assert.equal(LIMITS.lineBytes, 1024 * 1024, "the owner's decision (2026-10-31): 1 MiB per line on the Agent port");
@@ -82,6 +83,56 @@ test('requests are checked against their documented fields and limits, and copie
   assert.deepEqual(readGameLine('{"type":"say","author":"a","message":"m"}'), { msg: { type: 'say', author: 'a', message: 'm', source: 'discord' } });
   assert.deepEqual(readGameLine('{"type":"save"}'), { msg: { type: 'save' } });
   assert.deepEqual(readGameLine('{"type":"stopping"}'), { msg: null, id: null, why: 'unknown type' });
+});
+
+test("settingsSet is checked field by field against the game settings' rules; the password is optional, or null", () => {
+  const settings = {
+    name: 'Our base',
+    description: 'Ünïcode "quoted" 😀',
+    max_players: 8,
+    require_user_verification: false,
+    autosave_interval: 10,
+    autosave_slots: 5,
+    afk_autokick_interval: 0,
+    auto_pause: true,
+    auto_pause_when_players_connect: false,
+    only_admins_can_pause_the_game: true,
+    allow_commands: 'false',
+  };
+  const set = { type: 'settingsSet', id: 's1', settings, admins: ['alice', 'Bob.the-2nd_'] };
+  assert.deepEqual(readAgentLine(JSON.stringify({ ...set, settings: { ...settings, visibility: { public: true }, token: 't' }, path: '/x' })), { msg: set }, 'only the documented fields');
+  assert.deepEqual(readAgentLine(JSON.stringify({ ...set, game_password: null })), { msg: { ...set, game_password: null } }, 'null removes it');
+  assert.deepEqual(readAgentLine(JSON.stringify({ ...set, game_password: 'x'.repeat(64) })), { msg: { ...set, game_password: 'x'.repeat(64) } });
+  const refused = { msg: null, id: 's1', why: 'invalid settingsSet' };
+  for (const password of ['', 'pass word', 'x'.repeat(65), 'é', 'a\nb', 1, false]) {
+    assert.deepEqual(readAgentLine(JSON.stringify({ ...set, game_password: password })), refused, `password ${JSON.stringify(password)}`);
+  }
+  for (const [key, value] of [
+    ['name', ''],
+    ['name', 'x'.repeat(101)],
+    ['name', ' Our base'],
+    ['name', 'Our\nbase'],
+    ['description', 'x'.repeat(257)],
+    ['description', 'a\u2028b'],
+    ['max_players', 1001],
+    ['max_players', -1],
+    ['max_players', 2.5],
+    ['autosave_interval', 1441],
+    ['autosave_slots', 0],
+    ['afk_autokick_interval', 1441],
+    ['auto_pause', 'true'],
+    ['allow_commands', true],
+    ['allow_commands', 'maybe'],
+  ] as const) {
+    assert.deepEqual(readAgentLine(JSON.stringify({ ...set, settings: { ...settings, [key]: value } })), refused, `${key} ${JSON.stringify(value)}`);
+  }
+  assert.ok(readAgentLine(JSON.stringify({ ...set, settings: { ...settings, name: 'x'.repeat(100), description: 'x'.repeat(256), max_players: 1000 } })).msg);
+  const { auto_pause: _, ...missing } = settings;
+  assert.deepEqual(readAgentLine(JSON.stringify({ ...set, settings: missing })), refused, 'every key, none left out');
+  for (const admins of [['a b'], ['x'.repeat(61)], ['../x'], Array(LIMITS.admins + 1).fill('a'), 'alice']) {
+    assert.deepEqual(readAgentLine(JSON.stringify({ ...set, admins })), refused, `admins ${JSON.stringify(admins).slice(0, 40)}`);
+  }
+  assert.ok(readAgentLine(JSON.stringify({ ...set, admins: Array(LIMITS.admins).fill('x'.repeat(60)) })).msg, '100 admins of 60 characters');
 });
 
 test('printable: control characters (but a tab) and the line separators become ?; command output and log lines are printable', () => {

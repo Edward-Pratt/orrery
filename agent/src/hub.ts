@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
-import type { AgentMsg, AgentRequest, HostSample } from '../../hub/src/types.ts';
+import type { AgentMsg, AgentRequest, GameSettingsReport, HostSample } from '../../hub/src/types.ts';
 import type { Config } from './config.ts';
 import type { EventsState, GameEvent } from './events.ts';
 import { RconNoAnswer } from './rcon.ts';
@@ -185,6 +185,9 @@ export class HubClient {
   #saving: Promise<void> = Promise.resolve();
   /** Whether game events reach the hub: `GameEvents`' latest `state`. */
   #events: EventsState | null = null;
+  /** The game settings' latest report (`GameSettings`), and the last one sent on the Agent connection now up. */
+  #settings: GameSettingsReport | null = null;
+  #settingsSent = '';
   #runs = new RunWatch();
   /** The change time of the run whose end the hub was told (or is being told): no game connection until the next run. */
   #ended: number | null = null;
@@ -344,6 +347,32 @@ export class HubClient {
     this.#agent!.send(s.on ? { type: 'events', on: true } : { type: 'events', on: false, reason: cut(printable(s.reason), LIMITS.detail) });
   }
 
+  /**
+   * The game settings as read (`GameSettings`, at connect, after its own writes and when the unit becomes active): sent
+   * now if connected and not the same as the last sent on this connection (the hub drops an identical one anyway, but
+   * it would count), and on every connect. Cut to the hub's limits first.
+   */
+  settings(report: GameSettingsReport): void {
+    this.#settings = {
+      ...report,
+      admins: report.admins.slice(0, LIMITS.admins),
+      problem: report.problem === null ? null : cut(printable(report.problem), LIMITS.detail),
+      pending: report.pending.slice(0, LIMITS.pending),
+      extra: report.extra.slice(0, LIMITS.extra),
+      rolledBack: report.rolledBack === null ? null : cut(printable(report.rolledBack), LIMITS.detail),
+    };
+    this.#tellSettings();
+  }
+
+  #tellSettings(): void {
+    const s = this.#settings;
+    if (!s || !this.connected) return;
+    const key = JSON.stringify(s);
+    if (key === this.#settingsSent) return;
+    this.#settingsSent = key;
+    this.#agent!.send({ type: 'settings', ...s });
+  }
+
   /** A save's outcome, as the game connection's `backup` (dropped while it isn't up, like a Mod's). */
   backup(result: BackupResult): void {
     if (this.#game?.welcomed && !this.#stopping) this.#game.send({ type: 'backup', ...result });
@@ -444,6 +473,8 @@ export class HubClient {
     if (this.#saves) link.send({ type: 'saves', ...this.#saves });
     if (this.#installed) link.send({ type: 'installed', ...this.#installed });
     this.#tellEvents();
+    this.#settingsSent = '';
+    this.#tellSettings();
     this.#onWelcome();
     if (this.#reading) this.#openGame(this.#reading.modVersion);
   }

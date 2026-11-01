@@ -354,6 +354,35 @@ test('events on the Agent connection: each change, and again on every connect, s
   assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
 });
 
+test('settings on the Agent connection: sent on change (never twice the same on one connection), again on every connect, cut to the hub\'s limits', async (t) => {
+  const { hub, client } = await setup(t);
+  const told = () => hub.of('agentHello').map((c) => sent(c, 'settings'));
+  const report = {
+    settings: null,
+    admins: Array.from({ length: LIMITS.admins + 5 }, (_, i) => `admin${i}`),
+    problem: `server-settings.json \u001b[2J${'x'.repeat(LIMITS.detail)}`,
+    pending: [],
+    extra: Array.from({ length: LIMITS.extra + 1 }, () => 'tags'),
+    rolledBack: null,
+  };
+  client.settings(report); // kept for the connect
+  client.start();
+  await eventually(() => told()[0]?.length === 1);
+  const first = told()[0]![0] as typeof report;
+  assert.equal(first.admins.length, LIMITS.admins);
+  assert.equal(first.extra.length, LIMITS.extra);
+  assert.equal(first.problem, `server-settings.json ?[2J${'x'.repeat(LIMITS.detail - 25)}`);
+  client.settings(report); // the same: not sent again on this connection
+  client.settings({ ...report, problem: 'other' });
+  await eventually(() => told()[0]?.length === 2);
+  await sleep(30);
+  assert.equal(told()[0]!.length, 2);
+  hub.conns[0]!.socket.destroy();
+  await eventually(() => told()[1]?.length === 1, 2000, 'sent again on connect');
+  assert.equal((told()[1]![0] as typeof report).problem, 'other');
+  assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
+});
+
 test('started once per run of the unit, after the game hello; not again for a run already announced, even by an earlier agent', async (t) => {
   const { hub, client, root } = await setup(t);
   client.start();

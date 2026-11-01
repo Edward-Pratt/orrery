@@ -126,7 +126,14 @@ function noticeText(n: Notice, game: Game): string | null {
     case 'packUpdateStarted':
       return n.from === n.to ? `📦 Applying pack changes to ${n.to} (by ${n.by})` : `📦 Updating the pack: ${n.from} → ${n.to} (by ${n.by})`;
     case 'packUpdateStep': // progress for the dashboard
+    case 'settings': // for the dashboard's Settings tab
       return null;
+    case 'verificationOff':
+      return `⚠️ User verification is now off on ${n.name}${n.by === null ? '' : ` (by ${n.by})`}: player names aren't checked.`;
+    case 'verificationOn':
+      return `✅ User verification is on again on ${n.name}${n.by === null ? '' : ` (by ${n.by})`}: player names are checked.`;
+    case 'settingsRolledBack':
+      return `❌ ${n.name} didn't start with its new settings: the Agent put back the previous ones, its game password and user verification included.`;
     case 'packUpdateFinished':
       switch (n.outcome) {
         case 'ok':

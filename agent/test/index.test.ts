@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { eventually, fakeHub } from './fake-hub.ts';
-import { PASSWORD, fakeRcon } from './fake-rcon.ts';
+import { PASSWORD, factorioConfig, fakeRcon } from './fake-rcon.ts';
 
 const TOKEN = 'k'.repeat(40);
 const INDEX = new URL('../src/index.ts', import.meta.url).pathname;
@@ -51,6 +51,26 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
   };
   return { dir, root, env };
 }
+
+/** A `settingsSet` the hub's rules let through: a new name and player limit, Bob an admin. */
+const settingsSet = (id: string) => ({
+  type: 'settingsSet',
+  id,
+  settings: {
+    name: 'Our base',
+    description: '',
+    max_players: 8,
+    require_user_verification: true,
+    autosave_interval: 10,
+    autosave_slots: 5,
+    afk_autokick_interval: 0,
+    auto_pause: true,
+    auto_pause_when_players_connect: false,
+    only_admins_can_pause_the_game: true,
+    allow_commands: 'admins-only',
+  },
+  admins: ['bob'],
+});
 
 const status = () =>
   JSON.stringify({ ok: true, tick: Date.now(), tick_paused: false, players: {}, version: '2.1.24', mods: { base: '2.1.24', orrery: '0.1.0' }, loaded: true });
@@ -162,6 +182,7 @@ test('restore and update are refused while a deploy unit of the agent runs (its 
     const error = `a deploy is running (orrery-agent-deploy@agent-v1.2.5.service is ${active})`;
     assert.deepEqual(await ask({ type: 'restore', id: `r-${active}`, name: 'world.zip' }), { type: 'reply', id: `r-${active}`, ok: false, error });
     assert.deepEqual(await ask(update(`u-${active}`)), { type: 'reply', id: `u-${active}`, ok: false, error });
+    assert.deepEqual(await ask(settingsSet(`s-${active}`)), { type: 'reply', id: `s-${active}`, ok: false, error });
   }
 
   // Ended (failed): no longer the reason. The restore meets the running server, the update a Host with no release.
@@ -173,8 +194,50 @@ test('restore and update are refused while a deploy unit of the agent runs (its 
   assert.equal(updated.ok, false);
   assert.match(String(updated.error), /does not point at a release/);
   assert.doesNotMatch(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^start/m, 'nothing started');
+  assert.equal(JSON.parse(await readFile(join(dir, 'factorio', 'config', 'server-settings.json'), 'utf8')).name, undefined, 'no settings written');
   assert.deepEqual(agent.invalid, []);
   child.kill('SIGTERM'); // and wait for its exit, so it writes no more into the folder the test removes
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+});
+
+test('game settings: pushed on connect, written and applied live on settingsSet, and pushed again after the reply', async (t) => {
+  let adminlist = '';
+  const rcon = await fakeRcon((c) => (c === '/orrery-status' ? status() : (factorioConfig(c, adminlist) ?? [])));
+  const hub = await fakeHub();
+  t.after(async () => {
+    await rcon.close();
+    await hub.close();
+  });
+  const { dir, env } = await world(t, rcon.port, hub.port);
+  const config = join(dir, 'factorio', 'config');
+  adminlist = join(config, 'server-adminlist.json');
+  await writeFile(
+    join(config, 'server-settings.json'),
+    JSON.stringify({ name: 'orrery Factorio', description: '', game_password: 'Abcdefghij0123456789', visibility: { public: false, lan: false }, auto_pause: true, allow_commands: 'admins-only' }),
+  );
+  await writeFile(adminlist, '[]');
+  const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => child.kill('SIGKILL'));
+  const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
+  const pushed = () => agent.lines.filter((m) => m.type === 'settings') as Record<string, any>[];
+  await eventually(() => pushed().length > 0, 5000, 'settings on connect');
+  assert.equal(pushed()[0]!.settings.name, 'orrery Factorio');
+  assert.equal(pushed()[0]!.settings.game_password_set, true);
+  await eventually(() => hub.of('hello')[0], 5000, 'the game connection: RCON answers');
+
+  agent.send(settingsSet('s1'));
+  const reply = await eventually(() => agent.lines.find((m) => m.type === 'reply' && m.id === 's1'), 5000, 'the reply');
+  assert.deepEqual(reply, { type: 'reply', id: 's1', ok: true, data: { applied: ['name', 'max_players', 'admins'], pending: [] } });
+  assert.deepEqual(
+    rcon.commands().filter((c) => c !== '/orrery-status' && c !== '/orrery-hello'),
+    ['/config set name Our base', '/config set max-players 8', '/promote bob'],
+  );
+  const after = await eventually(() => pushed().find((p) => p.settings?.name === 'Our base'), 5000, 'settings after the save');
+  assert.deepEqual(after.admins, ['bob']);
+  assert.ok(agent.lines.indexOf(reply) < agent.lines.indexOf(after), 'the reply first');
+  assert.deepEqual(agent.invalid, []);
+  child.kill('SIGTERM');
   const [code] = await once(child, 'exit');
   assert.equal(code, 0);
 });

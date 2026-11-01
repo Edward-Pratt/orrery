@@ -52,8 +52,10 @@ export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string
 /**
  * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState
  * (`sub`), when that last changed (`since`, epoch ms) and Result (`result`, e.g. `success`, `exit-code`).
- * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `reply` answers a
- * request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it has any.
+ * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `events` says whether
+ * the Agent forwards its server's game events: off (`reason`: why) until Factorio's next start, or on again. `reply`
+ * answers a request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it
+ * has any.
  */
 export type AgentMsg =
   | { type: 'ping' }
@@ -65,6 +67,7 @@ export type AgentMsg =
   | ({ type: 'updateStep'; id: string } & PackStepState)
   | { type: 'updateDone'; id: string; outcome: PackFinished; from: string; to: string; backup?: string }
   | { type: 'deployResult'; tag: string; outcome: Exclude<DeployOutcome, 'running'>; log: string }
+  | { type: 'events'; on: boolean; reason?: string }
   | { type: 'reply'; id: string; ok: boolean; error?: string; data?: unknown };
 
 /**
@@ -263,6 +266,9 @@ export type TargetNotice = { severity: Severity } & (
   /** About a Host (`id`: the Agent's): its Agent went silent or closed without `bye`, then came back. */
   | { kind: 'agentLost'; name: string }
   | { kind: 'agentBack'; name: string }
+  /** About a Host (`id`: the Agent's): its Agent turned its server's game events off (`reason`, the Agent's words), then on again. */
+  | { kind: 'eventsOff'; name: string; reason: string }
+  | { kind: 'eventsOn'; name: string }
   | { kind: 'deployStarted'; part: DeployPart; from: string | null; to: string; by: string }
   | { kind: 'deployFinished'; part: DeployPart; from: string | null; to: string; outcome: DeployOutcome }
 );

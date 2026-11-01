@@ -46,7 +46,7 @@ export const LIMITS = {
   logLines: 1000,
   saves: 500,
   mods: 500,
-  /** A backup's or update step's `detail`, a `reply`'s `error`. */
+  /** A backup's or update step's `detail`, a `reply`'s `error`, an `events`' `reason`. */
   detail: 2048,
   /** A `deployResult`'s `log`: the last 40 lines of the deploy. */
   deployLog: 16 * 1024,
@@ -202,6 +202,7 @@ const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
     backup: optional(str()),
   },
   deployResult: { tag: str(), outcome: oneOf('ok', 'failed', 'rolled back'), log: str(LIMITS.deployLog) },
+  events: { on: bool, reason: optional(str(LIMITS.detail)) },
   reply: { id: str(), ok: bool, error: optional(str(LIMITS.detail)), data: json(LIMITS.replyData) },
 };
 

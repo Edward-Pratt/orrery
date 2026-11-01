@@ -82,6 +82,7 @@ function run(): void {
   saves.on('saves', (m) => hub.saves(m));
   saves.on('backup', (b) => hub.backup(b));
   events.on('event', (e) => hub.event(e));
+  events.on('state', (s) => hub.events(s));
   status.on('stalled', () => hub.stalled());
   status.on('down', () => hub.down());
   const sample = () =>

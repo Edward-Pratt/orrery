@@ -172,6 +172,9 @@ export class EventBudget {
  */
 export type Gate = 'closed' | 'checking' | 'on' | 'off';
 
+/** Whether game events reach the hub, as the Agent connection's `events` tells it: off says why. */
+export type EventsState = { on: true } | { on: false; reason: string };
+
 export type EventsOptions = {
   /** The agent's UDP port on 127.0.0.1 (`agentUdpPort`, 34199; the mod sends there). */
   port: number;
@@ -206,13 +209,24 @@ export type EventsOptions = {
  * the game connection's message, within `EventBudget` (5 a second, 30 at once; the rest dropped, counted in the log
  * once a minute). A `link` or `unlink` for a player not online at the latest poll (who may have joined since) waits
  * for a fresh `/orrery-status`, and is dropped, each one logged, if that doesn't have them online either.
+ *
+ * Emits `state` on each change of whether events reach the hub: off (with why) once the gate is `off`, or while the
+ * port can't be listened on past one retry; on once the gate is `on` with the port listened on. The first decision
+ * since the agent started is a change too.
  */
-export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
+export class GameEvents extends EventEmitter<{ event: [GameEvent]; state: [EventsState] }> {
   #o: Required<EventsOptions>;
   #socket: Socket | null = null;
   #bound: number | null = null;
   #retry: NodeJS.Timeout | undefined;
   #listenFailed = false;
+  /** Why listening failed, while the latest two attempts in a row did (the first try and its retry); else null. */
+  #listenWhy: string | null = null;
+  #listenFailures = 0;
+  /** Why the gate is `off`. */
+  #offWhy = '';
+  /** What `state` last said (null: nothing yet). */
+  #told: boolean | null = null;
   #stopped = true;
   #unit: UnitState | null = null;
   /** When the agent last saw the unit with no Factorio running (inactive, failed or activating), since the last start. */
@@ -311,13 +325,20 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
       if (this.#socket === socket) this.#socket = null;
       if (!this.#listenFailed) console.error(`[events] can't listen on UDP 127.0.0.1:${this.#o.port} (${err.message}): retrying`);
       this.#listenFailed = true;
+      if (++this.#listenFailures >= 2) {
+        this.#listenWhy = `the agent can't listen on UDP 127.0.0.1:${this.#o.port} (${err.message}), where the mod sends them: trying again every ${this.#o.retryMs / 1000} s`;
+        this.#report();
+      }
       if (!this.#stopped) this.#retry = setTimeout(() => this.#listen(), this.#o.retryMs);
     });
     socket.bind({ address: '127.0.0.1', port: this.#o.port }, () => {
       bound = true;
       this.#bound = socket.address().port;
       this.#listenFailed = false;
+      this.#listenFailures = 0;
+      this.#listenWhy = null;
       console.log(`[events] listening on UDP 127.0.0.1:${this.#bound}`);
+      this.#report();
     });
   }
 
@@ -345,7 +366,8 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
       // check.ts (S4) reads this line, the "off" one below, and the hello lines from agent.log: keep their wording.
       if (state === 'on') {
         this.#gate = 'on';
-        return console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);
+        console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);
+        return this.#report();
       }
       if (state === 'off' || Date.now() >= until) {
         this.#gate = 'off';
@@ -353,11 +375,26 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent] }> {
           state === 'off'
             ? `Factorio could not open its Lua UDP socket (is 127.0.0.1:${this.#o.factorioPort} taken?)`
             : `no "Opening socket" line for 127.0.0.1:${this.#o.factorioPort} in ${this.#o.log} within ${this.#o.deadlineMs / 1000} s`;
-        return console.error(`[events] game events are off until Factorio starts again: ${why}`);
+        console.error(`[events] game events are off until Factorio starts again: ${why}`);
+        this.#offWhy = `${why}: off until Factorio starts again`;
+        return this.#report();
       }
       this.#timer = setTimeout(() => void look(), this.#o.pollMs);
     };
     void look();
+  }
+
+  /** Emits `state` when whether events reach the hub changed: off while listening fails or the gate is off, on once both are fine. */
+  #report(): void {
+    const why = this.#listenWhy ?? (this.#gate === 'off' ? this.#offWhy : null);
+    if (why !== null) {
+      if (this.#told === false) return;
+      this.#told = false;
+      return void this.emit('state', { on: false, reason: why });
+    }
+    if (this.#gate !== 'on' || this.#bound === null || this.#told === true) return;
+    this.#told = true;
+    this.emit('state', { on: true });
   }
 
   #drop(kind: string, why: string): void {

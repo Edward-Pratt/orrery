@@ -4,12 +4,12 @@ import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { AgentMsg, AgentRequest, HostSample } from '../../hub/src/types.ts';
 import type { Config } from './config.ts';
-import type { GameEvent } from './events.ts';
+import type { EventsState, GameEvent } from './events.ts';
 import { RconNoAnswer } from './rcon.ts';
 import type { BackupResult, SavesMsg } from './saves.ts';
 import { RunWatch, type RunEnd, type UnitState } from './service.ts';
 import type { Reading } from './status.ts';
-import { LIMITS, LineReader, PROTOCOL_VERSION, encode, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
+import { LIMITS, LineReader, PROTOCOL_VERSION, cut, encode, printable, readAgentLine, readGameLine, type OutMsg, type Request, type ToGame } from './wire.ts';
 
 /** What answers a request: resolves with its reply's `data` (undefined: none); a throw is the reply's `error`. */
 export type Handlers = { [T in AgentRequest['type']]?: (req: Request<T>) => Promise<unknown> };
@@ -128,7 +128,7 @@ class Link {
 /**
  * The agent's two connections to the hub (docs/protocol.md, "Agent connection"). The Agent connection opens with
  * `agentHello`, sends nothing before `welcome`, then pings every 10 s, pushes the unit's state and the saves (on
- * connect and on change) and host samples, and answers each request by its id. It reconnects after any close, with
+ * connect and on change), whether game events reach the hub (`events`, the same) and host samples, and answers each request by its id. It reconnects after any close, with
  * capped exponential backoff and jitter, logging once per change of state, so with no hub reachable the agent just
  * keeps trying; a hello the hub refuses as `reconnecting too fast` is no failure: the next waits out the hub's 5 s. After each welcome it writes `<root>/connected` (`{ version, time }`, atomically) for its deploy's gate.
  *
@@ -164,6 +164,8 @@ export class HubClient {
   #reading: Reading | null = null;
   #service: UnitState | null = null;
   #saves: SavesMsg | null = null;
+  /** Whether game events reach the hub: `GameEvents`' latest `state`. */
+  #events: EventsState | null = null;
   #runs = new RunWatch();
   /** The change time of the run whose end the hub was told (or is being told): no game connection until the next run. */
   #ended: number | null = null;
@@ -250,6 +252,22 @@ export class HubClient {
   saves(msg: SavesMsg): void {
     this.#saves = msg;
     if (this.connected) this.#agent!.send({ type: 'saves', ...msg });
+  }
+
+  /**
+   * Whether game events reach the hub, on each change (`GameEvents`' `state`): sent now if connected, and on every
+   * connect, so a hub that restarted hears it while they are off, and one that missed the change while the agent was
+   * away (or on a connection that was closing) hears it on the next. The hub posts only a change.
+   */
+  events(state: EventsState): void {
+    this.#events = state;
+    this.#tellEvents();
+  }
+
+  #tellEvents(): void {
+    const s = this.#events;
+    if (!s || !this.connected) return;
+    this.#agent!.send(s.on ? { type: 'events', on: true } : { type: 'events', on: false, reason: cut(printable(s.reason), LIMITS.detail) });
   }
 
   /** A save's outcome, as the game connection's `backup` (dropped while it isn't up, like a Mod's). */
@@ -349,6 +367,7 @@ export class HubClient {
     this.#ping = setInterval(() => link.send({ type: 'ping' }), this.#pingMs);
     if (this.#service) link.send({ type: 'serviceState', ...this.#service });
     if (this.#saves) link.send({ type: 'saves', ...this.#saves });
+    this.#tellEvents();
     if (this.#reading) this.#openGame(this.#reading.modVersion);
   }
 

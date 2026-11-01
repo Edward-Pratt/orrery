@@ -130,6 +130,7 @@ const AGENT_MSGS = {
   updateStep: { type: 'updateStep', id: '7', step: 'prepare', state: 'running', detail: 'Downloading 2 mods' },
   updateDone: { type: 'updateDone', id: '7', outcome: 'rolled back', from: '2.1.24 · 5 mods', to: '2.1.25 · 5 mods', backup: 'orrery-pre-update-2.1.24-x.zip' },
   deployResult: { type: 'deployResult', tag: 'agent-v1.0.1', outcome: 'ok', log: 'flipped current\nconnected' },
+  events: { type: 'events', on: false, reason: 'Factorio could not open its Lua UDP socket (is 127.0.0.1:34198 taken?)' },
   reply: { type: 'reply', id: '3', ok: true, data: { lines: ['a', 'b'] } },
 };
 
@@ -140,6 +141,7 @@ test('every Agent port message parses, and only on the Agent port', () => {
   }
   assert.deepEqual(parseAgentLine('{"type":"reply","id":"4","ok":false,"error":"no such save"}'), { type: 'reply', id: '4', ok: false, error: 'no such save' });
   assert.deepEqual(parseAgentLine('{"type":"updateDone","id":"7","outcome":"ok","from":"a","to":"b"}'), { type: 'updateDone', id: '7', outcome: 'ok', from: 'a', to: 'b' });
+  assert.deepEqual(parseAgentLine('{"type":"events","on":true}'), { type: 'events', on: true });
   // Game connection messages go through parseModLine once a game hello is accepted.
   assert.equal(parseAgentLine('{"type":"chat","player":"Ann","message":"hi"}'), null);
   for (const line of ['', 'not json', 'null', '[]', '{"type":"constructor"}', '{"type":"__proto__"}']) assert.equal(parseAgentLine(line), null, line);
@@ -161,6 +163,8 @@ test('Agent port messages check their field types and values', () => {
     ['updateDone', { outcome: 'running' }],
     ['updateDone', { backup: 1 }],
     ['deployResult', { outcome: 'running' }],
+    ['events', { on: 'false' }],
+    ['events', { reason: 1 }],
     ['reply', { ok: 'true' }],
     ['reply', { error: 1 }],
   ];
@@ -220,6 +224,7 @@ test('every field has a limit, on both ports: at it parses, over it the message 
     ...(['id', 'from', 'to', 'backup'] as const).map((f) => [AGENT_MSGS.updateDone, [f], LIMITS.text] as [object, string[], number]),
     [AGENT_MSGS.deployResult, ['tag'], LIMITS.text],
     [AGENT_MSGS.deployResult, ['log'], LIMITS.deployLog],
+    [AGENT_MSGS.events, ['reason'], LIMITS.detail],
     [AGENT_MSGS.reply, ['id'], LIMITS.text],
     [{ type: 'reply', id: '1', ok: false, error: 'e' }, ['error'], LIMITS.detail],
   ];

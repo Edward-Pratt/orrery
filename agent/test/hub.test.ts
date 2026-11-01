@@ -304,6 +304,28 @@ test('a hello refused as reconnecting too fast is no failure: logged once per re
   assert.equal(logged.filter((l) => l.includes('welcomed this agent under')).length, 2, logged.join('\n')); // once per change of state
 });
 
+test('events on the Agent connection: each change, and again on every connect, so an on the hub missed while it was away comes', async (t) => {
+  const { hub, client } = await setup(t);
+  const told = () => hub.of('agentHello').map((c) => sent(c, 'events'));
+  client.events({ on: false, reason: 'before any connection' }); // kept for the connect
+  client.start();
+  await eventually(() => told()[0]?.length === 1);
+  assert.deepEqual(told()[0], [{ type: 'events', on: false, reason: 'before any connection' }]);
+  const long = `a\u001b[2Jb${'x'.repeat(LIMITS.detail)}`; // a terminal escape and over the limit: printable, cut
+  client.events({ on: false, reason: long });
+  await eventually(() => told()[0]?.length === 2);
+  assert.equal((told()[0]![1] as { reason: string }).reason, `a?[2Jb${'x'.repeat(LIMITS.detail - 6)}`);
+
+  hub.conns[0]!.socket.destroy();
+  await eventually(() => told()[1]?.length === 1, 2000, 'resent on connect while off');
+  assert.equal(told()[1]![0]!.on, false);
+  hub.conns[1]!.socket.destroy();
+  client.events({ on: true }); // while away
+  await eventually(() => told()[2]?.length === 1, 2000, 'the on, on connect');
+  assert.deepEqual(told()[2], [{ type: 'events', on: true }]);
+  assert.deepEqual(hub.conns.flatMap((c) => c.invalid), []);
+});
+
 test('started once per run of the unit, after the game hello; not again for a run already announced, even by an earlier agent', async (t) => {
   const { hub, client, root } = await setup(t);
   client.start();

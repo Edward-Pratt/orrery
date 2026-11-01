@@ -20,6 +20,7 @@ import {
   toCommand,
   toGame,
   type EventsOptions,
+  type EventsState,
   type GameEvent,
 } from '../src/events.ts';
 import { HubClient } from '../src/hub.ts';
@@ -68,6 +69,8 @@ async function setup(t: TestContext, options: Partial<EventsOptions> = {}) {
   });
   const got: GameEvent[] = [];
   events.on('event', (e) => got.push(e));
+  const states: EventsState[] = [];
+  events.on('state', (state) => states.push(state));
   events.start();
   const port = await eventually(() => events.bound, 2000, 'the UDP listener');
   t.after(async () => {
@@ -87,7 +90,7 @@ async function setup(t: TestContext, options: Partial<EventsOptions> = {}) {
     since += 1000;
     events.service(unit('active', since));
   };
-  return { events, factorio, stranger, factorioPort, players, commands, got, log, send, start };
+  return { events, factorio, stranger, factorioPort, players, commands, got, states, log, send, start };
 }
 
 const unit = (active: string, since: number): UnitState => ({ unit: 'factorio.service', active, sub: active === 'active' ? 'running' : 'dead', since, result: 'success' });
@@ -168,6 +171,57 @@ test('events are dropped when the Opening socket line is missing, or Factorio co
   await eventually(() => s.got.length === 1);
   assert.deepEqual(s.got, [{ type: 'join', player: 'Alice' }]);
   assert.equal(off().length, 3, 'each start reports once');
+});
+
+test('whether events reach the hub is a state, emitted once per change: off with why, on again at a start with the line', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const s = await setup(t);
+  await s.start([BANNER, RCON_LINE]);
+  await eventually(() => s.states.length === 1, 2000, 'off at the deadline');
+  assert.equal(s.states[0]!.on, false);
+  assert.match((s.states[0] as { reason: string }).reason, /^no "Opening socket" line for 127\.0\.0\.1:\d+ in .* within 0\.3 s: off until Factorio starts again$/);
+  await s.start([BANNER, FAILED]); // off again: no change
+  await eventually(() => s.events.gate === 'off');
+  await s.start([BANNER, opened(s.factorioPort)]);
+  await eventually(() => s.states.length === 2, 2000, 'on again');
+  assert.deepEqual(s.states[1], { on: true });
+  await s.start([BANNER, opened(s.factorioPort)]); // on again: no change
+  await eventually(() => s.events.gate === 'on');
+  await s.start([BANNER, FAILED]);
+  await eventually(() => s.states.length === 3, 2000, 'off at the failure line');
+  assert.deepEqual(s.states[2], { on: false, reason: `Factorio could not open its Lua UDP socket (is 127.0.0.1:${s.factorioPort} taken?): off until Factorio starts again` });
+  await sleep(50);
+  assert.equal(s.states.length, 3);
+});
+
+test("the agent's own UDP port taken past one retry is off too; on once it listens and a start's log shows the socket", async (t) => {
+  t.mock.method(console, 'error', () => {});
+  t.mock.method(console, 'log', () => {});
+  const holder = await udp(); // another local process on the agent's port
+  const port = holder.address().port;
+  const dir = await mkdtemp(join(tmpdir(), 'orrery-events-'));
+  const log = join(dir, 'factorio-current.log');
+  const events = new GameEvents({ port, factorioPort: 34198, log, players: () => [], run: async () => '', retryMs: 20, pollMs: 10 });
+  const states: EventsState[] = [];
+  events.on('state', (state) => states.push(state));
+  t.after(async () => {
+    events.stop();
+    await rm(dir, { recursive: true, force: true });
+  });
+  events.start();
+  await eventually(() => states.length === 1, 2000, 'off once the retry failed');
+  assert.equal(states[0]!.on, false);
+  assert.match((states[0] as { reason: string }).reason, new RegExp(`^the agent can't listen on UDP 127\\.0\\.0\\.1:${port} \\(.*EADDRINUSE.*\\), where the mod sends them: trying again every 0\\.02 s$`));
+  await sleep(100); // more failed retries: still one
+  assert.equal(states.length, 1);
+  holder.close();
+  await eventually(() => events.bound === port, 2000, 'listening');
+  await sleep(50);
+  assert.equal(states.length, 1, 'listening, but no start has shown the socket: nothing to say yet');
+  await writeFile(log, `${BANNER}\n${opened(34198)}\n`);
+  events.service(unit('active', Math.floor(Date.now() / 1000) * 1000 - 5000));
+  await eventually(() => states.length === 2, 2000, 'on');
+  assert.deepEqual(states[1], { on: true });
 });
 
 test('a log not written since the start is the previous run’s: it is not read until Factorio replaces it', async (t) => {

@@ -33,7 +33,7 @@ export type AgentsOptions = {
 type Rate = { perSecond: number; burst: number; overMs: number };
 
 /** What an Agent pushes on its own, put on the `Agents` emitter as it came (a copy of only its schema's fields). */
-type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'reply' }>;
+type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'events' | 'reply' }>;
 
 /**
  * `Agents`' events, each with the Agent's id: `agentLost` (it went silent, or closed without `bye`) and `agentBack`
@@ -99,6 +99,9 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
   { name: 'heartbeat', types: ['heartbeat'], perSecond: 1, burst: 5 },
   // One per Save now, or per 6 h of play: each one is a notice posted to Discord.
   { name: 'backup', types: ['backup'], perSecond: 1 / 10, burst: 3 },
+  // Taken only by a change (a repeat, such as the one it sends on each connect, posts nothing and takes none): each
+  // change is a notice posted to Discord, and an Agent's come at most once per Factorio start.
+  { name: 'events on or off', types: ['events'], perSecond: 1 / 10, burst: 3 },
 ];
 const NEW_PLAYERS = { name: 'new players', perSecond: 1 / 10, burst: LIMITS.players };
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
@@ -267,6 +270,7 @@ export class Agents extends EventEmitter<AgentEvents> {
   #conns = new Map<string, Conn>();
   #versions = new Map<string, string>();
   #lost = new Set<string>(); // lost (not after `bye`) and not back yet
+  #eventsOff = new Set<string>(); // the Agents whose game events are off, as the latest `events` each sent said
   #sockets = new Set<Socket>();
   #perPeer = new Map<string, number>(); // open connections by peer address, handshaken or not
   #sampled = new Map<string, number>(); // when each Agent's latest stored host sample came (the hub's clock)
@@ -498,7 +502,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   #agentLine(cfg: AgentConfig, conn: Conn, line: string): void {
     conn.silence.refresh();
     const msg = parseAgentLine(line);
-    if (!msg || !conn.budgets.allows(msg)) return; // junk after the handshake is ignored; over its budget, dropped
+    // Junk after the handshake is ignored; over its budget, dropped (`events` takes from its own only on a change).
+    if (!msg || (msg.type !== 'events' && !conn.budgets.allows(msg))) return;
     switch (msg.type) {
       case 'agentHello':
       case 'hello': // first lines only
@@ -514,11 +519,30 @@ export class Agents extends EventEmitter<AgentEvents> {
         this.#sampled.set(cfg.id, now);
         return this.#hosts.get(cfg.id)?.record({ ...msg.sample, ts: now });
       }
+      case 'events':
+        return this.#events(cfg, conn, msg);
       case 'reply':
         return this.#reply(conn, msg);
       default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult
         (this.emit as (event: Pushed['type'], id: string, msg: Pushed) => boolean)(msg.type, cfg.id, msg);
     }
+  }
+
+  /**
+   * Its server's game events went off or came back on: one host notice per change the hub hears, within the `events`
+   * budget (one over it is dropped, so the hub hears of it at the next change or connect). A repeat (the Agent sends
+   * its state on each connect) posts nothing and takes no budget; the hub keeps what it heard while the Agent is away.
+   */
+  #events(cfg: AgentConfig, conn: Conn, msg: Extract<AgentMsg, { type: 'events' }>): void {
+    const off = this.#eventsOff.has(cfg.id);
+    if (msg.on !== off || !conn.budgets.allows(msg)) return; // no change, or over its budget
+    const at = { target: 'host', id: cfg.id, type: 'notice', name: cfg.name } as const;
+    if (msg.on) {
+      this.#eventsOff.delete(cfg.id);
+      return this.#hub.publishTarget({ ...at, severity: 'good', kind: 'eventsOn' });
+    }
+    this.#eventsOff.add(cfg.id);
+    this.#hub.publishTarget({ ...at, severity: 'warning', kind: 'eventsOff', reason: msg.reason ?? 'no reason given' });
   }
 
   #reply(conn: Conn, msg: Extract<AgentMsg, { type: 'reply' }>): void {

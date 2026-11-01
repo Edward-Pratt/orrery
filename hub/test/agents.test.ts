@@ -321,6 +321,31 @@ test('silence or a close without bye: the Agent is lost, once, with no hung aler
   assert.equal(targets.filter((e) => e.type === 'notice' && e.kind === 'agentLost').length, 2);
 });
 
+test("an Agent's game events going off and on: one host notice per change, a resend on connect posting nothing, within its budget", async (t) => {
+  const { port, targets } = await setup(t);
+  const posted = () => targets.flatMap((e) => (e.type === 'notice' && (e.kind === 'eventsOff' || e.kind === 'eventsOn') ? [e] : []));
+  const reason = 'Factorio could not open its Lua UDP socket (is 127.0.0.1:34198 taken?)';
+  const agent = await agentUp(port);
+  agent.send({ type: 'events', on: true }); // the hub never heard them off: nothing to say
+  agent.send({ type: 'events', on: false, reason });
+  await until(() => posted().length === 1);
+  assert.deepEqual(posted(), [{ target: 'host', id: 'vm', type: 'notice', severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason }]);
+  agent.socket.destroy();
+  const again = await agentUp(port);
+  again.send({ type: 'events', on: false, reason }); // what it sends on each connect
+  again.send({ type: 'events', on: true });
+  await until(() => posted().length === 2);
+  assert.deepEqual(posted()[1], { target: 'host', id: 'vm', type: 'notice', severity: 'good', kind: 'eventsOn', name: 'Factorio VM' });
+  // A flapping token holder: only changes take from the budget (3 at once, then 1 per 10 s, across reconnects), and
+  // the two above took 2: one more off is posted, the rest dropped.
+  for (let i = 0; i < 10; i++) again.send({ type: 'events', on: i % 2 === 1, reason: 'flap' });
+  await until(() => posted().length === 3);
+  assert.equal(posted()[2]!.kind, 'eventsOff');
+  again.send({ type: 'ping' });
+  await sleep(100);
+  assert.equal(posted().length, 3, 'over the budget: dropped');
+});
+
 test('a game connection closing without stopping waits for its Agent: lost if that closes too, else crashed', async (t) => {
   const { port, types, notices } = await setup(t, { hub: { settleMs: 150 } });
   const agent = await agentUp(port);

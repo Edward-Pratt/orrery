@@ -63,3 +63,10 @@ export async function fakeRcon(
     },
   };
 }
+
+/**
+ * The file `game.server_save(name)` writes, as Factorio 2.1.24 names it (seen in the e2e loop): whatever follows the
+ * name's last `.` is replaced by `zip` (`a.b` → `a.zip`, `a.zip` stays), and a name with no `.` gets `.zip`. The test
+ * fakes of `/orrery-save` write their save under this name.
+ */
+export const savedAs = (name: string): string => `${name.replace(/\.[^.]*$/, '')}.zip`;

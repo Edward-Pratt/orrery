@@ -105,7 +105,7 @@ function saved(reply: string, name: string): boolean {
  *   and `current` on the file Factorio last loaded (the log's last `Loading map` line, matched against the folder's
  *   own entries by path); emits `saves` with the free space on each change of the list (every 10 s, and after its own
  *   changes).
- * - `save`: `/orrery-save orrery-<time>`, then waits until the file is there and its size and time held for 5 s (5
+ * - `save`: `/orrery-save orrery-<time>.zip`, then waits until the file is there and its size and time held for 5 s (5
  *   minutes at most), and emits `backup`; one at a time. `played` makes one every 6 h if anyone played since the last.
  * - `prune` after each named save and restore: the newest 20 named saves and 3 world files stay; never the current
  *   world, nor a save `hold` keeps for a running update; autosaves are Factorio's.
@@ -363,17 +363,22 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
     }
   }
 
-  /** `/orrery-save <name>`, then the wait for its file; resolves with the file's size. */
+  /**
+   * `/orrery-save <name>.zip`, then the wait for its file; resolves with the file's size. The `.zip` goes in the
+   * command: Factorio makes whatever follows a name's last `.` its extension (`game.server_save`, seen on 2.1.24), so
+   * `orrery-pre-update-2.1.24-<time>` alone would be written as `orrery-pre-update-2.1.zip`.
+   */
   async #make(name: string): Promise<number> {
+    const file = `${name}.zip`;
     try {
-      const reply = await this.#o.run(`/orrery-save ${name}`);
-      if (!saved(reply, name)) throw new Error(`/orrery-save answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
+      const reply = await this.#o.run(`/orrery-save ${file}`);
+      if (!saved(reply, file)) throw new Error(`/orrery-save answered ${printable(JSON.stringify(reply.slice(0, 200)))}`);
     } catch (err) {
       // The save runs within the command's tick, so on a big map RCON's answer can come after its timeout: the command
       // was sent, so the file tells. One never sent (RCON not reached, or no auth answer) did not run: it fails now.
       if (!(err instanceof RconNoAnswer)) throw err;
     }
-    return this.#written(`${name}.zip`);
+    return this.#written(file);
   }
 
   /** Waits until `file` is a regular file whose size and time held for `stableMs`, for `waitMs` at most. */

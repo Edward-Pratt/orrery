@@ -106,7 +106,7 @@ is `{}`, not `[]`, when nobody is online.
 | `/orrery-reply {json}` | `{player, ok, message}`, printed to that player only as `[Discord] message`, green if `ok` is `true`, else red | `{"ok":true}`; `not online: <player>` if they are not connected |
 | `/orrery-status` | none | `{"ok":true, tick, tick_paused, players, version, mods, loaded}`: `game.tick`, `game.tick_paused`, the online players' names, `helpers.game_version`, `script.active_mods` (name to version), and `loaded`, `true` once the mod's `storage` is set up in the loaded map |
 | `/orrery-hello` | none | sends the `hello` datagram, then `{"ok":true,"seq":N}` with the same `seq`. Writes nothing to `storage` |
-| `/orrery-save <name>` | a plain name: a letter or digit, then letters, digits, `.`, `_`, `-`, at most 100 (so never `_autosave…`); `game.server_save(name)` writes `saves/<name>.zip` | `{"ok":true,"name":"<name>"}` |
+| `/orrery-save <name>` | a plain name: a letter or digit, then letters, digits, `.`, `_`, `-`, at most 100 (so never `_autosave…`); `game.server_save(name)` writes `saves/<name>` with whatever follows its last `.` made `zip` (`a` and `a.zip` → `a.zip`, but `a.b` → `a.zip`, seen on 2.1.24), so the agent sends `<name>.zip` | `{"ok":true,"name":"<name>"}` |
 
 Player commands: `/orrery-link <CODE>` (sends `link`, tells the player "Linking…") and `/orrery-unlink` (sends
 `unlink`). Over RCON they answer `{"ok":false,"error":"/orrery-link is for players"}`.

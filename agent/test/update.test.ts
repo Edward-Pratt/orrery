@@ -19,6 +19,7 @@ import { GAME_MODS as HUB_GAME_MODS } from '../../hub/src/factorio.ts';
 import { ALLOWED_HOSTS, GAME_MODS, checkUpdate, installedOf, labels, Updates, type Http, type InstalledMsg, type UpdatesOptions } from '../src/update.ts';
 import type { Request } from '../src/wire.ts';
 import { eventually, fakeHub } from './fake-hub.ts';
+import { savedAs } from './fake-rcon.ts';
 import { fakeElf, OWN_MODS, releaseTar, tar, type Entry } from './fake-release.ts';
 
 const SUMS = 'https://www.factorio.com/download/sha256sums/';
@@ -152,7 +153,7 @@ async function world(t: TestContext, o: Partial<UpdatesOptions> = {}) {
     log: join(data, 'factorio-current.log'),
     run: async (command) => {
       const name = command.slice('/orrery-save '.length);
-      await writeFile(join(data, 'saves', `${name}.zip`), `save of ${await readlink(join(install, 'current'))}`);
+      await writeFile(join(data, 'saves', savedAs(name)), `save of ${await readlink(join(install, 'current'))}`);
       return JSON.stringify({ ok: true, name });
     },
     unit: () => unit.read(),

@@ -8,6 +8,7 @@ import { RconNoAnswer, RconTimeout } from '../src/rcon.ts';
 import { KEEP_NAMED, KEEP_WORLD, SAVE_EVERY_MS, Saves, kindOf, loadedMap, stamp, type BackupResult, type SavesMsg, type SavesOptions } from '../src/saves.ts';
 import { ServiceWatch, systemctl, type UnitState } from '../src/service.ts';
 import { eventually } from './fake-hub.ts';
+import { savedAs } from './fake-rcon.ts';
 import { fakeSystemctl } from './fake-systemctl.ts';
 
 /** Now, in whole seconds (as save names carry it): every time in these tests is relative to it, never a fixed date. */
@@ -31,7 +32,7 @@ async function world(t: TestContext, o: Partial<SavesOptions> = {}) {
     data,
     saves,
     commands,
-    write: (name: string) => writeFile(join(saves, `${name}.zip`), 'map'),
+    write: (name: string) => writeFile(join(saves, savedAs(name)), 'map'),
     s: null as unknown as Saves,
     backups: [] as BackupResult[],
     pushed: [] as SavesMsg[],
@@ -145,7 +146,7 @@ test('the 6 h save only after play: due 6 h after the last named save, and only 
   assert.deepEqual(w.commands, []);
   now = T0 + SAVE_EVERY_MS;
   w.s.played(false); // nobody on now, but someone played since the start
-  assert.deepEqual(w.commands, [`/orrery-save orrery-${stamp(now)}`]);
+  assert.deepEqual(w.commands, [`/orrery-save orrery-${stamp(now)}.zip`]);
   await eventually(() => w.backups.length === 1, 2000, 'the save written');
   assert.equal(w.backups[0]!.ok, true);
 
@@ -337,6 +338,15 @@ test("start removes a partial copy left by a restore the agent's exit cut short,
   assert.deepEqual(log.mock.calls.map((c) => String(c.arguments[0])), [`[saves] removed ${left}, left by a restore the agent's exit cut short`]);
 });
 
+test("a pre-update save keeps its version's dots: the command names the .zip, as Factorio makes a name's last . part its extension", async (t) => {
+  const w = await world(t);
+  const name = await w.s.preUpdate('2.1.24');
+  assert.match(name, /^orrery-pre-update-2\.1\.24-\d{8}T\d{6}Z\.zip$/);
+  assert.deepEqual(w.commands, [`/orrery-save ${name}`]);
+  assert.ok((await readdir(w.saves)).includes(name), 'written under that name');
+  assert.ok(!(await readdir(w.saves)).includes('orrery-pre-update-2.1.zip'), 'not as Factorio cuts a name without .zip');
+});
+
 test('a save that never appears times out after the bounded wait; one that keeps changing too', async (t) => {
   const w = await world(t, { waitMs: 300 });
   w.write = async () => {}; // the mod says ok, but no file comes
@@ -351,7 +361,7 @@ test('a save that never appears times out after the bounded wait; one that keeps
   let timer: NodeJS.Timeout | undefined;
   t.after(() => clearInterval(timer));
   w.write = async (name) => {
-    timer = setInterval(() => void appendFile(join(w.saves, `${name}.zip`), 'x'), 10);
+    timer = setInterval(() => void appendFile(join(w.saves, savedAs(name)), 'x'), 10);
   };
   await w.s.save();
   clearInterval(timer);
@@ -361,7 +371,7 @@ test('a save that never appears times out after the bounded wait; one that keeps
 test('a save is answered once its file held for the stable time; one at a time; an RCON timeout still waits for the file, unless never sent', async (t) => {
   const w = await world(t, { stableMs: 100 });
   w.write = async (name) => {
-    setTimeout(() => void writeFile(join(w.saves, `${name}.zip`), 'x'.repeat(2_500_000)), 30);
+    setTimeout(() => void writeFile(join(w.saves, savedAs(name)), 'x'.repeat(2_500_000)), 30);
   };
   const started = performance.now();
   await Promise.all([w.s.save(), w.s.save()]);
@@ -378,7 +388,7 @@ test('a save is answered once its file held for the stable time; one at a time; 
     dir: slow.saves,
     log: join(slow.data, 'factorio-current.log'),
     run: async (command) => {
-      await writeFile(join(slow.saves, `${command.slice('/orrery-save '.length)}.zip`), 'map');
+      await writeFile(join(slow.saves, savedAs(command.slice('/orrery-save '.length))), 'map');
       throw new RconNoAnswer('RCON command timed out after 4000 ms');
     },
     unit: async () => stopped,

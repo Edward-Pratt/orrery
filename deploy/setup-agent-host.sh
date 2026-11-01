@@ -35,9 +35,12 @@
 # refuses to overwrite one without it. Config files are written only when missing or still its own previous default
 # (kept root-only in /usr/local/lib/orrery/defaults/), so hand edits stay. server-settings.json gets a random
 # game_password (20 letters and digits), kept on a re-run; it is shown only in /srv/factorio/first-boot.txt (mode 600,
-# factorio's), never on the terminal, in an argv or in a trace. Everything else is written only when it differs, so a
-# second run finishes a half-failed one. Root never writes inside factorio's trees: those writes run as factorio,
-# and every write goes to a new temp file in the target's folder, then a rename, so a link left there steers nothing.
+# factorio's), never on the terminal, in an argv or in a trace. Everything else but that report is written only when it
+# differs, so a second run finishes a half-failed one. Factorio's and the agent's current links move to a new release
+# only once it passed its checks (Factorio's --version in the image; the agent's deploy/ files and the Quadlet dry run,
+# and its config and units written first), so a run that stops leaves the server and the agent on the releases they had.
+# Root never writes inside factorio's trees: those writes run as factorio, and every write goes to a new temp file in the
+# target's folder, then a rename, so a link left there steers nothing.
 # SETUP_ROOT exists for deploy/test-setup-agent-host.sh only: it prefixes every path the script reads or writes (/etc,
 # /opt, /srv, /usr/local, and /usr/libexec for the Quadlet generator). The files it writes still name the real paths.
 set -euo pipefail

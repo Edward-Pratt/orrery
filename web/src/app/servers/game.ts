@@ -3,7 +3,7 @@ import { afterNextRender, Component, computed, inject, Injector, signal } from '
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideArrowLeft, lucideCheck, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
+import { lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -14,14 +14,11 @@ import { Feedback } from '../feedback';
 import { changesCard } from './changes';
 import type { BrowseStatus } from './mod-browser';
 import { ModBrowser } from './mod-browser';
+import { ModImport } from './mod-import';
+import { GAME_MODS } from './mod-list';
 import ServerPage from './server';
 import { failedPrep, PACK_STEPS, UpdateHistory, UpdateSteps } from './update-steps';
 
-/**
- * The mods that come with Factorio itself (the ones setup's `mod-list.json` turns on, `orrery` aside): not on the
- * mod portal, so never picked; a game update brings them with the version.
- */
-const GAME_MODS = new Set(['base', 'elevated-rails', 'quality', 'recycler', 'space-age']);
 /** The orrery mod: the Agent reads the server's status through it, so the hub refuses an update without it. */
 const ORRERY = 'orrery';
 const STEPS: Record<PackStep, string> = { ...PACK_STEPS, backup: 'Save' };
@@ -40,8 +37,8 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
  */
 @Component({
   selector: 'app-server-game',
-  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, UpdateHistory, UpdateSteps],
-  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideLock, lucidePlus, lucideSearch, lucideX })],
+  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, UpdateHistory, UpdateSteps],
+  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX })],
   template: `
     @if (state(); as g) {
       <div class="flex max-w-4xl flex-col gap-8">
@@ -104,6 +101,13 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 </button>
                 <h2 hlmSheetTitle>Browse mods</h2>
               </div>
+            } @else if (importing()) {
+              <div class="flex items-center gap-1">
+                <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeImport()" data-import-back>
+                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                </button>
+                <h2 hlmSheetTitle>Import mod list</h2>
+              </div>
             } @else {
               <h2 hlmSheetTitle>Update game</h2>
             }
@@ -132,7 +136,18 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               <p class="px-4 text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to browse the mod portal.</p>
             }
           }
-          <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing()" data-update-view>
+          @if (importing()) {
+            <app-mod-import
+              class="text-sm"
+              [base]="base"
+              [factorio]="factorio()"
+              [picks]="pickNames()"
+              [required]="required()"
+              [installed]="state()?.installed?.mods ?? []"
+              (add)="importMods($event)"
+            />
+          }
+          <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing() || importing()" data-update-view>
             <label
               >Factorio version
               <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="setFactorio($any($event.target).value)" data-factorio>
@@ -199,7 +214,10 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 <span class="text-xs text-muted-foreground" data-add-error>{{ e }}</span>
               }
             </form>
-            <button hlmBtn variant="ghost" class="-mt-2 self-start" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
+            <span class="-mt-2 flex flex-wrap gap-1">
+              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
+              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="lucideFileUp" aria-hidden="true" /> Import mod list</button>
+            </span>
             @if (catalogError(); as e) {
               <p class="text-destructive" data-catalog-error>{{ e }}</p>
             }
@@ -271,8 +289,10 @@ export default class Game {
   protected readonly checking = signal(false);
   /** The Browse view is shown in place of the update view (which stays in the page, as it was). */
   protected readonly browsing = signal(false);
-  /** Where Browse was opened from, and how far the update view was scrolled, for Back. */
-  #browseFrom: { button: HTMLElement; scroller: HTMLElement | null; top: number } | null = null;
+  /** The Import mod list view, in place of the update view the same way. */
+  protected readonly importing = signal(false);
+  /** Where Browse or Import was opened from, and how far the update view was scrolled, for Back. */
+  #viewFrom: { button: HTMLElement; scroller: HTMLElement | null; top: number } | null = null;
   protected readonly catalogError = signal<string | null>(null);
   /** The latest catalog answer and the request it answered, as JSON. */
   readonly #catalog = signal<{ asked: string; answer: GameCatalog } | null>(null);
@@ -402,6 +422,7 @@ export default class Game {
     this.adding.set('');
     this.addError.set(null);
     this.browsing.set(false);
+    this.importing.set(false);
     this.sheet.set(true);
     this.#ask();
   }
@@ -443,17 +464,44 @@ export default class Game {
 
   /** Shows the Browse view; the update view keeps its picks and scroll position for Back. */
   protected openBrowse(event: Event): void {
+    this.#leave(event);
+    this.browsing.set(true);
+  }
+
+  /** Shows the Import mod list view, the same way. */
+  protected openImport(event: Event): void {
+    this.#leave(event);
+    this.importing.set(true);
+  }
+
+  /** Puts the mods Import confirmed in the picks (the ones there kept as they are) and asks the catalog. */
+  protected importMods(mods: GameModPick[]): void {
+    this.picks.update((picks) => [...picks, ...mods.filter((m) => !GAME_MODS.has(m.name) && !picks.some((p) => p.name === m.name))]);
+    this.addError.set(null);
+    this.closeImport();
+    this.#ask();
+  }
+
+  #leave(event: Event): void {
     const button = event.currentTarget as HTMLElement;
     const scroller = button.closest<HTMLElement>('[data-sheet]');
-    this.#browseFrom = { button, scroller, top: scroller?.scrollTop ?? 0 };
+    this.#viewFrom = { button, scroller, top: scroller?.scrollTop ?? 0 };
     if (scroller) scroller.scrollTop = 0;
-    this.browsing.set(true);
   }
 
   /** Back to the update view, where Browse was, with the focus on it. */
   protected closeBrowse(): void {
     this.browsing.set(false);
-    const from = this.#browseFrom;
+    this.#back();
+  }
+
+  protected closeImport(): void {
+    this.importing.set(false);
+    this.#back();
+  }
+
+  #back(): void {
+    const from = this.#viewFrom;
     if (!from) return;
     afterNextRender(
       () => {

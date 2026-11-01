@@ -15,7 +15,7 @@ The owner asked for three things on a factorio server's Game tab (`web/src/app/s
 
 Contents: [Fix 1](#fix-1-a-release-on-both-channels-is-stable), [Finding 2](#finding-2-nothing-yet-is-right),
 [The mod browser](#the-mod-browser) (what the portal offers, UX, hub routes, trust, tests, release order, docs, out
-of scope).
+of scope), [Import mod list](#import-mod-list) (built on `fa/mod-import`, not yet cut).
 
 ---
 
@@ -420,3 +420,63 @@ No Agent, mod or protocol change.
   `web/src/index.html` no meta). With the proxy in place, `default-src 'self'; img-src 'self' data:` is a possible
   follow-up for the Caddyfile.
 - Browsing from Discord.
+
+---
+
+## Import mod list
+
+Status: built on `fa/mod-import` (from `main` at `8e4d553`), not yet cut: release `hub-v2.17.0` (deployed first),
+then the dashboard. No Agent, mod or protocol change.
+
+The owner added mods to their own Factorio game and wants that set on the server in one go. The update sheet gets
+**Import mod list** next to Browse the mod portal.
+
+**UX.** Like Browse, a view in the sheet in place of the update view (Back keeps the picks and the scroll, and puts
+the focus back on the button). The task asked for a small dialog; it is a view instead because libs/ui has no
+`dialog`, a dialog over the open sheet would stack two modals and focus traps (the sheet closes before
+`Feedback.confirm` for the same reason), and Browse is the tested pattern. In it:
+
+- upload the client's `mod-list.json`, with where it lives: `%APPDATA%\Factorio\mods` on Windows,
+  `~/.factorio/mods` on Linux, `~/Library/Application Support/factorio/mods` on macOS; or paste names, one per line
+  or comma-separated (never split on spaces: `Squeak Through` is one name);
+- the browser reads it (`web/src/app/servers/mod-list.ts`, `parseModList`): over 256 KiB refused (a file by its size,
+  before it is read); JSON when it starts with `{`, its shape checked (`{"mods":[{"name", "enabled"?, "version"?}]}`,
+  `enabled` true or false, missing counts as true; a `version` kept only when it is `x.y.z`); enabled entries only;
+  the game's own mods (`GAME_MODS`) and disabled ones left out and counted; each name checked with the Agent's rule
+  (`^[A-Za-z0-9_. -]+$`, at most 256, no `..`), a refused one shown as text, control characters and bidi overrides
+  replaced, cut to 64; duplicates dropped; over 500 enabled portal mods refused (the hub's `LIMITS.mods`);
+- the names not in the update yet (not picked, not added by the catalog as a dependency) go to the hub's check, none
+  asked when there are none;
+- the preview, before anything changes: N mods to add (each the newest that fits, or back at the version the server
+  runs, as Add by name; "Keep the versions in the file", shown only when the file has some, unticked by default, pins
+  the file's), M already in the update, every skipped one with why (not on the mod portal, no release for Factorio
+  2.1, not checked, comes with Factorio, not a mod's name) and the disabled count;
+- Add N mods merges them into the picks (the ones there kept as they are, `orrery` too), back in the update view,
+  and asks the catalog, which resolves their dependencies and shows What changes as for any pick. Disabled with
+  nothing new, or when the picks would pass 500.
+
+**Hub: `POST /api/servers/:id/game/check`** (`{ factorio, names }` → `ModCheckAnswer`: `{ line, mods: [{ name, found,
+title, latest }] }`), in `web.ts`'s game block before the online check, like `catalog`. The catalog was the other way
+(report an unknown picked name as unresolved instead of 404), but it reads each mod's full page, 500 reads for a big
+list, and the preview wants an answer before anything is picked. So `FactorioCatalog.check(line, names)` answers from
+the line's list the mod browser already reads and keeps 15 minutes (it holds every non-deprecated mod with a release
+for the line): `fits` with its title and newest version, no read per name. Only a name missing from it is read with
+`mod(name)` (cached 5 minutes), the first 20 (`CHECK_READS`), through the thumbnails' 4-at-once slots: `fits` (a
+deprecated mod with a release for the line), `noRelease` or `missing`; a failed read, and any name past the cap, is
+`unchecked` (add it by name to find out). The list failing is 502. `GameUpdates.check` checks the body before any
+portal read (400): a Factorio version, at most 500 names, each passing `validName`, none the game's own or given twice.
+`catalog()` is unchanged: a picked mod the portal hasn't got is still its 404.
+
+**Trust.** The browser's parsing is only for the preview: the hub checks the names again, `catalog` and `update`
+check the picks as for any other, and the Agent checks names, versions and hashes once more. Titles in the answer are
+the portal's, made plain and cut by the hub, shown as text.
+
+**Tests.** `hub/test/factorio.test.ts` (listed, deprecated, no release for the line, missing, a failed read, the cap of
+20, one list read, cached), `hub/test/game-updates.test.ts` (401, 404, the 400 table, an answer, 502),
+`web/src/app/servers/mod-list.spec.ts` (a real `mod-list.json`, pasted names, injection-looking names, bad JSON and
+shapes, the byte cap, the 500 cap) and `web/src/app/servers/game.spec.ts` (upload, check, preview, keep versions,
+merge and the catalog; paste, nothing new, errors inline, over 256 KiB, the older hub's 404, over 500, Back).
+
+**Smoke after the cut.** Import a real client's `mod-list.json` on a scratch sheet: the preview's skipped names make
+sense, Add puts them in, the catalog resolves; close the sheet without updating.
+

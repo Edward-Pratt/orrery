@@ -213,13 +213,16 @@ test('a line from the hub over 1 MiB closes the connection cleanly, then it reco
   assert.equal(second.kind, 'agentHello');
 });
 
-test('every request gets a reply by its id: invalid, unknown and unsupported ones ok: false', async (t) => {
+test('every request gets a reply by its id: invalid, unknown and unsupported ones ok: false; an error redacted and cut', async (t) => {
   const seen: unknown[] = [];
   const { hub, client } = await setup(t, undefined, {
     handlers: {
       journal: async (req) => (seen.push(req), { lines: ['one', 'two'] }),
       log: async () => {
         throw new Error('no such log');
+      },
+      restore: async () => {
+        throw new Error(`can't fetch https://dl.factorio.com/x1.zip?secure=abc&expires=1 ${'😀'.repeat(LIMITS.detail)}`);
       },
     },
   });
@@ -234,6 +237,7 @@ test('every request gets a reply by its id: invalid, unknown and unsupported one
     { type: 'logs', id: 'e' },
     { type: 'journal', id: 'f', unit: 'factorio.service', extra: 'dropped' },
     { type: 'log', id: 'g', name: 'agent.log' },
+    { type: 'restore', id: 'h', name: 'world.zip' },
   ];
   conn.socket.write('not json\n' + JSON.stringify({ id: 'no-type' }) + '\n' + JSON.stringify({ type: 'logs', id: 'x'.repeat(LIMITS.text + 1) }) + '\n');
   for (const r of requests) conn.send(r);
@@ -246,6 +250,9 @@ test('every request gets a reply by its id: invalid, unknown and unsupported one
   assert.deepEqual(replies.e, { type: 'reply', id: 'e', ok: false, error: `logs is not supported by ${VERSION}` });
   assert.deepEqual(replies.f, { type: 'reply', id: 'f', ok: true, data: { lines: ['one', 'two'] } });
   assert.deepEqual(replies.g, { type: 'reply', id: 'g', ok: false, error: 'no such log' });
+  const h = replies.h!.error as string;
+  assert.ok(h.startsWith("can't fetch https://dl.factorio.com/x1.zip 😀"), 'no query string');
+  assert.ok(h.length <= LIMITS.detail && !/[\uD800-\uDBFF]$/.test(h), 'cut to 2 KiB, never half a surrogate pair');
   assert.deepEqual(seen, [{ type: 'journal', id: 'f', unit: 'factorio.service' }], 'a handler gets only the documented fields');
   assert.equal(conn.closed, false, 'lines with no usable id are dropped; the connection stays');
   assert.deepEqual(conn.invalid, []);

@@ -220,6 +220,25 @@ export class Saves extends EventEmitter<{ saves: [SavesMsg]; backup: [BackupResu
     await this.refresh();
   }
 
+  /**
+   * A game update's pre-update save, `orrery-pre-update-<from>-<time>` (`from`: the version it updates from, `X.Y.Z`),
+   * made and waited for like `save`'s but with no `backup` (the update's own steps report it); resolves with its file
+   * name, held from pruning until `release`.
+   */
+  async preUpdate(from: string): Promise<string> {
+    if (!/^\d+\.\d+\.\d+$/.test(from)) throw new Error(`${JSON.stringify(from)} is not a version`);
+    const name = `orrery-pre-update-${from}-${stamp(this.#o.now())}`;
+    this.hold(`${name}.zip`);
+    try {
+      await this.#make(name);
+    } catch (err) {
+      this.release(`${name}.zip`);
+      throw new Error(`${name}.zip: ${(err as Error).message}`);
+    }
+    await this.refresh();
+    return `${name}.zip`;
+  }
+
   /** Keeps the newest 20 named saves and 3 world files, and every current or held one. */
   async prune(): Promise<void> {
     let saves: Save[];

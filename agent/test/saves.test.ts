@@ -248,6 +248,7 @@ test('restore copies a listed save to restored-<time>-<name>, never over a file,
 
   // The same name again (the same second): refused, and the copy there is kept as it was.
   await writeFile(join(w.saves, copy), 'already here');
+  await utimes(join(w.saves, copy), new Date(T0), new Date(T0)); // the fake clock's time, not today's
   await assert.rejects(w.s.restore('world.zip'), /exists already: nothing was overwritten/);
   assert.equal(await readFile(join(w.saves, copy), 'utf8'), 'already here');
 

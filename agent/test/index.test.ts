@@ -35,7 +35,8 @@ async function world(t: TestContext, rconPort: number, hubPort: number) {
   await writeFile(join(dir, 'config.json'), JSON.stringify(config));
   await writeFile(
     join(dir, 'bin', 'systemctl'),
-    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
+    // A deploy unit has ended (its oneshot is inactive); every other unit runs.
+    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in *orrery-agent-deploy@*) echo ActiveState=inactive; exit 0;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
   );
   await chmod(join(dir, 'bin', 'systemctl'), 0o755);
   const env = {
@@ -92,6 +93,39 @@ test('the agent connects both ways, pushes its saves, carries out serviceAct wit
   assert.equal(hub.conns.length, 2, 'no reconnect after SIGTERM');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'connected'), 'utf8')).version, 'agent-v0.0.0');
   assert.deepEqual([...agent.invalid, ...game.invalid], []);
+});
+
+test('deploy: starts its own deploy unit (the reply means started), and reports the outcome deploy-agent.sh left once', async (t) => {
+  const rcon = await fakeRcon(status);
+  const hub = await fakeHub();
+  t.after(async () => {
+    await rcon.close();
+    await hub.close();
+  });
+  const { dir, root, env } = await world(t, rcon.port, hub.port);
+  // A deploy that ended while this agent was starting: rolled back, its log 40 lines at most.
+  const log = Array.from({ length: 45 }, (_, i) => `line ${i}`).join('\n');
+  const left = { tag: 'agent-v1.2.4', from: 'agent-v0.0.0', outcome: 'rolled back', finished: new Date().toISOString(), log };
+  await writeFile(join(root, 'deploy-status.json'), JSON.stringify(left) + '\n');
+  const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  t.after(() => child.kill('SIGKILL'));
+
+  const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
+  const result = await eventually(() => agent.lines.find((m) => m.type === 'deployResult'), 5000, 'the deployResult');
+  assert.deepEqual(result, { type: 'deployResult', tag: 'agent-v1.2.4', outcome: 'rolled back', log: log.split('\n').slice(-40).join('\n') });
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^show --property=ActiveState -- orrery-agent-deploy@agent-v1\.2\.4\.service$/m);
+
+  agent.send({ type: 'deploy', id: 'd1', tag: 'agent-v1.2.5' });
+  assert.deepEqual(await eventually(() => agent.lines.find((m) => m.id === 'd1'), 5000, 'the reply'), { type: 'reply', id: 'd1', ok: true });
+  assert.match(await readFile(join(dir, 'systemctl.log'), 'utf8'), /^start --no-block -- orrery-agent-deploy@agent-v1\.2\.5\.service$/m);
+  assert.equal(agent.lines.filter((m) => m.type === 'deployResult').length, 1, 'once');
+  child.kill('SIGTERM');
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, out);
+  assert.deepEqual(agent.invalid, []);
 });
 
 test('with no hub reachable the agent keeps running, logs that once, and connects when the hub comes up', async (t) => {

@@ -39,8 +39,8 @@ echo 'factorio:x:986:986::/srv/factorio:/sbin/nologin' >> "$F/passwd"
 EOF
 cat > "$T/bin/getent" << 'EOF'
 #!/usr/bin/env bash
-[[ $1 == passwd ]] || exit 2
-grep "^$2:" "$F/passwd" 2> /dev/null || exit 2
+[[ $1 == passwd || $1 == group ]] || exit 2
+grep "^$2:" "$F/$1" 2> /dev/null || exit 2
 EOF
 cat > "$T/bin/id" << 'EOF'
 #!/usr/bin/env bash
@@ -160,11 +160,15 @@ case $1 in
     if [[ $a == *' sh -c '* ]]; then
       if [[ $a == *debian* ]]; then echo 2.41-12; else echo 2.39; fi
     elif [[ $a == *' --version '* ]]; then
-      if [[ -e $F/glibc ]]; then
-        echo "/opt/factorio/current/bin/arm64/factorio: /lib64/libc.so.6: version \`GLIBC_2.38' not found" >&2
+      # The binary is the word before --version. $F/glibc makes every one need a newer glibc than the image's, or only
+      # the release it names (X.Y.Z in it).
+      bin=${a% --version *}
+      bin=${bin##* }
+      if [[ -e $F/glibc && (! -s $F/glibc || $bin == */releases/$(cat "$F/glibc")/*) ]]; then
+        echo "$bin: /lib64/libc.so.6: version \`GLIBC_2.38' not found" >&2
         exit 1
       fi
-      exec "$SETUP_ROOT/opt/factorio/current/bin/arm64/factorio" --version
+      exec "$SETUP_ROOT$bin" --version
     elif [[ $a == *' --create '* ]]; then
       w=${a##* --create }
       echo world > "$SETUP_ROOT${w%% *}"
@@ -239,10 +243,14 @@ done
 # GitHub release list.
 NV=$(sed -n 's/^NODE_VERSION=//p' "$HERE/setup-agent-host.sh")
 B=$T/build
-mkdir -p "$B/node-v$NV-linux-arm64/bin" "$B/factorio/bin/arm64" "$B/factorio/data/base" "$B/agent/src"
+mkdir -p "$B/node-v$NV-linux-arm64/bin" "$B/agent/src"
 printf '#!/bin/sh\nexec "$REAL_NODE" "$@"\n' > "$B/node-v$NV-linux-arm64/bin/node"
-printf '#!/usr/bin/env bash\n[[ $1 != --version ]] || echo "Version: 2.1.24 (build 87808, linux-arm64, headless)"\n' > "$B/factorio/bin/arm64/factorio"
-chmod 755 "$B/node-v$NV-linux-arm64/bin/node" "$B/factorio/bin/arm64/factorio"
+chmod 755 "$B/node-v$NV-linux-arm64/bin/node"
+for v in 2.1.24 2.1.25; do # Factorio's headless tarballs: one top folder factorio/
+  mkdir -p "$B/factorio-$v/factorio/bin/arm64" "$B/factorio-$v/factorio/data/base"
+  printf '#!/usr/bin/env bash\n[[ $1 != --version ]] || echo "Version: %s (build 87808, linux-arm64, headless)"\n' "$v" > "$B/factorio-$v/factorio/bin/arm64/factorio"
+  chmod 755 "$B/factorio-$v/factorio/bin/arm64/factorio"
+done
 cat > "$B/agent/src/index.ts" << 'EOF'
 // The agent, for the test: its check notes what it got (whether each secret was set, never a value), and its whole
 // environment in $CHECK_ENV, outside $F, to show the game password never reaches it.
@@ -256,17 +264,20 @@ if (process.argv[2] === 'check') {
   process.exitCode = fs.existsSync(e.F + '/check-fails') ? 1 : 0;
 }
 EOF
-mkdir -p "$X/nodejs.org/dist/v$NV" "$X/www.factorio.com/get-download/2.1.24/headless" "$X/www.factorio.com/download/sha256sums" \
-  "$X/factorio.com/api" "$X/api.github.com/repos/Edward-Pratt/orrery"
+mkdir -p "$X/nodejs.org/dist/v$NV" "$X/www.factorio.com/get-download/2.1.24/headless" \
+  "$X/www.factorio.com/get-download/2.1.25/headless" "$X/www.factorio.com/download/sha256sums" "$X/factorio.com/api" \
+  "$X/api.github.com/repos/Edward-Pratt/orrery"
 NODE_TGZ=nodejs.org/dist/v$NV/node-v$NV-linux-arm64.tar.xz
 tar -cJf "$X/$NODE_TGZ" -C "$B" "node-v$NV-linux-arm64"
 FACTORIO_TGZ=www.factorio.com/get-download/2.1.24/headless/linux-arm64
-tar -cJf "$X/$FACTORIO_TGZ" -C "$B" factorio
+tar -cJf "$X/$FACTORIO_TGZ" -C "$B/factorio-2.1.24" factorio
+tar -cJf "$X/www.factorio.com/get-download/2.1.25/headless/linux-arm64" -C "$B/factorio-2.1.25" factorio
 SUMS=www.factorio.com/download/sha256sums/index
 sha() { sha256sum < "$1" | cut -c1-64; }
 {
   echo "c49b66cff90aceff87b30f2973af0df7f51712cb2ee3153e0169d9bed46a964f  factorio-headless_linux_2.1.24.tar.xz"
   echo "$(sha "$X/$FACTORIO_TGZ")  factorio-headless_linux-arm64_2.1.24.tar.xz"
+  echo "$(sha "$X/www.factorio.com/get-download/2.1.25/headless/linux-arm64")  factorio-headless_linux-arm64_2.1.25.tar.xz"
 } > "$X/$SUMS"
 echo '{"experimental":{"headless":"2.1.25"},"stable":{"headless":"2.1.24"}}' > "$X/factorio.com/api/latest-releases"
 DL=github.com/Edward-Pratt/orrery/releases/download
@@ -409,8 +420,8 @@ check 'installs the newest stable Factorio, checked against sha256sums/, and poi
   called "^curl https://www.factorio.com/download/sha256sums/$" && called "^curl https://www.factorio.com/get-download/2.1.24/headless/linux-arm64$" &&
   [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -x $R/opt/factorio/releases/2.1.24/bin/arm64/factorio ]] &&
   [[ -z $(ls -A "$R/opt/factorio/.incoming") ]]'
-check 'runs Factorio --version in the pinned image, as factorio, read-only' '
-  called "^podman run --rm --network=none --user 986:986 --cap-drop=all --security-opt=no-new-privileges --read-only -v $R/opt/factorio:/opt/factorio:ro,z $OL@sha256:$DIGEST1 /opt/factorio/current/bin/arm64/factorio --version$"'
+check 'runs the release'\''s Factorio --version in the pinned image, as factorio, read-only' '
+  called "^podman run --rm --network=none --user 986:986 --cap-drop=all --security-opt=no-new-privileges --read-only -v $R/opt/factorio:/opt/factorio:ro,z $OL@sha256:$DIGEST1 /opt/factorio/releases/2.1.24/bin/arm64/factorio --version$"'
 check 'pulls the image by its full name and records the pin and its glibc in image.json' '
   called "^podman pull $OL$" &&
   [[ $(canon "$R/etc/orrery-agent/image.json") == "{\"image\":\"$OL@sha256:$DIGEST1\",\"glibc\":\"2.39\"}" ]] &&
@@ -572,6 +583,21 @@ for p in u-34197 u-34198 u-34199 t-27015; do
 done
 check 'ports held by factorio (its own container or agent) are no reason to refuse' 'IN= run "${ARGS[@]}"'
 
+# ---- A Factorio release the image can't run never becomes current: the server keeps its own, so a plain re-run works.
+echo 2.1.25 > "$F/glibc"
+check 'a --factorio release the image can'\''t run is refused before current points at it' '
+  ! IN= run "${ARGS[@]}" --factorio 2.1.25 && says "Factorio 2.1.25 can'\''t run in $OL, whose glibc is too old" &&
+  called "^podman run .* /opt/factorio/releases/2.1.25/bin/arm64/factorio --version$" &&
+  [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 && -d $R/opt/factorio/releases/2.1.25 ]]'
+check 'a plain re-run then keeps the Factorio the server runs' '
+  IN= run "${ARGS[@]}" && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.24 ]]'
+rm -f "$F/glibc"
+touch "$F/active-factorio.service"
+check 'a --factorio release it can run becomes current; a running server is told it runs it from its next restart' '
+  IN= run "${ARGS[@]}" --factorio 2.1.25 && [[ $(readlink "$R/opt/factorio/current") == releases/2.1.25 ]] &&
+  says "factorio.service was running: it runs Factorio 2.1.25 from its next restart" && ! called "^systemctl (stop|restart) factorio"'
+rm -f "$F/active-factorio.service"
+
 # ---- The game password on a VM set up before it existed, and in a file edited by hand without one.
 fresh
 run "${ARGS[@]}" || true
@@ -687,6 +713,7 @@ refuses 'a port held by root' 'port 27015/tcp is in use' "echo 'LISTEN 0 4096 12
 refuses 'a port held by another user while factorio exists' 'port 34197/udp is in use' \
   "echo 'factorio:x:986:986::/srv/factorio:/sbin/nologin' > \"\$F/passwd\"; echo 'UNCONN 0 0 0.0.0.0:34197 0.0.0.0:* uid:1000 <->' > \"\$F/ss-u-34197\"" "${ARGS[@]}"
 refuses 'a factorio user it did not make' 'a user factorio exists' "echo 'factorio:x:1001:1001::/home/factorio:/bin/bash' > \"\$F/passwd\"" "${ARGS[@]}"
+refuses 'a factorio group without the user' 'a group factorio exists without the user' "echo 'factorio:x:1001:' > \"\$F/group\"" "${ARGS[@]}"
 refuses 'a foreign factorio.service' 'factorio.service exists' 'printf "LoadState=loaded\nSourcePath=\n" > "$F/show-factorio.service"' "${ARGS[@]}"
 refuses 'a masked factorio.service' 'factorio.service exists (masked' 'printf "LoadState=masked\n" > "$F/show-factorio.service"' "${ARGS[@]}"
 refuses 'a foreign orrery-agent.service' 'orrery-agent.service exists' \

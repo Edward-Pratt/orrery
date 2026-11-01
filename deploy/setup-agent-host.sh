@@ -150,6 +150,8 @@ if pw=$(getent passwd factorio); then
   IFS=: read -r _ _ fuid _ _ fhome fshell <<< "$pw"
   [[ $fuid =~ ^[0-9]+$ ]] && ((fuid > 0 && fuid < 1000)) && [[ $fhome == /srv/factorio && $fshell == */nologin ]] ||
     die "a user factorio exists that this script didn't make (uid $fuid, home $fhome, shell $fshell): it needs a system user with home /srv/factorio and shell nologin"
+elif getent group factorio > /dev/null; then # useradd --user-group would refuse it, after the packages and Node went in
+  die "a group factorio exists without the user factorio: this script makes both, so remove or rename the group first"
 fi
 # A port is ours only when the socket is factorio's (the agent, or Factorio in its container: no user namespace).
 for p in udp:34197 udp:34198 udp:34199 tcp:27015; do
@@ -375,15 +377,17 @@ if [[ ! -d $opt/releases/$ver ]]; then
   as_factorio mv -T -- "$x" "$opt/releases/$ver"
   echo "installed Factorio $ver in ${opt#"$R"}/releases/$ver"
 fi
-flip "$opt" "releases/$ver"
-# The image must run this Factorio: its glibc is the reason for the container.
+# The image must run this Factorio: its glibc is the reason for the container. Checked on the release itself, before
+# current points at it, so a release that can't run never becomes the one the server starts.
 hardened=(--rm --network=none --user "$uid:$gid" --cap-drop=all --security-opt=no-new-privileges --read-only)
-out=$(podman run "${hardened[@]}" -v "$opt:/opt/factorio:ro,z" "$ref" /opt/factorio/current/bin/arm64/factorio --version 2>&1) || {
+out=$(podman run "${hardened[@]}" -v "$opt:/opt/factorio:ro,z" "$ref" "/opt/factorio/releases/$ver/bin/arm64/factorio" --version 2>&1) || {
   [[ $out != *GLIBC_* ]] || die "Factorio $ver can't run in ${ref%@*}, whose glibc is too old: $out
 Run this again with --image $FALLBACK_IMAGE"
   die "Factorio $ver --version failed in ${ref%@*}: $out"
 }
 [[ $out == *"Version: $ver "* ]] || die "Factorio --version in ${ref%@*} didn't say $ver: $out"
+old_factorio=$(readlink "$opt/current" 2> /dev/null) || old_factorio=''
+flip "$opt" "releases/$ver"
 [[ -d $etc/orrery-agent ]] || install -d -m 755 "$etc/orrery-agent"
 put "$img_file" 644 <<< "{ \"image\": \"$ref\", \"glibc\": \"$glibc\" }"
 
@@ -617,6 +621,9 @@ systemctl enable orrery-agent.service
 systemctl restart orrery-agent.service || { started=0; echo "warning: orrery-agent.service didn't start (journalctl -u orrery-agent.service)" >&2; }
 if ((active && quadlet_changed)); then
   echo "factorio.service was running: it uses the new factorio.container from its next restart (from the dashboard)"
+fi
+if ((active)) && [[ $old_factorio != "releases/$ver" ]]; then
+  echo "factorio.service was running: it runs Factorio $ver from its next restart (from the dashboard)"
 fi
 
 # ---- 18. The first-boot report, by the agent's own check (run as factorio; the secrets go in its environment only).

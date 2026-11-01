@@ -3,9 +3,9 @@
 # (dnf, rpm, useradd, getent, id, install's owner flags, runuser, systemctl, firewall-cmd, ip, selinuxenabled,
 # getenforce, semanage, restorecon, tailscale, uname, ss, df, podman, curl) and a fake Quadlet generator under the
 # prefix. curl serves local fixtures, and this folder's factorio.container, units and polkit file as the release's.
-# tar, xz, sha256sum and node are real, and the hub is a real local TCP listener. In the script's runs only, mv,
-# mktemp, tar, ln, rm and mkdir are logging wrappers around the real ones, noting who runs them, so the test sees
-# which writes run as factorio.
+# tar, xz, sha256sum, node and jq are real (the agent's releases are packed by .github/agent-tarball.sh), and the hub is
+# a real local TCP listener. In the script's runs only, mv, mktemp, tar, ln, rm and mkdir are logging wrappers around the
+# real ones, noting who runs them, so the test sees which writes run as factorio.
 #   bash deploy/test-setup-agent-host.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -291,13 +291,13 @@ echo '{"experimental":{"headless":"2.1.25"},"stable":{"headless":"2.1.24"}}' > "
 DL=github.com/Edward-Pratt/orrery/releases/download
 AGENT_TGZ=$DL/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz # release.yml: orrery-$GITHUB_REF_NAME.tar.gz
 MOD_ZIP=$DL/factorio-v0.1.0/orrery_0.1.0.zip
-mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/factorio-v0.1.0"
-tar -czf "$X/$AGENT_TGZ" -C "$B/agent" . # as ci.yml packs it
-echo "$(sha "$X/$AGENT_TGZ")  orrery-agent-v0.10.0.tar.gz" > "$X/$AGENT_TGZ.sha256"
 AGENT11_TGZ=$DL/agent-v0.11.0/orrery-agent-v0.11.0.tar.gz # a later release, for the re-run tests
-mkdir -p "$X/$DL/agent-v0.11.0"
-cp "$X/$AGENT_TGZ" "$X/$AGENT11_TGZ"
-echo "$(sha "$X/$AGENT11_TGZ")  orrery-agent-v0.11.0.tar.gz" > "$X/$AGENT11_TGZ.sha256"
+mkdir -p "$X/$DL/agent-v0.10.0" "$X/$DL/agent-v0.11.0" "$X/$DL/factorio-v0.1.0"
+echo '{ "name": "orrery-agent", "version": "0.0.0" }' > "$B/agent/package.json"
+for v in 0.10.0 0.11.0; do # packed as ci.yml packs it
+  bash "$HERE/../.github/agent-tarball.sh" "$B/agent" "$v" "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz"
+  echo "$(sha "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz")  orrery-agent-v$v.tar.gz" > "$X/$DL/agent-v$v/orrery-agent-v$v.tar.gz.sha256"
+done
 echo 'the orrery mod' > "$X/$MOD_ZIP"
 API=api.github.com/repos/Edward-Pratt/orrery/releases
 api() { # <zip digest>: a release list with drafts, other parts, and agent versions that sort wrong as text
@@ -452,6 +452,7 @@ check 'creates a world in a one-off container, as factorio, with its mods' '
   called "^podman run --rm --network=none --user 986:986 .* -e HOME=/srv/factorio -v $R/opt/factorio:/opt/factorio:ro,z -v $R/srv/factorio:/srv/factorio:z .* --config /srv/factorio/config/config.ini --mod-directory /srv/factorio/mods --create /srv/factorio/saves/world.zip$"'
 check 'installs the newest agent release by version (not a draft, not by text), checked against its .sha256' '
   [[ $(readlink "$R/srv/orrery-agent/current") == releases/agent-v0.10.0 && -f $R/srv/orrery-agent/releases/agent-v0.10.0/src/index.ts ]] &&
+  [[ $(node -p "require(process.argv[1]).version" "$R/srv/orrery-agent/releases/agent-v0.10.0/package.json") == 0.10.0 ]] &&
   called "^curl https://github.com/Edward-Pratt/orrery/releases/download/agent-v0.10.0/orrery-agent-v0.10.0.tar.gz.sha256$"'
 check 'takes the units, the polkit file and deploy-agent.sh from the same agent tag' '
   [[ $(grep -c "^curl https://$RAW/" "$F/calls") == 5 ]] && ! grep "^curl https://raw" "$F/calls" | grep -vq "/agent-v0.10.0/"'

@@ -110,6 +110,8 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version comes from agent-v* tags
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -118,7 +120,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck # imports hub/src/types.ts: an incompatible change there fails here
-      - run: tar -czf ../agent-dist.tar.gz --exclude=./node_modules --exclude=./test . # a tarball keeps file modes
+      - run: | # a tarball keeps file modes; its package.json carries the tag's version, which the agent reports
+          tag=$(git describe --tags --abbrev=0 --match 'agent-v*' 2>/dev/null || echo agent-v0.0.0)
+          bash ../.github/agent-tarball.sh . "${tag#agent-v}" ../agent-dist.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: agent-dist

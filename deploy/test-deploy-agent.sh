@@ -35,8 +35,8 @@ if [[ -n $out ]]; then cat "$src" > "$out"; else cat "$src"; fi
 EOF
 # systemctl restart orrery-agent.service: records the release current points at (and an earlier deploy's status file
 # still there, for the restarted agent to misreport), then plays the agent as the first line of $F/agent says, dropping
-# that line unless it's the last: ok (connected names that release, now), late (the same 0.5 s later), stale (a time
-# from before the restart), wrong (another version), none (writes nothing). Anything else fails: polkit lets factorio
+# that line unless it's the last: ok (connected names that release, now), late (the same 0.5 s later), back (it, with
+# a time 5 s before the restart: a clock stepped back), wrong (another version), none (writes nothing). Anything else fails: polkit lets factorio
 # only restart orrery-agent.service.
 cat > "$T/bin/systemctl" << 'EOF'
 #!/usr/bin/env bash
@@ -45,11 +45,11 @@ v=$(basename "$(readlink "$R/current")")
 echo "restart $2 $v$([[ -e $R/deploy-status.json ]] && echo ' with an old status')" >> "$F/calls"
 how=$(head -1 "$F/agent")
 if [[ $(wc -l < "$F/agent") -gt 1 ]]; then sed -i 1d "$F/agent"; fi
-write() { printf '{"version":"%s","time":%s}\n' "$1" "$2" > "$R/.connected.tmp" && mv "$R/.connected.tmp" "$R/connected"; }
+write() { printf '{"version":"%s","time":%s}\n' "$1" "$2" > "$R/.connected.$$.tmp" && mv "$R/.connected.$$.tmp" "$R/connected"; }
 case $how in
   ok) write "$v" "$(date +%s%3N)" ;;
   late) (sleep 0.5 && write "$v" "$(date +%s%3N)") > /dev/null 2>&1 & ;;
-  stale) write "$v" $(($(date +%s%3N) - 60000)) ;;
+  back) write "$v" $(($(date +%s%3N) - 5000)) ;;
   wrong) write agent-v0.0.9 "$(date +%s%3N)" ;;
 esac
 EOF
@@ -68,7 +68,7 @@ publish() { # <tag> [tar options...]: tars $B/<tag> into $X/<tag> with its .sha2
   (cd "$X/$t" && sha256sum "orrery-$t.tar.gz" > "orrery-$t.tar.gz.sha256")
 }
 tree() { mkdir -p "$B/$1/src"; echo "// $1" > "$B/$1/src/index.ts"; echo '{"name":"orrery-agent"}' > "$B/$1/package.json"; }
-for v in 1 2 3 4 5 6 7; do tree "agent-v1.0.$v"; publish "agent-v1.0.$v"; done
+for v in 1 2 3 4 5 6 7 8; do tree "agent-v1.0.$v"; publish "agent-v1.0.$v"; done
 tree agent-v2.0.1; publish agent-v2.0.1; echo '0000000000000000000000000000000000000000000000000000000000000000  orrery-agent-v2.0.1.tar.gz' > "$X/agent-v2.0.1/orrery-agent-v2.0.1.tar.gz.sha256"
 tree agent-v2.0.2; publish agent-v2.0.2; echo 'not a sum' > "$X/agent-v2.0.2/orrery-agent-v2.0.2.tar.gz.sha256"
 tree agent-v2.0.3; ln -s "$T/outside" "$B/agent-v2.0.3/src/out"; echo pwned > "$B/agent-v2.0.3/pwn"
@@ -156,7 +156,9 @@ agent none ok
 check 'an agent that never connects flips back, restarts the old one and writes rolled back' '! deploy agent-v1.0.3 &&
   current agent-v1.0.2 && status agent-v1.0.3 agent-v1.0.2 "rolled back" && restarts agent-v1.0.3 agent-v1.0.2 &&
   says "rolling back to agent-v1.0.2"'
-agent stale ok
+# A connected file naming the new release, left from before the restart (an earlier try): removed, so it can't count.
+agent none ok
+printf '{"version":"agent-v1.0.4","time":%s}\n' "$(date +%s%3N)" > "$R/connected"
 check 'a connected file from before the restart does not count' '! deploy agent-v1.0.4 && current agent-v1.0.2 &&
   status agent-v1.0.4 agent-v1.0.2 "rolled back" && restarts agent-v1.0.4 agent-v1.0.2'
 agent wrong ok
@@ -179,4 +181,10 @@ check 'only restarts orrery-agent.service' '! grep -q refused "$F/calls"'
 check 'downloads only from the public release, with no token or header, stopping a stalled or oversized transfer' '[[ -s $F/curl && -s $T/all ]] &&
   ! grep -qvE "^curl -q -fsSL --proto =https --proto-redir =https --retry 2 --connect-timeout 30 --speed-limit 1 --speed-time 60 --max-filesize 67108864 (-o [^ ]+ )?https://github.com/Edward-Pratt/orrery/releases/download/agent-v[0-9.]+/orrery-agent-v[0-9.]+\.tar\.gz(\.sha256)?$" "$F/curl" &&
   ! grep -qF "$GITHUB_TOKEN" "$F/curl" "$T/all" "$R/deploy-status.json"'
+# Last, so the checks above see the state they always did: no clock is compared, so a clock that stepped back while the
+# agent restarted (its connected file's time from before the restart) still counts.
+readlink "$R/current" > "$T/before-back"
+agent back
+check 'a connect counts even when the clock stepped back during the restart' 'deploy agent-v1.0.8 &&
+  current agent-v1.0.8 && status agent-v1.0.8 "$(basename "$(cat "$T/before-back")")" ok && restarts agent-v1.0.8'
 exit $fail

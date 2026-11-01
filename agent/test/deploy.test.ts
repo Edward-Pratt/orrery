@@ -391,18 +391,19 @@ test('the connected file HubClient writes after a welcome passes deploy-agent.sh
   });
   const gate = await scriptNode('connected');
   const file = join(root, 'connected');
-  /** deploy-agent.sh's check: exit 0 when `file` names `version` with a time from `since` (epoch ms) on. */
-  const passes = (version: string, since: number) =>
-    run(process.execPath, ['-e', gate, file, version, String(since)]).then(
+  /**
+   * deploy-agent.sh's check: exit 0 when `file` names `version`. The script removes the file right before each restart,
+   * so no time is compared (a stale file is test-deploy-agent.sh's case).
+   */
+  const passes = (version: string) =>
+    run(process.execPath, ['-e', gate, file, version]).then(
       () => true,
       () => false,
     );
-  const since = Date.now(); // `date +%s%3N` just before the restart
-  assert.equal(await passes('agent-v1.2.3', since), false, 'no file yet');
+  assert.equal(await passes('agent-v1.2.3'), false, 'no file yet');
   client.start();
   await eventually(() => client.connected);
   await eventually(() => existsSync(file), 2000, 'the connected file'); // renamed into place: whole once there
-  assert.equal(await passes('agent-v1.2.3', since), true);
-  assert.equal(await passes('agent-v1.2.2', since), false, 'another version');
-  assert.equal(await passes('agent-v1.2.3', Date.now() + 60_000), false, 'a time from before the restart');
+  assert.equal(await passes('agent-v1.2.3'), true);
+  assert.equal(await passes('agent-v1.2.2'), false, 'another version');
 });

@@ -8,7 +8,10 @@
 # checked against its .sha256, and refused unless it holds only plain files and folders, all inside its own top folder.
 # The gate: within DEPLOY_GATE_SECONDS of the restart, the agent writes <root>/connected after the hub's welcome,
 #   {"version":"agent-vX.Y.Z","time":<epoch ms>}
-# naming this tag with a time from the restart on. Otherwise current flips back, and the old agent must connect.
+# naming this tag. The file is removed right before each restart, so only the restarted agent's own welcome can make
+# it again: no clocks are compared (a clock stepped back during a deploy once made a real connect look stale).
+# A still-running agent that reconnects in between names another version, which never counts. Otherwise current
+# flips back, and the old agent must connect.
 # Writes <root>/deploy-status.json: {"tag","from","outcome":"ok"|"failed"|"rolled back","finished","log"}.
 # It removes that file when it starts and writes it only at the end, after the gate: so the restarted agent (the new
 # one, or the old one after a rollback) connects before its outcome exists. The agent reads it only once
@@ -74,16 +77,16 @@ fetch() { # downloads the release into $inc, checks it, and unpacks it into $inc
   touch "$inc/x" # tar gave it the archive's time; pruning keeps the newest installed
 }
 
-connected() { # <version> <since, epoch ms>: true once <root>/connected names <version> with a time from <since> on
+connected() { # <version>: true once <root>/connected (removed before the restart) names <version>
   local end=$((SECONDS + gate))
-  echo "waiting ${gate}s for $1 to connect (a connected file from $2 on)"
+  echo "waiting ${gate}s for $1 to connect"
   while :; do
     if node -e '
-      const [, file, version, since] = process.argv;
+      const [, file, version] = process.argv;
       let c = null;
       try { c = JSON.parse(require("fs").readFileSync(file, "utf8")); } catch {}
-      process.exit(c?.version === version && Number.isFinite(c.time) && c.time >= Number(since) ? 0 : 1);' \
-      "$root/connected" "$1" "$2"; then
+      process.exit(c?.version === version ? 0 : 1);' \
+      "$root/connected" "$1"; then
       echo "$1 connected"
       return 0
     fi
@@ -92,8 +95,9 @@ connected() { # <version> <since, epoch ms>: true once <root>/connected names <v
   done
 }
 
-flip() { # <target>: points current at it in one rename, then restarts the agent
+flip() { # <target>: points current at it in one rename, then restarts the agent with no connected file left
   ln -sfn "$1" "$root/current.new" && mv -T "$root/current.new" "$root/current"
+  rm -f "$root/connected"
   echo "current -> $1; restarting $unit"
   systemctl restart "$unit" || echo "systemctl restart $unit failed"
 }
@@ -106,12 +110,10 @@ dir=$root/releases/$tag
 rm -rf "$dir" # an older copy kept on disk: the fresh download replaces it
 mv -T "$inc/x" "$dir"
 
-since=$(date +%s%3N)
 flip "releases/$tag"
-if connected "$tag" "$since"; then finish ok; fi
+if connected "$tag"; then finish ok; fi
 echo "rolling back to $from"
-since=$(date +%s%3N)
 flip "$prev"
-if connected "$from" "$since"; then finish 'rolled back'; fi
+if connected "$from"; then finish 'rolled back'; fi
 echo "$from didn't connect either: leaving it in place"
 finish failed

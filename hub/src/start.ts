@@ -190,7 +190,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     services && restoreSources.size
       ? new Restores(hub, services, restoreSources, {
           deploying: (id) => (deploys?.busy() ? 'hub' : agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!) ? 'agent' : null),
-          updating,
+          // A game settings save too: the Agent writes the config folder then.
+          updating: (id): string | null => updating(id) ?? (gameSettings?.busy(id) ? 'game settings save' : null),
           restored: (id) => packs?.restored(id),
         })
       : undefined;
@@ -209,6 +210,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         servers: config.servers,
         restoring: (id) => restores?.busy(id) ?? false,
         deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
+        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
       },
       deps.gameUpdates,
     );
@@ -245,6 +247,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         agents,
         restoring: (id) => restores?.busy(id) ?? false,
         updating,
+        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
         libraryAdding: () => library?.busy() ?? false,
         installing: () => packs?.installRunning() ?? false,
         mcOf: (id) => {

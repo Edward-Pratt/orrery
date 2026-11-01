@@ -10,6 +10,12 @@ import type { AgentMsg, GameSettingsFields, GameSettingsReport } from './types.t
 
 /** The first Agent release that reads and writes its server's game settings (the repo's `agent-v0.0.0` counts as later). */
 export const SETTINGS_FLOOR = 'agent-v1.2.0';
+/**
+ * How long a `settingsSet` may take to be answered: over the Agent's worst case (its deploy check's and its unit's
+ * `systemctl` calls, 10 s each at most, 20 s of live commands plus the one under way past them, 8 s, and 2 s for the
+ * adminlist: about 50 s), so a save it applied is never reported as unanswered.
+ */
+export const SETTINGS_SET_MS = 60_000;
 
 export type GameSettingsDeps = {
   hub: Pick<ServerHub, 'publish' | 'audit'>;
@@ -51,9 +57,9 @@ const oneLine = (v: unknown, max: number, min: number) => typeof v === 'string' 
 
 /**
  * A `PUT /api/settings` body, checked by the rules in `GAME_SETTINGS` (docs/protocol.md, "Game settings"): every
- * field, the password only when given, and the admins; fields it doesn't know are dropped. Each refusal names the
- * field, never its value. The rule across fields that needs the Agent's report (verification off needs a password)
- * is `set`'s.
+ * field (the description trimmed), the password only when given, and the admins; fields it doesn't know are dropped.
+ * Each refusal names the field, never its value. The rules that need the Agent's report (verification off needs a
+ * password, a changed name at most `GAME_SETTINGS.nameBytes`) are `set`'s.
  */
 export function settingsRequest(body: Record<string, unknown>): GameSettingsRequest {
   const out: Record<string, unknown> = {};
@@ -63,6 +69,8 @@ export function settingsRequest(body: Record<string, unknown>): GameSettingsRequ
       if (!oneLine(v, LIMITS.serverName, 1) || v !== (v as string).trim()) throw bad(`name: 1 to ${LIMITS.serverName} characters on one line, with no space at either end.`);
     } else if (key === 'description') {
       if (!oneLine(v, LIMITS.text, 0)) throw bad(`description: at most ${LIMITS.text} characters on one line.`);
+      out[key] = (v as string).trim(); // as Factorio takes it from `/config set` (seen on 2.1.24)
+      continue;
     } else if (key === 'allow_commands') {
       if (v !== 'true' && v !== 'false' && v !== 'admins-only') throw bad('allow_commands: "true", "false" or "admins-only".');
     } else if (BOOLEANS.has(key)) {
@@ -121,7 +129,8 @@ export function auditDetails(req: GameSettingsRequest, before: GameSettingsRepor
  * others 404). The Agent reads and writes the files: the hub keeps its latest `settings` report in memory (none before
  * its first), checks a save by the same rules (`settingsRequest`) and sends it as `settingsSet`, never keeping or
  * logging the password. Each change of the report, and each save, goes on the server's stream as a `settings` notice;
- * a save turning user verification off or on, and a rollback the Agent reports, are notices for Discord too. Hub core.
+ * user verification turning off or on (a save, with the admin's name, or a report: a rollback, a hand edit), and a
+ * rollback the Agent reports, are notices for Discord's alerts channel too. Hub core.
  */
 export class GameSettings {
   #d: GameSettingsDeps;
@@ -129,6 +138,8 @@ export class GameSettings {
   #serverOf = new Map<string, string>();
   #reports = new Map<string, GameSettingsReport>();
   #saving = new Set<string>();
+  /** The user verification the hub last knew each server's file to have (a save's, or a report's), for its notices. */
+  #verification = new Map<string, boolean>();
 
   constructor(deps: GameSettingsDeps) {
     this.#d = deps;
@@ -168,6 +179,9 @@ export class GameSettings {
     const name = this.#name(serverId);
     const req = settingsRequest(body);
     const before = this.#reports.get(serverId) ?? NONE;
+    if (req.name !== before.settings?.name && new TextEncoder().encode(req.name).length > GAME_SETTINGS.nameBytes) {
+      throw bad(`name: Factorio keeps only the first ${GAME_SETTINGS.nameBytes} bytes of a server's name (UTF-8): use a shorter one.`);
+    }
     if (!req.require_user_verification) {
       const kept = req.game_password === undefined && before.settings?.game_password_set === true;
       if (!(typeof req.game_password === 'string' || kept)) throw bad('Without the account check a game password is needed.');
@@ -184,26 +198,42 @@ export class GameSettings {
         settings,
         ...(game_password !== undefined && { game_password }),
         admins,
-      });
+      }, { timeoutMs: SETTINGS_SET_MS });
     } catch (err) {
       const why = err instanceof AgentRefused ? err.message : `${name}'s Agent didn't answer: ${(err as Error).message}`;
       this.#d.hub.audit(by, 'game settings', serverId, `${details} (refused: ${why})`);
-      throw new GameRefused(502, why);
-    } finally {
       this.#saving.delete(serverId);
+      // An Agent that wrote the file but answered too late has pushed it meanwhile: its report is what holds.
+      this.#announce(serverId, this.#reports.get(serverId)?.settings?.require_user_verification, null);
+      throw new GameRefused(502, why);
     }
+    this.#saving.delete(serverId);
     this.#d.hub.audit(by, 'game settings', serverId, details);
-    const was = before.settings?.require_user_verification;
-    if (was !== false && !req.require_user_verification) this.#d.hub.publish(serverId, { kind: 'verificationOff', severity: 'warning', name, by: byName });
-    if (was === false && req.require_user_verification) this.#d.hub.publish(serverId, { kind: 'verificationOn', severity: 'good', name, by: byName });
+    // A file the hub never read held verification on as far as it knows (setup writes it on).
+    if (!this.#verification.has(serverId)) this.#verification.set(serverId, true);
+    this.#announce(serverId, req.require_user_verification, byName);
     this.#d.hub.publish(serverId, { kind: 'settings', severity: 'info' });
     return answer;
   }
 
   /**
+   * User verification as the hub now knows it for a server: a change from what it knew is a notice (`by`: the
+   * admin's name for a save, null for a report); the first value it learns is only kept.
+   */
+  #announce(serverId: string, on: boolean | undefined, by: string | null): void {
+    if (on === undefined) return;
+    const was = this.#verification.get(serverId);
+    this.#verification.set(serverId, on);
+    if (was === undefined || was === on) return;
+    const name = this.#name(serverId);
+    this.#d.hub.publish(serverId, on ? { kind: 'verificationOn', severity: 'good', name, by } : { kind: 'verificationOff', severity: 'warning', name, by });
+  }
+
+  /**
    * Keeps an Agent's report. A change goes on the stream; a `rolledBack` that changed from one the hub had heard (the
    * Agent sends it on every connect until the next save, and a restarted hub has heard none) is audited as
-   * `hub:agent` and announced.
+   * `hub:agent` and announced; so is user verification changed from what the hub knew (a rollback puts back the
+   * previous file, password and verification included; or a hand edit), unless a save is under way.
    */
   #onReport(agentId: string, msg: Extract<AgentMsg, { type: 'settings' }>): void {
     const serverId = this.#serverOf.get(agentId);
@@ -216,6 +246,8 @@ export class GameSettings {
       this.#d.hub.audit('hub:agent', 'game settings rollback', serverId, report.rolledBack);
       this.#d.hub.publish(serverId, { kind: 'settingsRolledBack', severity: 'problem', name: this.#name(serverId) });
     }
+    // A save under way announces its own change (the Agent pushes right after its reply, which may be read first).
+    if (!this.#saving.has(serverId)) this.#announce(serverId, report.settings?.require_user_verification, null);
     this.#d.hub.publish(serverId, { kind: 'settings', severity: 'info' });
   }
 

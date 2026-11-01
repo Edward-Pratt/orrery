@@ -101,6 +101,8 @@ export type DeploysDeps = {
   restoring: (serverId?: string) => boolean;
   /** What update runs on a server (undefined: on any): `pack update` or `game update`; null: none. */
   updating: (serverId?: string) => string | null;
+  /** Whether a save of a server's game settings is under way (`GameSettings.busy`): its Agent's deploy would cut it short. */
+  settingsSaving?: (serverId: string) => boolean;
   /** Whether a library add runs (a hub deploy's restart would lose it). */
   libraryAdding: () => boolean;
   /** Whether a New server install runs (likewise). */
@@ -526,6 +528,7 @@ export class Deploys {
     const updating = this.#d.updating(agent.server);
     if (updating) throw new DeployRefused(409, `A ${updating} is running on ${name}: deploy the Agent once it is done.`);
     if (this.#d.restoring(agent.server)) throw new DeployRefused(409, `A restore is running on ${name}: deploy the Agent once it is done.`);
+    if (this.#d.settingsSaving?.(agent.server)) throw new DeployRefused(409, `A save of ${name}'s game settings is under way: deploy the Agent once it is done.`);
     if (this.#d.restarts.pending(agent.server)) throw new DeployRefused(409, `A countdown is running on ${name}: cancel it first.`);
     // A release from before the Agent's deploys refuses `deploy`: say what works instead of failing a row.
     if (beforeAgentFloor(from)) {

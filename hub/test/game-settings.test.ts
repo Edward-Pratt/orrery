@@ -216,6 +216,8 @@ test('a save is refused while a countdown, a game update or a start runs, and wh
   await eventually(() => h.got.some((m) => m.type === 'settingsSet'));
   const second = await h.put(REQUEST);
   assert.deepEqual([second.status, await second.text()], [409, "A save of Space Age's game settings is under way."]);
+  // Nor does a game update start meanwhile.
+  assert.equal((await h.json<{ blocked: string | null }>(h.req('GET', '/api/servers/space/game'))).blocked, "A save of Space Age's game settings is under way.");
   await h.reply({ applied: [], pending: [] });
   await h.json(first);
 
@@ -247,6 +249,55 @@ test('a stopped server takes a save; with its Agent gone the last report stays, 
   assert.deepEqual((await h.settings()).settings, VALUES);
 });
 
+test('verification as the Agent reports it: a rollback turning it off again is announced with no name; a push read before the reply leaves the save its own notice; a save it refused but whose file changed is announced from the report', async (t) => {
+  const h = await settingsHub(t);
+  const kinds = () => h.notices.filter((n) => n.kind === 'verificationOff' || n.kind === 'verificationOn');
+  // The save: the Agent pushes its new file right after its reply, and may be read first.
+  const off = { ...REQUEST, require_user_verification: false, game_password: PASSWORD };
+  const saved = h.put(off);
+  const asked = (await h.agent.next()) as { id: string };
+  h.push({ ...REPORT, settings: { ...VALUES, require_user_verification: false } });
+  h.agent.send({ type: 'reply', id: asked.id, ok: true, data: { applied: ['require_user_verification', 'game_password'], pending: [] } });
+  await h.json(saved);
+  await eventually(async () => (await h.settings()).settings?.require_user_verification === false);
+  assert.deepEqual(kinds(), [{ kind: 'verificationOff', severity: 'warning', name: 'Space Age', by: 'alex' }], 'once, with the admin');
+  // Turned on again, then a failed start puts back the file the server last started with: verification off.
+  const on = h.put(REQUEST);
+  await h.reply({ applied: ['require_user_verification'], pending: [] });
+  await h.json(on);
+  h.push({ ...REPORT, settings: { ...VALUES, require_user_verification: false }, rolledBack: '2026-11-01T12:00:00.000Z: Error Map.cpp:1: broken save' });
+  await eventually(() => kinds().length === 3);
+  assert.deepEqual(kinds().slice(1), [
+    { kind: 'verificationOn', severity: 'good', name: 'Space Age', by: 'alex' },
+    { kind: 'verificationOff', severity: 'warning', name: 'Space Age', by: null },
+  ]);
+  assert.ok(h.notices.some((n) => n.kind === 'settingsRolledBack'));
+  const post = formatEvent({ type: 'notice', serverId: 'space', ...kinds()[2]! } as never, 'factorio');
+  assert.equal(titleOf(post), "⚠️ User verification is now off on Space Age: player names aren't checked.");
+  // A save refused (or unanswered) after the Agent wrote its file: the push it made decides.
+  const refused = h.put(REQUEST);
+  const asked2 = (await h.agent.next()) as { id: string };
+  h.push({ ...REPORT, settings: { ...VALUES, require_user_verification: true } });
+  h.agent.send({ type: 'reply', id: asked2.id, ok: false, error: 'late' });
+  assert.equal((await refused).status, 502);
+  await eventually(() => kinds().length === 4);
+  assert.deepEqual(kinds()[3], { kind: 'verificationOn', severity: 'good', name: 'Space Age', by: null });
+});
+
+test('a changed name over 50 bytes is refused as the name field (one the file already has is kept); the description goes trimmed', async (t) => {
+  const h = await settingsHub(t);
+  const res = await h.put({ ...REQUEST, name: 'Ü'.repeat(26) });
+  assert.deepEqual([res.status, await res.text()], [400, "name: Factorio keeps only the first 50 bytes of a server's name (UTF-8): use a shorter one."]);
+  assert.ok(!h.got.some((m) => m.type === 'settingsSet'));
+  h.push({ ...REPORT, settings: { ...VALUES, name: 'n'.repeat(60) } });
+  await eventually(async () => (await h.settings()).settings?.name === 'n'.repeat(60));
+  const kept = h.put({ ...REQUEST, name: 'n'.repeat(60), description: '  Our base  ' });
+  const asked = (await h.reply({ applied: ['description'], pending: [] })) as { settings?: { name: string; description: string } };
+  assert.equal(asked.settings?.name, 'n'.repeat(60));
+  assert.equal(asked.settings?.description, 'Our base');
+  await h.json(kept);
+});
+
 test("a rollback the Agent reports is audited as hub:agent and announced once; the stream keeps only the latest settings notice", async (t) => {
   const h = await settingsHub(t);
   const why = 'The server failed to start (Value (-1) outside of range): back to the settings of its last good start.';
@@ -261,7 +312,7 @@ test("a rollback the Agent reports is audited as hub:agent and announced once; t
   );
   assert.deepEqual(await h.audit(), [['hub:agent', 'game settings rollback', why]]);
   const post = formatEvent({ type: 'notice', serverId: 'space', kind: 'settingsRolledBack', severity: 'problem', name: 'Space Age' }, 'factorio');
-  assert.equal(titleOf(post), "❌ Space Age didn't start with its new settings: the Agent put back the previous ones.");
+  assert.equal(titleOf(post), "❌ Space Age didn't start with its new settings: the Agent put back the previous ones, its game password and user verification included.");
   const replayed = h.live.since(0).filter(([, e]) => 'serverId' in e && e.type === 'notice' && e.kind === 'settings');
   assert.equal(replayed.length, 1, 'only the latest settings notice is replayed');
   assert.ok(h.notices.filter((n) => n.kind === 'settings').length >= 3);

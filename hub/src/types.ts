@@ -227,9 +227,12 @@ export type Notice = { severity: Severity } & (
   | { kind: 'packUpdateFinished'; outcome: PackFinished; from: string; to: string; ms: number; backup?: string }
   /** A factorio server's game settings changed (its Agent's report, or a save): stream only, the dashboard asks again. */
   | { kind: 'settings' }
-  /** A save from the dashboard turned user verification off (`name`: the server's, `by`: the admin's name), or on again. */
-  | { kind: 'verificationOff'; name: string; by: string }
-  | { kind: 'verificationOn'; name: string; by: string }
+  /**
+   * User verification turned off on a factorio server (`name`: the server's), or on again: by a save from the dashboard
+   * (`by`: the admin's name), or as its Agent reported its file (`by` null: a rollback, or a hand edit).
+   */
+  | { kind: 'verificationOff'; name: string; by: string | null }
+  | { kind: 'verificationOn'; name: string; by: string | null }
   /** A factorio server's start failed after its game settings changed: its Agent put back those of its last good start. */
   | { kind: 'settingsRolledBack'; name: string }
 );

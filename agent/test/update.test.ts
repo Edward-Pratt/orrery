@@ -830,6 +830,74 @@ test('a rollback on a stopped server restores the world as it was before the swa
   assert.deepEqual(w.unit.calls, ['start', 'stop', 'start']);
 });
 
+test("a copy for the rollback that fails (a full disk) ends the update before the swap: nothing moved, the pre-update save held and named", async (t) => {
+  const w = await world(t);
+  const error = t.mock.method(console, 'error', () => {});
+  const released: string[] = [];
+  const release = w.saves.release.bind(w.saves);
+  t.mock.method(w.saves, 'release', (name: string) => {
+    released.push(name);
+    release(name);
+  });
+  t.mock.method(w.saves, 'keep', async () => {
+    throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+  });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  await writeFile(join(w.data, 'saves/world.zip'), 'the world, saved at the stop');
+  await w.u.resume();
+  const done = await w.done();
+  assert.equal(done.outcome, 'failed before swap');
+  assert.equal((await w.step('swap', 'failed')).detail, "Can't keep a copy of world.zip for a rollback, so nothing was changed: ENOSPC: no space left on device, write");
+  assert.match(done.backup!, /^orrery-pre-update-2\.1\.24-\d{8}T\d{6}Z\.zip$/, 'the backup step\'s save, still held, is the one named');
+  assert.deepEqual(released, [done.backup], 'released once, at the end, not before the copy');
+  assert.ok(await exists(join(w.data, 'saves', done.backup!)));
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24', 'never flipped');
+  assert.deepEqual((await readdir(join(w.data, 'mods'))).sort(), ['mod-list.json', 'mod-settings.dat', 'orrery_0.1.0.zip'], 'mods untouched');
+  assert.equal(await exists(join(w.data, 'mods.next')), false);
+  assert.equal(await exists(join(w.data, 'mods.prev')), false);
+  assert.equal(await readFile(join(w.data, 'saves/world.zip'), 'utf8'), 'the world, saved at the stop', 'the old release loads its own world');
+  assert.deepEqual(w.unit.calls, ['stop', 'start'], 'the old server started again, the new release never');
+  assert.equal(w.unit.state.active, 'active');
+  assert.ok(!w.steps().some((m) => m.step === 'gate' || m.step === 'rollback'));
+  assert.ok(error.mock.calls.some((c) => /u1: Can't keep a copy of world\.zip/.test(String(c.arguments[0]))), 'logged');
+  for (const m of w.sent) assert.ok(parseAgentLine(JSON.stringify(m)), `the hub takes ${JSON.stringify(m)}`);
+});
+
+test("a restart of the agent in the stop step leaves a server stopped before the update stopped, and starts one the hub stopped", async (t) => {
+  const w = await world(t);
+  await w.unit.act('stop');
+  w.unit.calls.length = 0;
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  assert.equal(JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).wasActive, false);
+  w.sent.length = 0;
+  let u = w.restart();
+  await u.start();
+  assert.equal((await w.done()).outcome, 'failed in staging');
+  assert.deepEqual(w.unit.calls, [], 'the owner stopped it: it stays stopped');
+  assert.equal(w.unit.state.active, 'inactive');
+  await until(async () => !(await exists(join(w.state, 'update.json'))), 2000, 'update.json removed once reported');
+
+  // Running at the backup, then stopped by the hub before its updateResume reached the agent: started again.
+  await w.unit.act('start');
+  w.unit.calls.length = 0;
+  w.sent.length = 0;
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']], 'u2'));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  w.sent.length = 0;
+  u = w.restart();
+  await u.start();
+  assert.equal((await w.done()).outcome, 'failed before swap');
+  assert.deepEqual(w.unit.calls, ['stop', 'start']);
+});
+
 test('a hub that restarts during its own stop: the cancel it sends then starts the server the update stopped', async (t) => {
   const w = await world(t);
   w.offer('2.1.25');
@@ -858,7 +926,7 @@ test('a hub that restarts during its own stop: the cancel it sends then starts t
   assert.deepEqual(w.unit.calls, []);
 });
 
-test("a rollback whose bookkeeping can't be written (a full disk) still rolls back and starts the old server", async (t) => {
+test("a swap whose bookkeeping can't be written (a full disk) ends before anything moves and starts the old server", async (t) => {
   const w = await world(t);
   const error = t.mock.method(console, 'error', () => {});
   w.offer('2.1.25');
@@ -872,6 +940,31 @@ test("a rollback whose bookkeeping can't be written (a full disk) still rolls ba
   await mkdir(tmp);
   t.after(() => rm(tmp, { recursive: true, force: true }));
   w.unit.state = { ...w.unit.state, active: 'inactive', sub: 'dead' };
+  const done = await w.done();
+  // Not recorded as swapping, a flip would leave a restarted agent nothing to roll back from: nothing moves.
+  assert.equal(done.outcome, 'failed before swap');
+  assert.deepEqual(w.unit.calls, ['start']);
+  assert.equal(w.unit.state.active, 'active');
+  assert.equal(await readlink(join(w.install, 'current')), 'releases/2.1.24');
+  assert.deepEqual((await readdir(join(w.data, 'mods'))).sort(), ['mod-list.json', 'mod-settings.dat', 'orrery_0.1.0.zip'], 'the old mods');
+  assert.equal(await exists(join(w.data, 'mods.next')), false);
+  assert.ok(error.mock.calls.some((c) => /can't write .*update\.json/.test(String(c.arguments[0]))), 'logged');
+});
+
+test("a rollback whose bookkeeping can't be written (a full disk) still rolls back and starts the old server", async (t) => {
+  const w = await world(t, { gateMs: 300 });
+  const error = t.mock.method(console, 'error', () => {});
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  w.broken.add('2.1.25');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.unit.act('stop');
+  await w.u.resume();
+  await w.step('gate', 'running'); // the swap is recorded; every write of update.json from here fails
+  const tmp = join(w.state, `update.json.${process.pid}.tmp`);
+  await mkdir(tmp);
+  t.after(() => rm(tmp, { recursive: true, force: true }));
   const done = await w.done();
   assert.equal(done.outcome, 'rolled back');
   assert.equal(w.unit.calls.at(-1), 'start');

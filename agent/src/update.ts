@@ -381,14 +381,14 @@ function readJob(raw: unknown): Job | null {
  *    cancelled the update (`updateCancel`, which never stops the unit; it starts it only if it ran at the backup and
  *    is stopped now: the hub stopped it, and may have restarted since without knowing).
  * 4. swap: the unit checked stopped, the newest save (the one the stop just wrote) copied as the rollback's save
- *    (`Saves.keep`: older than it, so the new release never loads or writes the copy), `current` flipped to the new
- *    release, `mods` to `mods.prev`, `mods.next` to `mods`, the unit started.
+ *    (`Saves.keep`: older than it, so the new release never loads or writes the copy; a copy that fails ends the
+ *    update before anything moves, `failed before swap`), `current` flipped to the new release, `mods` to
+ *    `mods.prev`, `mods.next` to `mods`, the unit started.
  * 5. gate, 5 minutes at most: `/orrery-status` with the new version and exactly the expected mods, and the game
  *    connection up.
  * 6. rollback, when the swap or the gate failed: the old `current`, `mods.prev` back (its `mod-settings.dat` with it),
- *    the swap's copy copied as the newest save (none if that copy failed: the old release's own newest is intact),
- *    started and gated again (the game connection only while the Agent
- *    connection is up): `rolled back`, or `failed`.
+ *    the swap's copy copied as the newest save (none if there was no save to copy), started and gated again (the
+ *    game connection only while the Agent connection is up): `rolled back`, or `failed`.
  *
  * `<state>/update.json` (the agent's own folder: a file of that name under `<data>` is never read) records each phase
  * before it acts, so a restart of the agent ends an update before the swap as failed and rolls one back from the swap
@@ -467,7 +467,8 @@ export class Updates {
       this.#step(r, job.phase as PackStep, 'failed', 'The agent restarted before the swap: nothing was changed');
       await this.#clean();
       const unit = await this.#o.unit.read().catch(() => null);
-      const restart = job.resumed || (job.phase === 'stop' && unit !== null && stopped(unit));
+      // In the stop phase before `updateResume`, a stopped unit is the hub's stop only if the server ran at the backup.
+      const restart = job.resumed || (job.phase === 'stop' && job.wasActive === true && unit !== null && stopped(unit));
       if (restart) await this.#startOld();
       return this.#finish(r, restart ? 'failed before swap' : 'failed in staging');
     }
@@ -581,6 +582,7 @@ export class Updates {
       await this.#stopped();
       this.#check(r);
       job.phase = 'swap'; // at once: no cancel from here on
+      await this.#keep(job); // and the swap phase recorded, before anything moves: a copy that fails ends it here
     } catch (err) {
       this.#step(r, step, 'failed', r.cancelled ? 'Cancelled by the hub' : reason(err));
       if (!r.cancelled && !(err instanceof Fail)) console.error(`[update] ${job.id}: ${reason(err)}`);
@@ -836,7 +838,6 @@ export class Updates {
     const { job } = r;
     const { data } = this.#o;
     this.#step(r, 'swap', 'running', `Putting Factorio ${job.factorio} and ${plural(job.mods.length, 'mod')} in place`);
-    await this.#keep(job); // and the swap phase recorded, before anything moves
     this.#latest = null;
     // Factorio writes mod-settings.dat as it stops: the copy prepare made is taken again, as it is now.
     const settings = await this.#settings();
@@ -852,22 +853,22 @@ export class Updates {
 
   /**
    * The rollback's save, taken once the server is stopped and before anything moves: a copy of the newest save, which
-   * the stop just wrote with all the play up to it (`Saves.keep`), held instead of the backup step's save. The new
-   * release loads (and on a stop writes) that newest file, never the copy. A copy that fails leaves none: then nothing
-   * has moved yet, and the old release's own newest save is the one to go back to. Recorded with the swap phase, before
-   * the flip: a restart before that ends the update before the swap, with nothing to restore.
+   * the stop just wrote with all the play up to it (`Saves.keep`), held instead of the backup step's save, which is
+   * released only once the copy is there. The new release loads (and on a stop writes, in its own format) that newest
+   * file, never the copy. A copy that fails throws, the backup step's save still held: nothing has moved yet, so the
+   * update ends there (`failed before swap`, the old server started again) rather than swap with no save a rollback
+   * could load. Recorded with the swap phase, before the flip: a restart before that ends the update before the swap.
    */
   async #keep(job: Job): Promise<void> {
     const prior = job.backup;
-    job.backup = null;
-    if (prior) this.#o.saves.release(prior);
     let newest: string | undefined;
     try {
       newest = (await this.#o.saves.list()).saves[0]?.name;
-      if (newest) job.backup = await this.#o.saves.keep(newest, job.from.factorio);
+      job.backup = newest ? await this.#o.saves.keep(newest, job.from.factorio) : null;
     } catch (err) {
-      console.error(`[update] ${job.id}: can't keep a copy of ${newest ?? 'the newest save'} for a rollback: ${reason(err)}`);
+      throw new Error(`Can't keep a copy of ${newest ?? 'the newest save'} for a rollback, so nothing was changed: ${reason(err)}`);
     }
+    if (prior) this.#o.saves.release(prior);
     await this.#save(job);
   }
 

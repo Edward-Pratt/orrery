@@ -210,8 +210,8 @@ Agent carries it out. In order:
    `base`, come with its version: see below; a mod left out is removed), each with its portal `sha1` and a signed
    link on `https://dl-mod.factorio.com` whose only query key is `secure`, resolved right before. No credential is
    ever in it. `mods` always holds `orrery` (the gate reads its `/orrery-status`), at most 500 mods, and the line,
-   its newline counted, fits the 1 MiB cap: the hub refuses (409) an update breaking one of these before it resolves
-   any link, opens a row or sends anything. The `reply` says the request passed the Agent's checks and the update
+   its newline counted, fits the 1 MiB cap: the hub refuses (409) an update breaking one of these, the first two before
+   it resolves any link, the line (whose links it needs) before it opens a row or sends anything. The `reply` says the request passed the Agent's checks and the update
    started (the hashes are checked during `prepare`); then every `updateStep` and the `updateDone` carry U.
 2. The Agent prepares (`prepare`) and saves (`backup`; a stopped server: none, and it names the newest save), then
    sends `updateStep` `stop` `waiting` and waits. Its `stop` step is only ever `waiting`: the stop is the hub's.

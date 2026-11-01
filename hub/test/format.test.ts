@@ -481,6 +481,18 @@ test('deploy notices reach Discord worded and coloured by outcome', () => {
     '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
     0xe74c3c,
   ]);
+
+  // An Agent's: `from` is what its hello said it runs, so it is escaped.
+  const agent = (n: object) => formatTargetEvent({ target: 'deploy', id: 'factorio-vm', type: 'notice', part: 'agent', to: 'agent-v1.2.0', ...n } as TargetEvent) as { embeds: { title: string }[] };
+  assert.equal(
+    agent({ severity: 'info', kind: 'deployStarted', from: '**[x](https://evil.example)**', by: 'web:alex (1)' }).embeds[0]!.title,
+    '🚀 Deploying the agent on factorio-vm: \\*\\*\\[x](https://evil.example)\\*\\* → agent-v1.2.0 (by web:alex (1))',
+  );
+  assert.equal(
+    agent({ severity: 'problem', kind: 'deployFinished', from: '__v__', outcome: 'rolled back' }).embeds[0]!.title,
+    '❌ Deploying the agent on factorio-vm agent-v1.2.0 failed: rolled back to \\_\\_v\\_\\_',
+  );
+  assert.equal(agent({ severity: 'good', kind: 'deployFinished', from: 'agent-v1.1.0', outcome: 'ok' }).embeds[0]!.title, '✅ Deployed the agent on factorio-vm: agent-v1.2.0');
 });
 
 test('chat and other plain posts are cut to 2000 characters after escaping, never splitting an emoji', () => {

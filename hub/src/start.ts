@@ -207,7 +207,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         catalog: new FactorioCatalog(deps.portal ?? fetch, deps.factorioAccount),
         servers: config.servers,
         restoring: (id) => restores?.busy(id) ?? false,
-        deploying: () => deploys?.busy() ?? false,
+        deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
       },
       deps.gameUpdates,
     );
@@ -226,7 +226,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         environment: config.environment,
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
-        restoring: () => restores?.busy() ?? false,
+        agents,
+        restoring: (id) => restores?.busy(id) ?? false,
         updating,
         libraryAdding: () => library?.busy() ?? false,
         installing: () => packs?.installRunning() ?? false,

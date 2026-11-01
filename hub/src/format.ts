@@ -223,16 +223,17 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: agent ${e.name} is not connected`;
     case 'agentBack':
       return `✅ Host ${e.id}: agent ${e.name} is connected again`;
+    // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':
-      return `🚀 Deploying ${deployed(e)}: ${e.from ?? 'unknown'} → ${e.to} (by ${e.by})`;
+      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : md(e.from)} → ${e.to} (by ${e.by})`;
     case 'deployFinished':
       if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
-      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from ?? 'the previous release'}`;
+      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : md(e.from)}`;
       return `❌ Deploying ${deployed(e)} ${e.to} failed`;
   }
 }
 
-/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh". */
+/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh", "the agent on factorio-vm". */
 const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
 
 /**

@@ -300,13 +300,19 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       return c.json(deploys.answer() satisfies DeploysAnswer);
     });
     app.post('/deploys', async (c) => {
-      const { part, tag, server } = await jsonBody(c.req);
-      if ((part !== 'hub' && part !== 'web' && part !== 'mod') || typeof tag !== 'string' || (part === 'mod') !== (typeof server === 'string')) {
-        return c.text('Give a part (hub, web or mod), a tag and, for a Mod, its server', 400);
+      const { part, tag, server, host } = await jsonBody(c.req);
+      if (
+        (part !== 'hub' && part !== 'web' && part !== 'mod' && part !== 'agent') ||
+        typeof tag !== 'string' ||
+        (part === 'mod') !== (typeof server === 'string') ||
+        (part === 'agent') !== (typeof host === 'string')
+      ) {
+        return c.text('Give a part (hub, web, mod or agent), a tag and, for a Mod, its server; for an Agent, its host', 400);
       }
       const user = c.get('user');
+      const on = (part === 'mod' ? server : host) as string | undefined;
       try {
-        return c.json({ id: await deploys.deploy(part, tag, actor(user), server as string | undefined, user.username) } satisfies DeployAnswer, 202);
+        return c.json({ id: await deploys.deploy(part, tag, actor(user), on, user.username) } satisfies DeployAnswer, 202);
       } catch (err) {
         if (err instanceof DeployRefused) return c.text(err.message, err.status);
         return c.text(`The deploy failed: ${(err as Error).message}`, 502);

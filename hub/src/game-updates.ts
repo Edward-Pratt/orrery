@@ -32,8 +32,11 @@ export type GameUpdatesDeps = {
   servers: Pick<ServerSettings, 'id' | 'name'>[];
   /** Whether a restore runs on a server. */
   restoring: (serverId: string) => boolean;
-  /** Whether a hub deploy runs (its restart would leave the update to the Agent alone). */
-  deploying: () => boolean;
+  /**
+   * What deploy runs that an update must not race (`agentId`: the server's Agent): a hub deploy (its restart would
+   * leave the update to the Agent alone), or the Agent's own (it restarts itself); null: none.
+   */
+  deploying: (agentId: string) => 'hub' | 'agent' | null;
 };
 
 const STEPS: PackStep[] = ['prepare', 'backup', 'stop', 'swap', 'gate'];
@@ -507,7 +510,9 @@ export class GameUpdates {
     if (!this.#d.agents.get(this.#agentOf.get(serverId)!)?.connected) return `${name}'s Agent isn't connected.`;
     if (!this.#installed.has(serverId)) return `${name}'s Agent hasn't said what it runs yet.`;
     if (this.#d.restoring(serverId)) return `A restore is running on ${name}.`;
-    if (this.#d.deploying()) return 'A hub deploy is running.';
+    const deploy = this.#d.deploying(this.#agentOf.get(serverId)!);
+    if (deploy === 'hub') return 'A hub deploy is running.';
+    if (deploy === 'agent') return `${name}'s Agent is being deployed.`;
     if (this.#d.restarts.pending(serverId)) return `A countdown is running on ${name}: cancel it first.`;
     return null;
   }

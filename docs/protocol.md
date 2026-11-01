@@ -75,8 +75,8 @@ replaces the old one; the old connection's close is then ignored (no alert).
 | `unlink` | `player` | in-game `/discord unlink` |
 | `backup` | `ok` (boolean), `detail` | ServerUtilities logs "Backup done in …" or "Error while backing up" |
 
-An Agent's game connection for a Factorio server sends the same messages (no `achievement`, `quest` or `cmdLate`),
-plus these:
+An Agent's game connection for a Factorio server sends the same messages (no `achievement`, `quest` or `cmdLate`:
+the hub drops them from it), plus these:
 
 | type | fields | when |
 |---|---|---|
@@ -106,7 +106,7 @@ A `cmdResult` with an unknown or late `id` is ignored.
 | Hub observes | Meaning | Discord alert |
 |---|---|---|
 | `hello` accepted | online (no alert — may be a reconnect after hub restart) | — |
-| `started` | server finished starting | "✅ Server started" |
+| `started` | server finished starting (one per connection: a repeat on it is ignored) | "✅ Server started" |
 | `stopping` then disconnect | clean stop | "🛑 Server stopped" |
 | disconnect without `stopping` | crash / killed | "💥 Server went down unexpectedly" |
 | no heartbeat for 30 s, after at least one heartbeat on this connection and before `stopping` | hung | "⚠️ Server not responding"; next heartbeat posts "✅ Server responding again" |
@@ -149,6 +149,9 @@ The first line on the Agent port is one of:
 |---|---|---|
 | `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
 | `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up (else `reject` with `its agent is not connected`). `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
+
+Either is refused (`reject` with `reconnecting too fast`) under 5 s after the last one of its kind for that Agent was
+welcomed; the connection that one opened stays.
 
 ```json
 {"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}
@@ -213,8 +216,12 @@ over is dropped (the hub logs it at most once a minute, with a count), never ans
   handshaken or not; a fifth is destroyed before any byte is read. Agents sharing an address share the 4. A refused
   first line gets its `reject`, then the hub closes the connection within 2 s, whatever the peer does.
 - **Lines**: each connection (the Agent connection and the game connection, each its own) 20 lines a second, in bursts
-  of up to 100, before and after the handshake. A line over it is dropped; a connection still dropping lines 10 s on
-  is closed.
+  of up to 100. A line over it is dropped; a connection still dropping lines 10 s on is closed. A connection's budgets
+  are kept across reconnects: one that replaces another, or comes after it closed, goes on with what that one left,
+  so reconnecting never starts a fresh burst. A first line, before the handshake says whose it is, takes from its
+  address's own budget, the same size.
+- **Handshakes**: an Agent connection, and a game connection for its server, each welcomed at most once per 5 s (see
+  "Handshake").
 - **Message types**, each within its own connection: a message over its budget is dropped and the connection stays.
 
 | type | budget |
@@ -225,6 +232,10 @@ over is dropped (the hub logs it at most once a minute, with a count), never ans
 | `serviceState`, `saves`, `installed`, each | dropped when identical to the last one of its type the hub took on that connection (so the first after a reconnect is always taken); else 1 a second, bursts of 10 |
 | `hostSample` | one per 10 s per Agent, its connections and reconnects together; stored with the hub's clock as its `ts`, never the Agent's |
 | any other | the line budget only |
+
+What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples
+name, each mount's change told at most once per 10 min (a change meanwhile is told after the wait, if it still holds),
+and its service's failure is a notice at most once per 10 min (every state still goes on the stream).
 
 An Agent forwards its server's game events at most 5 a second (bursts of 30, every type together, the rest dropped),
 so a player flooding chat never gets the game connection closed, and sends an `updateStep` for the same step at

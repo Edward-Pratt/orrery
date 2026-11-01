@@ -56,6 +56,8 @@ type Conn = {
   pending: Map<string, Pending>;
   /** The last TPS put on the event stream. */
   sentTps: number | null;
+  /** Its `started` is on the stream: one per connection (a Mod's server starts once per connection anyway). */
+  started: boolean;
 };
 
 /** Removes Minecraft § formatting codes. */
@@ -357,7 +359,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   /** Makes an accepted game connection its server's: welcomed, online, and its messages handled from then on. */
   #open(socket: Socket, id: string, modVersion: string): (msg: ModMsg) => void {
     this.#settle(id); // a crash waiting on the Agent is decided before the new connection counts
-    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null };
+    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null, started: false };
     const old = this.#conns.get(id);
     this.#conns.set(id, conn);
     old?.socket.destroy();
@@ -433,6 +435,8 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
         }
         return;
       case 'started':
+        if (conn.started) return; // a repeat would be another lifecycle row and another post for one start
+        conn.started = true;
         return this.#emit(id, 'started');
       case 'stopping':
         conn.stopping = true;

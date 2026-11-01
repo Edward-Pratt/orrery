@@ -1849,6 +1849,7 @@ test("an Agent's bye records its server lost, as unknown, and posts nothing; a l
       return { stop: () => {} };
     },
     get: () => assert.fail('nothing to request'),
+    agents: { handshakeMs: 0 }, // it reconnects at once
   });
   const port = await handle.agentPort!;
   const first = await agentOnline(port);

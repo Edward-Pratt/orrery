@@ -140,6 +140,20 @@ test('stopping then disconnect is a clean stop; a bare disconnect is a crash', a
   assert.deepEqual(types(), ['connected', 'started', 'stopped', 'connected', 'crashed']);
 });
 
+test('started is one event per connection, a repeat on it dropped; the next connection may start again', async (t) => {
+  const { port, types } = await setup(t);
+  const a = await online(port);
+  a.send({ type: 'started' });
+  a.send({ type: 'started' });
+  a.send({ type: 'stopping' });
+  a.socket.end();
+  await until(() => types().includes('stopped'));
+  const b = await online(port);
+  b.send({ type: 'started' });
+  await until(() => types().length === 5);
+  assert.deepEqual(types(), ['connected', 'started', 'stopped', 'connected', 'started']);
+});
+
 test('hung detection arms on the first heartbeat, recovers, and is off after stopping', async (t) => {
   const { hub, port, types } = await setup(t, { hungMs: 100 });
   const mod = await online(port);
@@ -283,8 +297,8 @@ test('sendLinkResult reaches the mod', async (t) => {
   assert.deepEqual(await mod.next(), { type: 'linkResult', player: 'Steve', ok: true, message: 'Linked' });
 });
 
-test('late command output reaches onLate until it expires', async (t) => {
-  const { hub, port } = await setup(t, { lateMs: 150 });
+test('late command output reaches onLate until it expires, every batch of it', async (t) => {
+  const { hub, port, events } = await setup(t, { lateMs: 150 });
   const mod = await online(port);
   const late: string[][] = [];
   const result = hub.runCommand('gtnh', 'spark profiler', 'test', (lines) => late.push(lines));
@@ -293,11 +307,13 @@ test('late command output reaches onLate until it expires', async (t) => {
   assert.deepEqual(await result, ['Profiler started']);
   mod.send({ type: 'cmdLate', id: cmd.id, output: ['https://spark.lucko.me/abc'] });
   mod.send({ type: 'cmdLate', id: 'unknown', output: ['ignored'] });
-  await until(() => late.length === 1);
+  mod.send({ type: 'cmdLate', id: cmd.id, output: ['a second batch'] }); // a Mod sends up to 10 for one command
+  await until(() => late.length === 2);
   await sleep(250);
   mod.send({ type: 'cmdLate', id: cmd.id, output: ['too late'] });
   await sleep(50);
-  assert.deepEqual(late, [['https://spark.lucko.me/abc']]);
+  assert.deepEqual(late, [['https://spark.lucko.me/abc'], ['a second batch']]);
+  assert.equal(events.filter((e) => e.type === 'console' && e.late).length, 2);
 });
 
 test('publish puts a hub-core notice on the event stream for that server', async (t) => {

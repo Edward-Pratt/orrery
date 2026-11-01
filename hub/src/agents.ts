@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentConfig, AgentsIntegration } from './config.ts';
 import type { Hosts } from './host.ts';
-import { LIMITS, parseAgentLine, parseModLine, parseReplyData, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg } from './protocol.ts';
+import { LIMITS, parseAgentLine, parseModLine, parseReplyData, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg, type ModMsg } from './protocol.ts';
 import { protocolRefusal, tokenMatches, type ServerHub } from './servers.ts';
 
 /** Shorter timings, for tests. */
@@ -18,12 +18,19 @@ export type AgentsOptions = {
   /** How often the listener asks for its address again while that isn't on this machine yet (10 s). */
   bindRetryMs?: number;
   /**
+   * How soon after its last welcome an Agent connection, or a game connection for the same server, may be welcomed
+   * again (`HANDSHAKE_MS`, 5 s); one sooner is refused and the live one stays.
+   */
+  handshakeMs?: number;
+  /**
    * Every connection's line budget (`LINES`: 20 lines a second, in bursts of up to 100): lines over it are dropped, and
    * a connection still over it `overMs` (10 s) on is closed. The per-type budgets (`TYPES`) and the host sample cadence
    * (`SAMPLE_MS`) are not options.
    */
-  rate?: { perSecond: number; burst: number; overMs: number };
+  rate?: Rate;
 };
+
+type Rate = { perSecond: number; burst: number; overMs: number };
 
 /** What an Agent pushes on its own, put on the `Agents` emitter as it came (a copy of only its schema's fields). */
 type Pushed = Exclude<AgentMsg, { type: 'ping' | 'bye' | 'hostSample' | 'reply' }>;
@@ -46,8 +53,10 @@ const WITH_DATA = new Set<string>(['journal', 'logs', 'log'] satisfies (keyof Ag
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
 
 type Waiting = { request: AgentRequest['type']; resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
-type Budgets = ReturnType<typeof typeBudgets>;
+type Budgets = ReturnType<typeof connBudgets>;
 type Conn = { socket: Socket; bye: boolean; silence: NodeJS.Timeout; pending: Map<string, Waiting>; budgets: Budgets };
+/** What a first line leads to: the line budget the connection's next lines take from, and what handles them. */
+type Next = { lines: Budget['lines']; onLine: (line: string) => void };
 
 /*
  * The Agent port's budgets (docs/protocol.md, "Rate rules"). The Agent stays under them; they are the hub's safety
@@ -63,6 +72,12 @@ type Conn = { socket: Socket; bye: boolean; silence: NodeJS.Timeout; pending: Ma
  * - `SAMPLE_MS`: at most one host sample per 10 s per Agent (whatever its connections), stored with the hub's clock as
  *   its `ts`: an Agent's clock is never trusted for what is stored.
  *
+ * `LINES` and `TYPES` belong to the connection, not its socket: the Agent connection's are kept by its Agent's id and
+ * the game connection's by its server's, so one that replaces another goes on with what that one left (reconnecting
+ * never starts a fresh burst); a first line, before anyone is known, takes from its peer address's. `HANDSHAKE_MS`: a
+ * connection is welcomed at most once per 5 s (each kind for each Agent), so reconnecting can't churn the server's
+ * connected and crashed events either. `SAME` stays its socket's: the first push after a reconnect is always taken.
+ *
  * Drops are logged at most once a minute (per connection, per budget), with how many since the last log.
  */
 const LINES = { perSecond: 20, burst: 100, overMs: 10_000 };
@@ -77,6 +92,9 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
 const SAME = new Set(['serviceState', 'saves', 'installed']);
 const SAMPLE_MS = 10_000;
+const HANDSHAKE_MS = 5_000;
+/** What a Mod sends but an Agent's game connection never does (docs/protocol.md): dropped from it. */
+const NOT_FROM_AGENTS = new Set<string>(['cmdLate', 'quest', 'achievement'] satisfies ModMsg['type'][]);
 /** Connections at once from one peer address, handshaken or not: an Agent connection, a game connection, two spare. */
 const PEER_SOCKETS = 4;
 /** How long a refused connection may take to close after its `reject`, whatever the peer does. */
@@ -112,33 +130,69 @@ function bucket(perSecond: number, burst: number): (now: number) => boolean {
 }
 
 /**
- * A connection's per-type budgets (`TYPES`, `SAME`): `allows(msg)` whether a parsed message may be handled now, false
- * for one over its type's budget (counted by `dropped`) or a repeated push (silently); `dropped(name)` counts a
- * message dropped over budget `name`, logged at most once a minute.
+ * A connection's budgets, which outlive its sockets (`Agents` keeps one per Agent connection, game connection and peer
+ * address): `lines(socket)` whether a line may be handled now (`LINES`: lines over it are dropped, logged at most once
+ * a minute, and a connection still dropping lines `overMs` after its first drop, with no drop-free second between, has
+ * `socket` closed); `fits(type)` whether a message of `type` is within its type's budget (`TYPES`), else counted by
+ * `dropped`; `dropped(name)` counts a message dropped over budget `name`, logged at most once a minute. `label` names
+ * it in the logs.
  */
-function typeBudgets(peer: string): { allows: (msg: { type: string }) => boolean; dropped: (name: string) => void } {
+type Budget = { lines: (socket: Socket) => boolean; fits: (type: string) => boolean; dropped: (name: string) => void };
+
+function budget(label: string, rate: Rate): Budget {
+  const take = bucket(rate.perSecond, rate.burst);
+  const logLines = everyMinute((n) => `[agents] ${label}: over ${rate.perSecond} lines/s, dropping lines (${n} dropped)`);
+  let overSince = 0;
+  let lastDrop = 0;
+  const lines = (socket: Socket) => {
+    const now = Date.now();
+    if (take(now)) {
+      if (overSince && now - lastDrop >= 1000) overSince = 0;
+      return true;
+    }
+    logLines();
+    lastDrop = now;
+    overSince ||= now;
+    if (now - overSince >= rate.overMs) {
+      console.error(`[agents] ${label}: over the line rate for ${rate.overMs / 1000} s, closing`);
+      socket.destroy();
+    }
+    return false;
+  };
   const buckets = new Map<string, (now: number) => boolean>();
-  const last = new Map<string, unknown>();
   const logs = new Map<string, () => void>();
   const dropped = (name: string) => {
     let log = logs.get(name);
-    if (!log) logs.set(name, (log = everyMinute((n) => `[agents] ${peer}: over the ${name} budget, dropped ${n}`)));
+    if (!log) logs.set(name, (log = everyMinute((n) => `[agents] ${label}: over the ${name} budget, dropped ${n}`)));
     log();
   };
+  const fits = (type: string) => {
+    const of = BUDGET_OF.get(type);
+    if (!of) return true;
+    let takeOne = buckets.get(of.name);
+    if (!takeOne) buckets.set(of.name, (takeOne = bucket(of.perSecond, of.burst)));
+    if (takeOne(Date.now())) return true;
+    dropped(of.name);
+    return false;
+  };
+  return { lines, fits, dropped };
+}
+
+/**
+ * A connection's per-type budgets on one socket: `allows(msg)` whether a parsed message may be handled now, false for
+ * a push deep-equal to the last one of its type this socket passed on (`SAME`, silently: so the first after a
+ * reconnect is always taken) or one over its type's budget (`budget.fits`, counted); `dropped` is `budget`'s.
+ */
+function connBudgets(budget: Budget): { allows: (msg: { type: string }) => boolean; dropped: (name: string) => void } {
+  const last = new Map<string, unknown>();
   const allows = (msg: { type: string }) => {
-    const budget = BUDGET_OF.get(msg.type);
-    if (!budget) return true;
-    if (SAME.has(msg.type) && isDeepStrictEqual(last.get(msg.type), msg)) return false;
-    let take = buckets.get(budget.name);
-    if (!take) buckets.set(budget.name, (take = bucket(budget.perSecond, budget.burst)));
-    if (!take(Date.now())) {
-      dropped(budget.name);
-      return false;
-    }
-    if (SAME.has(msg.type)) last.set(msg.type, msg);
+    const same = SAME.has(msg.type);
+    if (same && isDeepStrictEqual(last.get(msg.type), msg)) return false;
+    if (!budget.fits(msg.type)) return false;
+    if (same) last.set(msg.type, msg);
     return true;
   };
-  return { allows, dropped };
+  return { allows, dropped: budget.dropped };
 }
 
 /**
@@ -170,42 +224,17 @@ function readLines(socket: Socket, max: number, onLine: (line: string) => void):
 }
 
 /**
- * A connection's line budget (`LINES`), a token bucket: whether a line may be handled now. Lines over it are dropped
- * (logged at most once a minute); a connection still dropping lines `overMs` after its first drop (with no drop-free
- * second between) is closed.
- */
-function limiter(socket: Socket, rate: AgentsOptions['rate'] & {}): () => boolean {
-  const take = bucket(rate.perSecond, rate.burst);
-  const log = everyMinute((n) => `[agents] ${socket.remoteAddress}: over ${rate.perSecond} lines/s, dropping lines (${n} dropped)`);
-  let overSince = 0;
-  let lastDrop = 0;
-  return () => {
-    const now = Date.now();
-    if (take(now)) {
-      if (overSince && now - lastDrop >= 1000) overSince = 0;
-      return true;
-    }
-    log();
-    lastDrop = now;
-    overSince ||= now;
-    if (now - overSince >= rate.overMs) {
-      console.error(`[agents] ${socket.remoteAddress}: over the line rate for ${rate.overMs / 1000} s, closing`);
-      socket.destroy();
-    }
-    return false;
-  };
-}
-
-/**
  * The Agent port (`integrations.agents.listen`) and the Agents on it. Hub core: frontends use its registry
  * (`get`, `list`), requests (`request`) and events, never its sockets.
  *
  * A connection is accepted only from a configured Agent's address, and while that address has fewer than 4 open,
  * checked before any byte is read (else destroyed, without a word). Its lines are read with `LIMITS.lineBytes` as the
- * cap and the line budget, before and after the handshake, and each message within its type's budget (`TYPES`). The
- * first line, within 5 s, is an `agentHello` (an Agent connection) or a game `hello` for that Agent's own server while
- * its Agent connection is up, which goes to `ServerHub.attach`; a refused one gets its `reject`, then is closed within
- * 2 s whatever the peer does. A second Agent connection replaces the first. An Agent with no line for 20 s, or whose
+ * cap and the line budget, before and after the handshake, and each message within its type's budget (`TYPES`), both
+ * kept per connection across reconnects. The first line, within 5 s, is an `agentHello` (an Agent connection) or a
+ * game `hello` for that Agent's own server while its Agent connection is up, which goes to `ServerHub.attach` (its
+ * `cmdLate`, `quest` and `achievement`, which an Agent never sends, dropped); one under 5 s after the last welcome of
+ * its kind for that Agent is refused, the live one kept; a refused one gets its `reject`, then is closed within 2 s
+ * whatever the peer does. A second Agent connection replaces the first. An Agent with no line for 20 s, or whose
  * connection closes without `bye`, is lost: its server is `lost`, and one `agentLost` host notice goes out, then
  * `agentBack` when it connects again; after `bye` the server is `lost` with nothing posted. Its host samples go to its
  * Host's monitor (`Hosts`, by the Agent's id), at most one per 10 s, stamped with the hub's clock.
@@ -222,6 +251,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   #sockets = new Set<Socket>();
   #perPeer = new Map<string, number>(); // open connections by peer address, handshaken or not
   #sampled = new Map<string, number>(); // when each Agent's latest stored host sample came (the hub's clock)
+  #budgets = new Map<string, Budget>(); // by `agent <id>`, `game <server id>` and peer address: they outlive sockets
+  #welcomed = new Map<string, number>(); // when each `agent <id>` and `game <server id>` was last welcomed
   #tooMany = everyMinute((n) => `[agents] over ${PEER_SOCKETS} connections at once from one address: ${n} refused`);
   #server: Server | null = null;
   #retry: NodeJS.Timeout | undefined;
@@ -230,7 +261,8 @@ export class Agents extends EventEmitter<AgentEvents> {
   #silenceMs: number;
   #requestTimeoutMs: number;
   #bindRetryMs: number;
-  #rate: AgentsOptions['rate'] & {};
+  #handshakeMs: number;
+  #rate: Rate;
 
   constructor(
     hub: Pick<ServerHub, 'attach' | 'agentUp' | 'agentDown' | 'publishTarget'>,
@@ -248,6 +280,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     this.#silenceMs = opts.silenceMs ?? 20_000;
     this.#requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
     this.#bindRetryMs = opts.bindRetryMs ?? 10_000;
+    this.#handshakeMs = opts.handshakeMs ?? HANDSHAKE_MS;
     this.#rate = opts.rate ?? LINES;
   }
 
@@ -337,17 +370,16 @@ export class Agents extends EventEmitter<AgentEvents> {
       if (left) this.#perPeer.set(peer, left);
       else this.#perPeer.delete(peer);
     });
-    const budgets = typeBudgets(peer);
+    let lines = this.#budget(peer).lines; // first lines: nobody is known yet, so its peer address's
     let onLine = (line: string) => {
       clearTimeout(helloTimer);
       const msg = parseAgentLine(line);
-      if (msg?.type === 'agentHello') onLine = this.#agentHello(socket, peer, msg, budgets);
-      else if (msg?.type === 'hello') onLine = this.#gameHello(socket, peer, msg, budgets);
+      const next = msg?.type === 'agentHello' ? this.#agentHello(socket, peer, msg) : msg?.type === 'hello' ? this.#gameHello(socket, peer, msg) : null;
+      if (next) ({ lines, onLine } = next);
       else socket.destroy();
     };
-    const allowed = limiter(socket, this.#rate);
     readLines(socket, LIMITS.lineBytes, (line) => {
-      if (socket.destroyed || socket.writableEnded || !allowed()) return;
+      if (socket.destroyed || socket.writableEnded || !lines(socket)) return;
       try {
         onLine(line);
       } catch (err) {
@@ -359,13 +391,31 @@ export class Agents extends EventEmitter<AgentEvents> {
     socket.resume();
   }
 
-  #agentHello(socket: Socket, peer: string, hello: AgentHello, budgets: Budgets): (line: string) => void {
+  /** A connection's budgets by its key (`agent <id>`, `game <server id>` or a peer address), made on first use. */
+  #budget(key: string): Budget {
+    let b = this.#budgets.get(key);
+    if (!b) this.#budgets.set(key, (b = budget(key, this.#rate)));
+    return b;
+  }
+
+  /** Whether connection `key` was welcomed under `handshakeMs` ago; if not, it is being welcomed now. */
+  #tooSoon(key: string): boolean {
+    const now = Date.now();
+    if (now - (this.#welcomed.get(key) ?? -Infinity) < this.#handshakeMs) return true;
+    this.#welcomed.set(key, now);
+    return false;
+  }
+
+  #agentHello(socket: Socket, peer: string, hello: AgentHello): Next {
     const cfg = this.#byId.get(hello.agentId);
     const reason =
       protocolRefusal(hello.protocol) ??
       (cfg && cfg.address === peer && tokenMatches(cfg.token, hello.token) ? null : 'unknown agentId or bad token');
     if (!cfg || reason) return this.#reject(socket, reason ?? 'unknown agentId or bad token');
-    const conn: Conn = { socket, bye: false, silence: setTimeout(() => socket.destroy(), this.#silenceMs), pending: new Map(), budgets };
+    const key = `agent ${cfg.id}`;
+    if (this.#tooSoon(key)) return this.#reject(socket, 'reconnecting too fast');
+    const budget = this.#budget(key);
+    const conn: Conn = { socket, bye: false, silence: setTimeout(() => socket.destroy(), this.#silenceMs), pending: new Map(), budgets: connBudgets(budget) };
     const old = this.#conns.get(cfg.id);
     this.#conns.set(cfg.id, conn);
     old?.socket.destroy();
@@ -377,10 +427,10 @@ export class Agents extends EventEmitter<AgentEvents> {
       this.emit('agentBack', cfg.id);
     }
     socket.on('close', () => this.#closed(cfg, conn));
-    return (line) => this.#agentLine(cfg, conn, line);
+    return { lines: budget.lines, onLine: (line) => this.#agentLine(cfg, conn, line) };
   }
 
-  #gameHello(socket: Socket, peer: string, hello: Hello, budgets: Budgets): (line: string) => void {
+  #gameHello(socket: Socket, peer: string, hello: Hello): Next {
     const cfg = this.#cfg.agents.find((a) => a.server === hello.serverId);
     const reason =
       protocolRefusal(hello.protocol) ??
@@ -390,21 +440,28 @@ export class Agents extends EventEmitter<AgentEvents> {
           : 'its agent is not connected'
         : 'unknown serverId or bad token');
     if (reason) return this.#reject(socket, reason);
+    const key = `game ${hello.serverId}`;
+    if (this.#tooSoon(key)) return this.#reject(socket, 'reconnecting too fast');
+    const budget = this.#budget(key);
+    const budgets = connBudgets(budget);
     const handle = this.#hub.attach(socket, hello.serverId, hello.modVersion);
-    return (line) => {
-      const msg = parseModLine(line);
-      // Junk after the handshake is ignored; a message over its type's budget is dropped.
-      if (msg && msg.type !== 'hello' && budgets.allows(msg)) handle(msg);
+    return {
+      lines: budget.lines,
+      onLine: (line) => {
+        const msg = parseModLine(line);
+        // Junk after the handshake, and what an Agent never sends, is ignored; a message over its type's budget is dropped.
+        if (msg && msg.type !== 'hello' && !NOT_FROM_AGENTS.has(msg.type) && budgets.allows(msg)) handle(msg);
+      },
     };
   }
 
   /** Refuses a first line: its `reject`, then the connection is ended and destroyed within 2 s, whatever the peer does. */
-  #reject(socket: Socket, reason: string): typeof ignore {
+  #reject(socket: Socket, reason: string): Next {
     this.#send(socket, { type: 'reject', reason });
     socket.end(() => socket.destroy());
     const timer = setTimeout(() => socket.destroy(), END_MS);
     socket.once('close', () => clearTimeout(timer));
-    return ignore;
+    return { lines: () => false, onLine: ignore }; // its lines are not read on: it is ending
   }
 
   #agentLine(cfg: AgentConfig, conn: Conn, line: string): void {

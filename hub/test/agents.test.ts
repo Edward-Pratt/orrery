@@ -21,7 +21,8 @@ const SAMPLE = { ts: 1_000, cpu: 0.25, load: [1, 0.5, 0.25], memory: { used: 1, 
 
 /**
  * A hub with a minecraft server (`gtnh`, on no port here) and a factorio one (`space`) run by Agent `vm`, whose
- * address is `address` (default the tests' own, 127.0.0.1); the Agent port on an ephemeral port.
+ * address is `address` (default the tests' own, 127.0.0.1); the Agent port on an ephemeral port, welcoming a
+ * reconnect at once unless `agents.handshakeMs` says otherwise.
  */
 async function setup(t: TestContext, { address = '127.0.0.1', hub: hubOpts = {}, agents: agentOpts = {} }: { address?: string; hub?: HubOptions; agents?: AgentsOptions } = {}) {
   const hub = new ServerHub(
@@ -35,7 +36,7 @@ async function setup(t: TestContext, { address = '127.0.0.1', hub: hubOpts = {},
   const db = new Db(':memory:');
   const hosts = new Hosts(hub, db);
   hosts.add({ id: 'vm', mounts: [], ...LIMITS_VM });
-  const agents = new Agents(hub, hosts, { listen: { host: '127.0.0.1', port: 0 }, agents: [{ ...VM, address }] }, { silenceMs: 5_000, ...agentOpts });
+  const agents = new Agents(hub, hosts, { listen: { host: '127.0.0.1', port: 0 }, agents: [{ ...VM, address }] }, { silenceMs: 5_000, handshakeMs: 0, ...agentOpts });
   const port = await agents.start();
   const events: HubEvent[] = [];
   hub.on('event', (e) => events.push(e));
@@ -125,7 +126,7 @@ test('a line over the cap closes the connection, before and after the handshake 
   await new Promise((resolve) => agents.once('serviceState', resolve));
   agent.socket.write(huge);
   await agent.closed;
-  assert.equal(agents.get('vm')?.connected, false);
+  await waitFor(() => agents.get('vm')?.connected === false, 'the hub saw it close'); // its close may come after the peer's
   assert.equal(errors.mock.calls.filter((c) => /a line over 1048576 bytes, closing/.test(String(c.arguments[0]))).length, 2);
 
   await agentUp(port); // still listening, and handshakes as before
@@ -486,12 +487,12 @@ test('a chat flood at 15 lines/s for 20 s: chat over its budget is dropped, the 
   assert.equal(game.socket.destroyed, false);
   assert.equal(hub.get('space')?.online, true);
   const said = errors.mock.calls.map((c) => String(c.arguments[0]));
-  assert.deepEqual(said, ['[agents] 127.0.0.1: over the game events budget, dropped 1']); // once a minute at most
+  assert.deepEqual(said, ['[agents] game space: over the game events budget, dropped 1']); // once a minute at most
   t.mock.timers.tick(60_000);
   for (let i = 0; i < 40; i++) game.send({ type: 'join', player: `p${i}` }); // join shares the budget: 30 fit
   await readAll(sides.at(-1)!, game.socket);
   // 300 chat lines, 68 passed on: 232 dropped, the first logged at once, so the next log counts 231 and its own.
-  assert.equal(errors.mock.calls.at(-1)!.arguments[0], '[agents] 127.0.0.1: over the game events budget, dropped 232');
+  assert.equal(errors.mock.calls.at(-1)!.arguments[0], '[agents] game space: over the game events budget, dropped 232');
   assert.equal(events.filter((e) => e.type === 'join').length, 30);
 });
 
@@ -500,8 +501,8 @@ test('a flood over 20 lines/s for 10 s closes its connection', async (t) => {
   const errors = t.mock.method(console, 'error', () => {});
   const { agents, port } = await setup(t);
   const sides = hubSides(t, port);
-  const agent = await agentUp(port); // its agentHello took one of the 100
-  for (let i = 0; i < 100; i++) agent.send({ type: 'ping' }); // the last one is dropped: over since now
+  const agent = await agentUp(port); // its agentHello took from its address's budget, not the Agent connection's
+  for (let i = 0; i < 101; i++) agent.send({ type: 'ping' }); // the last one is dropped: over since now
   await readAll(sides[0]!, agent.socket);
   for (let step = 1; step <= 100; step++) {
     t.mock.timers.tick(100);
@@ -512,7 +513,7 @@ test('a flood over 20 lines/s for 10 s closes its connection', async (t) => {
   await agent.closed;
   assert.equal(agents.get('vm')?.connected, false);
   const said = errors.mock.calls.map((c) => String(c.arguments[0]));
-  assert.deepEqual(said, ['[agents] 127.0.0.1: over 20 lines/s, dropping lines (1 dropped)', '[agents] 127.0.0.1: over the line rate for 10 s, closing']);
+  assert.deepEqual(said, ['[agents] agent vm: over 20 lines/s, dropping lines (1 dropped)', '[agents] agent vm: over the line rate for 10 s, closing']);
 });
 
 test('a push identical to the last one passed on is skipped; changed ones come at most 1/s in bursts of 10', async (t) => {
@@ -583,4 +584,110 @@ test('a fifth connection at once from one address is destroyed with zero bytes r
   await waitFor(() => sides[0]!.closed, 'the hub saw it close');
   await agentUp(port);
   assert.equal(agents.get('vm')?.connected, true);
+});
+
+test('reconnecting never refills a budget: each connection goes on with what the one it replaces left', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() }); // no refill at all: what passes is one burst
+  t.mock.method(console, 'error', () => {});
+  const { agents, port, events } = await setup(t);
+  const sides = hubSides(t, port);
+  const pushed: number[] = [];
+  agents.on('serviceState', (_, m) => pushed.push(m.since));
+  const state = (since: number) => ({ type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since, result: 'success' });
+  for (let round = 0; round < 10; round++) {
+    const agent = await agentUp(port); // each a fresh Agent connection, the last one closed first
+    for (let i = 0; i < 20; i++) agent.send(state(round * 100 + i));
+    await readAll(sides.at(-1)!, agent.socket);
+    if (round < 9) {
+      agent.socket.destroy();
+      await waitFor(() => sides.at(-1)!.destroyed, 'the hub saw it close');
+    }
+  }
+  assert.equal(pushed.length, 10); // serviceState's burst, once in all
+  for (let round = 0; round < 10; round++) {
+    const game = await gameUp(port); // replaces the last one, which stays open
+    for (let i = 0; i < 200; i++) game.send(i % 2 ? { type: 'chat', player: 'Ann', message: `spam ${i}` } : { type: 'backup', ok: true, detail: `${i}` });
+    await readAll(sides.at(-1)!, game.socket);
+  }
+  // The line burst once in all (100 lines, half of them backups), and of its chat the game events' burst once.
+  assert.equal(events.filter((e) => e.type === 'backup').length, 50);
+  assert.equal(events.filter((e) => e.type === 'chat').length, 30);
+});
+
+test('a connection welcomed again under 5 s after the last of its kind is refused, and the live one stays', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { agents, hub, port, types, notices } = await setup(t, { agents: { handshakeMs: 5_000 } });
+  const agent = await agentUp(port);
+  const game = await gameUp(port);
+  for (const first of [agentHello(), gameHello()]) {
+    const again = fakeMod(port);
+    again.send(first);
+    assert.deepEqual(await again.next(), { type: 'reject', reason: 'reconnecting too fast' });
+    await again.closed;
+  }
+  assert.equal(agents.get('vm')?.connected, true);
+  assert.equal(hub.get('space')?.online, true);
+  assert.equal(agent.socket.destroyed || game.socket.destroyed, false);
+  t.mock.timers.tick(4_999);
+  const early = fakeMod(port);
+  early.send(gameHello());
+  assert.deepEqual(await early.next(), { type: 'reject', reason: 'reconnecting too fast' });
+  t.mock.timers.tick(1);
+  await agentUp(port); // 5 s on: welcomed, and it replaces the first
+  await agent.closed;
+  await gameUp(port);
+  await game.closed;
+  assert.deepEqual(types(), ['connected', 'connected']); // a replaced game connection is no crash
+  assert.deepEqual(notices(), []);
+});
+
+test("an Agent's game connection never passes on cmdLate, quest or achievement, which only a Mod sends", async (t) => {
+  const { hub, port, events, types } = await setup(t, { hub: { lateMs: 60_000 } });
+  await agentUp(port);
+  const game = await gameUp(port);
+  const late: string[][] = [];
+  const result = hub.runCommand('space', '/players', 'test', (lines) => late.push(lines));
+  const cmd = (await game.next()) as { id: string };
+  game.send({ type: 'cmdResult', id: cmd.id, output: ['Ann'] });
+  assert.deepEqual(await result, ['Ann']);
+  for (let i = 0; i < 3; i++) game.send({ type: 'cmdLate', id: cmd.id, output: ['late output'] });
+  game.send({ type: 'quest', player: 'Ann', quests: [{ name: 'Stone Age', main: true }] });
+  game.send({ type: 'achievement', player: 'Ann', achievement: 'Getting Wood' });
+  game.send({ type: 'started' });
+  game.send({ type: 'started' }); // one per connection
+  game.send({ type: 'chat', player: 'Ann', message: 'after' });
+  await until(() => types().includes('chat'));
+  assert.deepEqual(late, []);
+  assert.deepEqual(types(), ['connected', 'console', 'started', 'chat']);
+  assert.equal(events.filter((e) => e.type === 'console' && e.late).length, 0);
+});
+
+test("an Agent's Host watches the first 32 mounts its samples name, by its own limits, each one's change told at most once per 10 min", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { hosts, targets } = await setup(t);
+  const vm = hosts.get('vm')!;
+  const GB = 1024 ** 3;
+  const told = () => targets.flatMap((e) => (e.type === 'notice' ? [`${e.kind} ${'mount' in e ? e.mount : ''}`] : []));
+  const disks = (free: number, n = 32) => Array.from({ length: n }, (_, i) => ({ mount: `/m${i}`, free, total: 100 * GB }));
+  const record = (free: number, n?: number) => vm.record({ ...SAMPLE, ts: Date.now(), disks: disks(free, n) });
+  record(10 * GB); // at its diskMinFreeGB (10, from agents[].host): not low
+  record(9.9 * GB, 40); // eight more names than it watches
+  assert.equal(told().length, 32);
+  assert.ok(told().every((n, i) => n === `diskLow /m${i}`));
+  assert.deepEqual(targets.find((e) => e.type === 'notice'), { target: 'host', id: 'vm', type: 'notice', severity: 'warning', kind: 'diskLow', mount: '/m0', free: 9.9 * GB, minFreeGB: 10 });
+  record(0, 40);
+  for (let minute = 1; minute < 10; minute++) {
+    t.mock.timers.tick(60_000);
+    record(minute % 2 ? 50 * GB : 0); // flapping: each change waits out the 10 min
+  }
+  assert.equal(told().length, 32);
+  t.mock.timers.tick(60_000); // 10 min on, and ok since the last sample: told now, once per mount
+  record(50 * GB, 40);
+  assert.equal(told().length, 64);
+  assert.ok(told().slice(32).every((n, i) => n === `diskOk /m${i}`));
+  t.mock.timers.tick(10_000);
+  record(0); // low again 10 s on: waits
+  t.mock.timers.tick(10 * 60_000);
+  record(50 * GB); // and ok again before it was told: nothing to tell
+  assert.equal(told().length, 64);
 });

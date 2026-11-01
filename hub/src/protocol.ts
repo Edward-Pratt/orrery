@@ -314,6 +314,9 @@ const REPLY_DATA: { [K in keyof AgentReplyData]: Check } = {
   saveUploadEnd: object({ name: str() }),
 };
 
+/** The requests whose ok `reply` carries `data`: exactly those with a schema above, so the two can never drift. */
+export const REPLY_WITH_DATA: ReadonlySet<string> = new Set(Object.keys(REPLY_DATA));
+
 /** One line against `schemas`: a new object of only the schema's fields, or null. */
 function parse(line: string, schemas: Record<string, Record<string, Check>>): Record<string, unknown> | null {
   let msg: unknown;

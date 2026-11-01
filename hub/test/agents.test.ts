@@ -8,7 +8,7 @@ import { Db } from '../src/db.ts';
 import { Hosts } from '../src/host.ts';
 import { LiveFeed } from '../src/live.ts';
 import { PlaytimeTracker } from '../src/playtime.ts';
-import { LIMITS } from '../src/protocol.ts';
+import { LIMITS, REPLY_WITH_DATA } from '../src/protocol.ts';
 import { ServerHub, type HubEvent, type HubOptions, type TargetEvent } from '../src/servers.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
 import type { GameSettingsFields } from '../src/types.ts';
@@ -454,6 +454,17 @@ test('requests carry fresh ids, answer with checked data, and fail on refusal, b
   await agent.next();
   agent.socket.destroy();
   await assert.rejects(dropped, /disconnected/);
+});
+
+test("a saveUploadEnd's reply gives the stored name: every request with a reply schema has its data read", async (t) => {
+  const { agents, port } = await setup(t);
+  const agent = await agentUp(port);
+  const end = agents.request('vm', { type: 'saveUploadEnd', upload: 'c'.repeat(32) });
+  const asked = (await agent.next()) as { id: string };
+  agent.send({ type: 'reply', id: asked.id, ok: true, data: { name: 'uploaded-20300101T000000Z-x.zip' } });
+  assert.deepEqual(await end, { name: 'uploaded-20300101T000000Z-x.zip' });
+  for (const type of ['journal', 'logs', 'log', 'settingsSet', 'saveUploadEnd']) assert.ok(REPLY_WITH_DATA.has(type), type);
+  assert.ok(!REPLY_WITH_DATA.has('saveChunk'), 'a request with no data answers undefined');
 });
 
 test("a request's own timeout outlives the default one: a long restore is not reported failed while it goes on", async (t) => {

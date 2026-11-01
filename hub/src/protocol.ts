@@ -91,8 +91,9 @@ export const LIMITS = {
  * key's lowest and highest value; `control`, what a name or a description may not hold (C0, DEL, C1 and the line and
  * paragraph separators, so each is one printable line; a name is also trimmed and 1 to `LIMITS.serverName` long, a
  * description at most `LIMITS.text`); `password`, a game password (printable ASCII without a space, 1 to 64);
- * `admin`, an admin's name; `key`, a settings key as `pending`, `extra` and `applied` name one. The rules across
- * fields (no user verification without a game password, an admin named once whatever the case) are the modules'.
+ * `admin`, an admin's name; `key`, a settings key as `pending`, `extra` and `applied` name one; `nameBytes`, the most
+ * UTF-8 bytes of a name that changes (a longer one already in the file is read as it is). The rules across fields (no
+ * user verification without a game password, an admin named once whatever the case, `nameBytes`) are the modules'.
  */
 export const GAME_SETTINGS = {
   ranges: {
@@ -105,6 +106,8 @@ export const GAME_SETTINGS = {
   password: /^[\x21-\x7e]{1,64}$/,
   admin: /^[A-Za-z0-9_.-]{1,60}$/,
   key: /^[a-z_]{1,64}$/,
+  /** A new name's most UTF-8 bytes: Factorio 2.1.24 keeps no more, from the file and from `/config set`. */
+  nameBytes: 50,
 } as const;
 
 /** A failed check. */

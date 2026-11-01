@@ -1,6 +1,7 @@
 // The start gate (docs/notes/factorio-world-settings.md): the server's starts as the Agent judges them. A start is
 // good once RCON answers within 300 s of the unit becoming active; armed by a write, the gate watches the next start
-// and calls it failed when the unit fails or auto-restarts before RCON answered.
+// and calls it failed when the unit fails or auto-restarts before RCON answered. A start RCON answers in later than
+// that is only `late`: not judged good, but not a failed start either.
 import { EventEmitter } from 'node:events';
 import type { UnitState } from './service.ts';
 
@@ -29,15 +30,18 @@ export type GateOptions = {
  *
  * - `start`: the unit became active (or its change time moved while active: a restart between two readings), with
  *   that change time. The first reading counts, so an agent that starts while the server runs sees its run too.
- * - `good`: RCON answered for the first time in that run, within `GOOD_WITHIN_MS` of its change time (a run the agent
- *   came to late, past that, is never judged); `gated` says whether it was the start the gate watched, which disarms it.
+ * - `good`: RCON answered for the first time in that run, within `GOOD_WITHIN_MS` of its change time; `gated` says
+ *   whether it was the start the gate watched, which disarms it.
+ * - `late`: RCON answered for the first time in that run, past `GOOD_WITHIN_MS` (a run the agent came to late, or a
+ *   slow load): never judged good. When it was the start the gate watched, it disarms it all the same (`gated`): the
+ *   server runs, so a crash of that run later is not a failed start.
  * - `failed`: armed, the unit failed or auto-restarts after a run that didn't end in success, its change time after the
  *   arming, and not the end of a run that began before the arming and that RCON answered in (that run crashing is not
  *   the watched start: the gate stays armed for the restart). It disarms.
  *
  * `arm` at each write; the caller keeps `armedAt` across restarts.
  */
-export class StartGate extends EventEmitter<{ start: [number]; good: [number, boolean]; failed: [UnitState] }> {
+export class StartGate extends EventEmitter<{ start: [number]; good: [number, boolean]; late: [number, boolean]; failed: [UnitState] }> {
   #armedAt: number | null;
   #goodWithinMs: number;
   #now: () => number;
@@ -85,9 +89,8 @@ export class StartGate extends EventEmitter<{ start: [number]; good: [number, bo
     const run = this.#run;
     if (!run || run.answered) return;
     run.answered = true;
-    if (this.#now() - run.since > this.#goodWithinMs) return;
     const gated = this.#armedAt !== null && run.since + SECOND > this.#armedAt;
     if (gated) this.#armedAt = null;
-    this.emit('good', run.since, gated);
+    this.emit(this.#now() - run.since > this.#goodWithinMs ? 'late' : 'good', run.since, gated);
   }
 }

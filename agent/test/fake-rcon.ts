@@ -75,27 +75,40 @@ export const savedAs = (name: string): string => `${name.replace(/\.[^.]*$/, '')
 const ALLOW_WORDS: Record<string, string> = { true: 'Yes', false: 'No', 'admins-only': 'Admins only' };
 const minutes = (v: string) => `${v} minute${v === '1' ? '' : 's'}`;
 
+/** What the running server has, for `factorioConfig`'s "already" replies (unset: never already). */
+export type RunningConfig = { verification?: boolean; description?: string };
+
 /**
  * Factorio 2.1.24's answers to the built-ins the game settings use, as seen on a real headless server: `/config set
- * <option> [value]` (each option's change line; no value clears the description or removes the password), and
- * `/promote <name>` and `/demote <name>`, which answer nothing and rewrite `adminlist` at once, the name lowercased.
- * Undefined for any other command.
+ * <option> [value]` (each option's change line; no value, or spaces alone, clears the description, which is trimmed,
+ * and no value removes the password), and `/promote <name>` and `/demote <name>`, which answer nothing and rewrite
+ * `adminlist` at once, the name lowercased. With `running`, what the server has: verification set to what it is
+ * answers "User verification is already enabled." (or disabled), an empty description cleared again "The server
+ * description is already empty.", each kept in `running`. Undefined for any other command.
  */
-export function factorioConfig(command: string, adminlist: string): string | undefined {
+export function factorioConfig(command: string, adminlist: string, running: RunningConfig = {}): string | undefined {
   const set = /^\/config set ([a-z-]+)(?: (.*))?$/.exec(command);
   if (set) {
     const [, option, v] = set as unknown as [string, string, string | undefined];
     switch (option) {
       case 'name':
         return `Server name changed to: ${v}`;
-      case 'description':
-        return v === undefined ? 'Server description cleared.' : `Server description set to: ${v}`;
+      case 'description': {
+        const d = (v ?? '').trim();
+        const already = d === '' && running.description === '';
+        if (running.description !== undefined) running.description = d;
+        return already ? 'The server description is already empty.' : d === '' ? 'Server description cleared.' : `Server description set to: ${d}`;
+      }
       case 'max-players':
         return v === '0' ? 'Player limit removed.' : `Maximum number of players changed to ${v}.`;
       case 'password':
         return v === undefined ? 'Server password removed.' : 'Server password changed.';
-      case 'require-user-verification':
-        return `User verification has been ${v === 'true' ? 'enabled' : 'disabled'}.`;
+      case 'require-user-verification': {
+        const on = v === 'true';
+        const already = running.verification === on;
+        if (running.verification !== undefined) running.verification = on;
+        return `User verification ${already ? 'is already' : 'has been'} ${on ? 'enabled' : 'disabled'}.`;
+      }
       case 'autosave-interval':
         return v === '0' ? 'Autosave is now disabled.' : `Autosave interval changed to ${minutes(v!)}.`;
       case 'afk-auto-kick':

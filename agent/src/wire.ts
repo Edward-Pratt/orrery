@@ -35,7 +35,8 @@ export const LIMITS = {
 
 /**
  * The hub's rules for one field of a factorio server's game settings (`GAME_SETTINGS` in hub/src/protocol.ts): each
- * integer key's range, the characters a name or description may not hold, a game password, an admin's name, a key.
+ * integer key's range, the characters a name or description may not hold, a game password, an admin's name, a key,
+ * and a changed name's most bytes.
  */
 export const GAME_SETTINGS = {
   ranges: {
@@ -48,6 +49,8 @@ export const GAME_SETTINGS = {
   password: /^[\x21-\x7e]{1,64}$/,
   admin: /^[A-Za-z0-9_.-]{1,60}$/,
   key: /^[a-z_]{1,64}$/,
+  /** A new name's most UTF-8 bytes: Factorio 2.1.24 keeps no more, from the file and from `/config set`. */
+  nameBytes: 50,
 } as const;
 
 /** Everything the agent sends on either connection. */

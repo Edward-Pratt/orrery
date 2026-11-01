@@ -36,7 +36,10 @@ type Key = (typeof KEYS)[number];
 
 /**
  * Factorio's own values for the keys a file may leave out (data/server-settings.example.json; setup's file has no
- * `max_players`, for one). `name` and `description` have none: Factorio refuses to host without them.
+ * `max_players`, for one). Checked on 2.1.24 (2026-11-01): a server started from setup's file answers `/config get`
+ * with these for `max-players`, `afk-auto-kick`, `auto-pause-when-players-connect`, `only-admins-can-pause`,
+ * `autosave-interval`, `allow-commands` and `require-user-verification` (`auto_pause` and `autosave_slots` have no
+ * `/config get`, and setup's file sets both). `name` and `description` have none: Factorio refuses to host without them.
  */
 const DEFAULTS: Partial<GameSettingsFields> = {
   max_players: 0,
@@ -57,7 +60,7 @@ export const RESTART_ONLY: readonly Key[] = ['auto_pause', 'autosave_slots'];
 const WRITTEN = new Set<string>([...KEYS, 'game_password', 'visibility', 'non_blocking_saving']);
 
 /** Factorio 2.1.24 keeps only the first 50 bytes (UTF-8) of a server's name, from the file and from `/config set`. */
-export const NAME_BYTES = 50;
+export const NAME_BYTES = GAME_SETTINGS.nameBytes;
 
 const COMMENT =
   "Written by the orrery Agent from the dashboard's Settings tab: orrery's own keys only (any other is dropped at the next save). A private server: not listed, no factorio.com username or token.";
@@ -157,8 +160,13 @@ export function renderSettings(m: Model): string {
 const minutes = (n: number) => `${n} minute${n === 1 ? '' : 's'}`;
 const ALLOW_WORDS = { true: 'Yes', false: 'No', 'admins-only': 'Admins only' } as const;
 
-/** A key Factorio changes live, the command for its new value and the reply that says it changed (seen on 2.1.24). */
-type Live = { key: Exclude<Key, 'auto_pause' | 'autosave_slots'> | 'game_password'; command: (m: Model) => [command: string, reply: string] };
+/**
+ * A key Factorio changes live, the command for its new value and the replies that say the running server has it (seen
+ * on 2.1.24): its change line, and for verification and an empty description the line saying it already had it.
+ */
+type Live = { key: Exclude<Key, 'auto_pause' | 'autosave_slots'> | 'game_password'; command: (m: Model) => [command: string, replies: string[]] };
+/** The description as Factorio takes it from `/config set`: trimmed (seen on 2.1.24: `  a b ` is set as `a b`, spaces alone clear it). */
+const liveDescription = (m: Model) => m.fields.description.trim();
 
 /**
  * The live options, in the order they are sent: the password before verification, so turning the account check off
@@ -168,49 +176,52 @@ type Live = { key: Exclude<Key, 'auto_pause' | 'autosave_slots'> | 'game_passwor
 export const LIVE: readonly Live[] = [
   {
     key: 'game_password',
-    command: (m) => (m.password === '' ? ['/config set password', 'Server password removed.'] : [`/config set password ${m.password}`, 'Server password changed.']),
+    command: (m) => (m.password === '' ? ['/config set password', ['Server password removed.']] : [`/config set password ${m.password}`, ['Server password changed.']]),
   },
   {
     key: 'require_user_verification',
-    command: (m) => [`/config set require-user-verification ${m.fields.require_user_verification}`, `User verification has been ${m.fields.require_user_verification ? 'enabled' : 'disabled'}.`],
+    command: (m) => {
+      const on = m.fields.require_user_verification;
+      return [`/config set require-user-verification ${on}`, [`User verification has been ${on ? 'enabled' : 'disabled'}.`, `User verification is already ${on ? 'enabled' : 'disabled'}.`]];
+    },
   },
-  { key: 'name', command: (m) => [`/config set name ${m.fields.name}`, `Server name changed to: ${m.fields.name}`] },
+  { key: 'name', command: (m) => [`/config set name ${m.fields.name}`, [`Server name changed to: ${m.fields.name}`]] },
   {
     key: 'description',
     command: (m) =>
-      m.fields.description === ''
-        ? ['/config set description', 'Server description cleared.']
-        : [`/config set description ${m.fields.description}`, `Server description set to: ${m.fields.description}`],
+      liveDescription(m) === ''
+        ? ['/config set description', ['Server description cleared.', 'The server description is already empty.']]
+        : [`/config set description ${liveDescription(m)}`, [`Server description set to: ${liveDescription(m)}`]],
   },
   {
     key: 'max_players',
-    command: (m) => [`/config set max-players ${m.fields.max_players}`, m.fields.max_players === 0 ? 'Player limit removed.' : `Maximum number of players changed to ${m.fields.max_players}.`],
+    command: (m) => [`/config set max-players ${m.fields.max_players}`, [m.fields.max_players === 0 ? 'Player limit removed.' : `Maximum number of players changed to ${m.fields.max_players}.`]],
   },
   {
     key: 'autosave_interval',
     command: (m) => [
       `/config set autosave-interval ${m.fields.autosave_interval}`,
-      m.fields.autosave_interval === 0 ? 'Autosave is now disabled.' : `Autosave interval changed to ${minutes(m.fields.autosave_interval)}.`,
+      [m.fields.autosave_interval === 0 ? 'Autosave is now disabled.' : `Autosave interval changed to ${minutes(m.fields.autosave_interval)}.`],
     ],
   },
   {
     key: 'afk_autokick_interval',
     command: (m) => [
       `/config set afk-auto-kick ${m.fields.afk_autokick_interval}`,
-      m.fields.afk_autokick_interval === 0 ? 'AFK auto kick is now disabled.' : `AFK auto-kick changed to ${minutes(m.fields.afk_autokick_interval)}.`,
+      [m.fields.afk_autokick_interval === 0 ? 'AFK auto kick is now disabled.' : `AFK auto-kick changed to ${minutes(m.fields.afk_autokick_interval)}.`],
     ],
   },
   {
     key: 'auto_pause_when_players_connect',
-    command: (m) => [`/config set auto-pause-when-players-connect ${m.fields.auto_pause_when_players_connect}`, `Auto pause when players connect set to: ${m.fields.auto_pause_when_players_connect}.`],
+    command: (m) => [`/config set auto-pause-when-players-connect ${m.fields.auto_pause_when_players_connect}`, [`Auto pause when players connect set to: ${m.fields.auto_pause_when_players_connect}.`]],
   },
   {
     key: 'only_admins_can_pause_the_game',
-    command: (m) => [`/config set only-admins-can-pause ${m.fields.only_admins_can_pause_the_game}`, `Only admins can pause set to: ${m.fields.only_admins_can_pause_the_game}.`],
+    command: (m) => [`/config set only-admins-can-pause ${m.fields.only_admins_can_pause_the_game}`, [`Only admins can pause set to: ${m.fields.only_admins_can_pause_the_game}.`]],
   },
   {
     key: 'allow_commands',
-    command: (m) => [`/config set allow-commands ${m.fields.allow_commands}`, `Allow Lua commands set to ${ALLOW_WORDS[m.fields.allow_commands]}.`],
+    command: (m) => [`/config set allow-commands ${m.fields.allow_commands}`, [`Allow Lua commands set to ${ALLOW_WORDS[m.fields.allow_commands]}.`]],
   },
 ];
 
@@ -335,7 +346,7 @@ export type GameSettingsOptions = {
   push: (report: GameSettingsReport) => void;
   now?: () => number;
   goodWithinMs?: number;
-  /** How long a write may spend on live commands (the hub waits 30 s for the reply). */
+  /** How long a write may spend on live commands (the hub waits 60 s for the reply: `SETTINGS_SET_MS`). */
   liveMs?: number;
   /** How long a `/promote` or `/demote` has to show in the adminlist, polled every `pollMs`. */
   adminWaitMs?: number;
@@ -352,7 +363,8 @@ export type SettingsAnswer = { applied: string[]; pending: string[] };
  * live option (and each one a write before couldn't apply) as `/config set`, counted applied only on Factorio's own
  * reply for it, and the admins as `/promote` and `/demote`, counted applied once the adminlist shows them; a failure,
  * or 20 s spent, leaves the rest pending. With the unit stopped the adminlist is written instead. At each start
- * (`StartGate`'s `start`) the file read then is `startedWith`; a good start makes it `lastGood` when fully readable;
+ * (`StartGate`'s `start`) the file read then is `startedWith`; a good start makes it `lastGood` when fully readable
+ * (a late one too, while there is none);
  * a failed start the gate watched puts `lastGood` back and reports `rolledBack`, until the next write.
  */
 export class GameSettings {
@@ -367,6 +379,8 @@ export class GameSettings {
   /** The read of the file a start began with: a good start waits for it. */
   #starting: Promise<void> = Promise.resolve();
   #stopped = false;
+  /** `settingsSet`s running or queued. */
+  #sets = 0;
 
   constructor(o: GameSettingsOptions) {
     this.#o = { now: Date.now, liveMs: 20_000, adminWaitMs: 2000, pollMs: 100, ...o };
@@ -375,6 +389,7 @@ export class GameSettings {
     this.#gate = new StartGate({ armedAt: this.#state.armedAt, goodWithinMs: o.goodWithinMs, now: this.#o.now });
     this.#gate.on('start', (since) => (this.#starting = this.#started(since)));
     this.#gate.on('good', (since, gated) => void this.#starting.then(() => this.#good(since, gated)));
+    this.#gate.on('late', (since, gated) => void this.#starting.then(() => this.#late(since, gated)));
     this.#gate.on('failed', (s) => void this.#failed(s));
   }
 
@@ -440,9 +455,15 @@ export class GameSettings {
 
   /** A `settingsSet`, after any running one. */
   set(req: Request<'settingsSet'>): Promise<SettingsAnswer> {
-    const run = this.#queue.then(() => this.#set(req));
+    this.#sets++;
+    const run = this.#queue.then(() => this.#set(req)).finally(() => this.#sets--);
     this.#queue = run.catch(() => {});
     return run;
+  }
+
+  /** Whether a `settingsSet` runs or waits: a game update, a restore and a deploy are refused meanwhile. */
+  get busy(): boolean {
+    return this.#sets > 0;
   }
 
   async #set(req: Request<'settingsSet'>): Promise<SettingsAnswer> {
@@ -502,9 +523,9 @@ export class GameSettings {
     for (const live of LIVE) {
       if (!want.has(live.key)) continue;
       if (answering && performance.now() < deadline) {
-        const [command, reply] = live.command(after);
+        const [command, replies] = live.command(after);
         try {
-          if ((await this.#o.run(command)) === reply) {
+          if (replies.includes(await this.#o.run(command))) {
             applied.push(live.key);
             continue;
           }
@@ -562,10 +583,29 @@ export class GameSettings {
   }
 
   #good(since: number, gated: boolean): void {
-    const started = this.#state.startedWith;
-    if (started?.since === since && started.model && passwordOk(started.model.password)) this.#state.lastGood = started.model;
+    if (this.#startedOk(since)) this.#state.lastGood = this.#state.startedWith!.model;
     if (gated) console.log('[settings] the server started with the settings written last');
     this.#persist();
+  }
+
+  /**
+   * RCON first answered past `GOOD_WITHIN_MS` (a run the agent came to late, as after its own deploy onto a server that
+   * has run for a while, or a slow load): never a good start, but with no `lastGood` yet the settings that run started
+   * with become it, so the first write after such a deploy has something to put back. A later good start replaces it.
+   */
+  #late(since: number, gated: boolean): void {
+    if (this.#state.lastGood === null && this.#startedOk(since)) {
+      this.#state.lastGood = this.#state.startedWith!.model;
+      console.log('[settings] no good start seen yet: the settings the running server started with are the last good ones');
+    }
+    if (gated) console.log('[settings] the server started with the settings written last, after more than 300 s');
+    this.#persist();
+  }
+
+  /** Whether the run with this change time started with settings the Agent may put back: fully readable, a password by its rule. */
+  #startedOk(since: number): boolean {
+    const started = this.#state.startedWith;
+    return started?.since === since && started.model !== null && passwordOk(started.model.password);
   }
 
   async #failed(s: UnitState): Promise<void> {

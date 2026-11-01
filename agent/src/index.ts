@@ -26,6 +26,8 @@ function agentVersion(): string {
 }
 
 /** The config file; setup's `image.json` sits beside it. */
+/** Why a game update, a restore or a deploy is refused while a `settingsSet` runs or waits. */
+const SETTINGS_BUSY = 'a game settings save is running';
 const configPath = (): string => process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH;
 const load = (): Config => loadConfig(configPath(), process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
 
@@ -64,9 +66,10 @@ function run(): void {
       logs: () => logs.list(),
       log: ({ name }) => logs.log(name),
       journal: ({ unit }) => logs.journal(unit),
-      // Neither during a game update nor during a deploy, whose restart of the agent would cut it short.
+      // Neither during a game update or a game settings save nor during a deploy, whose restart of the agent would cut it short.
       restore: async ({ name }) => {
         if (updates.busy) throw new Error('a game update is running');
+        if (settings.busy) throw new Error(SETTINGS_BUSY);
         await deploys.idle();
         return saves.restore(name);
       },
@@ -90,9 +93,20 @@ function run(): void {
     gameUp: () => hub.gameUp,
     connected: () => hub.connected,
     installed: () => hub.latestInstalled,
-    idle: () => deploys.idle(),
+    // Not during a game settings save, which writes the config folder and runs live commands, nor a deploy.
+    idle: async () => {
+      if (settings.busy) throw new Error(SETTINGS_BUSY);
+      await deploys.idle();
+    },
   });
-  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.deliver(msg) });
+  const deploys: Deploys = new Deploys({
+    root: config.root,
+    state: config.state,
+    version,
+    // A deploy restarts the agent: neither during a game update nor during a game settings save, which it would cut short.
+    busy: () => (updates.busy ? 'a game update is running' : settings.busy ? SETTINGS_BUSY : null),
+    send: (msg) => hub.deliver(msg),
+  });
   const settings: GameSettings = new GameSettings({
     config: join(data, 'config'),
     state: config.state,

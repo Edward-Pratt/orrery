@@ -61,7 +61,7 @@ async function setup(t: TestContext, options: Partial<DeploysOptions> = {}) {
         root,
         state,
         version: 'agent-v1.2.2',
-        busy: () => false,
+        busy: () => null,
         send: async (msg) => w.connected && (w.sent.push(msg), w.written),
         run: async (args) => {
           if (args[0] === 'list-units') return (w.lists.push(args), w.units);
@@ -109,7 +109,7 @@ test('deploy: a well-formed tag only, nothing else from the request in the argv;
 
 test('deploy is refused while a game update runs, and systemctl never runs', async (t) => {
   let busy = true;
-  const w = await setup(t, { busy: () => busy });
+  const w = await setup(t, { busy: () => (busy ? 'a game update is running' : null) });
   await assert.rejects(w.deploys.deploy('agent-v1.2.3'), /a game update is running/);
   assert.deepEqual(w.calls, []);
   busy = false;
@@ -118,7 +118,7 @@ test('deploy is refused while a game update runs, and systemctl never runs', asy
 
   // A game update that began while the deploy units were being listed (it set busy, then waits on idle itself).
   const racing = await setup(t, {
-    busy: () => busy,
+    busy: () => (busy ? 'a game update is running' : null),
     run: async (args) => {
       if (args[0] === 'list-units') busy = true;
       else racing.calls.push(args);
@@ -170,7 +170,7 @@ test('the hub\'s deploy through HubClient: systemctl through execFile (no shell)
   const systemctl = await fakeSystemctl(t);
   const hub = await fakeHub();
   const root = await mkdtemp(join(tmpdir(), 'orrery-deploy-'));
-  const deploys = new Deploys({ root, state: join(root, 'state'), version: 'agent-v1.2.2', busy: () => false, send: async () => false });
+  const deploys = new Deploys({ root, state: join(root, 'state'), version: 'agent-v1.2.2', busy: () => null, send: async () => false });
   const client = new HubClient({
     config: { id: 'factorio-vm', hub: { host: '127.0.0.1', port: hub.port }, server: SERVER, token: TOKEN, root, state: join(root, 'state') },
     version: 'agent-v1.2.2',
@@ -336,7 +336,7 @@ test('polled: an outcome written after the agent connected goes out on its own; 
     root,
     state: join(root, 'state'),
     version: 'agent-v1.2.3',
-    busy: () => false,
+    busy: () => null,
     send: (msg) => client.deliver(msg),
     run: async () => `ActiveState=${active}\n`,
     pollMs: 10,

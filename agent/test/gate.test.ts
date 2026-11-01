@@ -13,6 +13,7 @@ function gate(armedAt: number | null = null) {
   const seen: string[] = [];
   g.on('start', (since) => seen.push(`start ${since - T0}`));
   g.on('good', (since, gated) => seen.push(`good ${since - T0}${gated ? ' gated' : ''}`));
+  g.on('late', (since, gated) => seen.push(`late ${since - T0}${gated ? ' gated' : ''}`));
   g.on('failed', (s) => seen.push(`failed ${s.active} ${s.sub}`));
   return { g, seen, at: (ms: number) => (now = T0 + ms) };
 }
@@ -27,7 +28,7 @@ test('failedStart: failed, or an auto-restart after a run that did not succeed',
   assert.equal(failedStart(state('deactivating', 'stop-post', 0, 'exit-code')), false);
 });
 
-test('every start is reported; one RCON answers within 300 s of is good, once; one the agent came to late is never judged', () => {
+test('every start is reported; one RCON answers within 300 s of is good, once; one the agent came to late is only late', () => {
   const { g, seen, at } = gate();
   g.service(state('active', 'running', T0));
   g.service(state('active', 'running', T0)); // the same run
@@ -39,12 +40,13 @@ test('every start is reported; one RCON answers within 300 s of is good, once; o
   at(40_000);
   g.service(state('active', 'running', T0 + 40_000));
   at(40_000 + GOOD_WITHIN_MS + 1);
-  g.rconUp(); // too late: the start isn't judged
+  g.rconUp(); // too late: the start isn't judged good
+  g.rconUp();
   // A restart between two readings: the change time moved while active.
   g.service(state('active', 'running', T0 + 400_000));
   at(400_000 + GOOD_WITHIN_MS);
   g.rconUp();
-  assert.deepEqual(seen, ['start 0', 'good 0', 'start 40000', 'start 400000', 'good 400000']);
+  assert.deepEqual(seen, ['start 0', 'good 0', 'start 40000', 'late 40000', 'start 400000', 'good 400000']);
 });
 
 test('armed: the next start RCON answers in disarms it; a failed one is reported once, then it is disarmed', () => {
@@ -98,4 +100,17 @@ test('the arming time is kept across restarts: a new gate armed then watches the
   const { g, seen } = gate(T0 - 30_000);
   g.service(state('activating', 'auto-restart', T0 - 10_000, 'exit-code'));
   assert.deepEqual(seen, ['failed activating auto-restart']);
+});
+
+test('armed: a start RCON first answers in past 300 s is late, not good, and disarms it: that run crashing later is no failed start', () => {
+  const { g, seen, at } = gate();
+  at(5_000);
+  g.arm();
+  g.service(state('active', 'running', T0 + 6_000));
+  at(6_000 + GOOD_WITHIN_MS + 1); // a big map on a slow Host
+  g.rconUp();
+  assert.equal(g.armedAt, null);
+  at(3_600_000);
+  g.service(state('activating', 'auto-restart', T0 + 3_600_000, 'exit-code')); // hours later
+  assert.deepEqual(seen, ['start 6000', 'late 6000 gated']);
 });

@@ -9,6 +9,7 @@ import { parseAgentLine } from '../../hub/src/protocol.ts';
 import type { GameSettingsFields, GameSettingsReport } from '../../hub/src/types.ts';
 import { RconSession } from '../src/rcon.ts';
 import type { UnitState } from '../src/service.ts';
+import { GOOD_WITHIN_MS as GOOD } from '../src/gate.ts';
 import { ADMINS_FILE, GameSettings, SETTINGS_FILE, parseSettings, renderSettings } from '../src/settings.ts';
 import { StatusPoller } from '../src/status.ts';
 import { readAgentLine, type Request } from '../src/wire.ts';
@@ -460,6 +461,103 @@ test('a good start after a write makes the new file the last good one; with none
   const r = await eventually(() => b.pushes.find((p) => p.rolledBack), 2000, 'the failure reported');
   assert.match(r.rolledBack!, /no earlier start had readable settings to put back \(no error line in factorio-current\.log\)/);
   assert.equal(fileOf(bad).name, 'Fresh', 'nothing written');
+});
+
+test('an agent come to a server that has run for long (its own deploy): with no last good start, what that run started with becomes it, and a failed start after the next write puts it back', async (t) => {
+  const h = await host(t);
+  const a = agent(h, { unit: ACTIVE });
+  a.setUnit(ACTIVE); // running since T0: the agent's first reading
+  a.at(GOOD + 60_000); // RCON answers only now, past 300 s of that change time
+  a.s.rconUp();
+  await eventually(() => stateOf(h)?.lastGood?.fields.name === 'orrery Factorio', 2000, 'the running file as the last good one');
+  // The next write, then a start that fails before RCON answers: the file the server ran with goes back.
+  await a.s.set(request({ name: 'Broken' }));
+  a.setUnit(unitState('inactive', 'dead', T0 + GOOD + 70_000));
+  a.setUnit(unitState('failed', 'failed', T0 + GOOD + 80_000, 'exit-code'));
+  await eventually(() => a.pushes.some((p) => p.rolledBack), 2000, 'the rollback');
+  assert.equal(fileOf(h).name, 'orrery Factorio');
+
+  // A last good start already kept is not replaced by a late answer.
+  const h2 = await host(t);
+  const b = agent(h2, { unit: STOPPED });
+  b.setUnit(STOPPED);
+  b.setUnit(unitState('active', 'running', T0 + 1_000));
+  b.at(2_000);
+  b.s.rconUp();
+  await eventually(() => stateOf(h2)?.lastGood?.fields.name === 'orrery Factorio', 2000, 'a good start');
+  await writeFile(join(h2.config, SETTINGS_FILE), JSON.stringify({ ...SETUP, name: 'Hand edited' }));
+  b.setUnit(unitState('inactive', 'dead', T0 + 3_000));
+  b.setUnit(unitState('active', 'running', T0 + 4_000));
+  b.at(4_000 + GOOD + 1);
+  b.s.rconUp();
+  await b.s.saved;
+  await new Promise((r) => setTimeout(r, 30));
+  await b.s.saved;
+  assert.equal(stateOf(h2)!.lastGood.fields.name, 'orrery Factorio');
+});
+
+test('a slow start the gate watched (RCON first answers past 300 s) is no failed start: that run crashing later puts nothing back', async (t) => {
+  const h = await host(t);
+  const a = agent(h, { unit: STOPPED });
+  a.setUnit(STOPPED);
+  await a.s.set(request({ name: 'Slow' }));
+  a.setUnit(unitState('active', 'running', T0 + 40_000));
+  a.at(40_000 + GOOD + 1);
+  a.s.rconUp();
+  await eventually(() => stateOf(h)?.armedAt === null, 2000, 'disarmed');
+  a.setUnit(unitState('activating', 'auto-restart', T0 + 3_600_000, 'exit-code')); // hours later
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(fileOf(h).name, 'Slow');
+  assert.ok(a.pushes.every((p) => p.rolledBack === null));
+});
+
+test('busy while a settingsSet runs or waits: a game update, a restore and a deploy are refused meanwhile', async (t) => {
+  const h = await host(t);
+  const waiting: (() => void)[] = [];
+  const a = agent(h, { ready: () => new Promise<void>((r) => waiting.push(r)) });
+  assert.equal(a.s.busy, false);
+  const first = a.s.set(request({ name: 'One' }));
+  const second = a.s.set(request({ name: 'Two' }));
+  assert.equal(a.s.busy, true, 'at once, before any await');
+  await eventually(() => waiting.length === 1);
+  waiting[0]!();
+  await first;
+  assert.equal(a.s.busy, true, 'the second still waits');
+  await eventually(() => waiting.length === 2);
+  waiting[1]!();
+  await second;
+  assert.equal(a.s.busy, false);
+  // A refused one ends it too.
+  const refused = a.s.set(request({ require_user_verification: false }, { game_password: null }));
+  await eventually(() => waiting.length === 3);
+  waiting[2]!();
+  await assert.rejects(refused);
+  assert.equal(a.s.busy, false);
+});
+
+test('live: an already empty description and verification already as asked are applied; the description goes trimmed, as Factorio takes it', async (t) => {
+  const h = await host(t);
+  const running = { verification: true, description: '' };
+  const a = agent(h, { reply: (c) => factorioConfig(c, join(h.config, ADMINS_FILE), running) });
+  a.setUnit(ACTIVE);
+  await eventually(() => a.pushes.length > 0);
+  // Spaces alone: Factorio clears the description, which it already had empty.
+  assert.deepEqual(await a.s.set(request({ description: '   ' }, { admins: ['alice'] })), { applied: ['description'], pending: [] });
+  assert.deepEqual(a.commands, ['/config set description']);
+  a.commands.length = 0;
+  assert.deepEqual(await a.s.set(request({ description: '  Our base  ' }, { admins: ['alice'] })), { applied: ['description'], pending: [] });
+  assert.deepEqual(a.commands, ['/config set description Our base']);
+  // A write before that couldn't apply verification, which the running server has all the same: applied on "already".
+  const h2 = await host(t);
+  let fail = true;
+  const b = agent(h2, { reply: (c) => (fail && c.includes('require-user-verification') ? new Error('RCON command timed out after 4000 ms') : factorioConfig(c, join(h2.config, ADMINS_FILE), running)) });
+  b.setUnit(ACTIVE);
+  assert.deepEqual(await b.s.set(request({ require_user_verification: false }, { game_password: 'pass-word', admins: ['alice'] })), { applied: ['game_password'], pending: ['require_user_verification'] });
+  running.verification = false; // the command took after all
+  fail = false;
+  b.commands.length = 0;
+  assert.deepEqual(await b.s.set(request({ require_user_verification: false }, { admins: ['alice'] })), { applied: ['require_user_verification'], pending: [] });
+  assert.deepEqual(b.commands, ['/config set require-user-verification false']);
 });
 
 test('a malformed file: no settings and why; the next save writes a fresh one from the fields (the password only if given)', async (t) => {

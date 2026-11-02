@@ -1,3 +1,8 @@
+// `LiveEvents.all$`: `GET /api/events` as an observable (fetch, not EventSource: a reconnect sends Last-Event-ID and
+// skips ids already seen; `cache: 'no-store'`, since the browser's cache lock would hold a second stream to the same
+// URL behind the first forever). Ends on 401. `ofServer(id)` keeps one server's events (not a same-named check's),
+// `ofTarget(target)` the host's, services' or checks'.
+
 import { inject, Injectable, InjectionToken } from '@angular/core';
 import type { HubEvent, LiveEvent, Target, TargetEvent } from '@hub/api';
 import { Observable } from 'rxjs';

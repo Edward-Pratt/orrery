@@ -1,4 +1,13 @@
 // The log files the agent serves to the hub (`logs`, `log`, `journal`), and its own `agent.log`.
+//
+// `Logs`, the logs the hub may read, by fixed name only (a name from the hub is looked up in the list, never joined
+// into a path): `list` (`logs`: each of `factorio-current.log` and `factorio-previous.log` in the server's data
+// folder and `agent.log` in the agent's, `{ name, size, modified }`, if there as a regular file); `log(name)` (its
+// last 1000 lines); `journal(unit)` (the last 200 lines of the unit's own log file: `factorio-current.log` for the
+// server's unit, `agent.log` for `orrery-agent.service`; any other unit refused, since the agent's user may not read
+// the system journal). Read through `files.ts`, cut by `replyLines`. `redact` strips every URL's query string (and
+// fragment). `AgentLog`, `<root>/agent.log`: a line per entry with its time, redacted, renamed to `agent.log.1` past
+// 4 MiB; `logTo` sends `console.log`/`info`/`warn`/`error` through `redact` to the journal and it.
 import { appendFileSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { format } from 'node:util';

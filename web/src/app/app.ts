@@ -1,3 +1,8 @@
+// The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages
+// (`PAGES`), `UserMenu` (avatar → Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
+// on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off
+// the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
+
 import { Component, computed, effect, inject, input } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';

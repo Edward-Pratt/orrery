@@ -1,3 +1,8 @@
+// `Checks`: requests each check's URL at startup and every interval through the injected `get` (up: 2xx; timeouts and
+// network errors are down, but a failure is asked again at once and only a second failure counts), keeps only the
+// current state (`list`), puts each result on the stream (`checked`, latest-only in the replay), and publishes
+// `checkDown`/`checkUp` target notices on changes only. Hub core.
+
 import type { CheckConfig } from './config.ts';
 import type { Get } from './health.ts';
 import type { CheckStatus, ServerHub } from './servers.ts';

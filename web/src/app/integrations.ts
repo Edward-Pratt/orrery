@@ -1,3 +1,6 @@
+// `Integrations` (`GET /api/integrations`, asked once) and `enabled(...names)`, the `canMatch` guard (any of them
+// on).
+
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type { CanMatchFn } from '@angular/router';

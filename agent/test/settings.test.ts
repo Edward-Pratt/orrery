@@ -1,3 +1,26 @@
+// `GameSettings` on a temp config folder with setup's files, a unit and a clock the test sets, and RCON answering
+// like Factorio 2.1.24 (`fake-rcon.ts`'s `factorioConfig`: each `/config set` option's change line, `/promote` and
+// `/demote` rewriting the adminlist): setup's file read with Factorio's defaults, the report taken by the hub's
+// `parseAgentLine`; files failing a rule (not JSON, a range, `allow_commands` a boolean, a control character, a key
+// Factorio needs missing) read as no settings, the key named and never its value, other keys `extra` and dropped by
+// the next write; a symlink or a FIFO in a file's place and a config folder swapped for a link never read or written
+// through; the file written with exactly the managed keys, mode 600, no partial left; every refusal across fields
+// (verification off with no password, left out or null; a file password the rule refuses; an admin twice in two
+// cases; a new name over 50 bytes, an unchanged one accepted; a broken character; a busy agent; a unit starting or
+// stopping) writing nothing; live: the commands exactly, the password first, one per changed key, then `/promote` and
+// `/demote`, restart-only keys pending, the push after the reply; a wrong reply pending and tried again, a failing
+// RCON leaving the rest pending, an admin not in the file in time; an "already" reply applied (`factorioConfig` given
+// the running server's verification and description), the description sent trimmed; `busy` while a set runs or waits;
+// stopped: no RCON, the adminlist written; the password (through a real `RconSession` whose command times out) in no
+// log line, reply, push or error, and on disk only in the two files; a good start's file kept as last good, a failed
+// start after a write rolled back with Factorio's error line (not on the crash of the run the write was made in),
+// kept across a restart and cleared by the next write; with no last good, nothing written; a run come to late (past
+// 300 s) giving the last good one only while there is none, and a slow watched start disarming the gate (its later
+// crash puts nothing back); a malformed file and a fresh write; `autoPause` from the start, and `StatusPoller` using
+// it; a planted state file ignored, partial files removed at start. `test/gate.test.ts`: `StartGate`'s sequences
+// (starts, good within 300 s only, a run come to late only `late`, armed and failed once, the old run's crash, states
+// from before the arming, a kept arming time, a slow watched start `late` and disarmed).
+
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

@@ -1,3 +1,16 @@
+// `LiveFeed`: numbers every hub event (ids start at the clock or above the highest stored one, so they keep rising
+// across hub restarts), stamps it with `at` (when it arrived; kept in the replay), re-emits it, and keeps the last
+// 500 per server (and per host, service and check) in memory for replay (`since(lastId)`; `lastId` is the newest id);
+// a server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also written
+// to `Db`'s `feed` table and seed its buffer at start (servers still in the config only), so Chat and Console survive
+// a restart; nothing else does; `tps` and `paused` events, host `sample`s, check results (`checked`),
+// `packUpdateStep` notices, a server's `settings` notices and a library add's progress stay out of that buffer, only
+// the latest of each is kept (a server's TPS and `paused` dropped when it goes down or is `lost`, its step when its
+// update finishes, an add's progress when it finishes; an Agent's heartbeats come at up to 1 a second, so toggling
+// `paused` can't push chat out); no limit on its listeners (`setMaxListeners(0)`): `web.ts` adds one per open
+// `/api/events` stream, the dashboard opening one per section, each removed when it closes, so over 10 is normal use,
+// not a leak. Hub core.
+
 import { EventEmitter } from 'node:events';
 import { FEED_KEPT, type Db } from './db.ts';
 import type { FeedEvent, LiveEvent, ServerHub } from './servers.ts';

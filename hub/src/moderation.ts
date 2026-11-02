@@ -1,3 +1,13 @@
+// `Moderation` (with agents), the players of a server an Agent runs (`has`; others 404, `GameRefused`): `state(id)`
+// (`ModerationState`: `online`, the latest heartbeat's players; `lists`, the Agent's `playerLists`, one request per
+// server at a time, reused for 2 s, null while the Agent is below `MODERATION_FLOOR` (`agent-v1.4.0`), away or
+// silent; `blocked`, in that order: the Agent too old (the deploy text), not connected, the server not online);
+// `act(id, body, by)`: `moderateRequest` checks the body (400 naming the field, never the value: `action` one of the
+// five, `player` by the admins' rule, a `reason` only for a kick or a ban, one line without control characters,
+// separators, bidi controls or a BOM, at most 200 once trimmed), 409 while `blocked` or one runs on that server, 429
+// past 20 a minute per server, then `moderate` (the Agent's refusal a 502; `unknown type` names `MODERATION_FLOOR`),
+// audited as `player <action>` with the name, the reason and the outcome (or `failed: <why>`). Hub core.
+
 import { AgentRefused, beforeAgentRelease, type Agents } from './agents.ts';
 import type { ModerateAnswer, ModerateRequest, ModerationState } from './api.ts';
 import type { ServerSettings } from './config.ts';

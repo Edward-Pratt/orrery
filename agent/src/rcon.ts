@@ -1,3 +1,18 @@
+// `Rcon`: a Source RCON client for Factorio's RCON, one connection. `Rcon.connect(host, port, password, timeoutMs)`
+// authenticates (a refused password, id -1, rejects); `exec(command, timeoutMs)` resolves with the reply, one command
+// in flight at a time. Factorio answers each command with exactly one packet of any size carrying its id, so the
+// reply is that packet's body with one trailing `\n` stripped; packets with any other id (or type) are dropped. No
+// packet with an empty body is ever sent (Factorio never answers one), so an empty command is refused. Ids are
+// non-zero and rising; a packet over `MAX_PACKET` (16 MiB) or malformed ends the connection, refused as soon as its
+// length field is in. A timeout ends it too, rejecting with `RconTimeout` (a server that took the connection but
+// didn't answer, not one that is gone): `RconNoAnswer` for a command's (it was sent, so Factorio may still run it),
+// the plain class for the auth's; the commands waiting behind it reject with `RconNotSent` (never sent, so not run).
+// A refused password rejects with `RconRefused`. Once authenticated, an end other than `close()` emits `close` once,
+// so the caller reconnects with a new `Rcon`. `RconSession`: commands on one kept connection of their own, opened on
+// the first and again on the next one after it ends (refused, timed out, closed), in order; a command that got
+// `RconNotSent` runs once more on the new connection, a sent one never again; apart from `StatusPoller`'s, so a
+// command that times out never reads as Factorio gone. `encode`/`decode` are the framing.
+
 import { EventEmitter } from 'node:events';
 import { connect, type Socket } from 'node:net';
 

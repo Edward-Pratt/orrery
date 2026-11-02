@@ -1,3 +1,7 @@
+// `reloadOnStaleBuild`, the router's navigation error handler: a lazy page whose chunk failed to load (a dashboard
+// deploy replaced the build under an open page) is loaded as a whole page instead (`RELOAD`), never on the first
+// navigation.
+
 import { inject, InjectionToken } from '@angular/core';
 import type { NavigationError } from '@angular/router';
 

@@ -1,3 +1,14 @@
+// `Attention`: what needs a human now (#60's rules), built from the server cards (with minecraft or agents on),
+// services, checks and (with GitHub on) `/api/deploys` it fetches once logged in (each only with its integration on)
+// and keeps current from the live stream; items can't be dismissed, they leave when the condition clears. An offline
+// server whose service runs says the mod is not connected (a factorio server: its Agent is not connected or RCON
+// doesn't answer, which the card can't tell apart). `AttentionStrip`: one amber line per item with its fix
+// (Start/Restart through `ServiceControl`, Cancel a restart, a card's `packUpdate.rolledBack` linking to the Pack
+// tab's restore offer; cards are fetched again whenever a backup or restore started here starts or ends), and a line
+// while a backup (a factorio server: "is saving") or restore started here runs (`BackupProgress`), and a release
+// newer than the running one published more than `newerAfterDays` ago (linking to the Host page's Releases).
+// `count(page)` feeds the sidebar badges.
+
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, Injectable, signal } from '@angular/core';

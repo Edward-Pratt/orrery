@@ -1,3 +1,6 @@
+// The logged-out card; shows the reason the hub gave in `?login=`, else "Your session ended" when the hub ended it
+// under the open page.
+
 import { Component, inject } from '@angular/core';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { StagingBadge } from './environment';

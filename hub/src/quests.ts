@@ -1,3 +1,6 @@
+// `QuestAnnouncer`: main quests at once, others per mode (`batched` rolls up every 10 min); announces `questBatch`
+// events. Hub core.
+
 import type { QuestDone } from './protocol.ts';
 import type { ServerHub } from './servers.ts';
 

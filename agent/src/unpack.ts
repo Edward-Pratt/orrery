@@ -1,5 +1,15 @@
 // A game update's release from its archive: Factorio's headless tarball unpacked without trusting its entries, and the
 // highest glibc its binary needs, read from the ELF's version needs (agent/CLAUDE.md, "Trust boundaries").
+//
+// `unpack(stream, target, strip = 1)`: a tar stream (ustar, GNU long names and links, pax `path`/`linkpath`/`size`)
+// into an empty folder of the agent's own, trusting no entry: checksums checked, each path's first component dropped
+// (setup's `--strip-components=1`), absolute paths, `..` and NULs refused, files created
+// `O_CREAT`/`O_EXCL`/`O_NOFOLLOW` with modes 755 or 644 only, nothing below a symlink of the archive, a symlink only
+// relative and staying inside step by step, and at the end every one must `realpath` inside (a chain can't lead out);
+// a hard link only to a file unpacked before it; any other kind (devices, FIFOs, sparse) refused; 4 GiB and 500,000
+// entries at most. A refusal throws `Refused`. `unxz(file)`: `xz -dc -- <file>`'s output (no shell; Node has no xz).
+// `glibcNeed(file)`: the highest `GLIBC_X.Y` in an ELF's version needs (`.gnu.version_r` and its string table; 32 or
+// 64 bit, either byte order), null if none, a malformed file throws; `compareGlibc` compares them as numbers.
 import { spawn } from 'node:child_process';
 import { constants, link, mkdir, open, realpath, symlink } from 'node:fs/promises';
 import { posix } from 'node:path';

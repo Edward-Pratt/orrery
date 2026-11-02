@@ -1,5 +1,12 @@
 // An uploaded file as a Factorio save, checked before it is stored: a zip whose entries all sit in one top folder with
 // safe names, holding `level.dat0`, whose zlib stream starts with the Factorio version that wrote it.
+//
+// `checkSave(fh, size)`: an uploaded file as a Factorio save, never trusting it, every read capped: the zip's end
+// record in its last 64 KiB, no ZIP64 or split zip, at most 20,000 entries and an 8 MiB central directory in bounds;
+// every entry name relative with no empty, `.` or `..` part and no `\\`, no symbolic link, all in one top folder;
+// `<top>/level.dat0` there, stored or deflated, its first 64 KiB read and its first 1 KiB inflated (deflate expands
+// at most about 1032 to 1, so no output cap is needed), twice when Factorio's zlib stream (`78 01`) is inside; its
+// first three u16s are the version that wrote it (`X.Y.Z`, checked on real 2.1.24 saves). `compareVersions`.
 import type { FileHandle } from 'node:fs/promises';
 import { constants, inflateRawSync, inflateSync } from 'node:zlib';
 

@@ -1,3 +1,21 @@
+// `Services`: the listed units only, each with a backend: local, or an Agent's (a service is agent-backed when it is
+// the `service` of the server an Agent runs; there is no other key). A local unit's ActiveState/SubState is read at
+// startup and every 5 s through the injected `Run` (`execRun`: `execFile` of systemctl/journalctl, no shell); an
+// agent-backed one's is what its Agent last pushed (`serviceState`, its first state streamed too), and it is never
+// passed to `Run`. Changes are published as `state` target events and a failure as a `serviceFailed` notice (an
+// agent-backed one's at most once per `FAILED_NOTICE_MS`, 10 min: every change still goes on the stream); `logs(id)`
+// reads the last 200 journal lines (agent-backed: the Agent's `journal` request for the configured unit, the last 200
+// lines of its log file); `act(id, verb)` runs `systemctl <verb> --no-block` (agent-backed: the Agent's `serviceAct`,
+// which runs that on its own unit), audited as `service <verb>`, but for a stop or restart whose linked server has
+// players online it first runs the server's 5-minute countdown (`RestartScheduler`), firing the action at its end
+// (`CountdownRunning` if one already runs: 409); `now(id, verb, by)` acts at once, with no countdown whoever is
+// online (how a factorio server's countdown ends: `RestartScheduler`'s `restart`), audited the same; `ofServer` is a
+// server's linked service; `read(id)` reads one unit now (a pack update polls a stop with it; agent-backed: its last
+// pushed state); `environment(id)` its `Environment=` (whether it names a server's Java link; none for an
+// agent-backed one). Units go after `--` or as `--unit=`. Agent-backed services are left out of the hub host's polkit
+// `UNITS` (`deploy/orrery-hub.rules`): an explicit exception to keeping it in sync with `integrations.systemd`, as
+// the hub never runs systemctl on them. Hub core.
+
 import { execFile } from 'node:child_process';
 import type { Agents } from './agents.ts';
 import type { CheckConfig, ServerSettings, ServiceConfig } from './config.ts';

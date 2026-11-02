@@ -1,3 +1,8 @@
+// `Uploader.send(file, progress)`: a pack zip or an Extra to the hub in 50 MiB chunks, in order (`POST /api/uploads`,
+// then `PUT …?offset=`), reporting the share sent; a failed chunk (a 409 too) is retried up to 3 times in a row,
+// waiting 1 s, 2 s, 3 s, each time first asking `GET /api/uploads/:upload` how much arrived. Resolves with the upload
+// id.
+
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import type { UploadAnswer, UploadProgress, UploadRequest } from '@hub/api';

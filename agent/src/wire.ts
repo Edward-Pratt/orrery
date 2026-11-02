@@ -1,6 +1,28 @@
 // The agent's side of the wire contract (docs/protocol.md, "Agent connection"): the hub's constants, the capped line
 // reader, the line encoder and the checks on what the hub sends. The message types come from hub/src/types.ts through
 // `import type` only: an agent release carries no hub code, so the constants are copies, checked by test/wire.test.ts.
+//
+// The agent's side of the wire: `PROTOCOL_VERSION`, `LIMITS` (copies of the hub's, the line cap 1 MiB, an `update`'s
+// URLs 2 KiB: `LIMITS.url`, as a signed mod link is longer than 256) and `GAME_SETTINGS` (a copy of the hub's rules
+// for one game settings field: the integer ranges, the characters a name or description may not hold, a game
+// password's, an admin name's and a settings key's patterns, and `nameBytes`, a changed name's most UTF-8 bytes);
+// `LineReader`, which splits a socket's bytes into lines and throws `LineTooLong` once a line (its `\n` included)
+// passes the cap, before its end arrives; `encode`, a message as one line within the cap, dropping a command output's
+// or a reply's oldest `lines` to fit and refusing (null) anything else too big, never cutting JSON; `readAgentLine`
+// and `readGameLine`, which check what the hub sends against the documented fields and limits and copy only those
+// fields, or say why not with the request's `id` when it had a usable one. The game connection reads `welcome`,
+// `reject`, `ToGame` (`say`, its `source` `discord` when left out, as docs/protocol.md allows; `notice`;
+// `linkResult`), `cmd` (a `command` of one line, 1 to 256 characters: the hub strips control characters) and `save`.
+// A `settingsSet` is checked field by field by `GAME_SETTINGS` (every key; a name trimmed; `game_password` left out,
+// null or by its pattern; at most 100 admins by theirs); the rules across fields are left to its handler
+// (`settings.ts`); a `moderate`'s `action` one of the five, its `player` by the admins' rule and its `reason` at most
+// `LIMITS.reason` (200; `moderation.ts` cleans it again); `settingsFieldOk` gives one field's rule to `settings.ts`,
+// which reads the file by them. Cutting to the hub's limits before sending: `cut` (surrogate-safe), `outputLines` (an
+// RCON reply as `cmdResult` output: the first 500 lines, each 1 KiB) and `replyLines` (a `log` or `journal` reply's
+// last lines, each 1 KiB, the oldest dropped until `{ lines }` fits the hub's 256 KiB for a reply's `data`), both
+// `printable` line by line: `printable` makes every control character but a tab (C0, DEL, C1) and U+2028/9 `?`, for
+// anything RCON or a container-written file puts in a line the agent logs or reports (tabs stay: Lua tracebacks use
+// them).
 import type { AgentHello, AgentMsg, AgentRequest, GameSettingsFields, Hello, HubAgentMsg, HubMsg, ModMsg } from '../../hub/src/types.ts';
 
 /** The protocol version in both hellos: the hub's `PROTOCOL_VERSION`, which `agentHello` shares with the Mod's. */

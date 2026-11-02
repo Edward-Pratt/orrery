@@ -2,6 +2,44 @@
 // settings"): server-settings.json and server-adminlist.json in the server's config folder, read as untrusted (the
 // container writes them), written only from checked fields, applied live where Factorio has a `/config set` option,
 // and put back as they were at the last good start when the next start fails.
+//
+// `GameSettings`, a factorio server's game settings: `<data>/config/server-settings.json` and
+// `server-adminlist.json`, each read through the config folder opened once (`O_DIRECTORY`, `O_NOFOLLOW`) through
+// `files.ts`'s `within` and `readIn` (a regular file on that folder's filesystem, 1 MiB at most), as untrusted files
+// that drive display only. `autoPause` and `verification`: `auto_pause` and `require_user_verification` as the
+// running server started with them (null when unknown). `parseSettings`: each managed key (`KEYS`) by the hub's rule
+// (`settingsFieldOk`), one left out as Factorio's default (but `name`, `description` and `visibility`, which Factorio
+// needs), `allow_commands` only as a string (Factorio 2.1.24 refuses a boolean there); one that fails makes the model
+// null and `problem` names the key, never a value; other keys (not `_comment…`) are `extra`. `parseAdmins`: the names
+// that pass the rule, each once whatever its case, 100 at most. `report` (the `settings` push, `game_password_set`
+// only, never the password) on `start`, `refresh` (each welcome), after its own writes and when a start's file was
+// read; pushes go out in order. `set` (`settingsSet`), one at a time (`busy` while one runs or waits: a game update,
+// a restore and a deploy are refused meanwhile): `ready` (no game update, no deploy), then a fresh `systemctl show`,
+// refused while activating, deactivating or reloading; the password the request's (null: none), else the file's,
+// refused if the rule refuses it ("The file's game password can't be kept: set a new one."); refused: verification
+// off with no password, an admin twice in any case, a new name over 50 bytes (`NAME_BYTES`,
+// `GAME_SETTINGS.nameBytes`: Factorio 2.1.24 keeps no more), a broken UTF-16 character. Then `renderSettings`
+// (`JSON.stringify` of a new object: the managed keys, `visibility` false and false, `non_blocking_saving` false, its
+// own `_comment`; no username, token or admins) written through the folder handle as `.<file>.<random>.partial`
+// (`O_CREAT`/`O_EXCL`/`O_NOFOLLOW`, mode 600), synced and renamed over the file; the start gate armed and
+// `rolledBack` cleared. With the unit active: each changed key (and each one a write before couldn't apply) with a
+// live option as `LIVE`'s `/config set <option> [value]`, the password first, applied only when the reply is
+// Factorio's change line for that value (or the one saying the server already has it, `User verification is already
+// enabled.` (or disabled) and `The server description is already empty.`, as seen on 2.1.24; the description sent
+// trimmed, as Factorio takes it, and `/config set description` with no value clears it (seen on 2.1.24), so the
+// description is live both ways), the first failure or 20 s spent leaving the rest pending; then `/promote` and
+// `/demote` for the admins' difference (ignoring case), applied once the adminlist read again (2 s at most) shows it.
+// With it stopped: no RCON; the adminlist written the same way, lowercased, when it differs. The reply is `{ applied,
+// pending }` (pending: the failed ones and the restart-only keys, `auto_pause` and `autosave_slots`, that differ from
+// what the run started with), then the push. `StartGate`'s `start` reads the file as `startedWith` (kept with the
+// run's change time, so an agent restarted during a run keeps it), emptying the failed ones; its `good` makes that
+// `lastGood` when fully readable (a password the rule lets through), and so does its `late` while there is no
+// `lastGood` yet (an agent deployed onto a server that has run past 300 s: its `startedWith` is the file as read at
+// the agent's start); its `failed` writes `lastGood` back as a write does (none: nothing written) and sets
+// `rolledBack` to the time and Factorio's last `Error` line from `factorio-current.log` (`printable`, 2 KiB).
+// `<state>/settings.json` (mode 600: it holds `lastGood`'s password) keeps `lastGood`, `startedWith`, the gate's
+// arming time, the failed keys and `rolledBack`, written whole after each change and read back shape-checked. `start`
+// removes partial files an exit left in the config folder. Never logs a value: key names only.
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { constants, lstat, mkdir, open, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';

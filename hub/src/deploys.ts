@@ -1,3 +1,47 @@
+// `Deploys`: GitHub's published releases (through the injected `GitHub`; `githubReader` is the real REST one,
+// `fetch`, the token from `GITHUB_TOKEN`), asked at start, hourly and on `check()`, drafts, prereleases and tags not
+// `hub-v`/`web-v`/`mod-v`/`agent-v` + three numbers left out (the Factorio mod's `factorio-v` too: a game update
+// installs it); `answer()` gives each part's running release (the hub: the name `<root>/current` resolves to, else
+// `dev`; the dashboard: the `<webDir>.release` stamp, else the newest ok `web` deploy; a Mod, for each minecraft
+// server: `mod-v` + its hello's `modVersion`; an Agent, for each one (`agent.hosts`, with its server; none without
+// the agents integration): the `agentVersion` its latest `agentHello` named, `agent-vX.Y.Z`, a bare version
+// prefixed), latest and list, and the history. `deploy(part, tag, by, on?)` (`on`: the Mod's server, or the Agent's
+// id): one at a time (an Agent's until its `deployResult`, below), only a listed tag, refusing (`DeployRefused`:
+// 404/409) an unknown server or Agent, the running tag (an Agent's: what its hello named), a hub deploy while a
+// restore runs, the hub, dashboard and Agent below `FLOOR` (`AGENT_FLOOR`, `agent-v1.1.0`, for an Agent:
+// `agent-v1.0.0` has no `deploy` handler), an Agent whose hello names a release below that floor (`beforeAgentFloor`:
+// it can't deploy itself; the refusal names the setup re-run at the floor, with no row), a Mod onto a server with no
+// folder, no Mod token or a countdown running, an Agent that isn't connected or with a game update, a restore, a save
+// of its game settings (`settingsSaving`, `GameSettings.busy`) or a countdown on its server, and a hub deploy while
+// any pack or game update (`updating()`, which names the kind), a library add (`Library.busy()`) or a New server
+// install (`Packs.installRunning()`) runs, a Mod deploy while an update runs on its server (`answer().packing` lists
+// the servers a pack or game update runs on). The hub (after a database copy) and the dashboard: `systemctl start
+// --no-block <template>@<tag>.service` through `Run`, then the unit is polled every 5 s until it is no longer
+// activating and the row closed from `<root>/deploy-status.json` (only that tag's, finished after the row started;
+// else `failed`, interrupted) — also by the next hub at start, as the hub's own deploy restarts it. A Mod: the
+// release's build for the Minecraft version of the server's pack (from its library entry; 1.7.10 without one)
+// (`orrery-<mc>-<version>.jar` assets, 409 naming the version when there's none; a pre-rename release's one
+// `gtnhdiscord-<version>.jar`, 409 onto a server without `config/gtnhdiscord.cfg`) downloaded to `mods/.<jar>.part`,
+// renamed into place (every other `gtnhdiscord-*.jar` and `orrery-*.jar` removed; a renamed jar also gets
+// `config/gtnhdiscord.cfg` copied to `config/orrery.cfg` when only the old one exists) at once on a stopped server,
+// else as the end of a `RestartScheduler` countdown before `stop`, ok on the server's next hello with the new version
+// (failed after 10 min; a cancelled countdown removes the part file). An Agent deploys itself: its `deploy` request
+// (`Agents.request`; the reply means its deploy unit started, and a refusal or no answer is the error, the row
+// failed), then ok once its next `agentHello` names the tag; its `deployResult` for the tag records any other end
+// (`rolled back`: the old release came back; `failed`; an `ok` while its hello names another release is failed),
+// once, also after that hello closed the row ok (its unit gates after the hello): a `rolled back` or `failed` then
+// amends the row (`amendDeploy`) and is announced again, an `ok` stores its log, and a repeat (the Agent resends it
+// until its write went out) changes nothing; failed after `AGENT_DEPLOY_MS` (20 min, over its unit's
+// `TimeoutStartSec=15min`, so the hub never stops waiting while that unit runs) without either. The deploy runs until
+// that result, or 20 min after the hello (its unit holds the Agent's deploy lock): every deploy is refused meanwhile,
+// naming the Agent and tag, and `agentBusy` stays true. A hub restart closes a running Mod or Agent deploy as
+// interrupted, and a later `deployResult` is ignored. Its hub and dashboard deploys' `target` is config's
+// `environment`, a Mod's its server, an Agent's its id. Each deploy is audited as `deploy` and announced as
+// `deployStarted`/`deployFinished` target notices (`target` `deploy`). `modBuild(mc)`: the newest Mod release with an
+// `orrery-<mc>-*.jar` build, and `download(tag, asset)` (a New server's Mod); `busy()`: a hub deploy runs (for
+// `Restores`, `Packs` and `GameUpdates`); `modBusy(id)`: a Mod deploy onto a server runs (for `Packs`);
+// `agentBusy(id)`: an Agent's deploy runs, until its result (for `GameUpdates` and `Restores`). Hub core.
+
 import { constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';

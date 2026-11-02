@@ -1,5 +1,37 @@
 // The Factorio mod's game events, both ways (factorio/CLAUDE.md): its UDP datagrams in, checked and turned into the
 // game connection's messages, and the hub's say, notice and linkResult out, as the mod's RCON commands.
+//
+// The Factorio mod's game events, both ways (factorio/CLAUDE.md). `GameEvents`: a UDP listener on
+// 127.0.0.1:`agentUdpPort` (retried every 10 s while the port is taken) that takes datagrams only from
+// 127.0.0.1:`factorioUdpPort`, only while the unit is `active`, and after each start (it became active, or its change
+// time moved while active: a restart between two readings) only once `factorio-current.log` (`files.ts`'s `head`: a
+// regular file, its first 1 MiB, whole lines) has Factorio's engine line `Opening socket at (IP
+// ADDR:({127.0.0.1:<port>}))` followed by a line that is not `Closing socket`, and no `Opening Lua UDP Socket failed`
+// (`socketState`, the Opening line `openingLine`: Factorio writes the Opening line before it binds, so on a taken
+// port it is followed by `Closing socket`, `Socket closed` and the failure line, as seen on 2.1.24), so no other
+// local process bound that port first. A log not written since the agent saw the unit stopped (inactive, failed or
+// activating), or for an unseen restart since the second after it became active, is the previous run's and is read
+// again (every 1 s) until Factorio replaces it. The failure line, the Opening line followed by `Closing socket`, or
+// no decision within 60 s: events are off until the next start, logged once. `state` (`EventsState`) says on each
+// change whether events reach the hub, for the Agent connection's `events`: off, with why, once the gate is off or
+// while the UDP port can't be listened on past one retry; on once the gate is on and the port listened on (the first
+// decision since the agent started counts as a change). Over 4 KiB, or not the mod's shape (`parseDatagram`: `t`,
+// `seq` a safe integer, each field checked against the hub's limits and copied; `message` and `text` cut to 1 KiB):
+// dropped, each kind logged once per start. A `link`/`unlink` for a name not in `StatusPoller.players` (up to 5 s
+// old: the player may have just joined) waits for a fresh `/orrery-status` on the command connection (never a UDP
+// `join`), and is dropped, each one logged (its name `printable`), unless that has them online. `seq` gaps (and going
+// back) are logged; the baseline is the mod's `hello` datagram, asked for with `/orrery-hello` once per start after
+// the gate opens and RCON answers (`rconUp`); one that doesn't come within 5 s is logged. Emits `chat`, `join`,
+// `leave` (no `reason` on the wire), `death` (`deathMessage`: "Alice was killed by Bob", "… by a medium biter",
+// "Alice died"), `milestone` and `link` (`uuid` `""`), `unlink`, within `EventBudget`: 5 a second sustained and 30 at
+// once, all kinds together (a cell-rate check on a monotonic clock), so a chat flood can never push the game
+// connection past the hub's 20 lines a second, which it closes after 10 s; only events count, not the hello or a
+// datagram dropped as malformed, and a link or unlink counts before its fresh `/orrery-status`, so a flood of them
+// can't flood RCON. One over the budget is dropped (its `seq` still taken, so no gap is logged) and counted: the
+// first drop starts a minute, at whose end one line logs the count (`stop` logs what is counted). `toCommand`: `say`,
+// `notice`, `linkResult` as `/orrery-say {author, message, source}`, `/orrery-notice {message}`, `/orrery-reply
+// {player, ok, message}`, the argument `commandJson` (`JSON.stringify`, plus `\u` escapes for DEL, the C1 controls
+// and U+2028/9): one line, never Lua. `toGame` runs one and logs a failure or a reply that is not `{"ok":true, …}`.
 import { createSocket, type RemoteInfo, type Socket } from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import type { ModMsg } from '../../hub/src/types.ts';

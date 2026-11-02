@@ -1,3 +1,8 @@
+// `gameExtrasRoutes`, registered by `webApi` before the online check, each block only with its module on: `GET
+// /api/servers/:id/game/updates` (`ModUpdatesState`) and `GET`/`POST /api/servers/:id/moderation` (`ModerationState`;
+// `ModerateRequest` answering `ModerateAnswer`), 404 for a server the module doesn't have, `GameRefused`'s status and
+// text.
+
 import type { Context, Hono } from 'hono';
 import type { Me, ModerateAnswer, ModerationState, ModUpdatesState } from './api.ts';
 import { GameRefused } from './factorio.ts';

@@ -1,3 +1,5 @@
+// `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as `dark` on `<html>`.
+
 import { DOCUMENT } from '@angular/common';
 import { effect, inject, Injectable, signal } from '@angular/core';
 

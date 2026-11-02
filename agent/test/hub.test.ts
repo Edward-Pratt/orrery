@@ -1,3 +1,20 @@
+// `HubClient` against the fake hub: nothing before a welcome, pings, `serviceState`, the `connected` file; `events`
+// on each change and on every connect (a reason made `printable` and cut); reconnect with backoff (and its reset); a
+// `reconnecting too fast` refusal retried once the hub's gap passed, not logged as a rejection (`HUB_WELCOME_GAP_MS`
+// checked against the hub's `HANDSHAKE_MS`); the game connection only while RCON answers, kept through a stall and,
+// with no unit state known, closed when RCON is gone (with `StatusPoller` and fake RCON); heartbeats; `bye` and both
+// closes on `stop` (index.test.ts: on SIGTERM, which a deploy's `systemctl restart` sends); a line over 1 MiB closes
+// cleanly and reconnects; invalid, unknown and unsupported requests answered `ok: false` by id, a handler's error
+// with no query string and cut to 2 KiB; `deliver` false offline, when the write fails (a mocked `Socket.write`) and
+// once stopping, true once written; a game `hello` refused four times as `reconnecting too fast` tried again on each
+// RCON answer until welcomed, the Agent connection kept; `settings` on change (not twice the same on one connection),
+// on every connect, cut to the hub's limits.
+//
+// `started` once per run, kept across a new agent on the same run, again after a restart between readings (with
+// `stopping` for the old run); no game connection while the unit isn't active; a console `cmd` answered by
+// `cmdResult` (also when refused or when RCON fails, "may still run" only for one sent and not answered); the saves
+// list on each connect and change; `save` and `backup` on the game connection.
+
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';

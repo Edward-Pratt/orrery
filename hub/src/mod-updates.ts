@@ -1,3 +1,16 @@
+// `ModUpdates` (with game updates), portal mod updates of the servers an Agent runs (`has`; others 404):
+// `findUpdates(catalog, installed)`: the installed portal mods (a name `validName` refuses is never asked:
+// `unchecked`) through the catalog's `check` for the line (the mod browser's list, cached); each whose newest release
+// is newer is a candidate, the first 20 by name read (`mod`, 4 at once) and given `choose`'s newest release that fits
+// the installed Factorio's game mods: newer, an update; else `later`; no release for the line, `gone`; past the cap,
+// `unchecked`. `state(id)` (`ModUpdatesState`): kept with what the server runs (`GameUpdates.state(id).installed`),
+// worked out again when it changed or after 15 minutes, one at a time per server; a failed read keeps the last good
+// lists with `error`; before the Agent's first `installed`, empty. `checkAll`, every 6 hours (first 10 minutes after
+// start; `ModUpdatesOptions` for tests), skipping a server while a game update runs on it: a `modUpdates` notice (the
+// first 10 updates by name, `count` all) when the updates hold a `name@to` key the last post didn't and that post is
+// a day old or more (`mod_update_notices`, so a restarted hub doesn't post the same set; sooner, new keys wait; none
+// clears the set, keeping its time; a set that only shrank posts nothing). Hub core.
+
 import type { ModUpdate, ModUpdatesState } from './api.ts';
 import type { Db } from './db.ts';
 import { GAME_MODS, GameRefused, type FactorioCatalog } from './factorio.ts';

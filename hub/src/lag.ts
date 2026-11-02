@@ -1,3 +1,8 @@
+// `LagMonitor`: 1/min TPS samples into the `tps` table, lag and recovery notices with the rate's label (a paused
+// server is skipped: no row, no notice, its lag state kept) (`isLagging` is the server card's `lagging`);
+// `sparkline`; `GAMES` and `rateOf(game)`, a game's rate (`TPS` out of 20, `UPS` out of 60): the one place it is
+// decided, used by config, Discord output and the server card's `rate`. Hub core.
+
 import type { Db } from './db.ts';
 import type { ServerHub } from './servers.ts';
 import type { Game, Rate } from './types.ts';

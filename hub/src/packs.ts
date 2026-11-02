@@ -1,3 +1,50 @@
+// `Packs`, for a server with a folder, a linked service and a Mod token (`has`; others 404): `state` (`PackState`:
+// the installed pack, Kept paths (`keep`, then the built-in ones: the world from `level-name`, the server's own
+// files, the backup folder when inside, `.pre-update-*`, `.orrery-update` and the older `.orrery-staging`, the Mod's
+// `gtnhdiscord-*.jar` and `orrery-*.jar`), Extras, Config edits, pending changes, history, the running update with
+// its steps, `blocked`, the rollback offer); `compare`/`adopt` (from a library entry, `{ library: <id> }`, unzipped
+// into `<root>/work/<server>/`, cleared at start; the report: matching, the Mod, files under `mods/`/`config/` not in
+// the pack, pack files that differ; held an hour; adopt stores the kept files as Extras and records the pack,
+// pointing at its library entry (`packs.library_id`), and the manifest — the pack's files plus the report's, so the
+// next update drops what wasn't kept — changing nothing in the folder); Extras (`<data>/extras/<server>/<id>`,
+// removed ones kept struck through until an apply) and Config edits (JS regexes, `gm`, in the order added) with
+// pending changes per file against the last apply's snapshot; `update(id, { library } | 'pending')` (one per server,
+// returns at once; never downloads: the new entry's zip, or for pending changes the installed one's, refused (409)
+// when the pack has no entry; the same sha256 and version with nothing pending refused up front): Prepare (a leftover
+// `.orrery-staging` deleted, the library zip checked with `unzip -Z` before `unzip` into `<dir>/.orrery-update`, Kept
+// paths dropped, Extras, the Mod's jar, edits last; an edit matching nothing fails it), Backup (`ServerHub.backup`:
+// `backup start`, the Mod's `backup` event, 30 min), Stop (`Services.act`, the countdown with players online; a
+// cancelled countdown cancels the update), Swap (the old manifest's files and Mod jar into `.pre-update-<time>/`,
+// older ones deleted), the health gate (the Mod's hello, 10 min) and, without one, a rollback (the old files copied
+// back: the folder stays for recovery); `setRuntime(id, name | null)` (swaps `<root>/java/<server>` to
+// `<root>/runtimes/<name>` atomically, a new link renamed over it, or removes it for system java; audited as `pack
+// runtime`) and `PackState.runtime` (what the link points at, `pending` until the server's next hello after a change
+// (in memory), and the two `Environment=` lines when `Services.environment` shows the unit doesn't name the link);
+// New server (with GitHub on: `PacksDeps.install`): `install(form)` refuses before anything is written (400/404/409:
+// the id `SERVER_ID`, not in config, a Pending server, pack data or `<root>/servers/<id>`/`<root>/java/<id>`; the
+// game port 1–65535 and not another server's `server.properties` (25565 without one) or a Pending server's; no unit
+// (`systemctl show --property=LoadState`, not `not-found`); a Mod build for the pack's Minecraft version; the EULA;
+// memory like `6G`; a start script from `startScripts` (the content root's plain `*.sh`, each with whether `LOOP`
+// matches and whether it sets `-Xmx`/`-Xms`, which it must); one install at a time, not during a library add), then
+// in the background (`install` target events: unpack, write, mod, done or failed): the runtime link first, the zip
+// unpacked into `work/install/` and its content root renamed to `<root>/servers/<id>`, `eula.txt`, `server-port`, the
+// Mod's jar and `config/orrery.cfg` (Forge's format: `hubHost`, `hubPort`, `serverId`, a 64-hex `token`), the memory
+// edit (`-Xm([sx])\S+`) and, ticked, the loop edit (`LOOP` → `$1`) applied, the pack row (`installed`) with the
+// manifest (Kept paths of the server it becomes, and the Mod, left out), `.orrery-pending.json` (0600) and the
+// `pending_servers` row; a failure removes all of it, and so does the next hub after one interrupted
+// (`work/installing.json` names its id). `pending()` (each with its `add-server.sh` command and, while
+// `/usr/local/lib/orrery/add-server.sh` is missing, the line that installs it; the running install), `discard(id)`
+// (409 once in config), `installRunning()`; at start a Pending server whose id is in config with the same folder is a
+// server (its row and pending file go; another folder is logged and left). Audited as `server install` and `server
+// discard`. `cancel` in Prepare or the countdown; `busy`, `installing(libraryId)` (a running install's entry too)
+// (the servers whose running update installs an entry: it can't be deleted), `rollback`, `restored`. Packs never
+// deletes or moves a library zip. Extras and edits are refused (409) while an update runs, and an update while a
+// countdown runs on the server; an error after the stop but before the swap ends as `failed before swap` (the old
+// pack is started again). Each update is a `pack_updates` row (at start, a `running` one left by a restart is closed
+// as interrupted, but a factorio server's: a game update's row is `GameUpdates`'), audited, and announced as
+// `packUpdateStarted`/`packUpdateStep` (stream only)/`packUpdateFinished` notices. `PackRefused` (400/404/409). Hub
+// core.
+
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';

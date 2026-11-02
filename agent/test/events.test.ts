@@ -1,3 +1,17 @@
+// `GameEvents` with UDP injected from Factorio's port and from a stranger's: wrong source port, oversize and
+// closed-gate datagrams dropped; the log check (no line or a forged chat or `log()` line: off at the deadline, logged
+// once; the failure line, also after the Opening line as Factorio writes it on a taken port: off at once; the next
+// start: on; a previous run's log not read); `link` for an offline name dropped, `link` with `uuid ""`; `state` once
+// per change (off at the deadline or the failure line, on at a start with the line), and off while the agent's own
+// UDP port is taken past one retry; a link from a player not in the last poll's list relayed after a fresh
+// `/orrery-status` has them, every drop logged; `seq` gaps and the hello baseline; `/orrery-hello` once per start;
+// the event budget (200 chat events in 1 s: 30 at once, then 5 a second, the rest in one log line a minute with the
+// count; one event a second all forwarded; with a fake clock and mock timers) and a flood through `GameEvents` (a
+// frozen clock: 200 datagrams give 30, a second later 10 give 5, no seq gap logged, the count at `stop`);
+// `parseDatagram` against the hub's `parseModLine`; RCON strings escaped (`toCommand`); end to end with the fake hub
+// and fake RCON, the hub's `say`, `notice` and `linkResult` as commands in order, and a link datagram reaching the
+// hub.
+
 import assert from 'node:assert/strict';
 import { createSocket, type Socket } from 'node:dgram';
 import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';

@@ -1,3 +1,11 @@
+// with `fakeSystemctl` (`test/fake-systemctl.ts`: first on `PATH`; `show` prints the state a test sets and
+// `list-units` the lines it sets, other calls are recorded, or refused like polkit), a real `ServiceWatch` and
+// `HubClient` against the fake hub: `serviceAct` argv exactly `[verb, '--no-block', '--', 'factorio.service']`
+// whatever else the request carries, a refusal answered `ok: false`; `stopping` only for a stop the agent started
+// (and no new game connection while the old Factorio still answers), another stop waiting for the final state
+// (`deactivating` decides nothing), a crash through `deactivating (stop-post)` to `auto-restart`, and `failed`,
+// closed with no `stopping`; `RunWatch`'s sequences; `parseShow` and the watch itself.
+
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

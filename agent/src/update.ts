@@ -2,6 +2,72 @@
 // it, stages it, swaps it in, gates it and rolls it back. Steps: prepare, backup, stop (the hub's, with its countdown),
 // swap, gate, and rollback when the gate fails. The hub's input is checked like any other (agent/CLAUDE.md, "Trust
 // boundaries"); the hashes come from factorio.com and the mod portal, never from the hub alone.
+//
+// `Updates`, game updates one at a time. `update`: the hub's request checked first (`checkUpdate`; a refusal is the
+// reply's `error`): versions `X.Y.Z`, mod names `^[A-Za-z0-9_. -]+$` with no `..`, each once, `orrery` among them
+// (the gate reads its `/orrery-status`), hex hashes, a headless build for `process.arch` (arm64, or x64 for the dev
+// loop), and every URL through `allowedUrl`: https on `ALLOWED_HOSTS` (`www.factorio.com`, `dl.factorio.com`,
+// `dl-mod.factorio.com`: one constant, the last S11's mod CDN host), no port, no user. Refused too while a deploy of
+// the agent runs (`idle`, `Deploys.idle`, checked before `checkUpdate`, once `busy` already holds off a deploy), as
+// the deploy's restart would cut the update short. Accepted, it runs: **prepare**: the game's sha256 from
+// `https://www.factorio.com/download/sha256sums/` (its line for `factorio-headless_linux-arm64_<ver>.tar.xz`, or
+// `_linux_` on x64) and each mod's sha1 from `https://mods.factorio.com/api/mods/<name>/full` must equal the hub's,
+// before any download; then, only if `<install>/releases/<ver>` is missing, the tarball into `<install>/.incoming/`
+// (its sha256 checked again), unpacked by `unpack` into `.incoming/<ver>`, its `bin/<arch>/factorio`'s highest glibc
+// need (`glibcNeed`) at most `image.json`'s `glibc` (else "Factorio X needs glibc 2.x; the friend must re-run setup
+// with a newer image"), then renamed into `releases/`; the mods into `<data>/.incoming/` (sha1 checked) and staged in
+// `<data>/mods.next/` with a `mod-list.json` (the release's own mods from its `data/*/info.json`, `core` aside, each
+// enabled or disabled as the server's current `mods/mod-list.json` has it, one not listed there (new in the release,
+// or no list at all) enabled, then the update's, all enabled; that current list read through the folder opened
+// `O_NOFOLLOW`, a regular file of 1 MiB at most, and one that isn't Factorio's `{ mods: [{ name, enabled }] }` fails
+// prepare) and `mods/mod-settings.dat` copied; the last update's `mods.prev` removed. Downloads (`Http`, injectable:
+// `fetch` with `redirect: 'manual'`) follow redirects themselves, at most 5, each only to an allowed https host; 1
+// GiB a game, 512 MiB a mod, 16 MiB a hash list (a `Content-Length` over it refused before a byte is read); one that
+// gets no byte for `STALL_MS` (60 s), its answer or its body, is stopped and fails prepare ("No data from <URL> for
+// 60 s: the download was stopped"); files in the data folder's subfolders only through the folder opened
+// `O_DIRECTORY`/`O_NOFOLLOW` (`/proc/self/fd/<fd>/<name>`), each created `O_EXCL`/`O_NOFOLLOW`. **backup**:
+// `Saves.preUpdate` while the unit is active, else the newest save, held until the swap; whether the unit was active
+// is recorded. **stop**, the hub's: `waiting` until `updateResume` or `updateCancel` (each with a request id of its
+// own, acting on the one update running; with none running, refused), the only state of this step that goes out (a
+// cancel or a restart in it is only logged). **swap**: the unit must read inactive or failed within 5 minutes
+// (`running`, "Checking that the server is stopped"), the newest save (the one the stop just wrote, with all play up
+// to it) copied by `Saves.keep` as the rollback's save, held in the backup step's place (released only once the copy
+// is there) and recorded with the swap phase before anything moves (a copy that fails, a full disk, ends the update
+// there as `failed before swap`, the backup step's save still held and named, the old server started again: the new
+// release would write the newest save in its own format at a rollback's stop, leaving the old one nothing it could
+// load; so does a swap record that can't be written, as a restart after the flip would find no swap to roll back),
+// `mod-settings.dat` copied again (Factorio writes it as it stops), `<install>/current` flipped (relative
+// `releases/<ver>`, validated, a symlink and a rename, as setup does), `mods` to `mods.prev`, `mods.next` to `mods`,
+// the unit started. **gate**, 5 minutes: a `/orrery-status` since the start with the target version and exactly the
+// expected mods (the own mods the staged list enables, and the update's), and `gameUp`. **rollback** after a failed
+// swap or gate (its own `update.json` write may fail, a full disk: logged, it goes on): the unit stopped, the old
+// `current`, `mods.prev` back (with its `mod-settings.dat`), the swap's copy copied as the newest save
+// (`Saves.restore`), started, gated again on the old version (and its mods, if known), the game connection asked for
+// only while the Agent connection is up (`connected`: the old server ran with the hub before, so with the hub
+// unreachable its RCON answer is enough and a recovery rollback ends `rolled back`, not `failed`): `rolled back` or
+// `failed`. A failure before the swap is `failed in staging`, or `failed before swap` once the hub had stopped the
+// server (`updateResume` for a server that ran at the backup: it is started again; one stopped before the update
+// stays stopped, `failed in staging`); `updateCancel` only before the swap: downloads aborted, `cancelled`, the unit
+// never stopped, and started only when it was active at the backup and reads inactive or failed (once a
+// `deactivating` is over, 5 minutes at most): the hub starts a server it stopped, unless it restarted during its stop
+// and doesn't know (a second start does nothing). A `mod-settings.dat` copy that fails leaves no part file in
+// `mods.next`. Every end empties both `.incoming` folders, removes `mods.next`, releases the save and keeps the
+// newest 3 releases, the running one and the one the update came from. `<state>/update.json` (the agent's folder;
+// nothing under the data folder is ever read for it) records each phase before it acts: `start` after a restart ends
+// one before the swap as failed (the old server started again if the hub had stopped it: after `updateResume`, or in
+// the stop step when it ran at the backup and is stopped now) and rolls one back from the swap on; a finished one's
+// `updateDone` is sent again. `updateStep` per step at most once per `STEP_MS` (1 s) unless its state changes (a held
+// one goes out when the second is up, never after a newer one), the latest again on `connected`, and a running one
+// again, as it is, after `BEAT_MS` (60 s) without a step (never a `waiting` one, which asks the hub to stop the
+// server), as the hub gives an update up after 15 minutes without a word; `updateDone` (`from`/`to` as the hub names
+// its row, `labels`: "2.1.24 · 5 mods", every enabled mod counted, the game's own (`GAME_MODS`, the hub's list)
+// included; `from` the latest `installed` (the `installed` option: `HubClient`'s, kept across restarts), `to` the
+// update's version with the game's own enabled in it and the update's mods; the bare versions before any `installed`;
+// `backup`) kept, with `update.json`, until its write on the Agent connection succeeded (`deliver`), and sent again
+// on each connect until then. Every detail and error is cut to 2 KiB and goes through `redact`; URLs in them are
+// written without query string or fragment. `installedOf`: a `Status` as `installed`. `busy` while one runs, is
+// checked or is recovered after a restart (a restore and a deploy are refused then). Roots, `Http`, the decompressor,
+// the arch and every wait are injectable.
 import { createHash } from 'node:crypto';
 import { constants, lstat, mkdir, open, readdir, readFile, readlink, rename, rm, symlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';

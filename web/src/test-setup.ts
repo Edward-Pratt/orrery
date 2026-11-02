@@ -1,4 +1,6 @@
 // jsdom has no canvas (ECharts measures text with one) and no ResizeObserver (ngx-echarts needs one).
+//
+// Vitest setup: stubs for what jsdom lacks (canvas, `ResizeObserver`), so pages with graphs render in tests.
 HTMLCanvasElement.prototype.getContext = () => null;
 globalThis.ResizeObserver ??= class {
   observe() {}

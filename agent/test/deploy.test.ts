@@ -1,3 +1,18 @@
+// `deployArgs` against `deploy/60-orrery-agent.rules` itself (run with a fake polkit: allowed for factorio, start
+// only); hostile tags refused with no systemctl call; refused while a game update runs (also one that began while the
+// units were listed), for the release running, while a deploy unit of any tag is activating, active, reloading or
+// deactivating (from `list-units`; a failed one doesn't stop the next), and when they can't be listed; `idle` the
+// same; a deploy that failed before any restart (its download) reported by the agent that started it once its unit is
+// `failed`; through `HubClient` and `fakeSystemctl`, the argv exactly `['start', '--no-block', '--',
+// 'orrery-agent-deploy@agent-v1.2.3.service']` whatever else the request carries, a bad tag and a polkit refusal
+// answered `ok: false`; `deployResult` from status files written by `deploy-agent.sh`'s own `finish()` program
+// (extracted from the script): nothing while its unit is activating or deactivating or the hub isn't connected, not
+// recorded when its write fails (sent again), then once, not again after a restart, again for the next deploy of the
+// same tag; `ok`, `failed` and `rolled back` each as is and taken by the hub's `parseAgentLine`; other shapes and a
+// symlink never sent, logged once; the log's 40 lines, query strings and 16 KiB end; polled after a connect, once
+// across a reconnect; the `connected` file `HubClient` writes passing the script's own `connected()` program (and
+// failing it for another version or an earlier time).
+
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';

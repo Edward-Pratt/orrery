@@ -1,3 +1,6 @@
+// `fakeEvents()`: a fake `/api/events` for the `FETCH` token (each push reaches every open stream); `dialog()`,
+// `dialogButton()` and `toasts()` read the confirmation and toasts, which live outside the component under test.
+
 import type { HubEvent, LiveEvent, TargetEvent } from '@hub/api';
 
 /**

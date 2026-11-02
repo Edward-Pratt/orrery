@@ -1,3 +1,6 @@
+// `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`;
+// teal `--brand`; Figtree).
+
 import { Component, input } from '@angular/core';
 import type { ServerCard } from '@hub/api';
 

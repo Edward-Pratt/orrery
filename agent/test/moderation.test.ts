@@ -1,3 +1,13 @@
+// `cleanReason` (a newline, U+2028, a bidi override, a tab, runs of spaces, 201 characters, a surrogate pair at the
+// cut, spaces only); `parseBans` (names and objects, the address never kept, bad names in `hidden`, each once,
+// sorted; not a list); the lists (500 of 501 with the total, an admin name the rule refuses dropped, verification
+// from the file, the hub's `parseReplyData` taking it; each file's problem in fixed words; a symlinked banlist never
+// read through, a missing one empty); the exact commands for each action, nothing else on RCON but `/orrery-status`,
+// and each outcome (`done`, `already`, a promote or demote calling the settings push); a kick of someone not on after
+// one fresh status, a player who stays on and a ban the file never shows `unconfirmed`; refused while the unit is
+// inactive, while one runs, for a bad name and when RCON fails; the log line without the reason; `readAgentLine` for
+// both requests.
+
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -1,3 +1,49 @@
+// `GameUpdates` (with agents and systemd), for a server an Agent runs (`has`; others 404): `state` (`GameState`: what
+// its Agent last reported in `installed`, in memory, null before; the history; the running update with its steps;
+// `blocked`: an update running, its Agent not connected or not reported yet (an Agent on a release below
+// `AGENT_FLOOR` never reports: it has no game updates, and the reason names the setup re-run), a restore on it, a
+// save of its game settings (`settingsSaving`, `GameSettings.busy`), a hub deploy or its Agent's own (until its
+// `deployResult`), a countdown); `catalog(id, body)` (the releases on offer and `resolve`, with the mod diff as
+// `changes`: added, updated, removed by portal mods, a picked one that can't be resolved never "removed");
+// `update(id, body, by, byName)` (400 bad input: a version `^\d+\.\d+\.\d+$`, at most 500 mods by name, each a
+// version or null, none the game's own or picked twice; 409 when `blocked`, with unmet dependencies, without `orrery`
+// among the resolved mods (the Agent's gate reads it) or over `LIMITS.mods` of them, nothing to change, or no account
+// for the links, all before any link or row; the game's own mods stay as the Agent's `mod-list.json` has them, so
+// dependencies are resolved, and `to` counted, against those enabled in its latest `installed`; 400 for a version
+// factorio.com lists no ARM64 build of; resolves each mod's signed link right before, refuses (409) an `update` line
+// that wouldn't fit `LIMITS.lineBytes` with its newline (`fitsLine`), checks `blocked` again, opens the
+// `pack_updates` row (from and to as `gameLabel`, the mod diff in `changes`), audits `game update`, announces
+// `packUpdateStarted`, and sends the Agent `update` with its own request id, which the Agent's steps and end carry;
+// the rest in the background); the steps are the Agent's, its `detail` and errors through `redact` (every URL's query
+// string, any `?key=value`, `token=`, `secure=` and `username=` values): `prepare`, `backup`, then on its `stop`
+// `waiting` the hub's stop (`Services.act` `stop`, the 5-minute countdown with players on, cancellable; none for an
+// inactive or failed unit), the unit read until inactive (15 min), then `updateResume`; `swap`, `gate`, `rollback`
+// and `updateDone`, its outcome and pre-update save, which end it; a stop that fails ends it `failed before swap`
+// (the server started again) or `failed in staging`; an update that ends (its `updateDone`) while the hub stops the
+// server drops that stop: its countdown cancelled (`RestartScheduler.cancel` as `hub:game-update`), the waits ended,
+// a server the hub stopped started again, no `updateResume`; an `update` request refused (`AgentRefused`) ends it
+// `failed in staging` with no `updateCancel` (only no reply in time or a dropped connection sends one); `cancel`
+// before the swap (409 after): during the countdown it is cancelled (`RestartScheduler.cancel`), else the Agent is
+// sent `updateCancel` (502 when it doesn't take it); an Agent quiet about the update for 15 min (not while the hub
+// stops the server) has it given up and is told to cancel before the swap; `updateCancel` that can't reach it goes on
+// its next `agentUp`. At start, a `running` row of its servers left by a restart is closed as `failed`, interrupted
+// during its step: before the swap the Agent is told to cancel it when it connects; either way the Agent's later
+// `updateDone` is recorded on the row and announced, matched by the update's id: the last hub's is gone, so the first
+// id the Agent echoes in an `updateStep` (it resends a running update's latest on connecting), else its next
+// `updateDone`'s; when it refuses the reconnect's `updateCancel` with no step echoed first, nothing runs and that row
+// takes none; so is a late one after the hub gave an update up (by its id). A new update on the server ends that wait
+// (the Agent takes one only once the last one's end is sent). An update's end is taken once: a repeat (the Agent
+// resends it until its write went out) is ignored. The quiet give-up counts from the Agent's latest step for the
+// update (or the hub's latest request), as `docs/protocol.md` has the Agent repeat a running step at least every 60
+// s. `busy(id?)` (for `updating`), one per server. `browse(id, query)` (the mod browser's query checked before any
+// portal read, 400 otherwise: `factorio` a version, whose line is browsed; `q` at most 100 characters once trimmed;
+// `category` empty or `^[a-z0-9-]{1,32}$`; `sort` `downloads` (default), `updated` or `name`; `page` 1 to 1000) and
+// `thumbnail(id, name)` (null for a name that fails the Agent's check), and `check(id, body)` (the Import mod list's,
+// its body checked before any portal read, 400 otherwise: `factorio` a version, whose line is checked; `names` at
+// most 500, each passing the Agent's check, none the game's own or given twice), through the catalog. Audited (`game
+// update`, `game update cancel`), announced as `packUpdateStarted`/`packUpdateStep` (stream
+// only)/`packUpdateFinished`. Hub core.
+
 import { randomUUID } from 'node:crypto';
 import { AGENT_FLOOR, AgentRefused, beforeAgentFloor, type Agents } from './agents.ts';
 import type { GameCatalog, GameModPick, GameState, GameUpdateRequest, ModBrowse, ModCheckAnswer, ModCheckRequest, PortalSort } from './api.ts';

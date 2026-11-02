@@ -1,3 +1,14 @@
+// The hub's plain data types (wire messages, events, notices, audit entries, stats answers): the game connection's
+// (`Hello`, `ModMsg` with `milestone` and `heartbeat.paused`, `HubMsg` with Factorio's `notice` and `save`) and the
+// Agent connection's (`AgentHello`, `AgentMsg` with `settings`, `AgentRequest` with `settingsSet`, `HubAgentMsg`,
+// `AgentReplyData`, `Save`, `FactorioMod`/`FactorioDownload`/`FactorioModDownload`, and a factorio server's game
+// settings: `AllowCommands`, `GameSettingsFields`, `GameSettingsValues` (with `game_password_set`, never the
+// password), `GameSettingsReport`); `Lifecycle` with the silent `lost`; the `paused` event (`Paused`); a factorio
+// server's `settings`, `verificationOff`, `verificationOn` and `settingsRolledBack` notices; `agentLost`/`agentBack`
+// and `eventsOff`/`eventsOn` host notices (`AgentMsg`'s `events`); `DeployPart` with `agent`. Pure types that import
+// nothing, so the dashboard and the Agent (`agent/`, with `import type`) can use them; the modules that own them
+// (`protocol`, `servers`, `stats`, `summary`, `backups`) re-export them.
+
 /**
  * The hub's plain data types: the wire messages, its events, audit entries and stats answers. Pure types that import
  * nothing, so the dashboard can type-check the API types (`api.ts`) without the hub's runtime or Node types. The

@@ -1,6 +1,12 @@
 // Files under the server's `data` folder, which the container writes (and may swap): opened without following a
 // symlink or blocking on a FIFO, and read only from the open handle, only if it is a regular file on its folder's
 // filesystem (agent/CLAUDE.md, "Trust boundaries").
+//
+// Files the container writes (and `deploy.ts`'s two files): `openPlain` (`O_NOFOLLOW`, `O_NONBLOCK`; only a regular
+// file on its folder's device, read from the handle), `head` (its first bytes; none if last written before
+// `freshAfter`, an earlier run's log), `tail` (its last lines, read back from the end, 4 MiB at most), `within(dir,
+// fn)` (`fn` on the folder opened once, `O_DIRECTORY`/`O_NOFOLLOW`, as `/proc/self/fd/<fd>`) and `readIn(base, name)`
+// (a plain file's text there, null when missing or not one, throwing over 1 MiB).
 import type { Stats } from 'node:fs';
 import { constants, open, stat, type FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';

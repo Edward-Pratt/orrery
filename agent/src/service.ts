@@ -1,3 +1,15 @@
+// The server's unit. `ServiceWatch`: `systemctl show --timestamp=unix
+// --property=ActiveState,SubState,Result,StateChangeTimestamp -- <unit>` every 5 s, through `execFile` (no shell);
+// `change` with `{ unit, active, sub, since, result }` on the first reading and each change (`since` in epoch ms, 0
+// if the unit never changed state); a failed read keeps the last state, logged once; `read` for a fresh reading (a
+// restore's check). `act(verb)`: `systemctl <start|stop|restart> --no-block -- <unit>` on its own configured unit
+// only (`actArgs`; nothing from the request but the verb), then `stopping` for a stop or restart systemctl took; a
+// refusal (polkit) rejects with its message. `RunWatch`, the stopping rule for changes the agent didn't start: a run
+// (active since one change time) ends at `inactive`, `failed` or `activating` with an `auto-restart*` SubState,
+// `Result` `success` meaning stopped and anything else crashed; `deactivating` alone decides nothing (a Quadlet unit
+// passes `deactivating (stop-post)` on a crash too); a change time that moved while active (a restart between two
+// readings) ends the run with the `Result` read then (a crash can't: its auto-restart waits 10 s in `activating`).
+
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { AgentMsg, ServiceVerb } from '../../hub/src/types.ts';

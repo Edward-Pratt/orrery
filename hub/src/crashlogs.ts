@@ -1,3 +1,6 @@
+// `findCrashLogs`: newest crash report / `hs_err_pid*.log` in a server folder; `CRASH_LOCATIONS`, where those live.
+// Hub core.
+
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 

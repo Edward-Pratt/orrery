@@ -1,3 +1,7 @@
+// `servers` (always: every hub has servers; a server without a Mod token just has no Mod features) and `audit`, and
+// one lazy route per other integration with pages, matched only when it is on (`host`; systemd or checks: `services`,
+// which holds the checks too; there is no `checks` route; `library` when the hub has one).
+
 import { Component } from '@angular/core';
 import type { Routes } from '@angular/router';
 import { enabled } from './integrations';

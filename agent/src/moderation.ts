@@ -2,6 +2,22 @@
 // Factorio's own files, and kick, ban, unban, promote and demote as Factorio's own commands, built here from a name
 // checked by the rule and a cleaned reason. The files are written by the container, so untrusted: they drive what is
 // shown and how an action ended, never a command. Factorio's reply is never read for the outcome, nor sent on.
+//
+// `Moderation`, the `playerLists` and `moderate` handlers. `lists`: `<data>/server-banlist.json` (Factorio's
+// write-data folder: no `--server-banlist`), `config/server-adminlist.json` (`parseAdmins`) and
+// `config/server-settings.json`'s `require_user_verification` (when `GameSettings.verification`, the running
+// server's, is unknown), each through `within`/`readIn`; `parseBans`: a name or `{ username, reason }` (every other
+// key ignored, an address included), names by the rule (the others counted in `hidden`), once each without case,
+// sorted, reasons through `cleanReason`; cut to `LIMITS.bans` with `bansTotal`; a file that isn't a list, or over 1
+// MiB, is `problem` in fixed words; a missing one (or not a regular file) is an empty list. `act`: one at a time;
+// refused for a name the rule refuses, while the unit isn't `active`, or when RCON fails ("Factorio didn't answer");
+// a kick only for a player in `StatusPoller.players` or a fresh `/orrery-status` (else `notOnline`, nothing sent),
+// under that spelling; the command from a fixed table, `/<action> <name>` plus the cleaned reason for a kick or a
+// ban; the outcome from the lists read before and after (read again until it shows, `waitMs` 3 s), a kick's from two
+// fresh statuses (an unreadable one confirms nothing): `done`, `already`, `unconfirmed`; Factorio's reply never read;
+// a promote or demote that changed the file calls `adminsChanged` (the settings push). Logs `[moderation] <action>
+// <name>: <outcome>`, never the reason. `cleanReason`: C0, DEL, C1, U+2028/9, the bidi controls and the BOM each a
+// space, runs of spaces one, trimmed, cut to 200 (`cut`); empty is none.
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Ban, ModerateOutcome, PlayerLists } from '../../hub/src/types.ts';

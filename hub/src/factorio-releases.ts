@@ -1,3 +1,9 @@
+// The mod portal's releases as the catalog checks them, pure: `MOD_NAME`/`validName`, `VERSION`, `GAME_MODS`, `LINE`,
+// `compareVersions`, `meets`, `lineOf`, `release` (a portal release checked, its dependencies parsed: `bad` for a
+// required one naming no possible mod), `plain` (a portal string as plain text on one line, cut), and `choose` (the
+// newest release of a mod for a line that meets every limit and its own on the game's mods, else why not).
+// `factorio.ts` re-exports the names other modules import from it. Hub core.
+
 import { LIMITS } from './protocol.ts';
 
 /*

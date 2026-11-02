@@ -1,3 +1,7 @@
+// The audit log page (`/audit`, always there): a table (cards on a phone), newest first, filtered by `?server=` and
+// `?actor=` (the server page links with the first), "Load older" pages back with `before`, skeletons and an empty
+// state.
+
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';

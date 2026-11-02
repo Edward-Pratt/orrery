@@ -98,7 +98,11 @@ bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dn
 bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
 bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, agent-tarball.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
+bash .github/check-file-length main     # source files changed on the branch stay under 300 lines, or say why: `modular-exempt: <reason>` in the first 10 lines
 ```
+
+A source file over 300 lines is split before it grows: `check-file-length` fails CI on a changed one that doesn't say
+why not. Touching a long file, move the part being changed into its own module first, then change it.
 
 Behaviour that needs a real server (event hooks, command capture) can only be checked by the manual
 smoke test in the release's notes (older releases: their tickets) — say so rather than claiming it works.

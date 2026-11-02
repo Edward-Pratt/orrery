@@ -346,7 +346,7 @@ for byte, and the report shows its password.
 
 ### Hub
 
-New module `hub/src/game-settings.ts`, `GameSettings` (hub core, with agents and systemd), for a server an Agent runs
+New module `hub/src/servers/game-settings.ts`, `GameSettings` (hub core, with agents and systemd), for a server an Agent runs
 (`has`; others 404):
 
 - `state(id)`: `GameSettingsState`. That is what the Agent last pushed, held in memory (null before), plus `blocked`
@@ -361,8 +361,8 @@ New module `hub/src/game-settings.ts`, `GameSettings` (hub core, with agents and
   (its deploy would restart it in the middle of the save).
 - It audits the change and publishes `settings` on the server's live feed whenever a push or a save changes the state.
 
-`hub/src/agents.ts` routes the `settings` push to `GameSettings`, as `installed` goes to `GameUpdates`.
-`hub/src/web.ts` gets a new block `if (gameSettings)` (kept apart from the game update routes):
+`hub/src/agents/agents.ts` routes the `settings` push to `GameSettings`, as `installed` goes to `GameUpdates`.
+`hub/src/web/web.ts` gets a new block `if (gameSettings)` (kept apart from the game update routes):
 
 - `GET /api/servers/:id/settings` gives `GameSettingsState`;
 - `PUT /api/servers/:id/settings` takes `GameSettingsRequest` and answers `GameSettingsAnswer`.
@@ -775,7 +775,7 @@ shown with `UpdateSteps`:
 Closing the sheet doesn't stop the job: the Saves tab lists it while it runs. A note: "Uploaded saves are kept like
 world files: the 3 newest that aren't loaded stay."
 
-#### The hub (`hub/src/save-uploads.ts`, `SaveUploads`, hub core)
+#### The hub (`hub/src/backups/save-uploads.ts`, `SaveUploads`, hub core)
 
 - `Uploads` is today made only with packs. From stage B it is made with packs or agents, so its routes exist for a
   factorio-only hub too.

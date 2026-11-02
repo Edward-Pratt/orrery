@@ -1,0 +1,575 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { APIEmbed } from 'discord.js';
+import {
+  chatContent,
+  COLORS,
+  formatBackupList,
+  formatBackupStatus,
+  formatEvent,
+  formatTargetEvent,
+  formatLastSeen,
+  formatLinked,
+  formatLinkHint,
+  formatNotice,
+  formatOutput,
+  formatPlayers,
+  formatPlaytime,
+  formatPresence,
+  formatQuests,
+  formatStatus,
+  formatSummary,
+  formatTop,
+  formatTopic,
+  formatTps,
+  inline,
+  md,
+  TOPIC_MIN_GAP_MS,
+  topicDue,
+  type Post,
+} from '../../src/discord/format.ts';
+import type { Notice, ServerState, Severity, TargetEvent } from '../../src/servers/servers.ts';
+
+test('formatEvent keeps chat-like events as escaped plain text', () => {
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'chat', player: 'x_y_z', message: '**hi** [a](http://x) §cred' }), {
+    content: '**x\\_y\\_z**: \\*\\*hi\\*\\* \\[a](http://x) red',
+  });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'chat', player: 'a', message: '# big' }), { content: '**a**: \\# big' });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'death', player: 'Steve', message: 'Steve fell from a high place' }), {
+    content: '💀 Steve fell from a high place',
+  });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'achievement', player: 'Steve', achievement: 'Taking Inventory' }), {
+    content: '🏆 **Steve** earned **Taking Inventory**',
+  });
+});
+
+test('formatEvent posts a dashboard line as escaped text, and no Discord line', () => {
+  const say = { serverId: 's', type: 'say', author: 'a_b', message: '**hi** @everyone' } as const;
+  assert.deepEqual(formatEvent({ ...say, source: 'dashboard', avatar: 'https://x/a.png' }), {
+    content: '**a\\_b** (dashboard): \\*\\*hi\\*\\* @everyone',
+  });
+  assert.equal(formatEvent({ ...say, source: 'discord' }), null);
+});
+
+test('formatEvent announces lifecycle as coloured embeds, but not reconnects', () => {
+  assert.equal(formatEvent({ serverId: 's', type: 'connected' }), null);
+  assert.equal(formatEvent({ serverId: 's', type: 'offline' }), null);
+  assert.equal(formatEvent({ serverId: 's', type: 'tps', tps: 12 }), null);
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'crashed' }), {
+    embeds: [{ title: '💥 Server went down unexpectedly', color: COLORS.red }],
+  });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'started' }), { embeds: [{ title: '✅ Server started', color: COLORS.green }] });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'hung' }), { embeds: [{ title: '⚠️ Server not responding', color: COLORS.orange }] });
+});
+
+test('formatNotice is a plain info embed, truncated to a title', () => {
+  assert.deepEqual(formatNotice('🔴 GTNH is offline'), { embeds: [{ title: '🔴 GTNH is offline', color: COLORS.blue }] });
+  assert.deepEqual(formatNotice('❌ not red any more'), { embeds: [{ title: '❌ not red any more', color: COLORS.blue }] });
+  const long = formatNotice('x'.repeat(300)) as { embeds: { title?: string }[] };
+  assert.ok(long.embeds[0].title!.length <= 256);
+});
+
+test('formatOutput always yields one valid code block under 2000 chars', () => {
+  assert.equal(formatOutput([]), '```\n(no output)\n```');
+  assert.equal(formatOutput(['§aGreen', 'b']), '```\nGreen\nb\n```');
+  const sneaky = formatOutput(['```', '@everyone']);
+  assert.equal(sneaky, "```\n'''\n@everyone\n```");
+  const long = formatOutput(['x'.repeat(5000)]);
+  assert.ok(long.length < 2000);
+  assert.ok(long.endsWith('… (truncated)\n```'));
+});
+
+const first = (p: Post) => (p as { embeds: APIEmbed[] }).embeds[0];
+
+test('formatStatus is an embed with state, TPS, players and uptime', () => {
+  const base: ServerState = { id: 's', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.96, players: ['a_b', 'c'], dims: [] };
+  const e = first(formatStatus(base, 1, 0.5));
+  assert.equal(e.title, 'GTNH — 🟢 Online');
+  assert.equal(e.color, COLORS.green);
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['TPS', '20.0'],
+      ['Players', '2'],
+      ['Uptime 24 h', '100.0%'],
+      ['Uptime 7 d', '50.0%'],
+      ['Online now', 'a\\_b, c'],
+    ],
+  );
+  assert.equal(first(formatStatus({ ...base, hung: true }, null, null)).title, 'GTNH — 🟠 Not responding');
+  const off = first(formatStatus({ ...base, online: false, tps: null, players: [] }, 0, 0));
+  assert.equal(off.color, COLORS.red);
+  assert.deepEqual(off.fields!.map((f) => f.name), ['Uptime 24 h', 'Uptime 7 d']);
+});
+
+test('formatPlayers lists escaped names in an embed', () => {
+  assert.equal(first(formatPlayers([])).title, 'Nobody online');
+  const e = first(formatPlayers(['Steve', 'a_b']));
+  assert.equal(e.title, 'Online (2)');
+  assert.equal(e.description, 'Steve, a\\_b');
+});
+
+test('formatPlaytime and formatLastSeen', () => {
+  const now = 10 * 3600_000;
+  assert.equal(formatLastSeen(null, now), 'never');
+  assert.equal(formatLastSeen({ online: true }, now), 'online now');
+  assert.equal(formatLastSeen(now - 3 * 3600_000, now), '3 h ago');
+  const e = first(formatPlaytime('Steve', 5 * 3600_000 + 12 * 60_000, 3600_000, { online: true }, now));
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Player', 'Steve'],
+      ['Total', '5 h 12 m'],
+      ['Last 7 days', '1 h'],
+      ['Last seen', 'online now'],
+    ],
+  );
+});
+
+test('formatTop numbers players and handles an empty period', () => {
+  const e = first(formatTop('week', [{ player: 'a_b', ms: 7200_000 }, { player: 'C', ms: 60_000 }]));
+  assert.equal(e.title, 'Top players (last 7 days)');
+  assert.equal(e.description, '1. **a\\_b**: 2 h\n2. **C**: 1 m');
+  assert.equal(first(formatTop('day', [])).description, 'No playtime recorded.');
+});
+
+test('formatBackupStatus and formatBackupList show count and total size', () => {
+  const now = 1_000_000_000_000;
+  const backups = [
+    { name: '2026-09-24-06-00-00.zip', size: 2 * 1024 ** 3, mtimeMs: now - 2 * 3600_000 },
+    { name: '2026-09-23-06-00-00.zip', size: 1024 ** 3, mtimeMs: now - 26 * 3600_000 },
+  ];
+  const status = first(formatBackupStatus(backups, now, 50 * 1024 ** 3));
+  assert.deepEqual(
+    status.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Newest', '2026-09-24-06-00-00.zip'],
+      ['Age', '2 h'],
+      ['Size', '2.0 GB'],
+      ['Count', '2'],
+      ['Total size', '3.0 GB'],
+      ['Free disk', '50.0 GB'],
+      ['Growth', '+1.0 GB/day'],
+    ],
+  );
+  assert.equal(first(formatBackupStatus([backups[0]], now, null)).fields!.at(-1)!.value, 'n/a'); // no growth yet
+  const list = first(formatBackupList(backups));
+  assert.equal(list.title, 'Backups: 2, 3.0 GB total');
+  assert.equal(list.description, '`2026-09-24-06-00-00.zip` 2.0 GB\n`2026-09-23-06-00-00.zip` 1.0 GB');
+  assert.equal(first(formatBackupStatus([], now, null)).description, 'No backups found.');
+});
+
+test("an Agent's save names can't format the backup posts: escaped as the newest, kept inside their code span in the list", () => {
+  const now = 1_000_000_000_000;
+  const hostile = { name: '[x](https://e.example) `y`_z.zip', size: 1024, mtimeMs: now, kind: 'world' as const, current: true };
+  assert.equal(first(formatBackupStatus([hostile], now, null)).fields![0]!.value, '\\[x](https://e.example) \\`y\\`\\_z.zip');
+  assert.equal(first(formatBackupList([hostile])).description, "`[x](https://e.example) 'y'_z.zip` 1.0 KB");
+});
+
+test('formatSummary lays out the daily stats', () => {
+  const e = first(
+    formatSummary('GTNH', {
+      day: '2026-09-23',
+      uptime: 0.75,
+      peak: 3,
+      unique: 4,
+      totalMs: 6.5 * 3600_000,
+      top: [{ player: 'A', ms: 3 * 3600_000 }],
+      starts: 2,
+      crashes: 1,
+    }),
+  );
+  assert.equal(e.title, '📊 GTNH: 2026-09-23');
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Uptime', '75.0%'],
+      ['Peak players', '3'],
+      ['Unique players', '4'],
+      ['Total playtime', '6 h 30 m'],
+      ['Starts', '2'],
+      ['Crashes', '1'],
+      ['Top players', '1. **A**: 3 h'],
+    ],
+  );
+});
+
+test('formatOutput truncates long emoji output without splitting an emoji', () => {
+  const out = formatOutput(['😀'.repeat(2000)]);
+  assert.ok(out.length <= 2000, `length ${out.length}`);
+  assert.ok(out.endsWith('😀\n… (truncated)\n```'));
+});
+
+const online: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.7, players: ['Steve', 'Alex'], dims: [] };
+
+test('formatPresence has one segment per server', () => {
+  assert.equal(formatPresence([online]), 'GTNH: 2 online · 20 TPS');
+  assert.equal(
+    formatPresence([online, { ...online, id: 'sky', name: 'Sky', online: false, tps: null, players: [] }, { ...online, id: 'x', name: 'X', hung: true }]),
+    'GTNH: 2 online · 20 TPS | Sky: offline | X: not responding',
+  );
+  assert.equal(formatPresence([{ ...online, tps: null }]), 'GTNH: 2 online');
+  assert.ok(formatPresence(Array(20).fill(online)).length <= 128);
+});
+
+test('formatTopic shows state, TPS and players within 1024 chars', () => {
+  assert.equal(formatTopic(online), '🟢 Online · 20 TPS · 2 players: Steve, Alex');
+  assert.equal(formatTopic({ ...online, players: ['Steve'] }), '🟢 Online · 20 TPS · 1 player: Steve');
+  assert.equal(formatTopic({ ...online, players: [] }), '🟢 Online · 20 TPS · 0 players');
+  assert.equal(formatTopic({ ...online, hung: true }), '🟠 Not responding');
+  assert.equal(formatTopic({ ...online, online: false }), '🔴 Offline');
+  assert.ok(formatTopic({ ...online, players: Array(200).fill('SomeLongPlayerName') }).length <= 1024);
+});
+
+test('topicDue edits on first sight, then only on change and after the minimum gap', () => {
+  assert.equal(topicDue(undefined, 'a', 0), true);
+  const last = { text: 'a', at: 1000 };
+  assert.equal(topicDue(last, 'a', 1000 + TOPIC_MIN_GAP_MS), false); // unchanged
+  assert.equal(topicDue(last, 'b', 1000 + TOPIC_MIN_GAP_MS - 1), false); // too soon
+  assert.equal(topicDue(last, 'b', 1000 + TOPIC_MIN_GAP_MS), true);
+});
+
+test('formatTps shows now, averages, a trend and the slowest dimensions', () => {
+  const s: ServerState = {
+    id: 's',
+    name: 'GTNH',
+    game: 'minecraft',
+    online: true,
+    hung: false,
+    paused: false,
+    tps: 13.4,
+    players: [],
+    dims: [{ id: -1, name: 'Nether', ms: 72.4 }],
+  };
+  const e = first(formatTps(s, [{ ts: 1, tps: 20 }, { ts: 2, tps: 10 }], { avg: 15, min: 10 }, { avg: 18.25, min: 9 }));
+  assert.equal(e.title, 'GTNH: 13.4 TPS');
+  assert.equal(e.color, COLORS.orange);
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Last hour', '15.0 (min 10.0)'],
+      ['Last 24 h', '18.3'],
+      ['Trend (1 sample/min)', '█▅'],
+      ['Slowest dimensions', 'Nether (DIM -1): 72 ms/tick'],
+    ],
+  );
+  assert.equal(first(formatTps({ ...s, online: false, tps: null }, [], null, null)).title, 'GTNH: offline');
+});
+
+test("a factorio server's rate is UPS out of 60: bands, trend and wording, and no dimensions", () => {
+  const s: ServerState = { id: 'f', name: 'Space Age', game: 'factorio', online: true, hung: false, paused: false, tps: 54, players: ['Ann'], dims: [] };
+  const e = first(formatTps(s, [{ ts: 1, tps: 60 }, { ts: 2, tps: 30 }], { avg: 45, min: 30 }, null));
+  assert.equal(e.title, 'Space Age: 54.0 UPS');
+  assert.equal(e.color, COLORS.green); // 54 is 0.9 of 60
+  assert.deepEqual(
+    e.fields!.map((f) => [f.name, f.value]),
+    [
+      ['Last hour', '45.0 (min 30.0)'],
+      ['Last 24 h', 'n/a'],
+      ['Trend (1 sample/min)', '█▅'],
+    ],
+  );
+  assert.equal(first(formatTps({ ...s, tps: 40 }, [], null, null)).color, COLORS.orange); // 20 TPS would be green on Minecraft's scale
+  assert.equal(first(formatTps({ ...s, tps: 35 }, [], null, null)).color, COLORS.red);
+  assert.deepEqual(first(formatStatus(s, null, null)).fields![0], { name: 'UPS', value: '54.0', inline: true });
+  assert.equal(formatPresence([s, online]), 'Space Age: 1 online · 54 UPS | GTNH: 2 online · 20 TPS');
+  assert.equal(formatTopic(s), '🟢 Online · 54 UPS · 1 player: Ann');
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'f' });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 41.5, label: 'UPS', worst: null }), {
+    embeds: [{ title: '🐢 Lag: 41.5 UPS', color: COLORS.orange }], // no dimensions to name
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 59.9, label: 'UPS' }), {
+    embeds: [{ title: '✅ UPS back to normal (59.9)', color: COLORS.green }],
+  });
+});
+
+test('formatQuests: at-once lists up to 5 names; a roll-up shows the count and latest', () => {
+  const q = (name: string, main = false) => ({ name, main });
+  assert.deepEqual(formatQuests({ player: 'a_b', quests: [q('Stone Age', true)], count: 1 }), {
+    content: '📜 **a\\_b** completed **Stone Age**',
+  });
+  const seven = ['1', '2', '3', '4', '5', '6', '7'].map((n) => q(n));
+  assert.deepEqual(formatQuests({ player: 'S', quests: seven, count: 7 }), {
+    content: '📜 **S** completed **1**, **2**, **3**, **4**, **5** and 2 more',
+  });
+  assert.deepEqual(formatQuests({ player: 'S', quests: [q('Bronze')], count: 7 }), {
+    content: '📜 **S** completed 7 quests (latest: **Bronze**)',
+  });
+});
+
+test('formatEvent posts quest batches and new links', () => {
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'questBatch', player: 'Steve', quests: [{ name: 'Stone Age', main: true }], count: 1 }), {
+    content: '📜 **Steve** completed **Stone Age**',
+  });
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'linked', player: 'Steve', discordId: '123' }), { content: '🔗 **Steve** linked to <@123>' });
+});
+
+test('formatEvent posts a daily summary under the server name', () => {
+  const summary = { day: '2026-09-23', uptime: 1, peak: 2, unique: 1, totalMs: 60_000, top: [], starts: 0, crashes: 0 };
+  assert.deepEqual(formatEvent({ serverId: 's', type: 'summary', name: 'GTNH', summary }), formatSummary('GTNH', summary));
+});
+
+test('formatLinked mentions without escaping the id', () => {
+  assert.deepEqual(formatLinked('Steve', '123'), { content: '🔗 **Steve** linked to <@123>' });
+});
+
+test('formatSummary adds a backups line when it has backup stats', () => {
+  const base = { day: '2026-09-23', uptime: 1, peak: 1, unique: 1, totalMs: 0, top: [], starts: 0, crashes: 0 };
+  const GB = 1024 ** 3;
+  const withBackups = first(formatSummary('GTNH', { ...base, backups: { count: 2, total: 3 * GB, free: 50 * GB, growth: -GB } }));
+  assert.deepEqual(withBackups.fields!.at(-1), { name: 'Backups', value: '2, 3.0 GB total, 50.0 GB free, −1.0 GB/day', inline: false });
+  const noGrowth = first(formatSummary('GTNH', { ...base, backups: { count: 0, total: 0, free: null, growth: null } }));
+  assert.equal(noGrowth.fields!.at(-1)!.value, '0, 0 B total, n/a free');
+  assert.equal(first(formatSummary('GTNH', base)).fields!.at(-1)!.name, 'Top players');
+});
+
+test("formatEvent posts restart notices with today's wording", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 600_000, by: 'alice' }), {
+    embeds: [{ title: '🔄 Restart in 10 minutes (by alice)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 60_000, by: 'bob' }), {
+    embeds: [{ title: '🔄 Restart in 1 minute (by bob)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartNow' }), { embeds: [{ title: '🔄 Restarting now', color: COLORS.blue }] });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartScheduled', ms: 300_000, by: 'alex', stop: true }), {
+    embeds: [{ title: '🛑 Stop in 5 minutes (by alex)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartNow', stop: true }), { embeds: [{ title: '🛑 Stopping now', color: COLORS.blue }] });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartCancelled', by: 'bob' }), {
+    embeds: [{ title: '❎ Restart cancelled (by bob)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'info', kind: 'restartCancelledDown' }), {
+    embeds: [{ title: '❎ Restart cancelled (server went down)', color: COLORS.blue }],
+  });
+  assert.deepEqual(post({ severity: 'problem', kind: 'restartFailed', error: 'timed out' }), {
+    embeds: [{ title: '❌ Restart failed: timed out', color: COLORS.red }],
+  });
+});
+
+test("formatEvent posts lag and backup notices with today's wording and severity colours", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  const nether = { id: -1, name: 'Nether', ms: 72.4 };
+  const GB = 1024 ** 3;
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 12.3, label: 'TPS', worst: nether }), {
+    embeds: [{ title: '🐢 Lag: 12.3 TPS; slowest: Nether (DIM -1) 72 ms/tick', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lag', tps: 9, label: 'TPS', worst: null }), {
+    embeds: [{ title: '🐢 Lag: 9.0 TPS; slowest: unknown', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'lagRecovered', tps: 19.9, label: 'TPS' }), {
+    embeds: [{ title: '✅ TPS back to normal (19.9)', color: COLORS.green }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'backupOverdue', hours: 30, newest: 'a.zip' }), {
+    embeds: [{ title: '⚠️ No new backup for 30 h (newest: a.zip)', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'warning', kind: 'backupsMissing' }), { embeds: [{ title: '⚠️ No backups found', color: COLORS.orange }] });
+  assert.deepEqual(post({ severity: 'warning', kind: 'lowDisk', free: 5 * GB, minFreeGB: 10 }), {
+    embeds: [{ title: '⚠️ Low disk space for backups: 5.0 GB free (limit 10 GB)', color: COLORS.orange }],
+  });
+  assert.deepEqual(post({ severity: 'good', kind: 'backupFinished', detail: '12.3 seconds (1.2GB)' }), {
+    embeds: [{ title: '✅ Backup finished (12.3 seconds (1.2GB))', color: COLORS.green }], // mid-title: no list rule, so no backslash
+  });
+  assert.deepEqual(post({ severity: 'problem', kind: 'backupFailed', detail: 'disk full' }), {
+    embeds: [{ title: '❌ Backup failed: disk full', color: COLORS.red }],
+  });
+});
+
+test('formatEvent posts a pack update when it starts and ends, coloured by outcome; its steps never', () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 's' });
+  const title = (n: Notice) => (post(n) as { embeds: APIEmbed[] }).embeds[0];
+  assert.deepEqual(title({ severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.5', by: 'alex' }), {
+    title: '📦 Updating the pack: 2.7.4 → 2.7.5 (by alex)',
+    color: COLORS.blue,
+  });
+  assert.deepEqual(title({ severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.4', by: 'alex' }), {
+    title: '📦 Applying pack changes to 2.7.4 (by alex)',
+    color: COLORS.blue,
+  });
+  const done = { kind: 'packUpdateFinished', from: '2.7.4', to: '2.7.5', ms: 400_000 } as const;
+  assert.deepEqual(title({ ...done, severity: 'good', outcome: 'ok' }), { title: '✅ Pack updated to 2.7.5 (6 m 40 s)', color: COLORS.green });
+  assert.deepEqual(title({ ...done, to: '2.7.4', severity: 'good', outcome: 'ok' }), { title: '✅ Pack changes applied to 2.7.4 (6 m 40 s)', color: COLORS.green });
+  assert.deepEqual(title({ ...done, severity: 'problem', outcome: 'rolled back', backup: '2026-09-30-14-12-00.zip' }), {
+    title: '❌ Pack update to 2.7.5 rolled back: 2.7.4 is running again. Pre-update backup: 2026-09-30-14-12-00.zip',
+    color: COLORS.red,
+  });
+  assert.deepEqual(title({ ...done, severity: 'problem', outcome: 'failed' }), {
+    title: "❌ Pack update to 2.7.5 failed: the server didn't come back, even after a rollback",
+    color: COLORS.red,
+  });
+  assert.deepEqual(title({ ...done, severity: 'info', outcome: 'failed in staging' }), {
+    title: "⚠️ Pack update to 2.7.5 failed while preparing: the server wasn't touched",
+    color: COLORS.blue,
+  });
+  assert.deepEqual(title({ ...done, severity: 'info', outcome: 'cancelled' }), {
+    title: "❎ Pack update to 2.7.5 cancelled: the server wasn't touched",
+    color: COLORS.blue,
+  });
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
+});
+
+test("a factorio server's update is a game update, and the Agent's pre-update save is escaped", () => {
+  const post = (n: Notice) => formatEvent({ ...n, type: 'notice', serverId: 'space' }, 'factorio');
+  const title = (n: Notice) => (post(n) as { embeds: APIEmbed[] }).embeds[0]?.title;
+  const from = '2.1.24 · 1 mod';
+  const to = '2.1.25 · 3 mods';
+  assert.equal(title({ severity: 'info', kind: 'packUpdateStarted', from, to, by: 'alex' }), `📦 Updating the game: ${from} → ${to} (by alex)`);
+  const done = { kind: 'packUpdateFinished', from, to, ms: 400_000 } as const;
+  assert.equal(title({ ...done, severity: 'good', outcome: 'ok' }), `✅ Game updated to ${to} (6 m 40 s)`);
+  assert.equal(
+    title({ ...done, severity: 'problem', outcome: 'rolled back', backup: 'orrery-pre-update_*x*_.zip' }),
+    `❌ Game update to ${to} rolled back: ${from} is running again. Pre-update save: orrery-pre-update\\_\\*x\\*\\_.zip`,
+  );
+  assert.equal(title({ ...done, severity: 'problem', outcome: 'failed before swap' }), `❌ Game update to ${to} failed after the stop, before anything changed: ${from} is starting again`);
+  assert.equal(title({ ...done, severity: 'info', outcome: 'cancelled' }), `❎ Game update to ${to} cancelled before the swap: nothing was changed`);
+  assert.equal(post({ severity: 'info', kind: 'packUpdateStep', step: 'prepare', state: 'running', detail: 'Downloading', cancellable: true }), null);
+
+  // `from` is the version the Agent reported, and the save's name the game folder's: inline() only, so a name with a
+  // line-start rule's look ("1. ", "- ") keeps its text, and markdown or a masked link in either is escaped.
+  const evil = '[pay](https://evil.example) **2.1** · 1 mod';
+  assert.equal(title({ severity: 'info', kind: 'packUpdateStarted', from: evil, to, by: 'alex' }), `📦 Updating the game: ${inline(evil)} → ${to} (by alex)`);
+  assert.equal(inline(evil), '\\[pay](https://evil.example) \\*\\*2.1\\*\\* · 1 mod');
+  assert.equal(
+    title({ ...done, from: evil, severity: 'problem', outcome: 'rolled back', backup: '1. orrery-pre-update-2.1.24.zip' }),
+    `❌ Game update to ${to} rolled back: ${inline(evil)} is running again. Pre-update save: 1. orrery-pre-update-2.1.24.zip`,
+  );
+  assert.equal(
+    title({ ...done, from: evil, severity: 'problem', outcome: 'failed before swap' }),
+    `❌ Game update to ${to} failed after the stop, before anything changed: ${inline(evil)} is starting again`,
+  );
+});
+
+test('a notice is coloured by its severity, not its text', () => {
+  const color = (severity: Severity) =>
+    (formatEvent({ severity, kind: 'restartNow', type: 'notice', serverId: 's' }) as { embeds: APIEmbed[] }).embeds[0].color;
+  assert.equal(color('problem'), COLORS.red);
+  assert.equal(color('warning'), COLORS.orange);
+  assert.equal(color('good'), COLORS.green);
+  assert.equal(color('info'), COLORS.blue);
+});
+
+test('formatTargetEvent names the host and services, and skips samples and states', () => {
+  const at = { target: 'host', id: 'oracle', type: 'notice' } as const;
+  const GB = 1024 ** 3;
+  const titles = [
+    { ...at, severity: 'warning', kind: 'memoryHigh', percent: 94, minutes: 5 },
+    { ...at, severity: 'good', kind: 'memoryOk', percent: 60 },
+    { ...at, severity: 'warning', kind: 'diskLow', mount: '/', free: 5 * GB, minFreeGB: 10 },
+    { ...at, severity: 'good', kind: 'diskOk', mount: '/', free: 20 * GB },
+  ].map((e) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title);
+  assert.deepEqual(titles, [
+    '⚠️ Host oracle: memory at 94% for 5 min',
+    '✅ Host oracle: memory back to 60%',
+    '⚠️ Host oracle: low disk on /: 5.0 GB free (limit 10 GB)',
+    '✅ Host oracle: disk on / back to 20.0 GB free',
+  ]);
+  const sample = { ts: 1, cpu: 0, load: [0, 0, 0], memory: { used: 1, total: 2 }, disks: [] };
+  assert.equal(formatTargetEvent({ target: 'host', id: 'oracle', type: 'sample', sample }), null);
+  assert.equal(formatTargetEvent({ target: 'service', id: 'gtnh', type: 'state', state: 'active', sub: 'running' }), null);
+  const failed = formatTargetEvent({ target: 'service', id: 'gtnh', type: 'notice', severity: 'problem', kind: 'serviceFailed', unit: 'gtnh.service' });
+  assert.deepEqual(failed, { embeds: [{ title: '❌ Service gtnh failed (gtnh.service)', color: COLORS.red }] });
+});
+
+test('formatTargetEvent names the check, since the alerts channel is shared', () => {
+  const at = { target: 'check', id: 'site', type: 'notice' } as const;
+  assert.deepEqual(formatTargetEvent({ ...at, severity: 'problem', kind: 'checkDown', url: 'https://site.example', error: 'HTTP 503' }), {
+    embeds: [{ title: '❌ Check site is down: HTTP 503', description: 'https://site.example', color: COLORS.red }],
+  });
+  assert.deepEqual(formatTargetEvent({ ...at, severity: 'good', kind: 'checkUp', url: 'https://site.example', ms: 120 }), {
+    embeds: [{ title: '✅ Check site is back up (120 ms)', description: 'https://site.example', color: COLORS.green }],
+  });
+});
+
+test('deploy notices reach Discord worded and coloured by outcome', () => {
+  const notice = (n: object) => formatTargetEvent({ target: 'deploy', id: 'production', type: 'notice', ...n } as TargetEvent);
+  const embed = (n: object) => {
+    const post = notice(n) as { embeds: { title: string; color: number }[] };
+    return [post.embeds[0]!.title, post.embeds[0]!.color];
+  };
+  const base = { part: 'hub', from: 'hub-v2.5.0', to: 'hub-v2.6.0' };
+  assert.deepEqual(embed({ ...base, severity: 'info', kind: 'deployStarted', by: 'web:alex (1)' }), [
+    `🚀 Deploying the hub on production: hub-v2.5.0 → hub-v2.6.0 (by web:alex (1))`,
+    0x3498db,
+  ]);
+  assert.deepEqual(embed({ ...base, severity: 'good', kind: 'deployFinished', outcome: 'ok' }), ['✅ Deployed the hub on production: hub-v2.6.0', 0x2ecc71]);
+  assert.deepEqual(embed({ ...base, severity: 'problem', kind: 'deployFinished', outcome: 'failed' }), ['❌ Deploying the hub on production hub-v2.6.0 failed', 0xe74c3c]);
+  assert.deepEqual(embed({ ...base, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), [
+    '❌ Deploying the hub on production hub-v2.6.0 failed: rolled back to hub-v2.5.0',
+    0xe74c3c,
+  ]);
+
+  // An Agent's: `from` is what its hello said it runs, so it is escaped.
+  const agent = (n: object) => formatTargetEvent({ target: 'deploy', id: 'factorio-vm', type: 'notice', part: 'agent', to: 'agent-v1.2.0', ...n } as TargetEvent) as { embeds: { title: string }[] };
+  assert.equal(
+    agent({ severity: 'info', kind: 'deployStarted', from: '**[x](https://evil.example)**', by: 'web:alex (1)' }).embeds[0]!.title,
+    '🚀 Deploying the agent on factorio-vm: \\*\\*\\[x](https://evil.example)\\*\\* → agent-v1.2.0 (by web:alex (1))',
+  );
+  assert.equal(
+    agent({ severity: 'problem', kind: 'deployFinished', from: '__v__', outcome: 'rolled back' }).embeds[0]!.title,
+    '❌ Deploying the agent on factorio-vm agent-v1.2.0 failed: rolled back to \\_\\_v\\_\\_',
+  );
+  assert.equal(agent({ severity: 'good', kind: 'deployFinished', from: 'agent-v1.1.0', outcome: 'ok' }).embeds[0]!.title, '✅ Deployed the agent on factorio-vm: agent-v1.2.0');
+});
+
+test('chat and other plain posts are cut to 2000 characters after escaping, never splitting an emoji', () => {
+  const pipes = '|'.repeat(1024); // a full 1 KiB message that escaping doubles
+  const chat = formatEvent({ serverId: 's', type: 'chat', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(chat.content.length, 2000);
+  assert.ok(chat.content.startsWith('**Steve**: \\|\\|'));
+  const death = formatEvent({ serverId: 's', type: 'death', player: 'Steve', message: pipes }) as { content: string };
+  assert.equal(death.content.length, 2000);
+  assert.equal(chatContent('a'.repeat(3000)).length, 2000);
+  assert.equal(chatContent('**hi**'), '\\*\\*hi\\*\\*');
+  assert.equal(chatContent(`${'a'.repeat(1999)}😀`), 'a'.repeat(1999));
+});
+
+test("a milestone is posted per kind, escaped, its text capped at 200 and its force named only when it isn't the default", () => {
+  const milestone = (m: { kind: 'research' | 'rocket' | 'platform' | 'landing'; text: string; player?: string; force?: string }) =>
+    formatEvent({ serverId: 's', type: 'milestone', ...m });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Mining productivity 12' }), { content: '🔬 Research finished: **Mining productivity 12**' });
+  assert.deepEqual(milestone({ kind: 'research', text: 'Logistics_2', force: 'team_red' }), { content: '🔬 Research finished: **Logistics\\_2** (team\\_red)' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: 'Nauvis' }), { content: '🚀 First rocket launched from **Nauvis**' });
+  assert.deepEqual(milestone({ kind: 'rocket', text: '' }), { content: '🚀 First rocket launched' });
+  assert.deepEqual(milestone({ kind: 'platform', text: '# [Home](http://x)' }), { content: '🛰️ First space platform in orbit: **\\# \\[Home](http://x)**' });
+  assert.deepEqual(milestone({ kind: 'landing', text: 'Vulcanus', player: 'x_y', force: 'blue' }), { content: '🪐 First landing on **Vulcanus** by **x\\_y** (blue)' });
+  const long = milestone({ kind: 'research', text: 'a'.repeat(1024) }) as { content: string };
+  assert.equal(long.content, `🔬 Research finished: **${'a'.repeat(200)}**`);
+});
+
+test('the /link hint names each game that has a server, in a fixed order', () => {
+  assert.equal(formatLinkHint('ABC234', ['minecraft']), 'In Minecraft, type `/discord link ABC234` within 10 minutes.');
+  assert.equal(formatLinkHint('ABC234', ['factorio']), 'In Factorio, type `/orrery-link ABC234` within 10 minutes.');
+  assert.equal(
+    formatLinkHint('ABC234', ['factorio', 'minecraft']),
+    'In Minecraft, type `/discord link ABC234`. In Factorio, type `/orrery-link ABC234`. The code works for 10 minutes.',
+  );
+});
+
+test("an Agent's text in a notice or a topic is escaped: a backup's detail, a save's name, a refusal, a mount, a version (inline: mid-line or a title), players", () => {
+  const evil = '[pay](https://evil.example) # **x** ||y|| <#1>';
+  assert.notEqual(md(evil), evil);
+  // A notice is an embed title, so its Agent text is escaped inline: masked links and every inline markup still are.
+  assert.equal(inline(evil), '\\[pay](https://evil.example) # \\*\\*x\\*\\* \\|\\|y\\|\\| <#1>');
+  assert.equal(inline('`a` _b_ ~~c~~ __d__ *e*'), '\\`a\\` \\_b\\_ \\~\\~c\\~\\~ \\_\\_d\\_\\_ \\*e\\*');
+  assert.equal(inline('12.3 seconds (1.2GB)'), '12.3 seconds (1.2GB)');
+  assert.equal(inline('1.4.0'), '1.4.0');
+  const notice = (n: Notice) => (formatEvent({ ...n, type: 'notice', serverId: 'space' }) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  assert.equal(notice({ severity: 'good', kind: 'backupFinished', detail: evil }), `✅ Backup finished (${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'backupFailed', detail: evil }), `❌ Backup failed: ${inline(evil)}`);
+  assert.equal(notice({ severity: 'warning', kind: 'backupOverdue', hours: 13, newest: evil }), `⚠️ No new backup for 13 h (newest: ${inline(evil)})`);
+  assert.equal(notice({ severity: 'problem', kind: 'restartFailed', error: evil }), `❌ Restart failed: ${inline(evil)}`);
+  const target = (e: object) => (formatTargetEvent(e as TargetEvent) as { embeds: APIEmbed[] }).embeds[0]!.title;
+  const host = { target: 'host', id: 'vm', type: 'notice' };
+  assert.equal(target({ ...host, severity: 'warning', kind: 'diskLow', mount: evil, free: 0, minFreeGB: 10 }), `⚠️ Host vm: low disk on ${inline(evil)}: 0 B free (limit 10 GB)`);
+  assert.equal(target({ ...host, severity: 'good', kind: 'diskOk', mount: evil, free: 0 }), `✅ Host vm: disk on ${inline(evil)} back to 0 B free`);
+  assert.equal(
+    target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: evil }),
+    `⚠️ Host vm: game events from agent Factorio VM are off: ${inline(evil)}`,
+  );
+  assert.equal(target({ ...host, severity: 'warning', kind: 'eventsOff', name: 'Factorio VM', reason: 'x'.repeat(2048) })!.length, 256); // an embed title's most
+  assert.equal(target({ ...host, severity: 'good', kind: 'eventsOn', name: 'Factorio VM' }), '✅ Host vm: game events from agent Factorio VM are on again');
+  const deploy = { target: 'deploy', id: 'gtnh', type: 'notice', part: 'mod', from: evil, to: 'mod-v1.2.0' };
+  assert.equal(target({ ...deploy, severity: 'info', kind: 'deployStarted', by: 'web:a (1)' }), `🚀 Deploying the Mod on gtnh: ${inline(evil)} → mod-v1.2.0 (by web:a (1))`);
+  assert.equal(target({ ...deploy, severity: 'problem', kind: 'deployFinished', outcome: 'rolled back' }), `❌ Deploying the Mod on gtnh mod-v1.2.0 failed: rolled back to ${inline(evil)}`);
+  assert.equal(formatTopic({ ...online, game: 'factorio', tps: 60, players: [evil] }), `🟢 Online · 60 UPS · 1 player: ${md(evil)}`);
+});

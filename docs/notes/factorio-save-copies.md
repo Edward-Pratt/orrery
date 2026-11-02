@@ -55,7 +55,7 @@ differently, the parts named here follow it:
   "One transfer per Agent at a time" covers both.
 - **`save-header.ts`** (the hub's copy and the Agent's): the capped zip and header reader. The hub reads a copy's
   version and mods with it, for display only.
-- **`SaveUploads`** (`hub/src/save-uploads.ts`) and the Agent's `fetch.ts`: the hub-to-Agent direction, which Put
+- **`SaveUploads`** (`hub/src/backups/save-uploads.ts`) and the Agent's `fetch.ts`: the hub-to-Agent direction, which Put
   back reuses with the copy as its source.
 - **The pre-restore save** (`orrery-pre-restore-<time>.zip`) and **`restoreResult`**: the restore's end, after which
   its pre-restore save is copied.
@@ -407,11 +407,11 @@ servers of Agents whose `saveCopies` isn't false (`has`; others 404):
 `COPIES_FLOOR` is the Agent release that adds `saveCopy` (placeholder `agent-v1.4.0`). `agent-v0.0.0` counts as
 newer, as for `beforeAgentFloor`.
 
-`hub/src/agents.ts`: the fourth first line, `agentSend`, with the rules above. The send socket is handed to
+`hub/src/agents/agents.ts`: the fourth first line, `agentSend`, with the rules above. The send socket is handed to
 `SaveCopies` once welcomed; `Agents` keeps only the transfer slot and the 5 s welcome key. `WITH_DATA` gains
 `saveCopy`.
 
-`hub/src/web.ts`: a block `if (saveCopies)`, apart from the other routes:
+`hub/src/web/web.ts`: a block `if (saveCopies)`, apart from the other routes:
 
 - `GET /api/servers/:id/save-copies` → `SaveCopiesState`;
 - `POST /api/servers/:id/save-copies` with `{ name }` → 202 (a `manual` job);

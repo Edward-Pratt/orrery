@@ -49,7 +49,7 @@ These are real-world conditions the unit tests can't reach. They're pinned by th
 
 **Files:**
 - Create: `hub/src/units.ts`, `hub/src/daily.ts`
-- Modify: `hub/src/restarts.ts` (`parseDaily`/`nextDaily` move to `daily.ts`; `daily()` replaces instead of stacking; `schedule(…, by, byName)`)
+- Modify: `hub/src/servers/restarts.ts` (`parseDaily`/`nextDaily` move to `daily.ts`; `daily()` replaces instead of stacking; `schedule(…, by, byName)`)
 - Test: `hub/test/units.test.ts`, `hub/test/daily.test.ts` (new; the daily/DST tests move here), `hub/test/restarts.test.ts`
 
 **Interfaces:**
@@ -447,7 +447,7 @@ export function everyDay(time: string, leadMs: number, fn: (target: number) => v
 }
 ```
 
-`hub/src/restarts.ts`:
+`hub/src/servers/restarts.ts`:
 
 ```ts
 import { everyDay, parseDaily } from './daily.ts';
@@ -579,7 +579,7 @@ Expected: `ℹ pass 63`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/units.ts hub/src/daily.ts hub/src/restarts.ts hub/test/units.test.ts hub/test/daily.test.ts hub/test/restarts.test.ts
+git add hub/src/units.ts hub/src/daily.ts hub/src/servers/restarts.ts hub/test/units.test.ts hub/test/daily.test.ts hub/test/restarts.test.ts
 git commit -m "refactor(hub): shared DST-safe daily timer; daily() replaces, restart audit keeps the user id"
 ```
 
@@ -588,8 +588,8 @@ git commit -m "refactor(hub): shared DST-safe daily timer; daily() replaces, res
 ### Task 2: Player stats (sessions, peaks, summary)
 
 **Files:**
-- Modify: `hub/src/db.ts` (sessions and peaks tables, stats queries, writes through one never-throwing helper, `markHubRestart` closes dangling sessions first)
-- Create: `hub/src/playtime.ts`, `hub/src/summary.ts`
+- Modify: `hub/src/stats/db.ts` (sessions and peaks tables, stats queries, writes through one never-throwing helper, `markHubRestart` closes dangling sessions first)
+- Create: `hub/src/servers/playtime.ts`, `hub/src/stats/summary.ts`
 - Test: `hub/test/db.test.ts`, `hub/test/playtime.test.ts`, `hub/test/summary.test.ts`
 
 **Interfaces:**
@@ -859,7 +859,7 @@ Expected: FAIL. `db.test.ts` fails with `db.openSession is not a function`, and 
 
 - [ ] **Step 3: Implement**
 
-`hub/src/db.ts`:
+`hub/src/stats/db.ts`:
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -1017,7 +1017,7 @@ export class Db {
 }
 ```
 
-`hub/src/playtime.ts`:
+`hub/src/servers/playtime.ts`:
 
 ```ts
 import type { Db } from './db.ts';
@@ -1071,7 +1071,7 @@ export class PlaytimeTracker {
 }
 ```
 
-`hub/src/summary.ts`:
+`hub/src/stats/summary.ts`:
 
 ```ts
 import type { Db } from './db.ts';
@@ -1122,7 +1122,7 @@ Expected: `ℹ pass 75`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/db.ts hub/src/playtime.ts hub/src/summary.ts hub/test/db.test.ts hub/test/playtime.test.ts hub/test/summary.test.ts
+git add hub/src/stats/db.ts hub/src/servers/playtime.ts hub/src/stats/summary.ts hub/test/db.test.ts hub/test/playtime.test.ts hub/test/summary.test.ts
 git commit -m "feat(hub): playtime sessions, daily peaks and daily summary stats"
 ```
 
@@ -1131,8 +1131,8 @@ git commit -m "feat(hub): playtime sessions, daily peaks and daily summary stats
 ### Task 3: Backups, and crash logs skip symlinks
 
 **Files:**
-- Create: `hub/src/backups.ts`
-- Modify: `hub/src/crashlogs.ts` (`lstat`)
+- Create: `hub/src/backups/backups.ts`
+- Modify: `hub/src/servers/crashlogs.ts` (`lstat`)
 - Test: `hub/test/backups.test.ts`, `hub/test/crashlogs.test.ts`
 
 **Interfaces:**
@@ -1299,7 +1299,7 @@ Expected: FAIL. `backups.test.ts` fails with `ERR_MODULE_NOT_FOUND`, and `crashl
 
 - [ ] **Step 3: Implement**
 
-`hub/src/backups.ts`:
+`hub/src/backups/backups.ts`:
 
 ```ts
 import { lstat, readdir } from 'node:fs/promises';
@@ -1404,7 +1404,7 @@ export class BackupWatcher {
 }
 ```
 
-`hub/src/crashlogs.ts`:
+`hub/src/servers/crashlogs.ts`:
 
 ```ts
 import { lstat, readdir } from 'node:fs/promises';
@@ -1456,7 +1456,7 @@ Expected: `ℹ pass 80`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/backups.ts hub/src/crashlogs.ts hub/test/backups.test.ts hub/test/crashlogs.test.ts
+git add hub/src/backups/backups.ts hub/src/servers/crashlogs.ts hub/test/backups.test.ts hub/test/crashlogs.test.ts
 git commit -m "feat(hub): backup listing, finish notices and missing-backup watchdog; crash logs skip symlinks"
 ```
 
@@ -1465,7 +1465,7 @@ git commit -m "feat(hub): backup listing, finish notices and missing-backup watc
 ### Task 4: Embeds, new commands and wiring
 
 **Files:**
-- Modify: `hub/src/format.ts` (returns `Post`, which is plain text or embeds; new formatters), `hub/src/discord.ts`, `hub/src/index.ts`, `hub/config.example.json`
+- Modify: `hub/src/discord/format.ts` (returns `Post`, which is plain text or embeds; new formatters), `hub/src/discord/discord.ts`, `hub/src/index.ts`, `hub/config.example.json`
 - Test: `hub/test/format.test.ts`, `hub/test/discord.test.ts`
 
 **Interfaces:**
@@ -1733,7 +1733,7 @@ Expected: FAIL. `format.test.ts` errors with `does not provide an export named '
 
 - [ ] **Step 3: Implement**
 
-`hub/src/format.ts`:
+`hub/src/discord/format.ts`:
 
 ````ts
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
@@ -1949,7 +1949,7 @@ export function topicDue(last: TopicEdit | undefined, text: string, now: number)
 }
 ````
 
-`hub/src/discord.ts`:
+`hub/src/discord/discord.ts`:
 
 ```ts
 import {
@@ -2463,7 +2463,7 @@ rm -f config.json bad.json hub.db
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/format.ts hub/src/discord.ts hub/src/index.ts hub/config.example.json hub/test/format.test.ts hub/test/discord.test.ts
+git add hub/src/discord/format.ts hub/src/discord/discord.ts hub/src/index.ts hub/config.example.json hub/test/format.test.ts hub/test/discord.test.ts
 git commit -m "feat(hub): embeds, /playtime, /top, /backup, daily summary; webhook name cache, clearer topic warning"
 ```
 

@@ -30,12 +30,12 @@ Unchanged: mods → `ServerHub` → frontends. The new logic is split the same w
 
 | File | Change |
 |---|---|
-| `hub/src/restarts.ts` | New. `RestartScheduler`. |
-| `hub/src/crashlogs.ts` | New. `findCrashLogs`. |
-| `hub/src/format.ts` | New. `md`, `formatEvent`, `formatStatus`, `formatPlayers`, `formatOutput` move here from `discord.ts`, plus `formatPresence`, `formatTopic`, `topicDue`. |
-| `hub/src/discord.ts` | Webhook chat, presence, topics, crash uploads, `/restart`, command visibility, `shouldRelay`. Returns `{ client, post }`. |
-| `hub/src/servers.ts` | New `truncate` (shared, so hub-core code never imports `format.ts`/`discord.js`); emoji-safe `mcText`; `close()` destroys every socket, including pre-handshake ones. |
-| `hub/src/db.ts` | `record`/`touch` log errors instead of throwing. |
+| `hub/src/servers/restarts.ts` | New. `RestartScheduler`. |
+| `hub/src/servers/crashlogs.ts` | New. `findCrashLogs`. |
+| `hub/src/discord/format.ts` | New. `md`, `formatEvent`, `formatStatus`, `formatPlayers`, `formatOutput` move here from `discord.ts`, plus `formatPresence`, `formatTopic`, `topicDue`. |
+| `hub/src/discord/discord.ts` | Webhook chat, presence, topics, crash uploads, `/restart`, command visibility, `shouldRelay`. Returns `{ client, post }`. |
+| `hub/src/servers/servers.ts` | New `truncate` (shared, so hub-core code never imports `format.ts`/`discord.js`); emoji-safe `mcText`; `close()` destroys every socket, including pre-handshake ones. |
+| `hub/src/stats/db.ts` | `record`/`touch` log errors instead of throwing. |
 | `hub/src/index.ts` | Config fields, scheduler wiring. |
 
 ## Config

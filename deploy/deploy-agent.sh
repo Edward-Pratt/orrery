@@ -15,7 +15,7 @@
 # Writes <root>/deploy-status.json: {"tag","from","outcome":"ok"|"failed"|"rolled back","finished","log"}.
 # It removes that file when it starts and writes it only at the end, after the gate: so the restarted agent (the new
 # one, or the old one after a rollback) connects before its outcome exists. The agent reads it only once
-# orrery-agent-deploy@<tag>.service has left activating, active, reloading and deactivating (as hub/src/deploys.ts
+# orrery-agent-deploy@<tag>.service has left activating, active, reloading and deactivating (as hub/src/updates/deploys.ts
 # watches deploy-hub.sh's unit), then sends deployResult from it.
 # DEPLOY_ROOT, DEPLOY_GATE_SECONDS and DEPLOY_GATE_POLL exist for the tests (deploy/test-deploy-agent.sh).
 set -euo pipefail

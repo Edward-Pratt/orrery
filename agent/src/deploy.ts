@@ -18,7 +18,7 @@
 // MiB at most; any other shape, or a tag that isn't one, is logged once and never sent) goes out as `deployResult {
 // tag, outcome, log }` (the outcome as is; `logExcerpt`: the last 40 lines, `redact`ed, the end kept within
 // `LIMITS.deployLog`), once its unit has ended (`systemctl show --property=ActiveState`: not activating, active,
-// reloading or deactivating, as `hub/src/deploys.ts` reads deploy-hub.sh's; the script still prunes after writing the
+// reloading or deactivating, as `hub/src/updates/deploys.ts` reads deploy-hub.sh's; the script still prunes after writing the
 // file), and only once per deploy: its tag and `finished`, recorded in `<state>/deploy.json` once its write on the
 // Agent connection succeeded (`HubClient.deliver`; until then sent again on each connect and poll, and across a
 // restart). Polled, not read once at connect: the script writes it after the restarted agent connected, and a deploy
@@ -50,7 +50,7 @@ export const DEPLOY_STATUS = 'deploy-status.json';
 /** The deploy log lines a `deployResult` carries: deploy-agent.sh's excerpt is as many. */
 export const LOG_LINES = 40;
 
-/** A oneshot deploy unit's states while its script runs, as hub/src/deploys.ts reads deploy-hub.sh's. */
+/** A oneshot deploy unit's states while its script runs, as hub/src/updates/deploys.ts reads deploy-hub.sh's. */
 const RUNNING = new Set(['activating', 'active', 'reloading', 'deactivating']);
 
 /**

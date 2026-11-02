@@ -52,8 +52,8 @@ These need a real Discord server, so they're pinned by the manual checklist in T
 ### Task 1: Hub core hardening
 
 **Files:**
-- Modify: `hub/src/servers.ts`: add `truncate`, make `mcText` emoji-safe, track every socket for `close()`.
-- Modify: `hub/src/db.ts`: `record`/`touch` never throw.
+- Modify: `hub/src/servers/servers.ts`: add `truncate`, make `mcText` emoji-safe, track every socket for `close()`.
+- Modify: `hub/src/stats/db.ts`: `record`/`touch` never throw.
 - Test: `hub/test/servers.test.ts`, `hub/test/db.test.ts`
 
 **Interfaces:**
@@ -385,7 +385,7 @@ Expected: FAIL. `servers.test.ts` errors with `does not provide an export named 
 
 - [ ] **Step 3: Implement**
 
-`hub/src/servers.ts`:
+`hub/src/servers/servers.ts`:
 
 ```ts
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -640,7 +640,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent] }> {
 }
 ```
 
-`hub/src/db.ts`:
+`hub/src/stats/db.ts`:
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -734,7 +734,7 @@ Expected: `ℹ pass 33`, `ℹ fail 0`, and `tsc` prints nothing. `[db] … faile
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/servers.ts hub/src/db.ts hub/test/servers.test.ts hub/test/db.test.ts
+git add hub/src/servers/servers.ts hub/src/stats/db.ts hub/test/servers.test.ts hub/test/db.test.ts
 git commit -m "fix(hub): emoji-safe truncation, instant close(), db writes never throw"
 ```
 
@@ -743,7 +743,7 @@ git commit -m "fix(hub): emoji-safe truncation, instant close(), db writes never
 ### Task 2: Crash-log finder
 
 **Files:**
-- Create: `hub/src/crashlogs.ts`
+- Create: `hub/src/servers/crashlogs.ts`
 - Test: `hub/test/crashlogs.test.ts`
 
 **Interfaces:**
@@ -803,7 +803,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/crashlogs.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/crashlogs.ts`:
+`hub/src/servers/crashlogs.ts`:
 
 ```ts
 import { readdir, stat } from 'node:fs/promises';
@@ -855,7 +855,7 @@ Expected: `ℹ pass 36`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/crashlogs.ts hub/test/crashlogs.test.ts
+git add hub/src/servers/crashlogs.ts hub/test/crashlogs.test.ts
 git commit -m "feat(hub): find crash reports and JVM crash logs for upload"
 ```
 
@@ -864,7 +864,7 @@ git commit -m "feat(hub): find crash reports and JVM crash logs for upload"
 ### Task 3: Restart scheduler
 
 **Files:**
-- Create: `hub/src/restarts.ts`
+- Create: `hub/src/servers/restarts.ts`
 - Test: `hub/test/restarts.test.ts`
 
 **Interfaces:**
@@ -1053,7 +1053,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/restarts.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/restarts.ts`:
+`hub/src/servers/restarts.ts`:
 
 ```ts
 import type { ServerHub } from './servers.ts';
@@ -1203,7 +1203,7 @@ Expected: `ℹ pass 47`, `ℹ fail 0`, and `tsc` prints nothing. `[restart] … 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/restarts.ts hub/test/restarts.test.ts
+git add hub/src/servers/restarts.ts hub/test/restarts.test.ts
 git commit -m "feat(hub): countdown and daily restarts (DST-safe)"
 ```
 
@@ -1212,8 +1212,8 @@ git commit -m "feat(hub): countdown and daily restarts (DST-safe)"
 ### Task 4: Discord frontend v1.1 and wiring
 
 **Files:**
-- Create: `hub/src/format.ts`, holding the pure text functions (moved out of `discord.ts`) plus `formatPresence`, `formatTopic` and `topicDue`.
-- Modify (rewrite): `hub/src/discord.ts` for:
+- Create: `hub/src/discord/format.ts`, holding the pure text functions (moved out of `discord.ts`) plus `formatPresence`, `formatTopic` and `topicDue`.
+- Modify (rewrite): `hub/src/discord/discord.ts` for:
   - webhook chat;
   - presence and topics;
   - crash uploads;
@@ -1369,7 +1369,7 @@ Expected: FAIL. `format.test.ts` fails with `ERR_MODULE_NOT_FOUND` for `src/form
 
 - [ ] **Step 3: Implement the formatters**
 
-`hub/src/format.ts`:
+`hub/src/discord/format.ts`:
 
 ````ts
 import { escapeMarkdown } from 'discord.js';
@@ -1462,7 +1462,7 @@ export function topicDue(last: TopicEdit | undefined, text: string, now: number)
 
 - [ ] **Step 4: Implement the Discord frontend**
 
-`hub/src/discord.ts`:
+`hub/src/discord/discord.ts`:
 
 ```ts
 import {
@@ -1835,7 +1835,7 @@ rm -f config.json bad.json hub.db
 - [ ] **Step 7: Commit**
 
 ```bash
-git add hub/src/format.ts hub/src/discord.ts hub/src/index.ts hub/config.example.json hub/test/format.test.ts hub/test/discord.test.ts
+git add hub/src/discord/format.ts hub/src/discord/discord.ts hub/src/index.ts hub/config.example.json hub/test/format.test.ts hub/test/discord.test.ts
 git commit -m "feat(hub): webhook chat with skins, presence/topics, crash uploads, /restart, hidden admin commands"
 ```
 

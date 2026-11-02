@@ -29,18 +29,18 @@ import type {
   TargetEvent,
 } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
-import { Db } from '../src/db.ts';
-import { backupCommand, postTargets, type BackupInteraction } from '../src/discord.ts';
-import { formatEvent, formatTargetEvent, type Post } from '../src/format.ts';
-import type { Links } from '../src/links.ts';
-import type { RestoreEnv, RunRestore } from '../src/restore.ts';
-import type { Run } from '../src/services.ts';
-import type { RestartScheduler } from '../src/restarts.ts';
-import type { HubEvent, ServerHub } from '../src/servers.ts';
-import { HISTORY_POINTS } from '../src/host.ts';
+import { Db } from '../src/stats/db.ts';
+import { backupCommand, postTargets, type BackupInteraction } from '../src/discord/discord.ts';
+import { formatEvent, formatTargetEvent, type Post } from '../src/discord/format.ts';
+import type { Links } from '../src/servers/links.ts';
+import type { RestoreEnv, RunRestore } from '../src/backups/restore.ts';
+import type { Run } from '../src/services/services.ts';
+import type { RestartScheduler } from '../src/servers/restarts.ts';
+import type { HubEvent, ServerHub } from '../src/servers/servers.ts';
+import { HISTORY_POINTS } from '../src/agents/host.ts';
 import { startHub } from '../src/start.ts';
-import type { Stats } from '../src/stats.ts';
-import type { OAuth, WebApi } from '../src/web.ts';
+import type { Stats } from '../src/stats/stats.ts';
+import type { OAuth, WebApi } from '../src/web/web.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };

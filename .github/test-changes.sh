@@ -18,7 +18,7 @@ check() {
 #     hub mod web deploy agent factorio
 check '0 0 0 0 0 0' $'README.md\ndocs/protocol.md\nCLAUDE.md' branch main
 check '0 0 0 0 0 0' '' branch main
-check '1 0 0 0 0 0' hub/src/servers.ts branch main
+check '1 0 0 0 0 0' hub/src/servers/servers.ts branch main
 check '0 1 0 0 0 0' mod/build.gradle branch main
 check '0 0 1 0 0 0' web/src/app/app.ts branch main
 check '0 0 0 1 0 0' deploy/install-web.sh branch main
@@ -28,8 +28,8 @@ check '0 0 0 1 0 0' $'deploy/deploy-agent.sh\ndeploy/test-deploy-agent.sh\ndeplo
 check '1 0 1 0 1 0' hub/src/api.ts branch main
 check '1 0 1 0 1 0' hub/src/types.ts branch main
 check '1 0 0 0 1 0' hub/src/protocol.ts branch main
-check '1 0 0 0 1 0' hub/src/factorio.ts branch main
-check '1 0 0 0 1 0' hub/src/agents.ts branch main
+check '1 0 0 0 1 0' hub/src/updates/factorio.ts branch main
+check '1 0 0 0 1 0' hub/src/agents/agents.ts branch main
 check '1 0 0 0 0 0' hub/package.json branch main
 check '0 0 0 0 1 0' agent/src/main.ts branch main
 check '0 0 0 0 0 1' factorio/control.lua branch main
@@ -43,4 +43,4 @@ check '0 0 1 0 0 0' '' tag web-v0.3.1
 check '0 0 0 1 1 0' hub/src/types.ts tag agent-v1.0.0
 check '0 0 0 0 0 1' agent/src/main.ts tag factorio-v1.0.0
 check '0 0 0 0 0 0' deploy/install-web.sh tag deploy-v1.0.0
-check '0 0 1 0 0 0' hub/src/servers.ts tag web-v0.3.1 unknown
+check '0 0 1 0 0 0' hub/src/servers/servers.ts tag web-v0.3.1 unknown

@@ -23,7 +23,7 @@ import { Socket } from 'node:net';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { HANDSHAKE_MS } from '../../hub/src/agents.ts';
+import { HANDSHAKE_MS } from '../../hub/src/agents/agents.ts';
 import { HUB_WELCOME_GAP_MS, HubClient, backoff, tooFastWait, type HubOptions } from '../src/hub.ts';
 import { RconNoAnswer, RconNotSent } from '../src/rcon.ts';
 import { StatusPoller, type Reading } from '../src/status.ts';

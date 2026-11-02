@@ -5,14 +5,14 @@
 
 import net from 'node:net';
 import { loadConfig } from './config.ts';
-import { githubReader } from './deploys.ts';
-import { startDiscord } from './discord.ts';
-import { httpGet } from './health.ts';
-import { localHost } from './host.ts';
-import { execRestore } from './restore.ts';
-import { execRun } from './services.ts';
+import { githubReader } from './updates/deploys.ts';
+import { startDiscord } from './discord/discord.ts';
+import { httpGet } from './services/health.ts';
+import { localHost } from './agents/host.ts';
+import { execRestore } from './backups/restore.ts';
+import { execRun } from './services/services.ts';
 import { startHub } from './start.ts';
-import { discordOAuth } from './web.ts';
+import { discordOAuth } from './web/web.ts';
 
 // fetch tries a name's addresses in turn, giving each only 250 ms by default. One lost SYN (resent after 1 s) on every
 // IPv4 address then fails the connect with ETIMEDOUT, within ~0.5 s on a host without IPv6, whose attempts fail at once.

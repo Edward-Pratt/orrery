@@ -69,7 +69,7 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 /** A Host's Agent went silent or came back: whether a save can go changes. */
 const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.type === 'notice' && (e.kind === 'agentLost' || e.kind === 'agentBack');
 /**
- * The hub's reasons that leave nothing to edit (hub/src/game-settings.ts): an Agent too old for game settings, one
+ * The hub's reasons that leave nothing to edit (hub/src/servers/game-settings.ts): an Agent too old for game settings, one
  * not connected, and one that hasn't reported yet. Any other reason only holds Save back.
  */
 const readOnlyWhy = (blocked: string | null) =>

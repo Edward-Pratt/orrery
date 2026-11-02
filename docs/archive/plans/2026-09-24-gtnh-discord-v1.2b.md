@@ -58,8 +58,8 @@ These need the real server, so they're pinned by the Task 7 manual checklist:
 
 **Files:**
 - Modify: `hub/src/protocol.ts` (new message types, and the `boolean`, `dims?` and `quests` field kinds)
-- Modify: `hub/src/servers.ts` (`ServerState.dims`, the new game events, `sendLinkResult`, `runCommand(…, onLate?)`, `cmdLate` routing)
-- Modify: `hub/src/format.ts`: one edit, so `formatEvent` handles the new event types
+- Modify: `hub/src/servers/servers.ts` (`ServerState.dims`, the new game events, `sendLinkResult`, `runCommand(…, onLate?)`, `cmdLate` routing)
+- Modify: `hub/src/discord/format.ts`: one edit, so `formatEvent` handles the new event types
 - Test: `hub/test/protocol.test.ts`, `hub/test/servers.test.ts`; fixture updates in `hub/test/format.test.ts` and `hub/test/playtime.test.ts`
 
 **Interfaces:**
@@ -544,7 +544,7 @@ export function parseModLine(line: string): Hello | ModMsg | null {
 }
 ```
 
-`hub/src/servers.ts`:
+`hub/src/servers/servers.ts`:
 
 ```ts
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -876,7 +876,7 @@ Expected: `ℹ pass 91`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/protocol.ts hub/src/servers.ts hub/src/format.ts hub/test/protocol.test.ts hub/test/servers.test.ts hub/test/format.test.ts hub/test/playtime.test.ts
+git add hub/src/protocol.ts hub/src/servers/servers.ts hub/src/discord/format.ts hub/test/protocol.test.ts hub/test/servers.test.ts hub/test/format.test.ts hub/test/playtime.test.ts
 git commit -m "feat(hub): v1.2b messages (dims, quest, link, backup, cmdLate), link results, late command output"
 ```
 
@@ -885,8 +885,8 @@ git commit -m "feat(hub): v1.2b messages (dims, quest, link, backup, cmdLate), l
 ### Task 2: TPS history and lag alerts
 
 **Files:**
-- Modify: `hub/src/db.ts` (the `tps` and `links` tables and their queries)
-- Create: `hub/src/lag.ts`
+- Modify: `hub/src/stats/db.ts` (the `tps` and `links` tables and their queries)
+- Create: `hub/src/servers/lag.ts`
 - Test: `hub/test/db.test.ts`, `hub/test/lag.test.ts`
 
 **Interfaces:**
@@ -1132,7 +1132,7 @@ Expected: FAIL. `db.test.ts` fails with `db.recordTps is not a function`, and `l
 
 - [ ] **Step 3: Implement**
 
-`hub/src/db.ts`:
+`hub/src/stats/db.ts`:
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -1352,7 +1352,7 @@ export class Db {
 }
 ```
 
-`hub/src/lag.ts`:
+`hub/src/servers/lag.ts`:
 
 ```ts
 import type { Db } from './db.ts';
@@ -1433,7 +1433,7 @@ Expected: `ℹ pass 97`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/db.ts hub/src/lag.ts hub/test/db.test.ts hub/test/lag.test.ts
+git add hub/src/stats/db.ts hub/src/servers/lag.ts hub/test/db.test.ts hub/test/lag.test.ts
 git commit -m "feat(hub): TPS history and lag alerts naming the slowest dimension"
 ```
 
@@ -1442,7 +1442,7 @@ git commit -m "feat(hub): TPS history and lag alerts naming the slowest dimensio
 ### Task 3: Quest announcer
 
 **Files:**
-- Create: `hub/src/quests.ts`
+- Create: `hub/src/servers/quests.ts`
 - Test: `hub/test/quests.test.ts`
 
 **Interfaces:**
@@ -1516,7 +1516,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/quests.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/quests.ts`:
+`hub/src/servers/quests.ts`:
 
 ```ts
 import type { QuestDone } from './protocol.ts';
@@ -1581,7 +1581,7 @@ Expected: `ℹ pass 100`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/quests.ts hub/test/quests.test.ts
+git add hub/src/servers/quests.ts hub/test/quests.test.ts
 git commit -m "feat(hub): quest announcer (main at once, others batched per player)"
 ```
 
@@ -1590,7 +1590,7 @@ git commit -m "feat(hub): quest announcer (main at once, others batched per play
 ### Task 4: Account linking
 
 **Files:**
-- Create: `hub/src/links.ts`
+- Create: `hub/src/servers/links.ts`
 - Test: `hub/test/links.test.ts`
 
 **Interfaces:**
@@ -1691,7 +1691,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/links.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/links.ts`:
+`hub/src/servers/links.ts`:
 
 ```ts
 import { randomInt } from 'node:crypto';
@@ -1776,7 +1776,7 @@ Expected: `ℹ pass 105`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/links.ts hub/test/links.test.ts
+git add hub/src/servers/links.ts hub/test/links.test.ts
 git commit -m "feat(hub): Discord ↔ Minecraft account linking with capped code guessing"
 ```
 
@@ -1785,8 +1785,8 @@ git commit -m "feat(hub): Discord ↔ Minecraft account linking with capped code
 ### Task 5: Discord frontend and wiring for v1.2b
 
 **Files:**
-- Modify: `hub/src/backups.ts`: `watch()` is removed, because the mod's backup events replace it; adds `backupNotice`
-- Modify: `hub/src/format.ts` (`formatTps`, `formatQuests`, `formatLinked`), `hub/src/discord.ts`, `hub/src/index.ts`, `hub/config.example.json`
+- Modify: `hub/src/backups/backups.ts`: `watch()` is removed, because the mod's backup events replace it; adds `backupNotice`
+- Modify: `hub/src/discord/format.ts` (`formatTps`, `formatQuests`, `formatLinked`), `hub/src/discord/discord.ts`, `hub/src/index.ts`, `hub/config.example.json`
 - Test: `hub/test/backups.test.ts`, `hub/test/format.test.ts`, `hub/test/discord.test.ts`
 
 **Interfaces:**
@@ -2176,7 +2176,7 @@ Expected: FAIL. `backups.test.ts` errors with `does not provide an export named 
 
 - [ ] **Step 3: Implement**
 
-`hub/src/backups.ts`:
+`hub/src/backups/backups.ts`:
 
 ```ts
 import { lstat, readdir } from 'node:fs/promises';
@@ -2257,7 +2257,7 @@ export class BackupWatcher {
 }
 ```
 
-`hub/src/format.ts`:
+`hub/src/discord/format.ts`:
 
 ````ts
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
@@ -2515,7 +2515,7 @@ export function topicDue(last: TopicEdit | undefined, text: string, now: number)
 }
 ````
 
-`hub/src/discord.ts`:
+`hub/src/discord/discord.ts`:
 
 ```ts
 import {
@@ -3110,7 +3110,7 @@ rm -f config.json bad.json hub.db
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/backups.ts hub/src/format.ts hub/src/discord.ts hub/src/index.ts hub/config.example.json hub/test/backups.test.ts hub/test/format.test.ts hub/test/discord.test.ts
+git add hub/src/backups/backups.ts hub/src/discord/format.ts hub/src/discord/discord.ts hub/src/index.ts hub/config.example.json hub/test/backups.test.ts hub/test/format.test.ts hub/test/discord.test.ts
 git commit -m "feat(hub): /tps, /link, /unlink, quest and backup posts, late /cmd follow-ups"
 ```
 

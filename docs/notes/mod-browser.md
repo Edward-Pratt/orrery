@@ -21,7 +21,7 @@ of scope), [Import mod list](#import-mod-list) (built on `fa/mod-import`, not ye
 
 ## Fix 1: a release on both channels is stable
 
-**Cause (reproduced).** The hub is right. `FactorioCatalog.releases()` (`hub/src/factorio.ts:142-144`) pushes one row
+**Cause (reproduced).** The hub is right. `FactorioCatalog.releases()` (`hub/src/updates/factorio.ts:142-144`) pushes one row
 per channel. `factorio.com/api/latest-releases` currently has headless 2.1.24 under both `stable` and `experimental`,
 so the catalog answers `[{2.1.24, stable}, {2.1.24, experimental}]`. The dashboard's `versions()`
 (`web/src/app/servers/game.ts:248-255`) is wrong. Its line 253 runs for every channel entry with the running version:
@@ -74,7 +74,7 @@ channel; one on both is listed once, as stable") and the `factorio.ts` row of `h
 - "What changes" renders only while `current()` is the catalog's answer for exactly the picks shown (it compares the
   request it asked with `JSON.stringify(request())`). It is not the checking state, which shows a spinner and no
   "What changes".
-- The hub's `#plan` (`hub/src/game-updates.ts:331-339`) diffs the resolved mods against the Agent's `installed` list.
+- The hub's `#plan` (`hub/src/updates/game-updates.ts:331-339`) diffs the resolved mods against the Agent's `installed` list.
   `squeak-through-2` 0.2.1 is already in it, so `changes` is `[]`. That gives "Nothing yet." (`game.ts:193`) and
   `startWhy` "Nothing to change yet." (`game.ts:272`), so Update… stays disabled.
 

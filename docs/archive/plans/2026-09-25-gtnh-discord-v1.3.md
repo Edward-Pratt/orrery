@@ -96,7 +96,7 @@ done
 
 ### Task 2: Protocol version range
 
-**Files:** Modify `hub/src/protocol.ts`, `hub/src/servers.ts`, `hub/test/servers.test.ts`.
+**Files:** Modify `hub/src/protocol.ts`, `hub/src/servers/servers.ts`, `hub/test/servers.test.ts`.
 
 - [ ] **Step 1: Failing test.** In `hub/test/servers.test.ts`, replace the test
   `'rejects an unsupported protocol version'` with:
@@ -128,7 +128,7 @@ The test pins that behaviour while the check becomes a range, so it still counts
 export const MIN_PROTOCOL = 1;
 ```
 
-- [ ] **Step 3:** In `hub/src/servers.ts`, import `MIN_PROTOCOL` alongside `PROTOCOL_VERSION`. Then replace
+- [ ] **Step 3:** In `hub/src/servers/servers.ts`, import `MIN_PROTOCOL` alongside `PROTOCOL_VERSION`. Then replace
   the version check in `#checkHello` with:
 
 ```ts
@@ -416,7 +416,7 @@ try {
 
 ### Task 4: Backup free space and growth
 
-**Files:** Modify `hub/src/backups.ts`, `hub/src/format.ts`, `hub/src/summary.ts`, `hub/src/discord.ts`,
+**Files:** Modify `hub/src/backups/backups.ts`, `hub/src/discord/format.ts`, `hub/src/stats/summary.ts`, `hub/src/discord/discord.ts`,
 `hub/src/index.ts`, `hub/test/backups.test.ts`, `hub/test/format.test.ts`.
 
 - [ ] **Step 1: Failing tests.** In `hub/test/backups.test.ts`:
@@ -490,7 +490,7 @@ test('the watchdog warns once about low disk space and re-arms when there is roo
   If one `flush()` isn't enough (the check now awaits twice), make the helper
   `const flush = async () => { for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r)); };`.
 
-- [ ] **Step 2:** `hub/src/backups.ts`:
+- [ ] **Step 2:** `hub/src/backups/backups.ts`:
   - Import `statfs` from `node:fs/promises` and `formatBytes` from `./units.ts`.
   - Add `const DAY = 24 * HOUR;`, `const GB = 1024 ** 3;` and `export const DEFAULT_MIN_FREE_GB = 10;`.
   - Add:
@@ -577,7 +577,7 @@ test('formatSummary adds a backups line when it has backup stats', () => {
 });
 ```
 
-  - [ ] **Step 4:** `hub/src/format.ts`:
+  - [ ] **Step 4:** `hub/src/discord/format.ts`:
   - Add a helper:
     `const formatGrowth = (g: number) => \`${g < 0 ? '−' : '+'}${formatBytes(Math.abs(g))}/day\`;`
   - `formatBackupStatus(backups, now, free: number | null)`:
@@ -590,10 +590,10 @@ test('formatSummary adds a backups line when it has backup stats', () => {
 { name: 'Backups', value: [`${b.count}`, `${formatBytes(b.total)} total`, `${b.free === null ? 'n/a' : formatBytes(b.free)} free`, ...(b.growth === null ? [] : [formatGrowth(b.growth)])].join(', '), inline: false }
 ```
 
-- [ ] **Step 5:** In `hub/src/summary.ts`, the `Summary` type gains `backups?: BackupStats`, with
+- [ ] **Step 5:** In `hub/src/stats/summary.ts`, the `Summary` type gains `backups?: BackupStats`, with
   `import type { BackupStats } from './backups.ts'`. `buildSummary` is unchanged.
 
-- [ ] **Step 6:** `hub/src/discord.ts`, `/backup status`:
+- [ ] **Step 6:** `hub/src/discord/discord.ts`, `/backup status`:
   `formatBackupStatus(await listBackups(dir), Date.now(), await freeBytes(dir))` (import `freeBytes`).
 
 - [ ] **Step 7:** `hub/src/index.ts`:
@@ -636,7 +636,7 @@ const summaries = config.servers.flatMap((s) =>
 
 ### Task 5: `hub.db` upkeep
 
-**Files:** Modify `hub/src/db.ts`, `hub/src/index.ts`, `hub/test/db.test.ts`, `.gitignore`.
+**Files:** Modify `hub/src/stats/db.ts`, `hub/src/index.ts`, `hub/test/db.test.ts`, `.gitignore`.
 
 - [ ] **Step 1: Failing test** in `hub/test/db.test.ts` (add imports: `mkdir`, `mkdtemp`, `readdir`, `rm`, `writeFile`
   from `node:fs/promises`; `tmpdir`; `join`; `DatabaseSync` from `node:sqlite`):
@@ -672,7 +672,7 @@ test('maintain prunes old TPS samples, copies the database and keeps 7 copies', 
 });
 ```
 
-- [ ] **Step 2:** `hub/src/db.ts`:
+- [ ] **Step 2:** `hub/src/stats/db.ts`:
   - Import `mkdirSync`, `readdirSync` and `rmSync` from `node:fs`, `join` from `node:path`, and `localDay` from `./units.ts`.
   - Add constants `const TPS_KEEP_MS = 90 * 24 * 60 * 60_000;` and `const COPIES_KEPT = 7;`.
   - Add a method:
@@ -723,7 +723,7 @@ const upkeep = everyDay(DB_UPKEEP_TIME, 0, (target) => db.maintain(dbCopies, tar
 
 ### Task 6: Liveness ping
 
-**Files:** Create `hub/src/health.ts`, `hub/test/health.test.ts`. Modify `hub/src/discord.ts`, `hub/src/index.ts`.
+**Files:** Create `hub/src/services/health.ts`, `hub/test/health.test.ts`. Modify `hub/src/discord/discord.ts`, `hub/src/index.ts`.
 
 - [ ] **Step 1: Failing test** `hub/test/health.test.ts`:
 
@@ -761,7 +761,7 @@ test('pings every interval only while up, and survives failures', async (t) => {
 });
 ```
 
-- [ ] **Step 2:** `hub/src/health.ts`:
+- [ ] **Step 2:** `hub/src/services/health.ts`:
 
 ```ts
 type Get = (url: string) => Promise<{ ok: boolean; status: number }>;
@@ -786,7 +786,7 @@ export function startPinger(url: string, up: () => boolean, everyMs = 60_000, ge
 }
 ```
 
-- [ ] **Step 3:** `hub/src/discord.ts`:
+- [ ] **Step 3:** `hub/src/discord/discord.ts`:
   - Import `Status` from `discord.js`.
   - `DiscordFrontend` gains `/** True while every gateway shard is Ready (client.isReady() stays true through reconnects). */ connected: () => boolean;`.
   - The returned object gains
@@ -894,7 +894,7 @@ set -euo pipefail
 GTNH_DIR=${GTNH_DIR:-/home/opc/GTNH}
 BACKUP_DIR=${BACKUP_DIR:-$GTNH_DIR/backups}
 GTNH_SERVICE=${GTNH_SERVICE:-gtnh}
-NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}.*\.zip$' # as hub/src/backups.ts
+NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}.*\.zip$' # as hub/src/backups/backups.ts
 
 die() { echo "restore-backup: $*" >&2; exit 1; }
 

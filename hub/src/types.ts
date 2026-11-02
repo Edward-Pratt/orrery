@@ -251,6 +251,8 @@ export type Notice = { severity: Severity } & (
    * `sent` of `size`, `storing` while the Agent checks it, then `done` with the stored `name`, or `failed` with `error`.
    */
   | { kind: 'saveUpload'; state: 'sending' | 'storing' | 'done' | 'failed'; file: string; sent: number; size: number; name?: string; error?: string }
+  /** Newer portal mod releases fit a factorio server's Factorio: the first 10 by name, and how many in all. */
+  | { kind: 'modUpdates'; factorio: string; mods: { name: string; from: string; to: string }[]; count: number }
 );
 /** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */
 export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';

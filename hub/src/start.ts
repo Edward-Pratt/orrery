@@ -5,6 +5,7 @@ import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './factorio.ts';
 import { GameSettings } from './game-settings.ts';
+import { ModUpdates, type ModUpdatesOptions } from './mod-updates.ts';
 import { GameUpdates, type GameUpdatesOptions } from './game-updates.ts';
 import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
@@ -69,6 +70,8 @@ export type HubDeps = {
   factorioAccount?: FactorioAccount;
   /** Shorter game update timings, for tests. */
   gameUpdates?: GameUpdatesOptions;
+  /** The portal mod update check's timings and clock, for tests. */
+  modUpdates?: ModUpdatesOptions;
   /** How long an upload is kept after its last chunk (default an hour), for tests. */
   uploadIdleMs?: number;
   /** Shorter liveness timings of the game connections, for tests. */
@@ -196,6 +199,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
           restored: (id) => packs?.restored(id),
         })
       : undefined;
+  // One catalog: game updates, the mod browser and portal mod updates share its caches.
+  const catalog = new FactorioCatalog(deps.portal ?? fetch, deps.factorioAccount);
   // Game updates, with an Agent's server: started (its interrupted rows closed, the Agents heard) before any can connect.
   gameUpdates =
     agents &&
@@ -207,7 +212,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         agents,
         services,
         restarts,
-        catalog: new FactorioCatalog(deps.portal ?? fetch, deps.factorioAccount),
+        catalog,
         servers: config.servers,
         restoring: (id) => restores?.busy(id) ?? false,
         deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
@@ -216,6 +221,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.gameUpdates,
     );
   gameUpdates?.start();
+  const modUpdates = gameUpdates && new ModUpdates({ hub, db, catalog, gameUpdates, servers: config.servers.map((s) => s.id) }, deps.modUpdates);
+  modUpdates?.start();
   // Game settings, with an Agent's server: listening before any Agent can connect.
   const gameSettings =
     agents &&
@@ -332,7 +339,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
@@ -356,6 +363,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deploys?.stop();
       packs?.stop();
       gameUpdates?.stop();
+      modUpdates?.stop();
       library?.stop();
       uploads?.stop();
       stopSummaries();

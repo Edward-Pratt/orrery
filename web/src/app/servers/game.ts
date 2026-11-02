@@ -15,6 +15,7 @@ import { changesCard } from './changes';
 import type { BrowseStatus } from './mod-browser';
 import { ModBrowser } from './mod-browser';
 import { ModImport } from './mod-import';
+import { ModUpdatesBadge, ModUpdatesNotes, PortalUpdates } from './mod-updates';
 import { GAME_MODS } from './mod-list';
 import ServerPage from './server';
 import { failedPrep, PACK_STEPS, UpdateHistory, UpdateSteps } from './update-steps';
@@ -37,7 +38,8 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
  */
 @Component({
   selector: 'app-server-game',
-  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, UpdateHistory, UpdateSteps],
+  imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, ModUpdatesBadge, ModUpdatesNotes, UpdateHistory, UpdateSteps],
+  providers: [PortalUpdates],
   viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX })],
   template: `
     @if (state(); as g) {
@@ -51,7 +53,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             }
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="min-w-0">
-                <p class="text-xs font-medium text-muted-foreground">Installed</p>
+                <p class="flex items-center gap-2 text-xs font-medium text-muted-foreground">Installed <app-mod-updates-badge /></p>
                 @if (g.installed; as i) {
                   <h2 class="text-xl font-semibold" data-installed>Factorio {{ i.factorio }}</h2>
                   <ul class="mt-2 flex flex-wrap gap-1.5" aria-label="Mods">
@@ -63,15 +65,24 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                         [attr.data-mod]="m.name"
                       >
                         {{ m.name }} {{ m.version }}
+                        @if (updates.to().get(m.name); as to) {
+                          <span class="text-brand" [attr.title]="to + ' is on the mod portal for Factorio ' + line(i.factorio)" data-update-to
+                            >→ {{ to }}<span class="sr-only">, update available: {{ to }}</span></span
+                          >
+                        }
                       </li>
                     }
                   </ul>
+                  <app-mod-updates-notes />
                 } @else {
                   <p class="text-sm text-muted-foreground" data-not-reported>Its Agent hasn't said yet what the server runs: it does once it is connected.</p>
                 }
               </div>
               <div class="flex flex-col items-end gap-1">
                 <button hlmBtn [disabled]="!g.installed || !!g.blocked || busy()" (click)="open()" data-update>Update game</button>
+                @if (updates.state()?.updates?.length; as n) {
+                  <button hlmBtn variant="outline" [disabled]="!g.installed || !!g.blocked || busy()" (click)="open(true)" data-update-all>Update {{ n }} {{ n === 1 ? 'mod' : 'mods' }}…</button>
+                }
                 @if (g.blocked; as why) {
                   <p class="text-xs text-muted-foreground" data-update-why>{{ why }}</p>
                 }
@@ -266,6 +277,7 @@ export default class Game {
   readonly #http = inject(HttpClient);
   readonly #feedback = inject(Feedback);
   readonly #injector = inject(Injector);
+  protected readonly updates = inject(PortalUpdates);
   protected readonly base = `/api/servers/${encodeURIComponent(this.#server.id)}/game`;
   protected readonly steps = STEPS;
   protected readonly flow = FLOW;
@@ -361,6 +373,8 @@ export default class Game {
         takeUntilDestroyed(),
       )
       .subscribe((g) => {
+        // What the server runs changed (or is first known): its portal mod updates are asked again.
+        if (JSON.stringify(g.installed) !== JSON.stringify(this.state()?.installed ?? undefined)) this.updates.reload();
         this.state.set(g);
         this.running.set(g.running);
       });
@@ -402,6 +416,7 @@ export default class Game {
   }
 
   protected isGame = (name: string) => GAME_MODS.has(name);
+  protected line = (factorio: string) => factorio.split('.').slice(0, 2).join('.');
   protected titleOf = (name: string) => this.#catalog()?.answer.mods.find((m) => m.name === name)?.title ?? name;
   /** What "Newest that fits" stands for now: the version the catalog picked, once it has said. */
   protected newest = (name: string) => {
@@ -414,11 +429,15 @@ export default class Game {
     return p.version && !releases.includes(p.version) ? [...releases, p.version] : releases;
   };
 
-  /** Opens the sheet on what the server runs now: its Factorio version and portal mods at their versions. */
-  protected open(): void {
+  /**
+   * Opens the sheet on what the server runs now: its Factorio version and portal mods at their versions, or with
+   * `allUpdates` each mod with a portal mod update at "Newest that fits".
+   */
+  protected open(allUpdates = false): void {
     const i = this.state()!.installed!;
+    const newest = allUpdates ? this.updates.to() : new Map<string, string>();
     this.factorio.set(i.factorio);
-    this.picks.set(i.mods.filter((m) => !GAME_MODS.has(m.name)).map((m) => ({ name: m.name, version: m.version })));
+    this.picks.set(i.mods.filter((m) => !GAME_MODS.has(m.name)).map((m) => ({ name: m.name, version: newest.has(m.name) ? null : m.version })));
     this.adding.set('');
     this.addError.set(null);
     this.browsing.set(false);

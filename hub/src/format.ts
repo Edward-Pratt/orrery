@@ -128,6 +128,7 @@ function noticeText(n: Notice, game: Game): string | null {
     case 'packUpdateStep': // progress for the dashboard
     case 'saveUpload': // the dashboard's upload progress
     case 'settings': // for the dashboard's Settings tab
+    case 'modUpdates': // its own embed, in formatEvent
       return null;
     case 'verificationOff':
       return `⚠️ User verification is now off on ${n.name}${n.by === null ? '' : ` (by ${n.by})`}: player names aren't checked.`;
@@ -177,6 +178,14 @@ function gameUpdateText(n: Extract<Notice, { kind: 'packUpdateStarted' | 'packUp
   }
 }
 
+/** A `modUpdates` notice's text: each update by name (the portal's names and versions escaped), and how many more. */
+function modUpdatesText(n: Extract<Notice, { kind: 'modUpdates' }>): string {
+  const what = n.count === 1 ? '1 portal mod update fits' : `${n.count} portal mod updates fit`;
+  const list = n.mods.map((m) => `**${inline(m.name)}** ${inline(m.from)} → ${inline(m.to)}`).join(', ');
+  const more = n.count > n.mods.length ? ` and ${n.count - n.mods.length} more` : '';
+  return `${what} Factorio ${inline(n.factorio)}: ${list}${more}. Update them from the dashboard's Game tab.`;
+}
+
 /** The Discord post for a hub event, or null for events that aren't announced. `game`: the server's (it words updates). */
 export function formatEvent(e: HubEvent, game: Game = 'minecraft'): Post | null {
   switch (e.type) {
@@ -205,6 +214,7 @@ export function formatEvent(e: HubEvent, game: Game = 'minecraft'): Post | null 
     case 'recovered':
       return embed({ title: '✅ Server responding again', color: COLORS.green });
     case 'notice': {
+      if (e.kind === 'modUpdates') return embed({ title: '🧩 Portal mod updates', description: truncate(modUpdatesText(e), DESCRIPTION), color: SEVERITY_COLORS[e.severity] });
       const text = noticeText(e, game);
       return text === null ? null : embed({ title: title(text), color: SEVERITY_COLORS[e.severity] });
     }

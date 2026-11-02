@@ -667,3 +667,5 @@ export type ModCheckRequest = { factorio: string; names: string[] };
 export type ModCheck = { name: string; found: 'fits' | 'noRelease' | 'missing' | 'unchecked'; title: string | null; latest: string | null };
 /** The answer to `POST …/game/check`: the line asked about and each name's `ModCheck`, in the order asked. 400 for a bad body, 502 if the portal can't be read. */
 export type ModCheckAnswer = { line: string; mods: ModCheck[] };
+
+export type * from './api-game-extras.ts';

@@ -98,6 +98,7 @@ export class Db {
       CREATE INDEX IF NOT EXISTS feed_server_id ON feed (server_id, id);
       CREATE TABLE IF NOT EXISTS factorio_links (discord_id TEXT PRIMARY KEY, name TEXT NOT NULL, linked_at INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS factorio_links_name ON factorio_links (name COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS mod_update_notices (server_id TEXT PRIMARY KEY, mods TEXT NOT NULL, at INTEGER NOT NULL);
     `);
     // Tables are only ever added (never altered) from here on: an older hub after a Rollback must still read this file.
     // sessions from before the avatar column read as null
@@ -339,6 +340,18 @@ export class Db {
       | { discord_id: string; name: string }
       | undefined;
     return row ? { discordId: row.discord_id, name: row.name } : null;
+  }
+
+  /** The portal mod updates last posted for a server (`name@version` keys) and when; null before the first. */
+  modUpdateNotice(serverId: string): { mods: string[]; at: number } | null {
+    const row = this.#db.prepare('SELECT mods, at FROM mod_update_notices WHERE server_id = ?').get(serverId) as { mods: string; at: number } | undefined;
+    if (!row) return null;
+    const mods = JSON.parse(row.mods) as unknown;
+    return { mods: Array.isArray(mods) ? mods.filter((m): m is string => typeof m === 'string') : [], at: row.at };
+  }
+
+  setModUpdateNotice(serverId: string, mods: string[], at: number): void {
+    this.#write('mod update notice', 'INSERT OR REPLACE INTO mod_update_notices (server_id, mods, at) VALUES (?, ?, ?)', serverId, JSON.stringify(mods), at);
   }
 
   /** A host's sample, kept as JSON. */

@@ -53,9 +53,9 @@ export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string
  * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState
  * (`sub`), when that last changed (`since`, epoch ms) and Result (`result`, e.g. `success`, `exit-code`).
  * `updateStep` and `updateDone` carry the id of the `update` request that started the update. `events` says whether
- * the Agent forwards its server's game events: off (`reason`: why) until Factorio's next start, or on again. `reply`
- * answers a request by its `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it
- * has any.
+ * the Agent forwards its server's game events: off (`reason`: why) until Factorio's next start, or on again.
+ * `settings` is its server's game settings as it read them (`GameSettingsReport`). `reply` answers a request by its
+ * `id`: `error` says why when not `ok`, and `data` is the request's `AgentReplyData`, if it has any.
  */
 export type AgentMsg =
   | { type: 'ping' }
@@ -68,6 +68,7 @@ export type AgentMsg =
   | { type: 'updateDone'; id: string; outcome: PackFinished; from: string; to: string; backup?: string }
   | { type: 'deployResult'; tag: string; outcome: Exclude<DeployOutcome, 'running'>; log: string }
   | { type: 'events'; on: boolean; reason?: string }
+  | ({ type: 'settings' } & GameSettingsReport)
   | { type: 'reply'; id: string; ok: boolean; error?: string; data?: unknown };
 
 /**
@@ -77,7 +78,8 @@ export type AgentMsg =
  * `restore` copies a listed save as the newest while the unit is stopped (10 min); `update` starts a game update (the reply
  * means accepted; its id is the update's), `updateResume` continues the running one after the hub's stop and
  * `updateCancel` cancels it before the swap; `deploy` starts the Agent's own deploy of a release (the reply means
- * started).
+ * started); `settingsSet` writes its server's game settings and applies what it can live (`game_password` left out
+ * keeps the file's, null removes it).
  */
 export type AgentRequest =
   | { type: 'serviceAct'; id: string; action: ServiceVerb }
@@ -88,7 +90,17 @@ export type AgentRequest =
   | { type: 'update'; id: string; factorio: FactorioDownload; mods: FactorioModDownload[] }
   | { type: 'updateResume'; id: string }
   | { type: 'updateCancel'; id: string }
-  | { type: 'deploy'; id: string; tag: string };
+  | { type: 'deploy'; id: string; tag: string }
+  | { type: 'settingsSet'; id: string; settings: GameSettingsFields; game_password?: string | null; admins: string[] }
+  /**
+   * A save uploaded from the dashboard, sent in order: `saveUploadStart` (the upload's id, its file name, size and
+   * sha256), a `saveChunk` per piece (base64, at its byte `offset`, each answered before the next), then
+   * `saveUploadEnd`, which the Agent answers once the file checks out and is stored; `saveUploadCancel` drops it.
+   */
+  | { type: 'saveUploadStart'; id: string; upload: string; name: string; size: number; sha256: string }
+  | { type: 'saveChunk'; id: string; upload: string; offset: number; data: string }
+  | { type: 'saveUploadEnd'; id: string; upload: string }
+  | { type: 'saveUploadCancel'; id: string; upload: string };
 /** Everything the hub sends on an Agent connection: the handshake's answer, then requests. */
 export type HubAgentMsg = Extract<HubMsg, { type: 'welcome' | 'reject' }> | AgentRequest;
 /** What an `ok` reply's `data` holds, for the requests that answer with data (the others send none). */
@@ -96,6 +108,47 @@ export type AgentReplyData = {
   journal: { lines: string[] };
   logs: { files: LogFile[] };
   log: { lines: string[] };
+  /** The keys that applied at once, and those waiting for the next restart. */
+  settingsSet: { applied: string[]; pending: string[] };
+  /** The stored save's name in `saves/`. */
+  saveUploadEnd: { name: string };
+};
+
+/** Who may run Lua commands on a factorio server: as server-settings.json's `allow_commands`. */
+export type AllowCommands = 'true' | 'false' | 'admins-only';
+/**
+ * A factorio server's game settings that the dashboard changes, by their `server-settings.json` keys (the password and
+ * the admins aside): `max_players` 0 means no limit, `autosave_interval` (minutes) 0 off, `afk_autokick_interval`
+ * (minutes) 0 never.
+ */
+export type GameSettingsFields = {
+  name: string;
+  description: string;
+  max_players: number;
+  require_user_verification: boolean;
+  autosave_interval: number;
+  autosave_slots: number;
+  afk_autokick_interval: number;
+  auto_pause: boolean;
+  auto_pause_when_players_connect: boolean;
+  only_admins_can_pause_the_game: boolean;
+  allow_commands: AllowCommands;
+};
+/** The game settings as its Agent read them: never the password, only whether one is set. */
+export type GameSettingsValues = GameSettingsFields & { game_password_set: boolean };
+/**
+ * What an Agent reports of its server's game settings. `settings` is null while `server-settings.json` can't be read
+ * (`problem` says why); `admins` are the adminlist's names that pass the name rule; `pending`, the keys saved but
+ * waiting for a restart; `extra`, keys in the file the next save drops; `rolledBack`, why the Agent last put back the
+ * settings it last started with (until the next save).
+ */
+export type GameSettingsReport = {
+  settings: GameSettingsValues | null;
+  admins: string[];
+  problem: string | null;
+  pending: string[];
+  extra: string[];
+  rolledBack: string | null;
 };
 
 /** A Factorio mod from the mod portal (or one that comes with the game, like `base`), at one version. */
@@ -183,6 +236,21 @@ export type Notice = { severity: Severity } & (
   | { kind: 'packUpdateStarted'; from: string; to: string; by: string }
   | ({ kind: 'packUpdateStep'; cancellable: boolean } & PackStepState)
   | { kind: 'packUpdateFinished'; outcome: PackFinished; from: string; to: string; ms: number; backup?: string }
+  /** A factorio server's game settings changed (its Agent's report, or a save): stream only, the dashboard asks again. */
+  | { kind: 'settings' }
+  /**
+   * User verification turned off on a factorio server (`name`: the server's), or on again: by a save from the dashboard
+   * (`by`: the admin's name), or as its Agent reported its file (`by` null: a rollback, or a hand edit).
+   */
+  | { kind: 'verificationOff'; name: string; by: string | null }
+  | { kind: 'verificationOn'; name: string; by: string | null }
+  /** A factorio server's start failed after its game settings changed: its Agent put back those of its last good start. */
+  | { kind: 'settingsRolledBack'; name: string }
+  /**
+   * A save uploaded from the dashboard on its way to a factorio server's Agent (stream only): `sending` with the bytes
+   * `sent` of `size`, `storing` while the Agent checks it, then `done` with the stored `name`, or `failed` with `error`.
+   */
+  | { kind: 'saveUpload'; state: 'sending' | 'storing' | 'done' | 'failed'; file: string; sent: number; size: number; name?: string; error?: string }
 );
 /** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */
 export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';

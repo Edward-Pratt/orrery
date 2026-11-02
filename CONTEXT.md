@@ -51,6 +51,16 @@ The number a Mod or an Agent announces when it connects, the same number for bot
 A Discord user's tie to their player names in game, made by typing a `/link` code in a game. One link per Discord user, holding a name per game; one code works in either game. Unlinking in game removes only that game's name; `/unlink` in Discord removes the whole link.
 _Avoid_: pairing, binding, connection (a connection is a socket)
 
+### Game settings
+
+**Game settings**:
+A factorio server's own settings: its name, description, player limit, game password, user verification, pausing, autosaves, idle kick, who may run Lua commands, and its admins. Changed in the dashboard's Settings tab; the server's `server-settings.json` and adminlist are their source, and some changes apply only at its next restart. Never a Minecraft server's, and never the hub's config.
+_Avoid_: config (the hub's), server settings (`ServerSettings` is the hub's per-server config), options, preferences
+
+**Admin**:
+A player name a factorio server treats as an admin in game. Not a dashboard admin (a Discord member with the admin role). While user verification is off the name is not checked, so anyone with the game password can join under it.
+_Avoid_: operator, op, moderator
+
 ### Backups
 
 **Backup**:
@@ -126,7 +136,7 @@ Putting one release of one part in place: the hub or dashboard onto an environme
 _Avoid_: install, rollout, push, redeploy (deploying the running release is refused)
 
 **Rollback**:
-Returning by itself to what ran before, when a deploy's new release or an update's new version fails to come up: to the release before it, or to the files before it (for a game update, also to its pre-update save).
+Returning by itself to what ran before, when a deploy's new release, an update's new version or a factorio server's new game settings fail to come up: to the release before it, to the files before it (for a game update, also to its pre-update save), or to the game settings of its last good start.
 _Avoid_: revert, downgrade (choosing an older release is a deploy)
 
 **Environment**:

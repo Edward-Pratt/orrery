@@ -8,9 +8,10 @@ import { Db } from '../src/db.ts';
 import { Hosts } from '../src/host.ts';
 import { LiveFeed } from '../src/live.ts';
 import { PlaytimeTracker } from '../src/playtime.ts';
-import { LIMITS } from '../src/protocol.ts';
+import { LIMITS, REPLY_WITH_DATA } from '../src/protocol.ts';
 import { ServerHub, type HubEvent, type HubOptions, type TargetEvent } from '../src/servers.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
+import type { GameSettingsFields } from '../src/types.ts';
 
 const AGENT_TOKEN = 'agent-token-0123456789abcdef-0123456789';
 const LIMITS_VM = { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 };
@@ -455,6 +456,17 @@ test('requests carry fresh ids, answer with checked data, and fail on refusal, b
   await assert.rejects(dropped, /disconnected/);
 });
 
+test("a saveUploadEnd's reply gives the stored name: every request with a reply schema has its data read", async (t) => {
+  const { agents, port } = await setup(t);
+  const agent = await agentUp(port);
+  const end = agents.request('vm', { type: 'saveUploadEnd', upload: 'c'.repeat(32) });
+  const asked = (await agent.next()) as { id: string };
+  agent.send({ type: 'reply', id: asked.id, ok: true, data: { name: 'uploaded-20300101T000000Z-x.zip' } });
+  assert.deepEqual(await end, { name: 'uploaded-20300101T000000Z-x.zip' });
+  for (const type of ['journal', 'logs', 'log', 'settingsSet', 'saveUploadEnd']) assert.ok(REPLY_WITH_DATA.has(type), type);
+  assert.ok(!REPLY_WITH_DATA.has('saveChunk'), 'a request with no data answers undefined');
+});
+
 test("a request's own timeout outlives the default one: a long restore is not reported failed while it goes on", async (t) => {
   const { agents, port } = await setup(t, { agents: { requestTimeoutMs: 50 } });
   const agent = await agentUp(port);
@@ -637,6 +649,61 @@ test('a push identical to the last one passed on is skipped; changed ones come a
   await readAll(sides[0]!, agent.socket);
   assert.deepEqual(pushed.slice(7), ['active 200']);
   assert.equal(agents.get('vm')?.connected, true);
+});
+
+test("game settings: a push like the last is skipped, changed ones within their own budget; settingsSet's answer is checked", async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.method(console, 'error', () => {});
+  const { agents, port } = await setup(t);
+  const sides = hubSides(t, port);
+  const agent = await agentUp(port);
+  const pushed: string[] = [];
+  agents.on('settings', (_, m) => pushed.push(`${m.settings?.max_players} ${m.pending.join(',')}`));
+  const fields: GameSettingsFields = {
+    name: 'orrery Factorio',
+    description: '',
+    max_players: 0,
+    require_user_verification: true,
+    autosave_interval: 10,
+    autosave_slots: 5,
+    afk_autokick_interval: 0,
+    auto_pause: true,
+    auto_pause_when_players_connect: false,
+    only_admins_can_pause_the_game: true,
+    allow_commands: 'admins-only',
+  };
+  const settings = (max: number, pending: string[] = []) => ({
+    type: 'settings',
+    settings: { ...fields, game_password_set: false, max_players: max, game_password: 'never-sent' },
+    admins: ['alice'],
+    problem: null,
+    pending,
+    extra: [],
+    rolledBack: null,
+  });
+  for (const msg of [settings(0), settings(0), settings(8, ['auto_pause']), settings(8, ['auto_pause']), settings(0)]) agent.send(msg);
+  await readAll(sides[0]!, agent.socket);
+  assert.deepEqual(pushed, ['0 ', '8 auto_pause', '0 ']);
+  pushed.length = 0;
+  for (let i = 1; i <= 12; i++) agent.send(settings(i)); // 7 left of the 10
+  await readAll(sides[0]!, agent.socket);
+  assert.equal(pushed.length, 7);
+
+  const set = agents.request('vm', {
+    type: 'settingsSet',
+    settings: { ...fields, max_players: 8 },
+    game_password: null,
+    admins: ['alice', 'bob'],
+  });
+  const asked = (await agent.next()) as { type: string; id: string; game_password: unknown; admins: string[] };
+  assert.equal(asked.type, 'settingsSet');
+  assert.equal(asked.game_password, null, 'null removes the password: it is sent as null');
+  assert.deepEqual(asked.admins, ['alice', 'bob']);
+  agent.send({ type: 'reply', id: asked.id, ok: true, data: { applied: ['max_players'], pending: ['game_password'], extra: 1 } });
+  assert.deepEqual(await set, { applied: ['max_players'], pending: ['game_password'] });
+  const bad = agents.request('vm', { type: 'settingsSet', settings: { ...fields, allow_commands: 'false' }, admins: [] });
+  agent.send({ type: 'reply', id: ((await agent.next()) as { id: string }).id, ok: true, data: { applied: ['Max Players'], pending: [] } });
+  await assert.rejects(bad, /malformed/);
 });
 
 test('a refused connection is destroyed within 2 s even if its peer never sends its FIN', async (t) => {

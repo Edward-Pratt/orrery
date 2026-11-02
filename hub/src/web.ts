@@ -44,7 +44,10 @@ import type {
 import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
 import { GameRefused } from './factorio.ts';
+import type { SaveUploads } from './save-uploads.ts';
 import type { GameUpdates } from './game-updates.ts';
+import type { GameSettings } from './game-settings.ts';
+import type { GameSettingsAnswer, GameSettingsState, SaveUploadAnswer, SaveUploadRequest } from './api.ts';
 import type { HostMonitor, Hosts } from './host.ts';
 import type { Config, WebIntegration } from './config.ts';
 import type { Db } from './db.ts';
@@ -136,6 +139,9 @@ export type WebDeps = {
   packs?: Packs;
   /** Only with the agents (and systemd) integrations. */
   gameUpdates?: GameUpdates;
+  /** Only with the agents (and systemd) integrations. */
+  gameSettings?: GameSettings;
+  saveUploads?: SaveUploads;
   /** With packs. */
   uploads?: Uploads;
   /** With packs. */
@@ -145,7 +151,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   // A factorio server is run by an Agent (its `server`).
@@ -168,7 +174,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       restart: restarts.pending(s.id) ?? null,
       lagging: lag.isLagging(s.id),
       service: linked ? { id: linked.id, state: linked.state } : null,
-      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)) },
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)), settings: Boolean(gameSettings?.has(s.id)), upload: Boolean(saveUploads?.has(s.id)) },
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
@@ -583,6 +589,38 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
         if (!image) return c.text('No thumbnail.', 404, { 'cache-control': 'private, max-age=3600' });
         // A checked PNG only, never sniffed as anything else; by name, so not immutable: a mod can change its thumbnail.
         return c.body(image, 200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    });
+  }
+  // Game settings are written while the server is stopped too, so they come before the online check below.
+  if (gameSettings) {
+    /** Runs a game settings call for a server an Agent runs, mapping its refusals to their status. */
+    const settings = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<object>) => {
+      const id = c.req.param('id')!;
+      if (!gameSettings.has(id)) return c.notFound();
+      try {
+        return c.json(await fn(id, c.get('user')));
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/servers/:id/settings', (c) => settings(c, async (sid) => gameSettings.state(sid) satisfies GameSettingsState));
+    app.put('/servers/:id/settings', (c) =>
+      settings(c, async (sid, user) => (await gameSettings.set(sid, await jsonBody(c.req), actor(user), user.username)) satisfies GameSettingsAnswer),
+    );
+  }
+  // An uploaded save goes to a stopped server too, so before the online check below.
+  if (saveUploads) {
+    app.post('/servers/:id/saves', async (c) => {
+      const id = c.req.param('id');
+      if (!saveUploads.has(id)) return c.notFound();
+      try {
+        const body = (await jsonBody(c.req)) as Partial<SaveUploadRequest>;
+        return c.json(saveUploads.add(id, body.upload, actor(c.get('user'))) satisfies SaveUploadAnswer, 202);
       } catch (err) {
         if (err instanceof GameRefused) return c.text(err.message, err.status);
         throw err;

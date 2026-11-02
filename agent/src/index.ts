@@ -12,6 +12,7 @@ import { HubClient } from './hub.ts';
 import { AGENT_LOG, AgentLog, Logs, logTo } from './logs.ts';
 import { RconSession } from './rcon.ts';
 import { Saves } from './saves.ts';
+import { GameSettings } from './settings.ts';
 import { ServiceWatch } from './service.ts';
 import { StatusPoller } from './status.ts';
 import { Updates, installedOf } from './update.ts';
@@ -25,6 +26,8 @@ function agentVersion(): string {
 }
 
 /** The config file; setup's `image.json` sits beside it. */
+/** Why a game update, a restore or a deploy is refused while a `settingsSet` runs or waits. */
+const SETTINGS_BUSY = 'a game settings save is running';
 const configPath = (): string => process.env.ORRERY_AGENT_CONFIG ?? CONFIG_PATH;
 const load = (): Config => loadConfig(configPath(), process.env, process.env.ORRERY_AGENT_ROOT ?? AGENT_ROOT);
 
@@ -56,15 +59,17 @@ function run(): void {
     welcomed: () => {
       updates.connected();
       deploys.connected();
+      void settings.refresh();
     },
     handlers: {
       serviceAct: ({ action }) => service.act(action),
       logs: () => logs.list(),
       log: ({ name }) => logs.log(name),
       journal: ({ unit }) => logs.journal(unit),
-      // Neither during a game update nor during a deploy, whose restart of the agent would cut it short.
+      // Neither during a game update or a game settings save nor during a deploy, whose restart of the agent would cut it short.
       restore: async ({ name }) => {
         if (updates.busy) throw new Error('a game update is running');
+        if (settings.busy) throw new Error(SETTINGS_BUSY);
         await deploys.idle();
         return saves.restore(name);
       },
@@ -73,6 +78,15 @@ function run(): void {
       updateResume: () => updates.resume(),
       updateCancel: () => updates.cancel(),
       deploy: ({ tag }) => deploys.deploy(tag),
+      settingsSet: (req) => settings.set(req),
+      // An upload from the dashboard: stored next to the world as a save of its own (loading it is a restore).
+      saveUploadStart: async ({ upload, name, size, sha256 }) => {
+        if (updates.busy) throw new Error('a game update is running');
+        await saves.uploadStart(upload, name, size, sha256);
+      },
+      saveChunk: ({ upload, offset, data }) => saves.uploadChunk(upload, offset, Buffer.from(data, 'base64')),
+      saveUploadEnd: async ({ upload }) => ({ name: await saves.uploadEnd(upload, hub.latestInstalled?.factorio) }),
+      saveUploadCancel: ({ upload }) => saves.uploadCancel(upload),
     },
   });
   const updates: Updates = new Updates({
@@ -87,13 +101,38 @@ function run(): void {
     gameUp: () => hub.gameUp,
     connected: () => hub.connected,
     installed: () => hub.latestInstalled,
-    idle: () => deploys.idle(),
+    // Not during a game settings save, which writes the config folder and runs live commands, nor a deploy.
+    idle: async () => {
+      if (settings.busy) throw new Error(SETTINGS_BUSY);
+      await deploys.idle();
+    },
   });
-  const deploys: Deploys = new Deploys({ root: config.root, state: config.state, version, busy: () => updates.busy, send: (msg) => hub.deliver(msg) });
+  const deploys: Deploys = new Deploys({
+    root: config.root,
+    state: config.state,
+    version,
+    // A deploy restarts the agent: neither during a game update nor during a game settings save, which it would cut short.
+    busy: () => (updates.busy ? 'a game update is running' : settings.busy ? SETTINGS_BUSY : null),
+    send: (msg) => hub.deliver(msg),
+  });
+  const settings: GameSettings = new GameSettings({
+    config: join(data, 'config'),
+    state: config.state,
+    log: join(data, 'factorio-current.log'),
+    unit: service,
+    run,
+    // Neither during a game update, which swaps the server's files, nor during a deploy, whose restart cuts it short.
+    ready: async () => {
+      if (updates.busy) throw new Error('a game update is running');
+      await deploys.idle();
+    },
+    push: (report) => hub.settings(report),
+  });
   const status = new StatusPoller({
     port: config.server.rconPort,
     password: config.rconPassword,
     settings: join(config.server.data, 'config', 'server-settings.json'),
+    autoPause: () => settings.autoPause,
   });
   const events = new GameEvents({
     port: config.server.agentUdpPort,
@@ -106,11 +145,13 @@ function run(): void {
   service.on('change', (s) => {
     hub.service(s);
     events.service(s);
+    settings.service(s);
   });
   service.on('stopping', () => hub.stopping());
   status.on('status', (r, s) => {
     hub.status(r);
     events.rconUp();
+    settings.rconUp();
     saves.played(r.players.length > 0);
     updates.status(s);
     hub.installed(installedOf(s));
@@ -135,6 +176,7 @@ function run(): void {
   saves.start();
   void updates.start();
   deploys.start();
+  void settings.start();
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -148,6 +190,7 @@ function run(): void {
     saves.stop();
     updates.stop();
     deploys.stop();
+    settings.stop();
     commands.close();
     void hub.stop().then(() => process.exit(0));
   };

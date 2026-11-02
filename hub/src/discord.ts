@@ -111,9 +111,19 @@ export function shouldRelay(m: Pick<Message, 'author' | 'webhookId' | 'system'>)
   return !m.author.bot && !m.webhookId && !m.system;
 }
 
-/** Where an event is posted: its server's channel, or the alerts channel for the host, services and checks. */
+/**
+ * A server's notices for the admins alone: user verification turned off or on, and game settings put back (a
+ * rollback can bring back a leaked game password). The server's channel is where its players read: saying there that
+ * names aren't checked would tell anyone with the game password they can join under an admin's name.
+ */
+const ADMINS_ONLY = new Set<string>(['verificationOff', 'verificationOn', 'settingsRolledBack']);
+
+/**
+ * Where an event is posted: its server's channel, or the alerts channel for the host, services and checks and for a
+ * server's notices for the admins alone (`ADMINS_ONLY`); without an alerts channel those are not posted.
+ */
 export function channelFor(e: LiveEvent, cfg: DiscordConfig): string | undefined {
-  if ('target' in e) return cfg.alertsChannel;
+  if ('target' in e || (e.type === 'notice' && ADMINS_ONLY.has(e.kind))) return cfg.alertsChannel;
   return Object.hasOwn(cfg.channels, e.serverId) ? cfg.channels[e.serverId] : undefined;
 }
 

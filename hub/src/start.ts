@@ -4,6 +4,7 @@ import { BackupWatcher } from './backups.ts';
 import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './factorio.ts';
+import { GameSettings } from './game-settings.ts';
 import { GameUpdates, type GameUpdatesOptions } from './game-updates.ts';
 import { Hosts, type HostReaders } from './host.ts';
 import { Library, type Fetch } from './library.ts';
@@ -23,6 +24,7 @@ import { RestartScheduler } from './restarts.ts';
 import { ServerHub, type HubOptions } from './servers.ts';
 import { Stats } from './stats.ts';
 import { scheduleSummaries } from './summary.ts';
+import { SaveUploads } from './save-uploads.ts';
 import { Uploads } from './uploads.ts';
 import { serveWebApi, webApi, type OAuth, type WebApi } from './web.ts';
 
@@ -189,7 +191,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     services && restoreSources.size
       ? new Restores(hub, services, restoreSources, {
           deploying: (id) => (deploys?.busy() ? 'hub' : agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!) ? 'agent' : null),
-          updating,
+          // A game settings save too: the Agent writes the config folder then.
+          updating: (id): string | null => updating(id) ?? (gameSettings?.busy(id) ? 'game settings save' : null),
           restored: (id) => packs?.restored(id),
         })
       : undefined;
@@ -208,10 +211,26 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         servers: config.servers,
         restoring: (id) => restores?.busy(id) ?? false,
         deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
+        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
       },
       deps.gameUpdates,
     );
   gameUpdates?.start();
+  // Game settings, with an Agent's server: listening before any Agent can connect.
+  const gameSettings =
+    agents &&
+    services &&
+    new GameSettings({
+      hub,
+      agents,
+      services,
+      restarts,
+      servers: config.servers,
+      updating,
+      restoring: (id) => restores?.busy(id) ?? false,
+      deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
+    });
+  gameSettings?.start();
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   deploys =
     github &&
@@ -229,6 +248,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
         agents,
         restoring: (id) => restores?.busy(id) ?? false,
         updating,
+        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
         libraryAdding: () => library?.busy() ?? false,
         installing: () => packs?.installRunning() ?? false,
         mcOf: (id) => {
@@ -241,10 +261,12 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     );
   deploys?.start();
   // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
-  const uploads = services && minecraft ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
+  // Uploads: for packs (a server's service and Mod), and for an Agent's server's uploaded saves.
+  const uploads = services && (minecraft || agents) ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
   // The library takes uploads and is one per Environment: on whenever packs are.
   library =
     uploads &&
+    minecraft &&
     new Library({
       hub,
       db,
@@ -283,6 +305,23 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       deps.packs,
     );
 
+  // Saves uploaded from the dashboard, sent to an Agent's server: not while it updates, restores, saves its game settings or deploys its Agent.
+  const saveUploads =
+    agents &&
+    uploads &&
+    new SaveUploads({
+      hub,
+      agents,
+      uploads,
+      busy: (id) => {
+        const kind = updating(id);
+        if (kind) return `a ${kind} is running`;
+        if (gameSettings?.busy(id)) return 'a game settings save is running';
+        if (restores?.busy(id)) return 'a restore is running';
+        if (agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!)) return "the server's Agent is being deployed";
+        return null;
+      },
+    });
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
@@ -293,7 +332,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

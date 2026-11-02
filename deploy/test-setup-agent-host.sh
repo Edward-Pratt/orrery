@@ -664,6 +664,24 @@ check 'a hand-edited server-settings.json without a game password is kept, and t
   says "warning: no game_password found in /srv/factorio/config/server-settings.json" &&
   grep -q "^warning: no game_password found" "$BOOT" && ! grep -q "^game password:" "$BOOT"'
 
+# ---- What the agent writes from the dashboard's Settings tab (agent/src/settings.ts) is kept on a re-run: its own
+# _comment, a new name, verification off and a game password with symbols in it; the adminlist as Factorio keeps it.
+AGENT_PW='Fam1ly-pass!#%'
+node -e '
+  const [f, pw] = process.argv.slice(1);
+  const s = { _comment: "Written by the orrery Agent from the dashboard'\''s Settings tab", name: "Our base", description: "", max_players: 8,
+    visibility: { public: false, lan: false }, game_password: pw, require_user_verification: false, autosave_interval: 10, autosave_slots: 5,
+    afk_autokick_interval: 0, auto_pause: true, auto_pause_when_players_connect: false, only_admins_can_pause_the_game: true,
+    allow_commands: "false", non_blocking_saving: false };
+  require("fs").writeFileSync(f, JSON.stringify(s, null, 2) + "\n", { mode: 0o600 });' "$T/agent-settings.json" "$AGENT_PW"
+cp "$T/agent-settings.json" "$SET"
+printf '["alice","bob"]\n' > "$T/agent-admins.json"
+cp "$T/agent-admins.json" "$R/srv/factorio/config/server-adminlist.json"
+check 'keeps the settings and admins the agent wrote, byte for byte, and the report shows its game password' '
+  IN= run "${ARGS[@]}" && cmp -s "$T/agent-settings.json" "$SET" && cmp -s "$T/agent-admins.json" "$R/srv/factorio/config/server-adminlist.json" &&
+  says "kept /srv/factorio/config/server-settings.json: edited by hand" && says "kept /srv/factorio/config/server-adminlist.json: edited by hand" &&
+  grep -qxF "game password: $AGENT_PW" "$BOOT" && ! says "warning: no game_password"'
+
 # ---- SELinux and firewalld on.
 fresh
 touch "$F/selinux" "$F/active-firewalld"

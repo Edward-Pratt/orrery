@@ -37,6 +37,8 @@ export type GameUpdatesDeps = {
    * leave the update to the Agent alone), or the Agent's own (it restarts itself); null: none.
    */
   deploying: (agentId: string) => 'hub' | 'agent' | null;
+  /** Whether a save of a server's game settings is under way (`GameSettings.busy`): an update waits for it. */
+  settingsSaving?: (serverId: string) => boolean;
 };
 
 const STEPS: PackStep[] = ['prepare', 'backup', 'stop', 'swap', 'gate'];
@@ -639,6 +641,7 @@ export class GameUpdates {
       return `${name}'s Agent hasn't said what it runs yet.`;
     }
     if (this.#d.restoring(serverId)) return `A restore is running on ${name}.`;
+    if (this.#d.settingsSaving?.(serverId)) return `A save of ${name}'s game settings is under way.`;
     const deploy = this.#d.deploying(this.#agentOf.get(serverId)!);
     if (deploy === 'hub') return 'A hub deploy is running.';
     if (deploy === 'agent') return `${name}'s Agent is being deployed.`;

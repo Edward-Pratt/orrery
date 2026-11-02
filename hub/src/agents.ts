@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentConfig, AgentsIntegration } from './config.ts';
 import type { Hosts } from './host.ts';
-import { LIMITS, parseAgentLine, parseModLine, parseReplyData, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg, type ModMsg } from './protocol.ts';
+import { LIMITS, parseAgentLine, parseModLine, parseReplyData, REPLY_WITH_DATA, type AgentHello, type AgentMsg, type AgentReplyData, type AgentRequest, type Hello, type HubAgentMsg, type ModMsg } from './protocol.ts';
 import { protocolRefusal, tokenMatches, type ServerHub } from './servers.ts';
 
 /** Shorter timings, for tests. */
@@ -47,7 +47,6 @@ export type AgentEvents = { agentUp: [agentId: string]; agentLost: [agentId: str
 export type AgentCall = AgentRequest extends infer R ? (R extends AgentRequest ? Omit<R, 'id'> : never) : never;
 /** What a request's promise resolves to: its reply's checked `data`, for the requests that answer with data. */
 export type AgentAnswer<T extends AgentRequest['type']> = T extends keyof AgentReplyData ? AgentReplyData[T] : void;
-const WITH_DATA = new Set<string>(['journal', 'logs', 'log'] satisfies (keyof AgentReplyData)[]);
 
 /** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
 export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
@@ -64,12 +63,17 @@ export const AGENT_FLOOR = 'agent-v1.1.0';
  * that isn't a version.
  */
 export function beforeAgentFloor(version: string | null): boolean {
+  return beforeAgentRelease(version, AGENT_FLOOR);
+}
+
+/** Whether an Agent's release is older than `floor` (an `agent-vX.Y.Z` tag), by `beforeAgentFloor`'s rules. */
+export function beforeAgentRelease(version: string | null, floor: string): boolean {
   const m = version === null ? null : /^(?:agent-v)?(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!m) return false;
   const v = m.slice(1).map(Number);
   if (v.every((n) => n === 0)) return false;
-  const floor = AGENT_FLOOR.slice('agent-v'.length).split('.').map(Number);
-  return v[0]! - floor[0]! < 0 || (v[0] === floor[0] && (v[1]! - floor[1]! < 0 || (v[1] === floor[1] && v[2]! < floor[2]!)));
+  const f = floor.slice('agent-v'.length).split('.').map(Number);
+  return v[0]! - f[0]! < 0 || (v[0] === f[0] && (v[1]! - f[1]! < 0 || (v[1] === f[1] && v[2]! < f[2]!)));
 }
 
 type Waiting = { request: AgentRequest['type']; resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
@@ -115,6 +119,7 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
   { name: 'serviceState', types: ['serviceState'], perSecond: 1, burst: 10 },
   { name: 'saves', types: ['saves'], perSecond: 1, burst: 10 },
   { name: 'installed', types: ['installed'], perSecond: 1, burst: 10 },
+  { name: 'settings', types: ['settings'], perSecond: 1, burst: 10 },
   // Its Agent sends one per RCON round trip (5 s): 1 a second bounds its `paused` changes and TPS events.
   { name: 'heartbeat', types: ['heartbeat'], perSecond: 1, burst: 5 },
   // One per Save now, or per 6 h of play: each one is a notice posted to Discord.
@@ -125,7 +130,7 @@ const TYPES: { name: string; types: string[]; perSecond: number; burst: number }
 ];
 const NEW_PLAYERS = { name: 'new players', perSecond: 1 / 10, burst: LIMITS.players };
 const BUDGET_OF = new Map(TYPES.flatMap((b) => b.types.map((type) => [type, b] as const)));
-const SAME = new Set(['serviceState', 'saves', 'installed']);
+const SAME = new Set(['serviceState', 'saves', 'installed', 'settings']);
 const SAMPLE_MS = 10_000;
 export const HANDSHAKE_MS = 5_000;
 /** What a Mod sends but an Agent's game connection never does (docs/protocol.md): dropped from it. */
@@ -571,7 +576,7 @@ export class Agents extends EventEmitter<AgentEvents> {
         return this.#events(cfg, conn, msg);
       case 'reply':
         return this.#reply(conn, msg);
-      default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult
+      default: // what it pushes: serviceState, saves, installed, updateStep, updateDone, deployResult, settings
         (this.emit as (event: Pushed['type'], id: string, msg: Pushed) => boolean)(msg.type, cfg.id, msg);
     }
   }
@@ -599,7 +604,7 @@ export class Agents extends EventEmitter<AgentEvents> {
     conn.pending.delete(msg.id);
     clearTimeout(waiting.timer);
     if (!msg.ok) return waiting.reject(new AgentRefused(msg.error ?? `${waiting.request} refused`));
-    if (!WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
+    if (!REPLY_WITH_DATA.has(waiting.request)) return waiting.resolve(undefined);
     const data = parseReplyData(waiting.request as keyof AgentReplyData, msg.data);
     if (data === null) return waiting.reject(new Error(`the agent's ${waiting.request} reply is malformed`));
     waiting.resolve(data);

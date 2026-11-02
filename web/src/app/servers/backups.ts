@@ -13,6 +13,7 @@ import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { Feedback } from '../feedback';
 import { formatBytes } from '../units';
 import { BackupProgress } from './backup-progress';
+import { SaveUpload } from './save-upload';
 import ServerPage from './server';
 
 /** How the section names a server's Backups: a factorio server's are its saves. */
@@ -60,7 +61,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
  */
 @Component({
   selector: 'app-server-backups',
-  imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSpinner],
+  imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSpinner, SaveUpload],
   viewProviders: [provideIcons({ lucideEllipsis })],
   template: `
     @if (backups(); as b) {
@@ -83,6 +84,9 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
             }
             {{ progress() === 'backup' ? words().running : words().start }}
           </button>
+          @if (canUpload()) {
+            <app-save-upload />
+          }
           @if (progress() === 'restore') {
             <span class="text-sm text-muted-foreground" data-progress>Restoring {{ restoring() ?? 'a ' + words().one }}…</span>
           } @else if (progress() === 'backup') {
@@ -173,6 +177,8 @@ export default class Backups {
     ];
   });
   protected readonly online = computed(() => this.#server.card()!.online);
+  /** Uploading a save: a factorio server whose hub takes them (`features.upload`, left out by an older hub). */
+  protected readonly canUpload = computed(() => Boolean(this.#server.card()!.features.upload));
   protected readonly offline = computed(() => `${this.#server.card()!.name} is offline: ${this.words().offline}.`);
   protected readonly serverName = computed(() => this.#server.card()!.name);
   /** What is running on this server, from the live feed. */

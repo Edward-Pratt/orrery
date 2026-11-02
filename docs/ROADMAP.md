@@ -200,6 +200,22 @@ serves the thumbnails; the dashboard never talks to it. With it, a release on bo
 changes" says when the server runs the picks already. To cut as `hub-v2.16.0` (deployed first), then `web-v0.14.0`;
 no Agent, mod or protocol change.
 
+## Factorio game settings, new worlds and save uploads — stage A built on `fa/world-settings`, not yet cut
+
+Notes: `docs/notes/factorio-world-settings.md`. On the factorio server an Agent runs, in two stages, each released
+on its own:
+
+| Stage | What | Where | State |
+|---|---|---|---|
+| A | Game settings from a Settings tab: name, description, max players, game password, user verification (off for family-shared players, with its warning and an alert in Discord's alerts channel), autosaves, the idle kick, pausing, Lua commands and the admins; written to `server-settings.json` and applied live where Factorio can, with a start gate that puts back the last good settings when the next start fails | hub + agent + web (additive messages `settings` and `settingsSet`, no protocol bump) | built, not yet cut |
+| B | A new world from map settings (keeping the current world as a save) and a save uploaded from the dashboard, each loaded at the next start | hub + agent + web | designed only |
+
+Stage A is cut as the next hub minor (`hub-v2.16.0` if it ships with the mod browser above, which it now includes),
+then the dashboard's (`web-v0.14.0` likewise), then `agent-v1.2.0` (`SETTINGS_FLOOR`: an older Agent gets the deploy
+text), deployed from the Host page in that order. The dashboard's texts for an older hub name `hub-v2.16.0`: change
+them if the mod browser is cut on its own first. Not covered by the tests, so left to the smoke check after the cut:
+`/config` with players online, and the start gate on the real Podman unit.
+
 ## Later / if needed
 
 - More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).

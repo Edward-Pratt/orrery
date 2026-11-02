@@ -45,6 +45,15 @@ test('notices about the host, services and checks go only to the alerts channel,
   assert.equal(channelFor(check, { ...cfg, alertsChannel: '4'.repeat(18) }), '4'.repeat(18));
   assert.equal(channelFor({ serverId: 'gtnh', type: 'started' }, { ...cfg, alertsChannel: '4'.repeat(18) }), '3'.repeat(18));
   assert.equal(channelFor({ serverId: 'toString', type: 'started' }, cfg), undefined);
+  // User verification and a settings rollback: the admins' alerts channel, never the players' one; none without it.
+  for (const kind of ['verificationOff', 'verificationOn'] as const) {
+    const e = { serverId: 'gtnh', type: 'notice', severity: 'warning', kind, name: 'GTNH', by: null } as const;
+    assert.equal(channelFor(e, { ...cfg, alertsChannel: '4'.repeat(18) }), '4'.repeat(18));
+    assert.equal(channelFor(e, cfg), undefined);
+  }
+  const rolled = { serverId: 'gtnh', type: 'notice', severity: 'problem', kind: 'settingsRolledBack', name: 'GTNH' } as const;
+  assert.equal(channelFor(rolled, { ...cfg, alertsChannel: '4'.repeat(18) }), '4'.repeat(18));
+  assert.equal(channelFor({ serverId: 'gtnh', type: 'notice', severity: 'info', kind: 'backupsMissing' }, { ...cfg, alertsChannel: '4'.repeat(18) }), '3'.repeat(18));
 });
 
 /** A Discord API error as discord.js throws it: Invalid Form Body, with the field Discord refused. */

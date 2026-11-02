@@ -1,7 +1,18 @@
 // Wire contract between the hub and what connects to it, one JSON object per line: a Mod or an Agent's game
 // connection (`parseModLine`), and an Agent connection (`parseAgentLine`).
 // The message types live in types.ts (pure types, for the dashboard and the agent too); this file validates against them.
-import type { AgentHello, AgentMsg, AgentReplyData, DimTime, Hello, HubMsg, ModMsg, QuestDone } from './types.ts';
+import type {
+  AgentHello,
+  AgentMsg,
+  AgentReplyData,
+  DimTime,
+  GameSettingsFields,
+  GameSettingsValues,
+  Hello,
+  HubMsg,
+  ModMsg,
+  QuestDone,
+} from './types.ts';
 export type {
   AgentHello,
   AgentMsg,
@@ -46,7 +57,10 @@ export const LIMITS = {
   logLines: 1000,
   saves: 500,
   mods: 500,
-  /** A backup's or update step's `detail`, a `reply`'s `error`, an `events`' `reason`. */
+  /**
+   * A backup's or update step's `detail`, a `reply`'s `error`, an `events`' `reason`, a `settings`' `problem` and
+   * `rolledBack`.
+   */
   detail: 2048,
   /** A `deployResult`'s `log`: the last 40 lines of the deploy. */
   deployLog: 16 * 1024,
@@ -55,12 +69,49 @@ export const LIMITS = {
   logFiles: 32,
   /** An `update`'s download URLs (a mod's signed link is longer than `text`). */
   url: 2048,
+  /** A factorio server's name in its game settings (`settings`, `settingsSet`); its description is `text`. */
+  serverName: 100,
+  /** The admins in a `settings` or `settingsSet`. */
+  admins: 100,
+  /** The keys a `settings` lists as `pending`, and a `settingsSet` answer as `applied` or `pending`. */
+  pending: 16,
+  /** The keys a `settings` lists as `extra`. */
+  extra: 32,
   text: 256,
+  /** A `saveChunk`'s `data`: base64 of at most 512 KiB, so its line stays well under `lineBytes`. */
+  saveChunk: 700_000,
+  /** An uploaded save's size. */
+  saveBytes: 1024 * 1024 * 1024,
   /**
    * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line
    * destroys the socket. The Agent keeps every line it sends at or under it.
    */
   lineBytes: 1024 * 1024,
+} as const;
+
+/**
+ * The rules of a factorio server's game settings that hold for one field (docs/notes/factorio-world-settings.md,
+ * "What can be changed"), the hub's and the Agent's alike (agent/src/wire.ts holds a copy): `ranges`, each integer
+ * key's lowest and highest value; `control`, what a name or a description may not hold (C0, DEL, C1 and the line and
+ * paragraph separators, so each is one printable line; a name is also trimmed and 1 to `LIMITS.serverName` long, a
+ * description at most `LIMITS.text`); `password`, a game password (printable ASCII without a space, 1 to 64);
+ * `admin`, an admin's name; `key`, a settings key as `pending`, `extra` and `applied` name one; `nameBytes`, the most
+ * UTF-8 bytes of a name that changes (a longer one already in the file is read as it is). The rules across fields (no
+ * user verification without a game password, an admin named once whatever the case, `nameBytes`) are the modules'.
+ */
+export const GAME_SETTINGS = {
+  ranges: {
+    max_players: [0, 1000],
+    autosave_interval: [0, 1440],
+    autosave_slots: [1, 100],
+    afk_autokick_interval: [0, 1440],
+  },
+  control: /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/,
+  password: /^[\x21-\x7e]{1,64}$/,
+  admin: /^[A-Za-z0-9_.-]{1,60}$/,
+  key: /^[a-z_]{1,64}$/,
+  /** A new name's most UTF-8 bytes: Factorio 2.1.24 keeps no more, from the file and from `/config set`. */
+  nameBytes: 50,
 } as const;
 
 /** A failed check. */
@@ -78,6 +129,11 @@ const str =
   (v) =>
     typeof v === 'string' && v.length >= min && v.length <= max ? v : BAD;
 const num: Check = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : BAD);
+/** An integer from `min` to `max`. */
+const int =
+  (min: number, max: number): Check =>
+  (v) =>
+    Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? v : BAD;
 const bool: Check = (v) => (typeof v === 'boolean' ? v : BAD);
 /** A string cut to `max` characters, for the fields older Mods send without a limit. */
 const clipped =
@@ -92,6 +148,16 @@ const optional =
   (check: Check): Check =>
   (v) =>
     v === undefined ? undefined : check(v);
+/** `check`'s value, or null. */
+const nullable =
+  (check: Check): Check =>
+  (v) =>
+    v === null ? null : check(v);
+/** A string `re` matches. */
+const matching =
+  (re: RegExp): Check =>
+  (v) =>
+    typeof v === 'string' && re.test(v) ? v : BAD;
 const list =
   (item: Check, max: number, min = 0): Check =>
   (v) => {
@@ -142,6 +208,29 @@ const player = str(LIMITS.player);
 const output = clippedList(clipped(LIMITS.line), LIMITS.output);
 const lines = object({ lines: list(str(LIMITS.line), LIMITS.logLines) });
 const hello = { protocol: num, serverId: str(), token: str(), modVersion: str() };
+
+// A factorio server's game settings, each field by its rule in `GAME_SETTINGS`.
+const oneLine =
+  (max: number, min = 0): Check =>
+  (v) =>
+    typeof v === 'string' && !GAME_SETTINGS.control.test(v) ? str(max, min)(v) : BAD;
+const serverName: Check = (v) => (typeof v === 'string' && v === v.trim() ? oneLine(LIMITS.serverName, 1)(v) : BAD);
+const range = (key: keyof typeof GAME_SETTINGS.ranges): Check => int(GAME_SETTINGS.ranges[key][0], GAME_SETTINGS.ranges[key][1]);
+const settingsFields = {
+  name: serverName,
+  description: oneLine(LIMITS.text),
+  max_players: range('max_players'),
+  require_user_verification: bool,
+  autosave_interval: range('autosave_interval'),
+  autosave_slots: range('autosave_slots'),
+  afk_autokick_interval: range('afk_autokick_interval'),
+  auto_pause: bool,
+  auto_pause_when_players_connect: bool,
+  only_admins_can_pause_the_game: bool,
+  allow_commands: oneOf('true', 'false', 'admins-only'),
+} satisfies Fields<GameSettingsFields>;
+const admins = list(matching(GAME_SETTINGS.admin), LIMITS.admins);
+const keys = (max: number): Check => list(matching(GAME_SETTINGS.key), max);
 
 /** A game connection: a Mod's on the Mod port, or an Agent's for its server on the Agent port. */
 const GAME: Schemas<Hello | ModMsg> = {
@@ -205,6 +294,14 @@ const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
   },
   deployResult: { tag: str(), outcome: oneOf('ok', 'failed', 'rolled back'), log: str(LIMITS.deployLog) },
   events: { on: bool, reason: optional(str(LIMITS.detail)) },
+  settings: {
+    settings: nullable(object({ ...settingsFields, game_password_set: bool } satisfies Fields<GameSettingsValues>)),
+    admins,
+    problem: nullable(str(LIMITS.detail)),
+    pending: keys(LIMITS.pending),
+    extra: keys(LIMITS.extra),
+    rolledBack: nullable(str(LIMITS.detail)),
+  },
   reply: { id: str(), ok: bool, error: optional(str(LIMITS.detail)), data: json(LIMITS.replyData) },
 };
 
@@ -213,7 +310,12 @@ const REPLY_DATA: { [K in keyof AgentReplyData]: Check } = {
   journal: lines,
   log: lines,
   logs: object({ files: list(object({ name: str(), size: num, modified: num }), LIMITS.logFiles) }),
+  settingsSet: object({ applied: keys(LIMITS.pending), pending: keys(LIMITS.pending) }),
+  saveUploadEnd: object({ name: str() }),
 };
+
+/** The requests whose ok `reply` carries `data`: exactly those with a schema above, so the two can never drift. */
+export const REPLY_WITH_DATA: ReadonlySet<string> = new Set(Object.keys(REPLY_DATA));
 
 /** One line against `schemas`: a new object of only the schema's fields, or null. */
 function parse(line: string, schemas: Record<string, Record<string, Check>>): Record<string, unknown> | null {

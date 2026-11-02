@@ -1,6 +1,26 @@
 // Wire contract between the hub and what connects to it, one JSON object per line: a Mod or an Agent's game
 // connection (`parseModLine`), and an Agent connection (`parseAgentLine`).
 // The message types live in types.ts (pure types, for the dashboard and the agent too); this file validates against them.
+//
+// Validation of the wire messages (their types are in `types.ts`, re-exported here): a schema per message type,
+// checked to have exactly its type's fields, with a limit on every field (`LIMITS`: player names 64, messages 1 KiB,
+// `players[]` 200, `output[]` 500 lines of 1 KiB, `detail` 2 KiB, `saves[]`/`mods[]` 500, `reply.data` 256 KiB as
+// JSON, an `update`'s URLs 2 KiB (`LIMITS.url`, for what the hub sends), a factorio server's game settings' `name`
+// 100 (`serverName`), `admins[]` 100, `bans[]` 500 and a ban's `reason` 200 (a `playerLists` answer), `pending[]` 16,
+// `extra[]` 32, any other string 256; the same on both ports); over a limit the message is refused, but a command's
+// `output` and a `backup`'s `detail` are cut to fit (Mods already deployed send up to 2000 lines of any length).
+// `LIMITS.lineBytes` (1 MiB, the newline not counted) is the Agent port's line cap, for its line reader.
+// `parseModLine` for a game connection (a Mod's, or an Agent's for its server: `milestone`, `heartbeat.paused`),
+// `parseAgentLine` for the Agent port (`agentHello`, a game `hello` as a first line, and the Agent connection's
+// messages), `parseReplyData(request, data)` for an ok `reply`'s data (`journal`/`log`: 1000 lines of 1 KiB; `logs`:
+// file entries; `settingsSet`: `applied` and `pending` keys; `playerLists` and `moderate`: the bans and admins by the
+// admins' rule, `outcome` one of four). `GAME_SETTINGS`: the rules of one game settings field, each integer key's
+// range, the characters a name or description may not hold, a game password's, an admin name's and a settings key's
+// patterns, and `nameBytes`, a changed name's most UTF-8 bytes (the Agent's `wire.ts` holds a copy), which the
+// `settings` schema applies to every field (a name also trimmed); the rules across fields are the modules'. Each
+// returns a new object of only the schema's fields, nested ones too, or null; a `reply`'s `data` alone is only
+// size-checked (one too deep to serialise is refused), so nothing reads it before `parseReplyData`.
+// `PROTOCOL_VERSION` is shared by the Mod's hello and `agentHello`. The contract with the mod and the Agent.
 import type {
   AgentHello,
   AgentMsg,

@@ -1,3 +1,18 @@
+// `check` called directly on a temp host as setup leaves it (`host`): the data folder, the install, agent.log and
+// `connected`, a `/proc` (Factorio's process, its environment holding the password, its UDP socket), the unit files,
+// a fake RCON that runs a tick per command and writes a save holding its tick, and a `Systemctl` that plays
+// factorio.service (a stop or start queued by `act` happens at the next `show`: no race). All pass, in order, the map
+// back to S1's save only, the three `systemctl` calls exactly, never Lua; a stale password fails after one auth; a
+// failed unit fails with RCON untried, and failing while awaited ends the wait; RCON refused or silent fails once the
+// wait is up; players on or `auto_pause` off skip the stops; a restart that loaded an older save, a stop that saved
+// nothing, `SIGTERM`, a start loading another file, S1 failing (stopped and started anyway), polkit refusing; S4 off
+// in agent.log, the Lua UDP port taken, and with the agent down the hello heard by the check; S16 `203/EXEC` and
+// SELinux permissive; the password in a unit file; S6 with no `mods/mod-settings.dat` written (the friend's VM: on
+// the ok line, never "not in"), one name under the release instead (a warning), and `mods/` a link to another mount;
+// S6 failing still names one not written yet, and `mods/` unsearchable (`EACCES`) a warning, not on the ok line; a
+// mod not loaded and a version other than `current`; the hub's rejection quoted and no hub; `shutdownOf`, `udpOwner`,
+// `enabledMods`. No test's report has a secret.
+
 import assert from 'node:assert/strict';
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
 import { appendFile, chmod, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';

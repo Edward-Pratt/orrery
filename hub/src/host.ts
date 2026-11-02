@@ -1,3 +1,15 @@
+// `Hosts`: every Host the hub knows, a `HostMonitor` each in the order added (`add(cfg)` with that host's limits, ids
+// unique; `get(id)`, `list()`), the hub's own first. `HostMonitor.record(sample)` stores a sample (`host_samples`,
+// keyed by host id; `history(hours)` reads it back: the raw minutes up to 25 hours, else averaged into at most
+// `HISTORY_POINTS` (1500) time buckets of `bucketMs(hours)`), puts it on the stream as a `sample` target event, and
+// warns once / recovers once on memory high for `memoryMinutes` and on a low mount (a Host with no mounts in config,
+// an Agent's, watches the first `LIMITS.disks` (32) mounts its samples name, and tells each one's change at most once
+// per `DISK_NOTICE_MS` (10 min), a change meanwhile told at the first sample after the wait if it still holds). Only
+// the hub's own host samples itself (`start(read)`): once a minute CPU (between two readings), load, memory and each
+// mount's disk through `HostReaders` (`localHost`: `node:os`, `/proc/meminfo`, and `diskSpace` from `backups.ts`);
+// other hosts' samples are reported to it through `record` (an Agent's by `Agents`, at most one per 10 s, stamped
+// with the hub's clock, which is then the only clock any stored sample has). Hub core.
+
 import { readFile } from 'node:fs/promises';
 import { cpus, loadavg } from 'node:os';
 import { diskSpace } from './backups.ts';

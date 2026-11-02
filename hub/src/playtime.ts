@@ -1,3 +1,5 @@
+// `PlaytimeTracker`: syncs sessions with each server's live player list every 10 s. Hub core.
+
 import type { Db } from './db.ts';
 import type { ServerHub } from './servers.ts';
 import { localDay } from './units.ts';

@@ -1,3 +1,15 @@
+// `RestartScheduler`: countdown restarts (in-game warnings through `ServerHub.broadcast`, a Mod's `say` audited as
+// `hub:restart`, then `stop`; a factorio server's ends in its `restart` option instead, which `startHub` makes
+// `Services.now(<its service>, 'restart')`, looked up late as Services is built after it: one countdown, then one
+// restart of its unit, never a stop, as `factorio.service` restarts only on failure) and daily restarts; a countdown
+// can be a stop that ends in its own action (`{ stop, fire }`: a service's `systemctl stop`, so Restart=always
+// doesn't bring the server back; audited by its owner, `Services`); its notices are `publish`ed hub events; a server
+// going down cancels its countdown (`restartCancelledDown`): its `stopped`, `crashed` or `lost`, or, as a factorio
+// server's may be dropped over its lifecycle budget, `ServerHub.downs` moved since the countdown began, checked at
+// its every event (`connected`, `tps`), each warning and the end, so a server that went down and came back is never
+// restarted by it; scheduling and cancelling are audited, the daily restart as `hub:daily`, which is skipped while
+// `paused` says why (a pack or game update runs on the server). Hub core.
+
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 

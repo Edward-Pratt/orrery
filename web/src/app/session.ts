@@ -1,3 +1,6 @@
+// `Session` (who is logged in, logout; `lost()` on a 401, setting `ended` when a session was open) and the
+// `loggedOutOn401` interceptor.
+
 import { HttpClient, HttpErrorResponse, type HttpInterceptorFn } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import type { Me } from '@hub/api';

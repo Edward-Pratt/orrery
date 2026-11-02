@@ -1,3 +1,7 @@
+// `TimeSeries`: the one reusable graph, a line per `Series` (`[ms, value]` points; `step` for counts and states),
+// coloured from the theme's tokens. It loads `echarts.ts` (only the parts it uses, SVG renderer) lazily.
+// `PeriodPicker`: the period buttons (`PERIODS`) of every graph page.
+
 import { Component, computed, input, model } from '@angular/core';
 import { HlmButton } from '@spartan-ng/helm/button';
 import type { EChartsCoreOption } from 'echarts/core';

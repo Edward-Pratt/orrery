@@ -1,3 +1,26 @@
+// Config shape: `environment` (`production`, the default, or `staging`: a label for the dashboard, never a switch),
+// `dbPath`, `healthcheckUrl`, `servers[]` (each with a `game`: `minecraft`, the default, or `factorio`; ids at most
+// 256 characters, the wire's cap; only a minecraft server needs a Mod token (16 to 256 characters), and a factorio
+// server is refused one, a `dir`, a `backupDir` and `keep`, needs a `service`, and is the `server` of exactly one
+// Agent; `lagTps` up to the game's full rate, 20 or 60), `integrations.agents` (`listen`: an IPv4 address and a port
+// other than the Minecraft and web ones; `agents[]`: id `^[a-z][a-z0-9-]{0,31}$`, also its Host's, so not
+// `integrations.host`'s id; name; a token of 32 to 256 characters, unique among every token, Mod tokens too; its IPv4
+// `address`; its factorio `server`, whose `service` it then backs; `host` limits, defaulted like
+// `integrations.host`'s), and `integrations.minecraft` (port, tokens) / `integrations.discord` (guild, admin role,
+// channels keyed by server id, optional `alertsChannel` for the host, services and checks), `integrations.systemd`
+// (id, unit name; the only units the hub touches), `integrations.checks` (id, URL, `intervalSeconds` ≥ 30, optional
+// linked `service`), `integrations.host` (id, mounts, memory and disk limits; defaulted by `loadConfig`),
+// `integrations.web` (port, public URL, OAuth client id, guild and admin role — each defaulting to `discord`'s —
+// session days), `integrations.github` (`repo`, `newerAfterDays` (14), and `deploys`: the environment's root, hub
+// unit, deploy unit templates and dashboard folder, defaulted to production's `PRODUCTION_DEPLOYS`; paths absolute,
+// unit names checked; with GitHub on, `dbPath` must be a file directly in that root, never under `current/`, which
+// each hub deploy replaces), and a server's `keep` (paths in its folder a pack update never touches: relative, no
+// `..`). `validateConfig` (every error at once, offline; the pre-2.0 shape gets a list of keys to move) and
+// `loadConfig`, which returns `ServerSettings` per server with every default applied (game `minecraft`, lag 15 TPS
+// (50 UPS for factorio)/2 min, quests `batched`, 10 GB free, 7-day web sessions, web's guild and admin role from
+// `discord`) and the Backup folder derived (`backupDir`, else `<dir>/backups`). The only place per-server defaults
+// live. Used by startup and `check-config`. Hub core.
+
 import { readFileSync, statSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';

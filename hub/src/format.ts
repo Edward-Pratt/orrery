@@ -1,3 +1,23 @@
+// Pure Discord output: `Post` = plain text or embeds; `md`, `format*` (a server's rate named and scaled by `rateOf`;
+// `lost` and `paused` not posted; a `milestone` per kind (research, a force's first rocket, platform and landing),
+// its `text` capped at 200 and `text`, `player` and `force` escaped, the force named only when set; a lag notice
+// names the slowest dimension only in TPS (Minecraft); `agentLost`/`agentBack` and `eventsOff`/`eventsOn` host
+// notices; a factorio server's `packUpdateStarted`/`packUpdateFinished` worded as a game update, its `modUpdates` as
+// a "Portal mod updates" embed in its own channel (each update's name and versions through `inline()`, the first 10,
+// then "and N more"), its `verificationOff`/`verificationOn` (the admin's name only when a save made it) and
+// `settingsRolledBack` (naming the game password and user verification as put back too) notices (the `settings` one
+// not posted), `formatEvent(e, game)`, its `from` (the version the Agent reported) and the Agent's pre-update save
+// through `inline()`; deploy notices, the Agent's as "the agent on <id>", with `from` escaped: a Mod's or an Agent's
+// hello names it), plain-text posts cut to 2000 characters after escaping, `chatContent` (a relayed chat line,
+// escaped and cut the same), `formatLinkHint` (`/link`'s answer, naming each game that has a server: "In Minecraft,
+// type `/discord link CODE` within 10 minutes.", or each game's sentence, then "The code works for 10 minutes."),
+// Backup names escaped (with `md()` as the newest, with `inline()` in `backupOverdue`, without a backtick in the
+// list's code spans: an Agent's come from the game's folder), and every other text an Agent controls escaped:
+// `inline()` (inline markdown and masked links, not the line-start rules, which would put a backslash before a GTNH
+// backup's "12.3 seconds") where it goes mid-line in a notice's embed title (a backup's `detail`, a `restartFailed`
+// error, a mount in `diskLow`/`diskOk`, an `eventsOff` reason, a deploy's `from` version, a game update's `from` and
+// pre-update save), `md()` for the players in a topic, `topicDue`. Unit-tested.
+
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from './backups.ts';
 import { GAMES, rateOf, sparkline } from './lag.ts';

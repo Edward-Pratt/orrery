@@ -1,3 +1,14 @@
+// `src/index.ts` as a child process, with a temp config, a fake `systemctl` first on `PATH`, the fake hub and fake
+// RCON: both connections, the saves pushed, `started`, a `serviceAct` restart as `restart --no-block --
+// factorio.service` with `stopping` first, `agent.log` written, then `bye` on SIGTERM and exit 0; `restore`, `update`
+// and `settingsSet` refused ("a deploy is running (…)") while `list-units` shows a deploy unit activating, active,
+// reloading or deactivating, not once it failed; a `deploy` of its own release (`agent-v0.0.0`) refused, then one as
+// `list-units` and `start --no-block -- orrery-agent-deploy@agent-v1.2.5.service`, and a `deploy-status.json` left at
+// start sent once as `deployResult` after its unit's `show`; game settings pushed on connect, a `settingsSet` written
+// and applied live (the reply, then the push); offline with no hub, then connecting when it listens; `check` (exit 1
+// exactly when a line is `FAIL`, a mod name's escape sequences printed as `?`, no secret; each line in the pipe while
+// RCON is still awaited).
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';

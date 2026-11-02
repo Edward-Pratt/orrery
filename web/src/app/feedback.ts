@@ -1,3 +1,10 @@
+// `Feedback`: the one place for "are you sure?" (`confirm({title, verb, destructive, typeName})`, a spartan alert
+// dialog whose title names the target and consequence; `typeName` makes the button wait for the exact name, as
+// Restore does; the dialog is `confirm-dialog.ts`, its own chunk, fetched once the page is idle) and for toasts
+// (`ok`: brief; `notice`: sticky, for an outcome to look at; `failed`: sticky with the hub's message) for the outcome
+// of this browser's own requests only, never for live events. A button disables with a `hlm-spinner` while its
+// request is in flight; form errors (console, chat, lookup) stay inline. No `window.confirm`.
+
 import { HttpErrorResponse } from '@angular/common/http';
 import { ApplicationRef, EnvironmentInjector, Injectable, createComponent, inject } from '@angular/core';
 import { toast } from '@spartan-ng/brain/sonner';

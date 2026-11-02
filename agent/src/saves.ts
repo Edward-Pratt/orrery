@@ -1,5 +1,45 @@
 // The server's saves as Backups (Factorio's `saves/` folder): listed with their kind and the current world, a named
 // save on the hub's request and every 6 h after play, pruning, and a restore by copy.
+//
+// `Saves`, Factorio's `saves/` as Backups. Every operation goes through the folder opened once (`O_DIRECTORY`,
+// `O_NOFOLLOW`) as `/proc/self/fd/<fd>/<name>`, since the container could swap `saves/` for a symlink; a file counts
+// only if `lstat` finds a regular file on that folder's filesystem. `list`: every `*.zip` but a name with a control
+// character (not `printable`: a newline in one would forge a log line), newest first, 500 at most, its `kind`
+// (`kindOf`: `orrery-<time>.zip` and `orrery-pre-update-<X.Y.Z>-<time>.zip` `named`, `_autosave*` `auto`, the rest
+// `world`) and `current` on the file whose path the last `Loading map <path>: <n> bytes.` engine line in
+// `factorio-current.log` (its first 1 MiB) names (`loadedMap`: a mod's `log()` line can't match), with the bytes free
+// there; `refresh` (every 10 s, and after its own changes) emits `saves` when the list changed. `save`: `/orrery-save
+// orrery-<UTC time>.zip` (`stamp`, `20261031T120000Z`; the `.zip` in the command, as Factorio makes whatever follows
+// a name's last `.` its extension: `orrery-pre-update-2.1.24-<time>` alone is written as
+// `orrery-pre-update-2.1.zip`), then waits until the file is a regular file whose size and time held 5 s, 5 minutes
+// at most (an `RconNoAnswer` from a big map's save still waits for the file: it was sent; a command never sent fails
+// at once), and emits `backup { ok, detail }`; one at a time (a second does nothing). `played` (each RCON answer)
+// makes one 6 h after the last named save (the newest there, or the agent's start) once anyone played since.
+// `preUpdate(from)`: a game update's `orrery-pre-update-<from>-<time>`, made and waited for like `save`'s but with no
+// `backup` (the update's steps report it), held until `release`. `prune` (after each save and restore): the newest 20
+// named and 3 world files stay, never the current world nor a name `hold` keeps for a running update (`release`);
+// autosaves are Factorio's. `restore(name)`: only a listed name, only while a fresh `systemctl show` says inactive or
+// failed; copies from the source opened `O_NOFOLLOW`/`O_NONBLOCK` (the copy named `restored-<time>-<name>`, `name`
+// without the `restored-<time>-` prefixes of earlier restores, so chained ones never outgrow a file name) into
+// `.restored-<time>-<name>.partial` (`O_CREAT`/`O_EXCL`; no `.zip`, so neither the list nor a start meanwhile takes
+// half a file for a save), synced and its time set 2 s past every other file's (or now if later), so
+// `--start-server-load-latest` loads it next; then `systemctl show` again, refused ("the server started during the
+// restore") unless still inactive or failed, since that start loaded the old world; then linked to
+// `restored-<time>-<name>` (never over a file: `link` fails if it exists) and the partial file removed, as it is on
+// any failure. `keep(name, from)`: a game update's copy of a listed save for its rollback,
+// `orrery-pre-update-<from>-<time>.zip` (the next second while that name is taken), written and linked the same way
+// through `.<copy>.partial`, byte for byte, its time 2 s before `name`'s (so `--start-server-load-latest` loads
+// `name` itself and never the copy), held until `release`. `start` first removes every such partial file (a restore's
+// or a `keep`'s) (a regular one, its name printable) left by a restore the agent's exit cut short (`process.exit`
+// skips that `finally`), since neither the list nor pruning sees one; no restore of this agent runs yet. An upload
+// from the dashboard (`uploadStart`, `uploadChunk`, `uploadEnd`, `uploadCancel`; one at a time): into
+// `.upload-<id>.zip.partial` (`O_RDWR`/`O_CREAT`/`O_EXCL`/`O_NOFOLLOW` through the folder, refused with less than its
+// size and `UPLOAD_SPARE` (512 MiB) free), each piece only at the bytes received so far and never past the size,
+// hashed as it lands; at the end every byte in, the sha256 the hub announced, `checkSave`, no newer than the
+// installed Factorio (`HubClient.latestInstalled`), synced, timed 2 s before the newest save (so no start loads it
+// unasked) and linked as `uploadedName` (`uploaded-<time>-<the file's name in [A-Za-z0-9_-], 40 at most, or
+// save>.zip`), a `world` save; the partial file removed whatever happens, and by `start` after an exit. The constants
+// (6 h, 20, 3, 5 s, 5 minutes) are not settings.
 import { createHash, type Hash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { constants, link, lstat, open, readdir, statfs, unlink, type FileHandle } from 'node:fs/promises';

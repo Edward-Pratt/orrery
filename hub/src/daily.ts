@@ -1,3 +1,5 @@
+// `everyDay(time, leadMs, fn(target))`: DST-safe daily timers (used by restarts and the summary). Hub core.
+
 /** Parses a 24-hour "HH:MM"; null if invalid. */
 export function parseDaily(time: string): { h: number; m: number } | null {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);

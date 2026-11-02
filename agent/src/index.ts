@@ -1,6 +1,34 @@
 // The orrery agent (orrery-agent.service): `index.ts` runs it, `index.ts check` runs the first-boot check.
 // ORRERY_AGENT_CONFIG and ORRERY_AGENT_ROOT move the config file and the agent's folder, for tests and the local dev
 // loop only; on the Host they are unset.
+//
+// The entry point. `node src/index.ts` loads the config, sends everything it logs through `logs.ts` (to the journal
+// and `<root>/agent.log`, URL query strings stripped) and wires the rest: the unit's state (to `HubClient` and
+// `GameEvents`) and the agent's own stops (`ServiceWatch`'s `stopping`, to `HubClient.stopping`); RCON's answers (to
+// `HubClient`, to `GameEvents` for its hello, and to `Saves.played`); the Factorio mod's game events and their
+// `state`, the saves list and each save's `backup`, and a host sample every 60 s go to `HubClient`. The hub's
+// requests: `serviceAct` (`ServiceWatch.act`), `logs`, `log` and `journal` (`Logs`), `restore` (`Saves`; refused
+// while a game update or a game settings save runs (`GameSettings.busy`), and while a deploy unit runs:
+// `Deploys.idle`), `update`, `updateResume` and `updateCancel` (`Updates`, on the same `ServiceWatch` and `Saves`,
+// with `image.json` from beside the config, `HubClient.connected`, `HubClient.latestInstalled` and `Deploys.idle`, an
+// update refused while `GameSettings.busy` too; `updateResume` and `updateCancel` act on the one update running,
+// whatever their request ids), `deploy` (`Deploys`, with this release's version; refused while `Updates.busy` or
+// `GameSettings.busy`: "a game settings save is running"), `settingsSet` (`GameSettings`, on the config folder,
+// `ServiceWatch.read` and the commands' `RconSession`; refused while `Updates.busy` and while a deploy unit runs:
+// `Deploys.idle`), `saveUploadStart` (refused while `Updates.busy`), `saveChunk` (its base64 decoded),
+// `saveUploadEnd` and `saveUploadCancel` (`Saves`), `playerLists` and `moderate` (`Moderation`, on the data folder,
+// the commands' `RconSession`, `StatusPoller.players`, `ServiceWatch.state`, `GameSettings.verification`, and
+// `GameSettings.refresh` after a promote or demote). Each `/orrery-status` answer also goes to `Updates.status` (the
+// gate's evidence), to `GameSettings.rconUp` (a good or late start) and, as `installedOf`, to `HubClient.installed`;
+// each unit state to `GameSettings.service` too; `StatusPoller` takes `auto_pause` from `GameSettings.autoPause`;
+// each welcome calls `Updates.connected`, `Deploys.connected` and `GameSettings.refresh` (the `settings` push);
+// `Updates.start` runs first thing, ending an update a restart cut short, and `Deploys.start` polls for a deploy's
+// outcome. On the game connection `say`, `notice` and `linkResult` run as the mod's commands (`toGame`), a console
+// `cmd` as typed (its reply cut by `outputLines`) and `save` as `Saves.save`. Every RCON command runs on one
+// `RconSession` of its own, apart from the status poll's. With no hub reachable it keeps running (the hub client
+// retries, and logs once per change). SIGTERM or SIGINT: `HubClient.stop` (`bye`, both connections closed), then exit
+// 0. `node src/index.ts check` runs `check.ts` and exits 1 on any `FAIL` (a bad config among them), else 0. The
+// version is `agent-v` + `package.json`'s.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { check } from './check.ts';

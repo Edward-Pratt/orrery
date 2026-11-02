@@ -1,3 +1,15 @@
+// `Stats`: frontends' read questions as plain data (`status`, `tps`, `playtime`, `top`, `backupSource(id)`, each
+// server's Backups (its Backup folder's, or for a server an Agent runs the saves it last pushed, newest first with
+// their kind and the current world, and the free space it reported: in memory only, nothing before its first push),
+// and `backups` through it with growth and the `backupMinFreeGB` minimum, `history` (TPS averaged like the host's
+// past 25 hours, player counts from sessions ending with the live count, up/down/hung periods), `crashLogs` (a
+// folder's only, so none for an Agent's server), `hasLogs`/`logs`/`log` through each server's log source: its
+// folder's logs through `logs.ts`, or for a server an Agent runs the files it serves (`logs` and `log` requests: the
+// listing newest first, and a file asked for only by a name a fresh listing holds; rejects when the Agent can't
+// answer), `summary`, `linkedPlayer(serverId, discordId)` (the name a Discord user linked in that server's game:
+// `links` for Minecraft, `factorio_links` for Factorio; the chat relays and `/playtime` use it), `audit`), owning the
+// time windows, `/top` periods and each server's folders. Hub core.
+
 import type { Agents } from './agents.ts';
 import { backupStats, freeBytes, growthPerDay, listBackups } from './backups.ts';
 import type { ServerSettings } from './config.ts';

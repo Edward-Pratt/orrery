@@ -1,3 +1,8 @@
+// `HostSampler`: the hub's `HostSample` from this machine: CPU use between two `/proc/stat` readings (the first call
+// only takes the baseline), `/proc/loadavg`, memory used and total from `/proc/meminfo` (`MemTotal` less
+// `MemAvailable`) and `statfs` free and total on each configured mount (one that can't be read is left out, logged).
+// The readers (`HostReaders`) are injectable for tests.
+
 import { readFile, statfs } from 'node:fs/promises';
 import type { HostSample } from '../../hub/src/types.ts';
 

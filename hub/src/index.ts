@@ -1,3 +1,8 @@
+// Entry point: raises Node's per-address connect attempt to 2.5 s (a lost SYN at 250 ms failed whole fetches with
+// ETIMEDOUT), reads config and env (`FACTORIO_USERNAME` and `FACTORIO_TOKEN` are optional: without both, with agents
+// on, a warning, and only game updates are refused: each has `orrery`, a portal mod), starts the hub with the real
+// Discord frontend, HTTP get, Discord OAuth and GitHub reader, wires signals.
+
 import net from 'node:net';
 import { loadConfig } from './config.ts';
 import { githubReader } from './deploys.ts';

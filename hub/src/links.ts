@@ -1,3 +1,13 @@
+// `Links`: link codes (6 chars, 10 min; five wrong ones in 10 minutes lock a name, counted per game and lower-case
+// name, and twenty on a factorio server lock that server for every name, a right code too, so fresh names from its
+// Agent can't guess (a Mod's players are on its server, trusted input: only the per-name lock); names with wrong
+// codes are swept a code lifetime after their newest, at each `issue` and `redeem`, and kept at most 1000, the oldest
+// dropped: `failing`), one code for every game; answers a game connection's `link`/`unlink` by its server's game
+// (`redeem(code, game, player, uuid, now, serverId)`, the Mod's and the Agent's alike: Minecraft's in `links`,
+// Factorio's in `factorio_links`, each replacing that user's and that name's earlier link in that game; an in-game
+// unlink removes only its own game's link, so a Factorio name never removes a Minecraft link of that name),
+// `unlinkDiscord` (Discord's `/unlink`: both), announces `linked` events. Hub core.
+
 import { randomInt } from 'node:crypto';
 import type { Db } from './db.ts';
 import type { ServerHub } from './servers.ts';

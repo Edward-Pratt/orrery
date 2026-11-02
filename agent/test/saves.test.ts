@@ -1,3 +1,17 @@
+// names, kinds and `loadedMap` (a mod's `log()` line can't name the map); the list with kinds, newest first, the
+// current world, symlinks and folders left out, a swapped `saves/` refused; a name with a control character (a forged
+// log line) never listed, pruned or restored; `saves` pushed on change only; a pre-update save named with its
+// version's dots (`/orrery-save` given the `.zip`; the fakes write a save where Factorio does, `fake-rcon.ts`'s
+// `savedAs`); the 6 h save only after play (a fake clock); pruning keeps 20 named and 3 world files, the current
+// world and a held save; restore refused while active (the fake systemctl on `PATH`), for a symlinked or unlisted
+// save, or when the server started during the copy (written meanwhile only under its `.partial` name, nothing left
+// behind), a partial file an exit left removed at `start` (and no other file, nor a symlink of that shape or what it
+// points at), copying without overwriting and stamped newest (2 s past a file ahead of the clock or one under 2 s
+// behind it, else now); a restore of a restored copy (ten chained) named after the original; `keep`'s copy byte for
+// byte, 2 s older, held, the next second when taken, a partial one an exit left removed at `start`; a save that never
+// appears (or keeps growing) fails after the bounded wait; one save at a time, an RCON timeout still waiting for the
+// file, one never sent failing at once.
+
 import assert from 'node:assert/strict';
 import { appendFile, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

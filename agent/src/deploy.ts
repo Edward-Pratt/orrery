@@ -2,6 +2,29 @@
 // orrery-agent-deploy@<tag>.service, which runs setup's root-owned copy of deploy/deploy-agent.sh as factorio (polkit,
 // 60-orrery-agent.rules, allows exactly that start); the outcome that script writes to <root>/deploy-status.json goes
 // back to the hub as `deployResult`, once per deploy.
+//
+// `Deploys`, the agent's own deploys. `deploy(tag)`: `isTag` (`^agent-v\d+\.\d+\.\d+$`, 256 characters at most),
+// refused for the release running ("<tag> is already running"), while a game update or a game settings save runs
+// (`busy`, which names which) and while a deploy unit of any tag hasn't ended (`LIST_ARGS`: `systemctl list-units
+// --all --plain --no-legend --full -- 'orrery-agent-deploy@*.service'`, its ACTIVE column activating, active,
+// reloading or deactivating: "a deploy is running (<unit> is <state>)"; deploy-agent.sh would exit at its lock before
+// writing a status, so the hub would never hear its end; a listing that fails refuses too), then `systemctl start
+// --no-block -- orrery-agent-deploy@<tag>.service` (`deployArgs`, `deployUnit`) through `execFile`: exactly the verb
+// and unit name `60-orrery-agent.rules` allows; resolves once systemd queued the job (the reply means started), a
+// refusal (polkit) rejects with its message. The unit runs setup's root-owned copy of `deploy/deploy-agent.sh` as
+// factorio, which flips `<root>/current`, restarts the agent and gates on the `connected` file (`hub.ts`). The
+// outcome: every 5 s and on each welcome (`connected`), `<root>/deploy-status.json` (`readStatus`: exactly the
+// script's `{ tag, from, outcome: ok, failed or rolled back, finished, log }`; read through `files.ts`'s `head`, 1
+// MiB at most; any other shape, or a tag that isn't one, is logged once and never sent) goes out as `deployResult {
+// tag, outcome, log }` (the outcome as is; `logExcerpt`: the last 40 lines, `redact`ed, the end kept within
+// `LIMITS.deployLog`), once its unit has ended (`systemctl show --property=ActiveState`: not activating, active,
+// reloading or deactivating, as `hub/src/deploys.ts` reads deploy-hub.sh's; the script still prunes after writing the
+// file), and only once per deploy: its tag and `finished`, recorded in `<state>/deploy.json` once its write on the
+// Agent connection succeeded (`HubClient.deliver`; until then sent again on each connect and poll, and across a
+// restart). Polled, not read once at connect: the script writes it after the restarted agent connected, and a deploy
+// that failed before its restart never restarts the agent. Checks run one at a time. `idle()`: rejects with the same
+// "a deploy is running (…)" (or when the units can't be listed) while a deploy unit of any tag hasn't ended; a game
+// update and a restore wait for it, and `deploy` checks `busy` again after it (an update that began meanwhile).
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentMsg } from '../../hub/src/types.ts';

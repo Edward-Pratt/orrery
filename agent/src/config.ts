@@ -1,3 +1,10 @@
+// `loadConfig(path, env, root)`: `/etc/orrery-agent/config.json` (`{ id, hub: { host, port }, server: { id, unit,
+// install, data, rconPort, factorioUdpPort, agentUdpPort }, mounts }`) and the secrets from the environment, checked
+// strictly (every problem listed, no secret printed; unknown keys ignored, since setup can be newer than the agent):
+// the hub's Agent id rule, an IPv4 hub, ports, a `.service` unit name, absolute normalised folders outside the
+// agent's own (`/srv/orrery-agent`, which also holds `state/`) and not holding it, 1 to 32 mounts,
+// `ORRERY_AGENT_TOKEN` 32 to 256 characters, `RCON_PASSWORD` set.
+
 import { readFileSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
 import { posix } from 'node:path';

@@ -1,3 +1,8 @@
+// the three names listed only as regular files (a symlink or a FIFO in their place is neither listed nor read); names
+// outside the list refused; the last 1000 and 200 lines, long lines cut and the oldest dropped to fit the hub's reply
+// limits (checked with its `parseReplyData`); `agent.log` with times, query strings stripped (in the journal too),
+// rotated.
+
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';

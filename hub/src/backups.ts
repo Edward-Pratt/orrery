@@ -1,3 +1,8 @@
+// `listBackups`, `freeBytes`, `growthPerDay`, `backupStats`, `BackupWatcher` (missing-backup and low-disk watchdog
+// over each server's Backup source; for a server an Agent runs, which saves only after play, a save is overdue only
+// once someone has played since the newest (`played`, from `db.sessionsSince`), and none is before its first push;
+// turns the game's backup events, a Mod's or an Agent's save written, into finished/failed notices). Hub core.
+
 import { lstat, readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ServerHub } from './servers.ts';

@@ -4,6 +4,39 @@
 // smoke checks (docs/notes/factorio-agent.md) the agent can make from its seat gets a line, in the order they run (S1,
 // S2, S20, S3, S5, S4, S6, S8, S16, S21, S25, S29); the others end the report, naming who makes them. Whatever RCON or
 // a file the container writes says goes through `printable`, and no secret is ever printed.
+//
+// `check`, the first-boot report (setup's last step, run as factorio after setup started both units; no hub needed):
+// a line per check on stdout as it ends (`ok`, `FAIL` or `warn`; an unmarked note before each long wait; `Saves` and
+// `ServiceWatch` print their own lines too), then `summary: N ok, M FAIL, K warn` and a `skip` line for each smoke
+// check others make (players, owner, friend or setup), as a to-do. True (exit 0) only with no `FAIL`: a warning
+// passes. In order: the config and secrets (a bad config ends the report there); a host sample; factorio.service
+// (`failed` or `inactive`: a `FAIL` at once with its state, RCON not tried); `/orrery-status` on the check's own
+// `RconSession`, retried for 5 minutes (the start timeout), but final at once on a refused password (`RconRefused`)
+// or the unit stopping. Then S1, S20, S3 and S5 only with nobody on and `auto_pause` on (else each is `warn …
+// skipped`): S1 a named save (`Saves.save`, 60 s; the tick read just before it); S2 (always) `/orrery-unlink` refused
+// as for players (a nil `player_index`); S20 200 `/orrery-status` (one tick each while paused), a restart, then the
+// tick no lower and `factorio-previous.log` with `Saving map as` and `Goodbye`; S3 200 more, a stop, S1's save
+// restored (`Saves.restore`), a start, which must load the restored copy (`loadedMap` of a log written since the
+// start) at a tick from S1's and below the stop's; S5 that stop: `Received SIGINT`, saved, `Goodbye`,
+// `Result=success`, within 170 s (`SIGTERM` a warning); the server is always started again. Then: S4 Factorio's
+// socket on 127.0.0.1:`factorioUdpPort` in `/proc/net/udp` as this uid, its `Opening socket` line (`socketState` on;
+// an Opening line the socket failed or closed after is named as such), and the mod's hello (in agent.log since the
+// start while the agent holds its port, else to the check's own listener after `/orrery-hello`); S6 Factorio's log in
+// the data folder (this run's, this uid's), S1's save there, and nothing under `releases/<version>` changed since
+// that release's first run (`lstat`, no link followed); `player-data.json` and `mods/mod-settings.dat` (`NAMES`, not
+// confirmed by the notes) a warning only under the release instead, or when `lstat` fails other than `ENOENT`;
+// missing in both, a note on S6's ok or FAIL line ("not written yet, in either"), never reported as outside the data
+// folder; S8 the largest reply (or Factorio's `/help`) over 4096 bytes, else a warning; S16 Node's version, arch and
+// glibc, orrery-agent.service running (`203/EXEC` fails) with `NRestarts` held 6 s, SELinux enforcing (else a
+// warning); S21 the password in neither the generated unit nor the `.container` (read, never printed),
+// `${RCON_PASSWORD}` left there for systemd, and RCON took it; S25 a `factorio` process of this uid, `HOME` the data
+// folder (its environment read, never printed), no passwd entry for it in its image; S29 setup's six mods and every
+// one `mod-list.json` enables loaded, in the version `<install>/current` points at; the hub: a TCP connect (a warning
+// only, for `--no-hub`), then the `connected` file written since the agent started (a welcome), else a warning
+// quoting agent.log's latest `[hub]` line (at once on a rejection). Every RCON reply, log line, mod or file name it
+// prints is `printable`; no secret is printed. `WAITS`, `PATHS` (`/proc`, SELinux's `enforce`, the generator and
+// Quadlet folders) and the `systemctl` are options for tests. A first boot leaves the world as
+// `restored-<time>-orrery-<time>.zip`, a few paused ticks back; with a hub, the running agent reports the stops.
 import { createSocket } from 'node:dgram';
 import { constants, lstat, open, readdir, readFile, readlink, type FileHandle } from 'node:fs/promises';
 import { connect } from 'node:net';

@@ -1,5 +1,9 @@
 // The HTTP API's types for a factorio server's portal mod updates and its players' moderation, re-exported by `api.ts`.
 // Imports only `types.ts`, as `api.ts` does.
+//
+// The API types of portal mod updates (`ModUpdate`, `ModUpdatesState`) and moderation (`ModerationState`,
+// `ModerateRequest`, `ModerateAnswer`, and `types.ts`'s `Ban`, `ModerateAction`, `ModerateOutcome`, `PlayerLists`
+// re-exported), re-exported by `api.ts`; imports only `types.ts`.
 import type { ModerateAction, ModerateOutcome, PlayerLists } from './types.ts';
 
 export type { Ban, ModerateAction, ModerateOutcome, PlayerLists } from './types.ts';

@@ -1,3 +1,31 @@
+// `GameSettings` (with agents and systemd), a factorio server's game settings (`server-settings.json` and its
+// adminlist, which its Agent reads and writes), for a server an Agent runs (`has`; others 404, `GameRefused`): its
+// Agent's latest `settings` report in memory (none before its first; kept while it is away), taken only when it
+// differs from the last one (the Agent sends it on every connect, and `SAME` is per socket); `state`
+// (`GameSettingsState`: the report and `blocked`: an Agent below `SETTINGS_FLOOR` (`agent-v1.2.0`, through
+// `beforeAgentRelease`; the dev loop's `agent-v0.0.0` is not) with the deploy text "This server's Agent runs
+// <version>, which can't change game settings. Deploy agent-v1.2.0 or later from the Host page (Releases).", the
+// Agent not connected, no report yet, a save under way, a game update, a restore, a hub deploy or its Agent's own, a
+// countdown, the unit activating, deactivating or reloading); `set(id, body, by, byName)`: `settingsRequest` checks
+// the body by `GAME_SETTINGS`' rules (400, the reason naming the field, never a value; fields it doesn't know
+// dropped; the description trimmed, as Factorio takes it; `game_password` left out keeps it, null removes it; admins
+// at most 100, each once whatever the case), then verification off needs a password (one sent, or the report's
+// `game_password_set` with none sent: else 400 "Without the account check a game password is needed.") and a name
+// that changes at most `GAME_SETTINGS.nameBytes` (50) UTF-8 bytes (400 naming the name; one the report already has is
+// kept), 409 while `blocked`, then `settingsSet` (one at a time per server: `busy`, which a game update, a restore
+// and the Agent's deploy wait for), answered within `SETTINGS_SET_MS` (60 s, over the Agent's worst case of about 50
+// s), and the Agent's `{ applied, pending }`, or 502 with its refusal or why it didn't answer; the password is passed
+// on once and kept, logged and audited nowhere. Audited after the answer (`game settings`, `auditDetails`: each
+// changed key with its old and new value, the password only as "game password changed" or "removed", admins as `+bob,
+// -alice`; a refusal with its reason). Notices: `settings` (stream only, on each report change and save: the
+// dashboard asks again), `verificationOff`/`verificationOn` (user verification changed from what the hub last knew:
+// by a save, with the admin's name, or by a report, `by` null: a rollback or a hand edit; a report read while a save
+// is under way is left to the save, and a save refused or unanswered goes by the latest report; the first value a
+// restarted hub learns posts none) and `settingsRolledBack` (a report whose `rolledBack` changed from one the hub had
+// heard: also audited as `hub:agent`, `game settings rollback`, with the Agent's detail; a restarted hub's first
+// report posts none), each for Discord's `alertsChannel` alone (`channelFor`), never the server's channel, where its
+// players read. Hub core.
+
 import { AgentRefused, beforeAgentRelease, type Agents } from './agents.ts';
 import type { GameSettingsAnswer, GameSettingsRequest, GameSettingsState } from './api.ts';
 import type { ServerSettings } from './config.ts';

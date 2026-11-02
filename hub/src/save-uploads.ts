@@ -1,6 +1,17 @@
 // Saves uploaded from the dashboard onto a factorio server's Host: the finished upload (`Uploads`) sent to its Agent in
 // pieces over the Agent connection, each answered before the next, then stored there next to the world. Loading it is
 // a restore, as for any save.
+//
+// `SaveUploads` (with agents and uploads), saves uploaded from the dashboard onto a server an Agent runs (`has`; else
+// 404): `add(serverId, upload, by)` refuses before anything is sent (`GameRefused`: 404 an unknown server or no such
+// finished upload; 400 not a `.zip` (`basename` of its file name, cut to 200) or over 1 GiB (`LIMITS.saveBytes`); 409
+// its Agent away or below `SAVES_FLOOR` (`agent-v1.3.0`, with the deploy text), one already sending to that server,
+// or `busy` (a pack or game update, a game settings save, a restore, its Agent's deploy)), takes the upload from
+// `Uploads` and sends it in the background: `saveUploadStart`, then a `saveChunk` per `PIECE` (512 KiB, base64) at
+// its offset, each awaited (60 s) before the next, then `saveUploadEnd` (5 min) for the stored name; `saveUpload`
+// notices (stream only) for `sending` (at most once a second), `storing`, then `done` or `failed`, a failure sending
+// `saveUploadCancel`; audited (`save upload`: the file and size, then the stored name or why it failed); the hub's
+// copy removed at the end whatever happens. `busy(id)`. Hub core.
 import { open, unlink } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { AgentRefused, beforeAgentRelease, type Agents } from './agents.ts';

@@ -2,6 +2,16 @@
 // good once RCON answers within 300 s of the unit becoming active; armed by a write, the gate watches the next start
 // and calls it failed when the unit fails or auto-restarts before RCON answered. A start RCON answers in later than
 // that is only `late`: not judged good, but not a failed start either.
+//
+// `StartGate`, the server's starts from the unit's states (`service`) and RCON's answers (`rconUp`): `start` when the
+// unit becomes active (or its change time moves while active; the first reading counts), `good` when RCON first
+// answers in that run within `GOOD_WITHIN_MS` (300 s, `TimeoutStartSec`) of its change time, `late` when it first
+// answers past that (a run the agent came to later, or a slow load: never judged good), each `gated` when it was the
+// start the gate watched, which disarms it (a late one too: that run crashing later is no failed start). Armed
+// (`arm`, at each write; `armedAt` kept by the caller across restarts), `failed` once the unit is `failed`, or
+// `activating` with an `auto-restart` SubState and a Result other than success (`failedStart`), with a change time
+// after the arming (whole seconds: a second's tolerance) and not at the end of a run that began before the arming and
+// that RCON answered in (that run's crash is not the watched start: it stays armed); it then disarms.
 import { EventEmitter } from 'node:events';
 import type { UnitState } from './service.ts';
 

@@ -1,3 +1,26 @@
+// `startHub(config, { startFrontend, get, oauth, host, run, restore, github, deploys, download, packs, uploadIdleMs,
+// hub, agents, portal, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub` (`HubOptions`),
+// `agents` (`AgentsOptions`), `gameUpdates` (`GameUpdatesOptions`): shorter timings for tests; `download`: the
+// library's HTTP requests, default `fetch`; `portal`: factorio.com's and the mod portal's, default `fetch`;
+// `githubToken`: for Actions artifacts; `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod links):
+// wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose config
+// section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
+// awaited, and given to `Services` and `Stats`; `Stats` before the `BackupWatcher`, armed for each server with a
+// Backup source (an Agent's with `played`), and `Restores`, with systemd and a `RestoreSource` for any server (an
+// Agent's, or a folder's with the injected `restore`); `RestartScheduler`'s `restart` looks `Services` up late, as it
+// is built first; one `FactorioCatalog`, shared by `GameUpdates` and `ModUpdates` (which follows it, with its 6-hour
+// check) so the mod browser's cache serves both; `Moderation` with agents; `GameUpdates` with agents and systemd,
+// built and started (the last hub's running rows closed, the Agents listened to) before the first await, so before
+// any Agent can connect, and `GameSettings` beside it (its `updating`, restores and deploys the same; its `busy`
+// given to `Restores` (through its `updating`), `GameUpdates` and `Deploys` as `settingsSaving`); one
+// `updating(id?)`, a pack update (`Packs.busy`) or a game update (`GameUpdates.busy`) by kind, for every busy check:
+// `RestartScheduler`'s `paused`, `Restores`, `Deploys` and `DeploysAnswer.packing`; `Restores`' `deploying(id)`: a
+// hub deploy, or the server's Agent's (`agentBusy`); `Deploys` with GitHub, given `Agents` for the Agents' releases
+// and deploys, and `deploying` from it for `Packs` (a hub deploy or the server's Mod's) and `GameUpdates` (a hub
+// deploy or the server's Agent's); Discord: `startFrontend`; web: the HTTP API, with the injected `oauth`); its
+// handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort` promise,
+// and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
+
 import { dirname, join } from 'node:path';
 import { Agents, type AgentsOptions } from './agents.ts';
 import { BackupWatcher } from './backups.ts';

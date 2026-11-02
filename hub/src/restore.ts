@@ -1,3 +1,16 @@
+// `Restores`: puts a backup back on a server through its `RestoreSource` (`list`, the names it may restore, and
+// `run`): `folderRestore`, over a server folder with `deploy/restore-backup.sh` through the injected `RunRestore`
+// (`execRestore`: bash, no shell parsing the name, the script's settings `GTNH_DIR`/`BACKUP_DIR`/`GTNH_SERVICE` in
+// its environment, its prompt answered), or `agentRestore`, for a server an Agent runs, its `restore` request over
+// the saves it last pushed (the Agent copies the save as the newest, which the next start loads), answered within
+// `AGENT_RESTORE_MS` (10 min, not the 30 s of other requests: the copy of a big save can take longer); refusing
+// (`RestoreRefused`: 404/409) unless the server's linked service is stopped (an Agent's: its pushed state), the name
+// is one its source lists, and no restore runs on it, nor a hub deploy (`Deploys.busy()`) or its Agent's own deploy
+// (`Deploys.agentBusy`, until its result) nor a pack or game update on it (`updating(id)`, which names the kind; a
+// save of its game settings too, `GameSettings.busy`); `busy(id?)` says whether a restore runs (on any: a hub deploy
+// waits for it; on a server: a pack or game update, and its Agent's deploy, do); a restore done tells
+// `Packs.restored` (it ends a rollback's offer); every attempt on a known server audited as `restore`. Hub core.
+
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Agents } from './agents.ts';

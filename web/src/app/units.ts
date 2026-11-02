@@ -1,3 +1,5 @@
+// `formatDuration` and `formatBytes`, as Discord's (the hub's `units.ts` isn't importable here).
+
 /** A duration as Discord's `/top` and `/playtime` give it: its two largest units, e.g. "2 h 5 m" or "45 s". */
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));

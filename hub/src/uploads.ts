@@ -1,3 +1,11 @@
+// `Uploads`, with packs or agents (a save upload): chunked uploads in `<data>/uploads/<id>` (`create(fileName,
+// size)`, ≤ 4 GiB; `append(id, offset, body)`, ≤ 64 MiB and never past `size`, only at `offset` = the bytes received
+// and one at a time, else `UploadRefused` 409 with `received`; a failed or oversize chunk is truncated away, so
+// `received` is always what's on disk; `received(id)`; each chunk is hashed as it lands, into a copy of the running
+// hash kept only with the chunk, so a finished upload's sha256 is ready at once). `get`/`take` give a finished one
+// (`{ path, fileName, size, sha256 }`) to `Packs` as a source or an Extra, once. Dropped an hour after their last
+// chunk (`HubDeps.uploadIdleMs`), wiped at start. `UploadRefused` (400/404/409/413). Hub core.
+
 import { createHash, randomBytes, type Hash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rm, truncate, writeFile } from 'node:fs/promises';

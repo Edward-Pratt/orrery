@@ -1,3 +1,6 @@
+// `Environment.staging` (`GET /api/environment`, asked once, before login; false on an error) and `StagingBadge`, the
+// amber "Staging" next to "orrery" in the sidebar, phone header and login card (nothing on Production).
+
 import { HttpClient } from '@angular/common/http';
 import { Component, inject, Injectable } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';

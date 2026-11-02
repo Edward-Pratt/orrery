@@ -1,3 +1,48 @@
+// `Agents` (with `integrations.agents`): the Agent port, a second listener on `listen` (`start` resolves once it is
+// bound; while its address isn't on this machine yet, EADDRNOTAVAIL, it tries again every 10 s, logged once, and
+// startup never waits for it). A connection is paused at accept and destroyed without a word unless its peer address
+// is a configured Agent's and has fewer than 4 open (`PEER_SOCKETS`, handshaken or not; the fifth logged at most once
+// a minute), so nothing is read first; its lines are read from raw chunks with `LIMITS.lineBytes` as the cap (a
+// longer one destroys it) and the line budget (`LINES`, a token bucket: 20 lines/s in bursts of 100; lines over it
+// are dropped, and a connection still dropping 10 s on is closed), before and after the handshake, then each parsed
+// message within its type's budget in that connection (both budgets kept per connection, not per socket: the Agent
+// connection's by its Agent's id, the game connection's by its server's, a first line's by its peer address, so a
+// reconnect goes on with what the last one left; `TYPES`: game events together 2/s in bursts of 30, `link`/`unlink`
+// 1/s in 5, `updateStep` 5/s in 20, `serviceState`, `saves`, `installed` and `settings` each 1/s in 10 and dropped
+// when deep-equal to the last one of their type passed on (`SAME`), `heartbeat` 1/s in 5, `backup` 1 per 10 s in 3,
+// `events` 1 per 10 s in 3 taken only by a change; others only the line budget, none of which posts or stores per
+// line; over it dropped, the connection kept; and `NEW_PLAYERS`: a heartbeat's names not on its server's player list
+// yet, 1 per 10 s in bursts of 200, a name over it left out of that heartbeat, so churning names, or reconnecting
+// (the list is empty while offline), can't make playtime sessions faster), drops logged at most once a minute with
+// the count since the last line (`everyMinute`, exported for its test: the first at once, later ones summed and
+// logged when the minute is up, by a timer once drops stop, cleared by `close`); the one table of the Agent port's
+// budgets (docs/protocol.md, "Rate rules"); a line whose handling throws ends only its own connection. Its first
+// line, within 5 s: an `agentHello` (an id in config whose `address` is the peer's, its token by `timingSafeEqual`,
+// the protocol in range; a second connection replaces the first) or a game `hello` (that Agent's token, for its own
+// `server`, while its Agent connection is up), whose lines it then parses with `parseModLine` and hands, within their
+// budgets, to the handler `ServerHub.attach` returns (`cmdLate`, `quest` and `achievement`, which an Agent never
+// sends, dropped: `NOT_FROM_AGENTS`); either refused (`reconnecting too fast`) under 5 s after the last one of its
+// kind for that Agent was welcomed (`HANDSHAKE_MS`, exported: the agent's tests check its copy), the live one kept;
+// else `reject`, then the connection is ended and destroyed within 2 s whatever the peer does. The registry (`get`,
+// `list`: connected, and the version its latest `agentHello` named). An Agent with no line for 20 s, or whose
+// connection closes without `bye`, is lost: `ServerHub.agentDown` (its server `lost`), one `agentLost` host notice,
+// then `agentBack` when it connects again; after `bye` only `agentDown`. An Agent's `events` (whether its server's
+// game events reach the hub) posts an `eventsOff` host notice (its `reason`) or `eventsOn` only when it changes what
+// the hub last heard from that Agent (kept while it is away), so its send on every connect posts nothing.
+// `request(id, call, { id, timeoutMs })`: typed RPCs with a fresh id (or `id`: an `update`'s, which its steps and end
+// carry) and a 30 s timeout unless the call gives its own, an ok reply's data through `parseReplyData`; rejected when
+// not connected, refused (`AgentRefused`, its `error`: an `ok: false` reply), late, malformed or cut off. Events
+// (typed): `agentUp` (every welcomed Agent connection), `agentLost`, `agentBack` and what an Agent pushes
+// (`serviceState`, `saves`, `installed`, `updateStep`, `updateDone`, `deployResult`, `settings`, each the parser's
+// schema-only copy); a `hostSample` goes to its Host's `HostMonitor` (`Hosts`, by the Agent's id), at most one per 10
+// s per Agent across its connections (`SAMPLE_MS`), its `ts` replaced by the hub's clock. Its throttles by the hub's
+// clock (handshakes, host samples, drop logs) treat a time before their last stamp, a clock stepped back, as long
+// after it. `AgentsOptions`: shorter timings (`handshakeMs` too) and the line budget, for tests. `AGENT_FLOOR`
+// (`agent-v1.1.0`, the first Agent release with game updates and its own deploys) and `beforeAgentFloor(version)` (a
+// hello's `agentVersion` older than it; the repo's `agent-v0.0.0`, the dev loop, is not), for `Deploys` and
+// `GameUpdates`; `beforeAgentRelease(version, floor)`, the same against another floor (`GameSettings`'
+// `SETTINGS_FLOOR`). Hub core.
+
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';

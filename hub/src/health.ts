@@ -1,3 +1,7 @@
+// `httpGet` (10 s timeout, body discarded; also the checks' GET), `startPinger`: the `healthcheckUrl` liveness ping,
+// sent every minute from the hub's own timer (so it stops when the hub dies or hangs), whatever Discord is doing. Hub
+// core.
+
 export type Get = (url: string) => Promise<{ ok: boolean; status: number }>;
 
 /** A GET that gives up after 10 s (a `TimeoutError`); the body is discarded, so the connection is freed. */

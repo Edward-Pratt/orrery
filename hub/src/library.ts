@@ -1,3 +1,37 @@
+// `Library`, with packs (one per Environment): pack versions stored at `<root>/library/<sha256>.zip` (the root holds
+// `hub.db`), named in the `library` table (name, version, Minecraft version, loader, sha256, size, source, by, at;
+// name, version and Minecraft version trimmed, 1–100 characters, loader only `forge`). `start` (clears adds'
+// leftovers, then moves each `packs/<server>.zip` from before the library in under its pack row's name and version as
+// 1.7.10 Forge, or reuses the entry with its sha256, and points the row at it; a name and version taken by another
+// file joins as "<version> (<server>)", a file with no row is deleted, one still clashing is logged and left;
+// `packs/` goes once empty; then, and after every stored add, each pack row with no (or a deleted) library entry is
+// linked to the entry holding its sha256, as an older hub after a Rollback leaves it); `state` (the entries newest
+// first, each with `usedBy`: the servers whose pack row is it or whose running update installs it, and the running
+// add); `addPack(source, by)` (an `https:` URL fetched by `download` through `HubDeps.download`, a fetch-shaped
+// request, following up to 5 redirects itself (each `https:`) and resuming a drop up to 3 times with `Range` +
+// `If-Range` from the bytes on disk, a `200` starting over; a GitHub Actions artifact link
+// (`…/actions/runs/<run>/artifacts/<id>`, kept as the source) through `GET /repos/<o>/<r>/actions/artifacts/<id>/zip`
+// with `HubDeps.githubToken`, refused (400) without one; or a finished upload taken from `Uploads`; returns its
+// number at once and runs in the background into `library/.add-<random>`, cleared at start: adds are lost on a
+// restart), one at a time (409); `cancel` (until it is being stored; removes what it wrote); `deletePack` (409 naming
+// the servers while used), `entry(id)`, `zip(id)` and `busy` (a hub deploy and an install wait); adds are refused
+// (409) while a New server install runs. The zip is checked with `Packs`' entry checks (`zipEntries`, `contentRoot`);
+// a blank Minecraft version or loader is read from a Forge universal jar (`forge-<mc>-…jar`) at the content root,
+// else `minecraft_server.<mc>.jar` (version only), and the add fails if still missing. Duplicates: the same file
+// under the same name and version finishes ok as "already in the library"; another file under that name and version,
+// or the file under another name or version (naming it), fails; an upload's (sha256 known at once) are refused (409)
+// before it is taken. Java runtimes: `addRuntime({ feature })` (8, 17, 21 or 25; sharing the one add slot, Cancel and
+// events, `id` `runtimes`) asks Adoptium (`api.adoptium.net/v3/assets/latest/<feature>/hotspot`, `os` `linux` or
+// `alpine-linux` on musl, `process.arch` mapped to `x64`/`aarch64`), names it `temurin-<release>` (checked against
+// `RUNTIME`), answers "already installed" for a known name before downloading, downloads the tarball into
+// `work/runtime-<random>/` (cleared at start), checks Adoptium's sha256, unpacks it with the system `tar`, runs
+// `bin/java -version` (30 s) and only then moves it to `runtimes/<name>/` (`runtimes` table: name, feature, the
+// tarball's size and sha256, by, at); `deleteRuntime` (404 unknown, 409 naming the servers whose `<root>/java/*` link
+// points at it); `runtime(name)`; `state().runtimes` with each one's linked servers. Each add is audited at its start
+// and end (`library add`, `library runtime add`), cancels and deletes too (target `library`), and posts `libraryAdd`
+// target events (`target` `library`, `id` `packs` or `runtimes`: progress, then finished ok/cancelled/failed with a
+// reason; not posted to Discord). `LibraryRefused` (400/404/409). Hub core.
+
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, readdirSync, readlinkSync } from 'node:fs';

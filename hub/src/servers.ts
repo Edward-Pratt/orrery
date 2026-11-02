@@ -1,3 +1,33 @@
+// `ServerHub`: the Mod port (`listen`) and the Agents' game connections (`attach(socket, serverId, modVersion)` from
+// `Agents`, which keeps reading the socket and feeds the returned function its messages, parsed and within their
+// budgets; the socket joins those `close` destroys), per-server state, liveness (crash/stop/hung; `started` once per
+// connection, a repeat on it ignored; `start()`, which `startHub` always calls, runs hung detection and the 60 s
+// grace period, after which a server that can't connect stays unknown: a factorio server whose Agent isn't connected,
+// a minecraft one while the Mod port isn't open (`listen`, only with `integrations.minecraft`)), the Agent rules
+// (`agentUp`/`agentDown`: an Agent leaving drops its server's game connection and makes it `lost`; a game connection
+// closing without `stopping` while its Agent connection is up waits `settleMs` (5 s) for that one to close too, else
+// it crashed; hung detection is off only while a factorio server's Agent is away; a factorio server's lifecycle
+// events at most 20 an hour, in bursts of 20, kept across connections: one over it is not emitted at all, so the
+// uptime log, the stream and Discord alike miss it, the drops logged at most once a minute with a count, and the
+// latest dropped one is emitted when the next token comes, within 3 min, unless a later one went out first; a Mod's
+// server has no such budget), `downs(id)` (how many times a server's game connection went away since the hub started,
+// counted in `#offline` whether or not its down event fits the budget), `say`, `broadcast(id, text, by)` (a hub line
+// in game, such as a countdown's: a Mod's server runs `say <text>` through `runCommand`, audited as `by`; a factorio
+// server's Agent gets a `notice`, cleaned like `say`, and builds the game's command itself), `backup(id, by)` (a
+// Backup now: a Mod's server runs `backup start` through `runCommand`, resolving with its output; a factorio server's
+// Agent gets `save`, audited as `backup`, resolving with none; the game's `backup` event follows either way),
+// `runCommand` (control characters taken out; a Mod's command without a leading `/`, a factorio server's as typed,
+// `/players`, and at most 256 characters, as its Agent runs no longer one: else `CommandRefused`, before it is
+// audited or sent), `audit` (entries go to the `HubOptions.audit` sink: the database), `event` emitter (game,
+// lifecycle and hub-core `notice` events, plus `say` for chat sent in game, with its `source` (`discord` or
+// `dashboard`, the latter with the admin's avatar URL, never sent to the mod), `console` for command output, late
+// output included, `tps` when a heartbeat's TPS moved by 0.1 or more, and `paused` when a heartbeat changed the
+// server's `paused`), `publish` (hub-core modules put typed notices — kind, severity, details — on it), `modVersion`
+// (what a server's Mod reported in its latest hello, kept after it disconnects), `paused` on each `ServerState` (from
+// an Agent's heartbeat: while paused the rate is ignored, not put on the state or the stream, but heartbeats still
+// count for hung detection), and `publishTarget` for notices about the host, a service, a check or a deploy (`target`
+// events, apart from server `event`s so server handlers never see them). The API frontends use.
+
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';

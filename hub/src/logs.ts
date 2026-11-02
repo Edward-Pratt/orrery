@@ -1,3 +1,8 @@
+// `listLogs`: a server folder's `logs/*.log`, `logs/*.log.gz` and crash reports (`CRASH_LOCATIONS`), plain files only
+// (`lstat`), newest first (a name in two folders is `logs/`'s); `tailLog`: the last 1000 lines (`TAIL_LINES`) of a
+// name the listing holds right now, never a path from the caller, opened `O_NOFOLLOW`; a plain file read back from
+// its end in 64 KB chunks, a `.gz` streamed through gunzip, both holding at most its last 4 MB. Hub core.
+
 import { constants } from 'node:fs';
 import { lstat, open, readdir, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';

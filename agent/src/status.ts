@@ -1,3 +1,17 @@
+// `StatusPoller`: `/orrery-status` over one kept RCON connection every 5 s; `status` (the `Reading`, and the `Status`
+// it came from: version and mods, for a game update and `installed`) after each successful round trip only
+// (heartbeats follow RCON, never a timer); `stalled` once when RCON takes the connection but times out (an
+// `RconTimeout`: a blocking save, or frozen) or answers without a status; `down` once when it is gone (refused, reset
+// or closed by the server). `players` is the latest online list (emptied once RCON is gone). `parseStatus` reads the
+// mod's reply as untrusted: anything off is no status; players `{}` is nobody; names over 64 characters or with a
+// control character dropped, at most 200; versions must be `X.Y.Z`; the orrery mod's from `mods.orrery`. `reading`:
+// UPS = Δtick / Δwall time (null on the first answer or a tick that went back); paused when `tick_paused`, or nobody
+// on with `auto_pause`, or Δtick at most 1 with players on. `auto_pause` comes from the `autoPause` option
+// (`GameSettings.autoPause`: what the running server started with, since the file may hold a value saved for the next
+// start), else from `readAutoPause`, which reads `server-settings.json` (container-writable) with `O_NOFOLLOW` and
+// `O_NONBLOCK`, only a regular file up to 1 MiB, `auto_pause === true`, else false (the first-boot check reads it so
+// too).
+
 import { EventEmitter } from 'node:events';
 import { constants, open, type FileHandle } from 'node:fs/promises';
 import { Rcon, RconTimeout } from './rcon.ts';

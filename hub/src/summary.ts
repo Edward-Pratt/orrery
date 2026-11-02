@@ -1,3 +1,6 @@
+// `Summary` type, `yesterday` (the local day before the summary's scheduled time; `Stats.summary` builds it) and
+// `scheduleSummaries` (announces each server's summary at its `dailySummary` time). Hub core.
+
 import { everyDay } from './daily.ts';
 import type { ServerHub } from './servers.ts';
 import type { Stats } from './stats.ts';

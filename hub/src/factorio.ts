@@ -1,3 +1,47 @@
+// `FactorioCatalog`, for game updates and the mod browser, through the injected `PortalFetch` (15 s timeouts; answers
+// capped, bytes counted as read: 64 KiB, 4 MiB for `sha256sums/` and a mod's page, 16 MiB for a line's list
+// (`CAPS.list`), 512 KiB for a short page and a thumbnail; read again after 5 minutes, as the dashboard asks on every
+// change, a line's list after 15 and the categories and thumbnail paths after 6 hours (`#cached` takes a time per
+// key, one read in flight per key, a failed one not kept); every request `redirect: 'manual'`, a public read
+// following at most 3 redirects itself, each checked before it is asked: https on `factorio.com`, `www.factorio.com`
+// or `mods.factorio.com`, no port, no user, else 502): `releases()` (`factorio.com/api/latest-releases`: each
+// channel's headless version, one on both listed once, as stable), `sha256(version)`
+// (`www.factorio.com/download/sha256sums/`: the `linux-arm64` headless build's) and `download(version)` (its
+// `get-download` URL: the Agent's Host is ARM64), `mod(name)` (`mods.factorio.com/api/mods/<name>/full`; null for a
+// 404; the answer must name the mod asked; only releases with a version `^\d+\.\d+\.\d+$`, a sha1, a `/download/…`
+// link without `..` and a `factorio_version` line are kept, newest first; a dependency's name is the Agent's check,
+// `^[A-Za-z0-9_. -]+$` without `..` (`validName`, which also refuses `.` alone: a URL reads `/api/mods/./full` as
+// `/api/mods/full`), and a required one that fails makes its release unusable), `resolve(factorio, picks, gameMods)`
+// (the releases for the version's line only; required dependencies, no prefix or `~`, added transitively at the
+// newest release meeting every limit on it: the other mods' required and optional ones, and its own on the game's
+// mods against the Factorio version, rounds repeated until the picks settle; optional `?`/`(?)` ones not added; a `!`
+// one refused while both are in, or the game's mod is enabled; what can't be met is `unresolved`: not on the portal,
+// no release for the line, a limit no release meets, a game mod not enabled; a picked mod the portal doesn't have
+// rejects, 404), `link(downloadUrl)` (with the account, `mods.factorio.com<download_url>?username&token`, `redirect:
+// 'manual'`: only a 3xx to `https://dl-mod.factorio.com/…` whose only query key is `secure`, holding no credential,
+// at most `LIMITS.url`, is returned; 409 without the account, 502 otherwise; no error ever holds the request's URL);
+// `browse(line, { q, category, sort, page })` (the mod browser: the portal's list has no search, so
+// `mods.factorio.com/api/mods?page_size=max&version=<line>&hide_deprecated=true` is read whole with
+// `/api/categories`, in parallel, and kept as checked slim rows only, the two most recently browsed lines; a row is
+// dropped unless its name passes the Agent's check and its newest release has a version `^\d+\.\d+\.\d+$` for that
+// line; title (200), owner (64) and summary (500, with `…`) plain text on one line, control characters and bidi
+// overrides out; downloads a finite number ≥ 0, else 0; a category one the portal lists, else null; `page` the portal
+// URL built from the name; over 50,000 rows refused, 502; a category id `^[a-z0-9-]{1,32}$` with a title, others
+// dropped; every word of `q` in the name, title or summary, case aside, then the category (400 for one the portal
+// doesn't list), sorted by downloads, newest release or title (ties by name), a name or title equal to `q` first, a
+// page of `BROWSE_PAGE` (24) with the total), `thumbnail(name)` (its path from `mods.factorio.com/api/mods/<name>`,
+// the short page, which must name the mod and match `^/assets/[0-9a-f]{40}\.thumb\.png$`, else null: also for a 404
+// or a page over its cap; kept 6 hours, at most 10,000 names, cleared when full; the image from
+// `https://assets-mod.factorio.com<path>` alone (`THUMBS`, not in `PUBLIC_HOSTS`), following no redirect (502),
+// `image/png` with the PNG signature, else 502; the 100 last used kept by their sha1; at most 4 of these reads at
+// once); `check(line, names)` (the Import mod list's: nothing read for no names; each name from that line's list, the
+// mod browser's cache, `fits` with its title and newest release, no read per name; a name not in it read with
+// `mod(name)`, the first 20 only (`CHECK_READS`), through the thumbnails' 4-at-once slots: `fits` (a deprecated mod
+// with a release for the line), `noRelease` or `missing`; a failed read, and every name past the cap, `unchecked`;
+// 502 if the list can't be read); `GAME_MODS` (base, elevated-rails, quality, recycler, space-age: the dashboard's
+// too; with the release helpers in `factorio-releases.ts`), `gameLabel` ("2.1.24 · 5 mods": every enabled mod, the
+// game's own too), `GameRefused` (400/404/409/429/502). Hub core.
+
 import type { CatalogMod, FactorioRelease, GameModPick, ModBrowse, ModCheck, PortalCategory, PortalListing, PortalSort, UnresolvedDependency } from './api.ts';
 import { LIMITS } from './protocol.ts';
 import { choose, compareVersions, GAME_MODS, LINE, lineOf, plain, release, validName, VERSION, type Dependency, type ModRelease, type PortalMod } from './factorio-releases.ts';

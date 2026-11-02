@@ -1,3 +1,42 @@
+// `HubClient`, the two connections to the hub's Agent port. The Agent connection sends `agentHello` and nothing else
+// before `welcome`; then a `ping` every 10 s, `serviceState`, `saves`, `installed`, `events` (whether game events
+// reach the hub, its `reason` `printable` and cut to 2 KiB) and `settings` (`GameSettings`' report: its `problem` and
+// `rolledBack` `printable` and cut to 2 KiB, its lists to the hub's limits; never twice the same on one connection)
+// on connect and on each change (`installed` never twice the same in a row, and kept in `<state>/installed.json`,
+// read back shape-checked at start, so a restarted agent sends it on connect while its server is stopped too;
+// `latestInstalled`, for a game update's `from` and `to`), then the `welcomed` hook (a game update's latest step and
+// pending `updateDone`, a deploy's outcome not yet sent), `hostSample` when given (never queued), `send` for a game
+// update's steps (false while not connected), `deliver` for `updateDone` and `deployResult` (resolves true only once
+// the line's write succeeded; false while not connected, when the write fails, or after 30 s: the caller keeps it and
+// sends it again on each connect, and the hub ignores a repeat), and a `reply` by id to every request: a `Handlers`
+// entry's result (a rejection's message as its `error`, `redact`ed and cut to 2 KiB), or `ok: false` for one that is
+// invalid, of an unknown type or has no handler. Any close reconnects after `backoff` (1 s doubling to 60 s, jittered
+// into the upper half, reset by a welcome); state changes are logged once each. A hello the hub refuses as
+// `reconnecting too fast` (under 5 s after its last welcome, `HUB_WELCOME_GAP_MS`) counts no failure and is logged
+// without `(rejected: `, which the first-boot check stops at: the next hello waits what is left of those 5 s since
+// the last welcome it saw (all of them before its first), and a twentieth more (`tooFastWait`). After each welcome it
+// writes `<root>/connected`, `{"version":"agent-vX.Y.Z","time":<epoch ms>}`, atomically (temp file and rename;
+// `writeAtomic`): exactly what `deploy-agent.sh`'s gate reads (`version` equal to the tag; the script removes the
+// file right before each restart, so `time` is never compared). The game connection opens only while the Agent
+// connection is up, RCON answers (`status`) and the unit, if its state is known, is active: `hello` with the agent's
+// token and the orrery mod's version, `started` once per run of the unit (its change time, kept in
+// `<state>/started.json`, so a restarted agent doesn't announce a run again), then a `heartbeat { tps: UPS, players,
+// paused }` per answer once there is a rate, each game event given to `event` and each `backup` (dropped while the
+// game connection isn't up, as a Mod drops them while disconnected); the hub's `say`, `notice` and `linkResult` on it
+// go to `toGame`, a `cmd` to `command` (answered by `cmdResult`, also with a `refused` line for one that isn't valid,
+// so the hub never waits; a failure is "the command did not run", but one sent and not answered in time,
+// `RconNoAnswer`, "may still run"), `save` to `save`. The stopping rule: for a stop the agent started (`stopping`,
+// from `serviceAct` stop or restart) it sends `stopping` and closes at once; any other end of a run is `RunWatch`'s,
+// at the unit's final state: `stopping` then the close for `stopped`, the close alone for `crashed`. A stall
+// (`stalled`), or RCON gone (`down`) while the unit is still active, only stops the heartbeats, so the hub's hung
+// detection reports a frozen server as hung; with no unit state known, `down` closes it. After a run ended no game
+// connection opens until the unit's next run (active with another change time). It also closes with the Agent
+// connection; `gameUp` says whether it is welcomed (a game update's gate). A game `hello` the hub refuses
+// (`reconnecting too fast` among them) closes only that connection: the next RCON answer (`status`) opens another, as
+// many times as it takes, so an update's gate, which polls `gameUp` for its 5 minutes, never gives up after one. A
+// line from the hub over the cap destroys that connection (then a reconnect). `stop`: `bye`, then once it is written
+// the game connection and the Agent connection end, 2 s at most.
+
 import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { connect, type Socket } from 'node:net';

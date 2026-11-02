@@ -1,3 +1,31 @@
+// SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down, and `lost` to
+// unknown) and uptime math; player sessions, daily peaks and stats queries; dashboard login sessions (stored hashed;
+// `web_session_checks` holds each one's Discord access token, sealed with its cookie, and when its admin role was
+// last checked); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
+// never pruned); account links (`links`: a Discord user's Minecraft name and uuid, `link`, `unlinkPlayer`,
+// `linkByDiscord`, `linkByPlayer`; `factorio_links`, its own table so `links` stays as an older hub reads it: a
+// Discord user's Factorio name, unique without case, `linkFactorio`, `unlinkFactorioPlayer`, `factorioLinkByDiscord`,
+// `factorioLinkByName`; a link replaces that user's and that name's earlier one in its own table only;
+// `unlinkDiscord` clears both); host samples (`recordHostSample`, `hostSamples`, as JSON); the live feed's chat and
+// console (`feed`: `recordFeed`, which every `FEED_CAP_EVERY` (100) inserts of a server deletes its rows beyond the
+// newest `FEED_CAP` (10,000), so a flood stays bounded until the nightly prune; `feed(serverId)` the newest
+// `FEED_KEPT` (500), `feedMaxId`, as JSON under their feed id); for server history, `states` (up/down rows from a
+// window's start), `sessionsSince` and `tpsAveraged` (TPS in time buckets, in SQL); `maintain` (nightly: prune TPS
+// and host samples > 90 days, expired sessions and all but each server's newest 500 feed rows, 7 dated copies, the 3
+// newest `hub-before-*` deploy copies by time); the deploy history (`startDeploy`, `finishDeploy` (a running row
+// only), `amendDeploy` (an `ok` row only: an Agent's deploy whose result came after its hello), `deploys`: newest
+// first, by part, outcome and a `before` id) and `copyTo` (a `VACUUM INTO` copy before a hub deploy; it and
+// `startDeploy` throw); packs (`packs`, the manifest in `pack_files` with whether the pack ships each file, `extras`,
+// `config_edits`, `pack_updates`; their writes throw, as `startDeploy` does, but `setPackUpdate`); the pack library
+// (`library`, `addLibraryEntry`, `deleteLibraryEntry`; writes throw; unique on name and version, and on sha256),
+// `packs.library_id` (a nullable column, the one other exception to "never altered" besides `web_sessions.avatar`: an
+// older hub after a Rollback writes it as null; `packsOf`, `setPackLibrary`), Java runtimes (`runtimes`,
+// `addRuntime`, `deleteRuntime`); Pending servers (`pending_servers`: `pendingServers`, `addPendingServer`,
+// `deletePendingServer`); the portal mod updates last posted per server (`mod_update_notices`: `modUpdateNotice`,
+// `setModUpdateNotice`) and, for an install's id, `hasPackData`/`deletePackData` (its pack row, manifest, Extras and
+// edits). Tables are only added, never altered: an older hub after a Rollback still reads the file. Other writes
+// never throw.
+
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';

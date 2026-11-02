@@ -1,3 +1,11 @@
+// The HTTP API's request/response types, one per endpoint (`Integrations`, `ServerCard`, `ServerDetail`, `AuditLog`,
+// `LiveEvent`, …, the game update ones: `GameState`, `GameCatalog`, `GameUpdateRequest`, `GameUpdateAnswer`, the mod
+// browser's `ModBrowse`, `PortalListing`, `PortalCategory`, `PortalSort`, the Import mod list's `ModCheckRequest`,
+// `ModCheck`, `ModCheckAnswer`, and the game settings ones: `GameSettingsState`, `GameSettingsRequest`,
+// `GameSettingsAnswer`; `Features.settings`, left out by an older hub), for the dashboard (`web/`) to import
+// type-only. Imports only `types.ts`, so it compiles without `@types/node` (`npm run typecheck` checks it with
+// `tsconfig.api.json`); `web.ts` checks each payload against it with `satisfies`.
+
 /**
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
  * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.

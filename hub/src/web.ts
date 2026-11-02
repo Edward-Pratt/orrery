@@ -1,3 +1,58 @@
+// Web integration: the Hono HTTP API under `/api` (`webApi`), Discord OAuth login for admin-role members (`OAuth`,
+// real `discordOAuth`), sessions in SQLite (with the Discord avatar hash; a failed login redirects to
+// `/?login=admin|state|discord` for the dashboard's login card), `GET /api/environment` (`{ environment }`, the one
+// read without a session), `GET /api/me` (`id`, `username`, `avatar`), `POST /api/logout`, reads
+// (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` (404
+// unlisted, 502 if journalctl fails) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
+// Agent's) and `/api/hosts/:id/samples?hours=` (404 unknown id) with the host or agents on, and `/api/host` and
+// `/api/host/samples?hours=`, the hub's own alone, only with the host on, kept for one release for an older
+// dashboard; `/api/servers` cards (with `lagging` and the linked service's id and state); `/api/servers/:id` status,
+// TPS, top per period, backups, `logs` (it has a folder, or an Agent runs it); `/api/servers/:id/logs` (`Stats.logs`,
+// newest first; 502 if its Agent can't answer) and `/api/servers/:id/logs/:name` (the last 1000 lines, `{ lines }` as
+// a service's logs; a name not in the listing, so `..`, slashes and symlinks too, is 404; 502 if the file can't be
+// read or the Agent can't answer), 404 for an unknown server or one with neither a folder nor an Agent, not audited;
+// `/api/servers/:id/players/:name`, 404 if never seen; `/api/servers/:id/history?hours=` with `asOf`, the newest
+// event id, so the dashboard skips replayed events already counted; `/api/audit[?server=][&actor=][&before=id]`, a
+// batch of 200 newest first with `older` (`before` is an entry's `id`, paged by (ts, rowid); 400 if not an id);
+// unknown server ids 404; features per server: chat, TPS and the console (and TPS itself) over a game connection, so
+// for a server with a mod token or one an Agent runs, quests only with a mod token, `update` for a server an Agent
+// runs while game updates are on (`GameUpdates`); the card's `paused` from `ServerState`; `agents` in
+// `/api/integrations`), `GET /api/events` (SSE: `LiveFeed`'s buffer after `Last-Event-ID`, then live events;
+// keep-alive comments); actions (`POST /api/servers/:id/chat` (a linked admin named by their name in that server's
+// game, `Stats.linkedPlayer`), `/command` (400 with why for a factorio server's over 256 characters,
+// `CommandRefused`), `/restart`, `/restart/cancel`, `/backup` (`ServerHub.backup`: a Mod's `backup start`, a factorio
+// server's save): 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the admin;
+// `POST /api/services/:id/start|stop|restart`: 404 unlisted, 409 if a countdown is running, 502 if systemctl (or the
+// service's Agent) fails; `POST /api/servers/:id/restore` with systemd whenever a server has a restore source (a
+// folder and the restore script, or an Agent), registered before the online check: `Restores`' 404/409, 502 with the
+// script's (or the Agent's) error); with game updates (agents and systemd on), registered before the online check,
+// for a server an Agent runs (else 404): `GET /api/servers/:id/game` (`GameState`), `POST …/game/catalog`
+// (`GameCatalog`), `…/game/update` (202 `{ id }`) and `…/game/update/cancel` (204) (`GameRefused`'s status, its
+// message as text), and the mod browser's reads, `GET …/game/mods?factorio=&q=&category=&sort=&page=` (`ModBrowse`;
+// 400 for a bad parameter, 502 if the portal can't be read) and `GET …/game/mods/:name/thumbnail` (the PNG,
+// `image/png` with `x-content-type-options: nosniff` and `cache-control: private, max-age=86400`; 404 with `private,
+// max-age=3600` when it has none; 502 uncached), and the Import mod list's `POST …/game/check` (`{ factorio, names
+// }`: `ModCheckAnswer`; 400 for a bad body, 502 if the portal's list can't be read); with game settings (agents and
+// systemd on), a separate block registered before the online check, for a server an Agent runs (else 404): `GET
+// /api/servers/:id/settings` (`GameSettingsState`) and `PUT …/settings` (`GameSettingsRequest`, answering
+// `GameSettingsAnswer`; `GameRefused`'s 400/409/502 as text), and `features.settings` on its card; with GitHub on,
+// `GET /api/deploys[?before=id]` (`Deploys.answer`, 50 history rows a batch), `POST /api/deploys/check` (asks GitHub,
+// answers the same) and `POST /api/deploys` (`{ part, tag, server?, host? }`: `server` for a Mod, `host`, the Agent's
+// id, for an Agent; 202 with the row id; `DeployRefused`'s 404/409, 400 bad input, 502 if systemctl, the download or
+// the Agent's `deploy` fails); with packs (systemd and Minecraft on), `POST /api/uploads` (`{ fileName, size }`),
+// `GET /api/uploads/:upload` and `PUT /api/uploads/:upload?offset=` (a raw chunk; `UploadRefused`'s status, 409 as `{
+// received }`), and, registered before the online check, for servers `Packs.has` (else 404): `GET
+// /api/servers/:id/pack`, `POST …/compare`, `…/adopt`, `…/update` (202), `…/update/cancel`, `…/extras` (then
+// `PUT`/`DELETE …/extras/:id`), `…/edits` (then `PUT`/`DELETE …/edits/:id`), `…/edits/preview` (`PackRefused`'s or
+// `LibraryRefused`'s status); with the library (as uploads), `GET /api/library`, `POST /api/library/packs` (`{ upload
+// | url, name, version, mc?, loader? }`: 202 with the add's number), `POST /api/library/cancel`, `DELETE
+// /api/library/packs/:id` (`LibraryRefused`'s status; 409 while used), `POST /api/library/runtimes` (`{ feature }`:
+// 202) and `DELETE /api/library/runtimes/:name`, and for a pack's server `PUT /api/servers/:id/pack/runtime` (`{
+// runtime: name | null }`), `GET /api/library/packs/:id/scripts`, and `library` in `/api/integrations`; with packs,
+// the library and GitHub (`newServer` in `/api/integrations`), registered before `/servers/:id`: `POST /api/servers`
+// (202 `{ id }`; `PackRefused`'s status), `GET /api/servers/pending` and `DELETE /api/servers/pending/:id`; every
+// other route needs a session. `serveWebApi` serves it on 127.0.0.1.
+
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';

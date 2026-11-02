@@ -1,3 +1,5 @@
+// `formatDuration`, `formatBytes`, `localDay` (local calendar, not UTC). Hub core.
+
 /** "3 d 4 h", "5 h 12 m", "3 m 12 s", "45 s": the two largest non-zero units. */
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));

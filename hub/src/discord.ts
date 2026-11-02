@@ -1,3 +1,21 @@
+// Discord frontend: webhook chat (game chat, and dashboard lines as `<name> (dashboard)`, under the name `relayAs`
+// gives: a factorio player's as `<name> (Factorio)`, and one with whitespace or parentheses posted as the bot, so a
+// game's line never passes for a dashboard one or the bot, and one with `discord` or `clyde` in it (any case), which
+// Discord refuses as a webhook name, posted as the bot at once; `sendChat`: content escaped and cut to 2000, and a
+// name remembered as refused only when Discord's error is about the username (`usernameRefused`), never for the
+// content, the newest `REFUSED_KEPT` (1000) kept, the oldest dropped; then posted as the bot), Discord chat into the
+// game under the author's linked name in that server's game (`Stats.linkedPlayer`), alerts (+ crash-log uploads; the
+// host's, services' and checks' only in `alertsChannel`, via `channelFor`, and so a factorio server's
+// `verificationOff`, `verificationOn` and `settingsRolledBack` (`ADMINS_ONLY`: not in the players' channel, and not
+// posted without an alerts channel); an Agent's `agentLost` and `agentBack` there each at most once per 10 minutes
+// per Agent (`agentAlerts`, `AGENT_ALERT_MS`): one sooner is held and posted when its 10 minutes are up if it is
+// still that Agent's latest, and one that would repeat what Discord last said is not posted, so a back after a held
+// lost is held too; the stream and the dashboard keep every event), player skins as chat avatars on minecraft servers
+// only, presence, topics, notices as embeds (each with its server's game, which words its updates), `/status` `/list`
+// `/tps` `/playtime` `/top` `/link` (how to type the code in each game that has a server) `/unlink` (every game's
+// link) `/cmd` `/restart` `/backup` (`backupCommand`: the server's Backups, a factorio server's saves, and `start`
+// through `ServerHub.backup`), worded for any game; late `/cmd` output as follow-ups.
+
 import {
   ActivityType,
   ChannelType,

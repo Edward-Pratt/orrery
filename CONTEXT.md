@@ -58,8 +58,15 @@ A factorio server's own settings: its name, description, player limit, game pass
 _Avoid_: config (the hub's), server settings (`ServerSettings` is the hub's per-server config), options, preferences
 
 **Admin**:
-A player name a factorio server treats as an admin in game. Not a dashboard admin (a Discord member with the admin role). While user verification is off the name is not checked, so anyone with the game password can join under it.
+A player name a factorio server treats as an admin in game. Not a dashboard admin (a Discord member with the admin role). While user verification is off the name is not checked, so anyone with the game password can join under it. Changed in the Settings tab, and promoted and demoted from the Players tab too.
 _Avoid_: operator, op, moderator
+
+**Moderation**:
+Kicking, banning, unbanning, promoting and demoting a factorio server's players from the Players tab, through Factorio's own commands, which the Agent builds.
+_Avoid_: admin tools, mod actions
+
+**Ban**:
+A name on a factorio server's banlist, with an optional reason Factorio shows them. By name only, so it stops no one while user verification is off.
 
 ### Backups
 
@@ -108,6 +115,10 @@ _Avoid_: upgrade, reinstall
 **Game update**:
 The factorio counterpart of a pack update: moving a factorio server to another Factorio version or set of portal mods. The hub picks the versions and their dependencies; the Agent carries it out (a backup, a countdown stop, the swap, a health gate, and a rollback if the gate fails). Adding a mod, or putting a new Factorio mod release on the server, is a game update too.
 _Avoid_: pack update (a pack is Minecraft's), upgrade, patch
+
+**Portal mod update**:
+A newer release of a portal mod a factorio server runs that fits its Factorio. The Game tab marks it, the hub posts new ones at most once a day, and installing it is a game update.
+_Avoid_: mod update (the Mod is the Minecraft one), upgrade
 
 **Pack library**:
 The pack versions an Environment's hub keeps, by pack name and version, for any of its servers to install or update to. A version is removed only by hand, and only while no server runs it.

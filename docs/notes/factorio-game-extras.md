@@ -1,9 +1,8 @@
 # Factorio: portal mod update notices and player moderation
 
-Status: design, not built. Date: 2026-11-01. Based on `main` at `2f368ab` (production: `hub-v2.17.0`, `web-v0.15.1`,
-`agent-v1.1.1`). Built on `fa/game-extras`, next to `fa/world-settings` (game settings, then new worlds and save
-uploads: `docs/notes/factorio-world-settings.md` on that branch). Both ship in the same hub, dashboard and
-`agent-v1.2.0` releases; see [Living next to fa/world-settings](#living-next-to-faworld-settings).
+Status: built on `fa/game-extras` (2026-11-02), not yet cut: `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, in that
+order. Designed on 2026-11-01 against `main` at `2f368ab`, next to fa/world-settings, whose Settings and save uploads
+shipped first; the version numbers below are this release's. See [Built](#built) for where the build differs.
 
 The owner asked for two things on the factorio server an Agent runs:
 
@@ -108,7 +107,7 @@ older accounts and LAN names may fall outside the registration rule, and nothing
 | User verification off | The Agent reports `require_user_verification` from `server-settings.json` with the lists. With it off, the section says that a ban by name stops no one. |
 | Freshness | No push. The section asks on open, after its own action (the reply carries fresh lists), on the server's `join` and `leave` events (debounced 2 s) and on Refresh. An in-game `/ban` of someone online shows at once through their `leave`. |
 | Discord for moderation | Nothing posted. It is audited. |
-| Versions | The world-settings note planned `hub-v2.16.0` and `web-v0.14.0` for its stage A; those numbers went to the mod browser. The next ones are `hub-v2.18.0` and `web-v0.16.0`, shared with Settings, and `agent-v1.2.0`. The texts below use them. |
+| Versions | Settings and save uploads shipped first (`hub-v2.18.0` to `hub-v2.19.1`, `web-v0.16.0` and `web-v0.17.0`, `agent-v1.2.0` and `agent-v1.3.0`), so this ships as `hub-v2.20.0`, `web-v0.18.0` and `agent-v1.4.0`. The texts below use them. |
 
 ---
 
@@ -342,11 +341,11 @@ request runs, and every action button is disabled meanwhile.
   start it to kick, ban, unban or change admins here." The Admins line points to the Settings tab.
 - **The Agent isn't connected**: "The Agent isn't connected: the lists come back when it is." Online now still shows
   the card's players (empty while the server is lost).
-- **An older Agent**: "This server's Agent runs agent-v1.1.1, which can't moderate players. Deploy agent-v1.2.0 or
+- **An older Agent**: "This server's Agent runs agent-v1.3.0, which can't moderate players. Deploy agent-v1.4.0 or
   later from the Host page (Releases)." Online now shows without buttons, and no lists.
 - **A file problem** (`lists.problem`): an amber line with the Agent's reason, such as "server-banlist.json can't be
   read: not a JSON list." The other list still shows.
-- **An older hub** (its 404, the dashboard ahead): "This hub has no player moderation yet: deploy hub-v2.18.0 or
+- **An older hub** (its 404, the dashboard ahead): "This hub has no player moderation yet: deploy hub-v2.20.0 or
   later." The rest of the Players tab is as today.
 - Loading: skeletons for the three cards.
 
@@ -365,7 +364,7 @@ Hub core, made by `startHub` with `integrations.agents`. For a server an Agent r
 - `state(id)`: `ModerationState`.
   - `online`: the server's players from its latest heartbeat (`ServerHub.get(id).players`).
   - `blocked`: why actions are refused now, or null. In this order: the Agent below `MODERATION_FLOOR`
-    (`agent-v1.2.0`; the dev loop's `agent-v0.0.0` counts as newer, as for `beforeAgentFloor`), with the deploy text
+    (`agent-v1.4.0`; the dev loop's `agent-v0.0.0` counts as newer, as for `beforeAgentFloor`), with the deploy text
     above; the Agent not connected; the server not online (no game connection, so no RCON).
   - `lists`: the Agent's `playerLists` answer, or null when the Agent is older or not connected, or didn't answer.
     Calls for the same server share one request in flight, and an answer is reused for 2 s. So at most one
@@ -523,10 +522,10 @@ the hub bounds these two itself, and the skew below).
 **Version skew**, stated in `docs/protocol.md`:
 
 - A hub older than this never sends them.
-- An Agent older than `agent-v1.2.0` is never sent them: `MODERATION_FLOOR` blocks first, and the dashboard shows the
+- An Agent older than `agent-v1.4.0` is never sent them: `MODERATION_FLOOR` blocks first, and the dashboard shows the
   deploy text. If one were sent anyway, its `readAgentLine` finds no schema for the type and returns
   `{ msg: null, id, why: 'unknown type' }`, so `HubClient` answers `{ ok: false, error: 'unknown type' }`. The hub
-  passes that on as a 502: "<server>'s Agent can't moderate players (unknown type): deploy agent-v1.2.0 or later."
+  passes that on as a 502: "<server>'s Agent can't moderate players (unknown type): deploy agent-v1.4.0 or later."
 
 ### Trust
 
@@ -588,7 +587,7 @@ The other rules, all kept:
   hub's real `parseReplyData` (nothing refused).
 - `hub/test/moderation.test.ts`, the whole hub with `test/fake-agent.ts`:
   - `GET` without a session is 401, a Minecraft server 404; `online` from the heartbeat;
-  - an Agent at `agent-v1.1.1` is blocked with the deploy text, and nothing is sent to it;
+  - an Agent at `agent-v1.3.0` is blocked with the deploy text, and nothing is sent to it;
   - not connected, and stopped (the lists, with `blocked`);
   - two `GET`s at once send one `playerLists`; a third within 2 s sends none;
   - `POST`: every 400 case (naming the field, never the value); 409 blocked, 409 while one runs, 429 on the 21st in
@@ -608,6 +607,29 @@ The other rules, all kept:
 - `web/src/app/servers/players.spec.ts` (new, small): the section shows for a factorio server only.
 
 ---
+
+## Built
+
+Built inline on 2026-11-02, after merging `main` (Settings and save uploads). Where the build differs from the
+design above:
+
+- **Kick and Ban** confirm in an inline panel under the Moderation heading (the reason with its counter, the hub's rule
+  checked inline, Ban's button destructive), not in a dialog chunk of their own. Promote goes through
+  `Feedback.confirm` as designed. An `unconfirmed` outcome is a sticky `Feedback.notice` (new).
+- **The name rule** is `GAME_SETTINGS.admin` on both sides, the same regex; no separate `PLAYER_NAME`.
+- **A symlinked or non-regular banlist** reads as no bans (`readIn` gives null for both), not as a `problem`. A file
+  that isn't a list, or is over 1 MiB, is a `problem`.
+- **`later`** is any installed mod whose newest release for the line `choose` doesn't take (in practice one needing a
+  newer Factorio).
+- **A ban, unban, promote or demote** reads the files again until they show it, 3 s at most, before `unconfirmed`, as
+  Settings' admins wait for the adminlist. An unreadable `/orrery-status` never confirms a kick.
+- **Rate**: 20 actions in any rolling minute per server, not a token bucket.
+- **Modules**: `hub/src/mod-updates.ts`, `hub/src/moderation.ts`, `hub/src/web-game-extras.ts` (both route blocks),
+  `hub/src/api-game-extras.ts` (re-exported by `api.ts`), `hub/src/factorio-releases.ts` (the catalog's pure release
+  helpers, moved so `ModUpdates` reuses `choose`), `agent/src/moderation.ts`, `web/src/app/servers/mod-updates.ts`,
+  `web/src/app/servers/moderation.ts`.
+- **The release-2 open minor** is fixed in the same release: a game update of a server stopped before it that fails
+  after `updateResume`, before the swap, leaves it stopped (`failed in staging`); before, the Agent started it.
 
 ## Living next to fa/world-settings
 
@@ -642,10 +664,10 @@ Shipped together with Settings (fa/world-settings stage A). Both branches merge 
 
 1. Build on `fa/game-extras`. Verify as `CLAUDE.md` says (hub, agent and web), and run `deploy/test-setup-agent-host.sh`
    (no change expected: nothing in `deploy/` changes).
-2. Release **`hub-v2.18.0`** and deploy it. Portal mod updates work at once: they need nothing from the Agent. The
+2. Release **`hub-v2.20.0`** and deploy it. Portal mod updates work at once: they need nothing from the Agent. The
    first check runs 10 minutes later, and the first Discord notice can come then.
-3. Release **`web-v0.16.0`** and deploy it. Against `agent-v1.1.1`, the Moderation section shows the deploy text.
-4. Release **`agent-v1.2.0`** and deploy it from the Host page (Releases). The friend does nothing: no unit, polkit
+3. Release **`web-v0.18.0`** and deploy it. Against `agent-v1.3.0`, the Moderation section shows the deploy text.
+4. Release **`agent-v1.4.0`** and deploy it from the Host page (Releases). The friend does nothing: no unit, polkit
    rule or setup step changes.
 5. Smoke on production:
    - Game tab: put an older release of a small mod on through Update game, then see "1 update", **Update 1 mod…**,

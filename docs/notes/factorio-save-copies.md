@@ -1,6 +1,6 @@
 # Factorio: save copies on the hub
 
-Status: design, not built. Date: 2026-11-01. Based on `main` at `2f368ab` (production: `hub-v2.17.0`, `web-v0.15.1`,
+Status: design, not built; to redesign before building (2026-11-02): it assumes stage B's `agentFetch`/`agentSend` transfer, but save uploads shipped (`agent-v1.3.0`) as base64 pieces over the Agent connection instead. Date: 2026-11-01. Based on `main` at `2f368ab` (production: `hub-v2.17.0`, `web-v0.15.1`,
 `agent-v1.1.1`). To be built **after stage B** of `docs/notes/factorio-world-settings.md` (on `fa/world-settings`),
 because it reuses that stage's file transfer, save header check and save uploads. That stage is designed but not
 built yet: [What this needs from stage B](#what-this-needs-from-stage-b) lists what this note depends on.

@@ -49,6 +49,11 @@ export class Feedback {
     toast.success(message);
   }
 
+  /** A toast that stays until dismissed, for an outcome that needs a look (sent, but not confirmed). */
+  notice(message: string): void {
+    toast.warning(message, { duration: Infinity, closeButton: true });
+  }
+
   /** A toast that stays until dismissed, with the hub's message. */
   failed(what: string, err: HttpErrorResponse): void {
     const why = typeof err.error === 'string' && err.error ? err.error : `HTTP ${err.status}`;

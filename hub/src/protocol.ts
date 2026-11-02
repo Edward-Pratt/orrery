@@ -71,8 +71,11 @@ export const LIMITS = {
   url: 2048,
   /** A factorio server's name in its game settings (`settings`, `settingsSet`); its description is `text`. */
   serverName: 100,
-  /** The admins in a `settings` or `settingsSet`. */
+  /** The admins in a `settings` or `settingsSet`, and in a `playerLists` answer. */
   admins: 100,
+  /** The bans in a `playerLists` answer, and a ban's (or a `moderate`'s) reason in characters. */
+  bans: 500,
+  reason: 200,
   /** The keys a `settings` lists as `pending`, and a `settingsSet` answer as `applied` or `pending`. */
   pending: 16,
   /** The keys a `settings` lists as `extra`. */
@@ -306,12 +309,23 @@ const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
 };
 
 /** The `data` of an ok `reply`, per request that answers with data. */
+/** A `playerLists` answer: every name by the admin rule (a player's name), a reason one line within its limit. */
+const playerLists = object({
+  bans: list(object({ name: matching(GAME_SETTINGS.admin), reason: nullable(str(LIMITS.reason)) }), LIMITS.bans),
+  bansTotal: int(0, Number.MAX_SAFE_INTEGER),
+  hidden: int(0, Number.MAX_SAFE_INTEGER),
+  admins: list(matching(GAME_SETTINGS.admin), LIMITS.admins),
+  verification: nullable(bool),
+  problem: nullable(str(LIMITS.detail)),
+});
 const REPLY_DATA: { [K in keyof AgentReplyData]: Check } = {
   journal: lines,
   log: lines,
   logs: object({ files: list(object({ name: str(), size: num, modified: num }), LIMITS.logFiles) }),
   settingsSet: object({ applied: keys(LIMITS.pending), pending: keys(LIMITS.pending) }),
   saveUploadEnd: object({ name: str() }),
+  playerLists,
+  moderate: object({ outcome: oneOf('done', 'already', 'notOnline', 'unconfirmed'), lists: playerLists }),
 };
 
 /** The requests whose ok `reply` carries `data`: exactly those with a schema above, so the two can never drift. */

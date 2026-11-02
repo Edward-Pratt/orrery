@@ -170,9 +170,16 @@ type Job = {
   wasActive?: boolean;
   phase: Phase;
   outcome: PackFinished | null;
-  /** The hub stopped the server for it (`updateResume`): a failure before the swap starts the old one again. */
+  /** The hub resumed it (`updateResume`): with `wasActive`, it stopped the server, so a failure before the swap starts the old one again. */
   resumed: boolean;
 };
+
+/**
+ * Whether the hub stopped the server for the update: it resumed it, and the server ran at the backup. A server stopped
+ * before the update stays stopped after one that fails before the swap. An `update.json` from before `wasActive` was
+ * kept counts as having run, as an older agent took it.
+ */
+const hubStopped = (job: Job): boolean => job.resumed && job.wasActive !== false;
 
 type StepMsg = Extract<AgentMsg, { type: 'updateStep' }>;
 type Running = {
@@ -467,8 +474,9 @@ export class Updates {
       this.#step(r, job.phase as PackStep, 'failed', 'The agent restarted before the swap: nothing was changed');
       await this.#clean();
       const unit = await this.#o.unit.read().catch(() => null);
-      // In the stop phase before `updateResume`, a stopped unit is the hub's stop only if the server ran at the backup.
-      const restart = job.resumed || (job.phase === 'stop' && job.wasActive === true && unit !== null && stopped(unit));
+      // In the stop phase before `updateResume`, a stopped unit is the hub's stop only if the server ran at the backup;
+      // after it, too: the hub resumes an update of a server stopped before it without stopping anything.
+      const restart = hubStopped(job) || (job.phase === 'stop' && job.wasActive === true && unit !== null && stopped(unit));
       if (restart) await this.#startOld();
       return this.#finish(r, restart ? 'failed before swap' : 'failed in staging');
     }
@@ -588,8 +596,8 @@ export class Updates {
       if (!r.cancelled && !(err instanceof Fail)) console.error(`[update] ${job.id}: ${reason(err)}`);
       await this.#clean();
       if (r.cancelled) await this.#startAfterCancel(job);
-      else if (job.resumed) await this.#startOld();
-      return this.#finish(r, r.cancelled ? 'cancelled' : job.resumed ? 'failed before swap' : 'failed in staging');
+      else if (hubStopped(job)) await this.#startOld();
+      return this.#finish(r, r.cancelled ? 'cancelled' : hubStopped(job) ? 'failed before swap' : 'failed in staging');
     }
     let outcome: PackFinished;
     step = 'swap';

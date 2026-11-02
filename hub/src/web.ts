@@ -44,6 +44,9 @@ import type {
 import type { Checks } from './checks.ts';
 import { DeployRefused, type Deploys } from './deploys.ts';
 import { GameRefused } from './factorio.ts';
+import { gameExtrasRoutes } from './web-game-extras.ts';
+import type { Moderation } from './moderation.ts';
+import type { ModUpdates } from './mod-updates.ts';
 import type { SaveUploads } from './save-uploads.ts';
 import type { GameUpdates } from './game-updates.ts';
 import type { GameSettings } from './game-settings.ts';
@@ -115,7 +118,7 @@ async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<s
   return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
-type Env = { Variables: { user: Me; body: Record<string, unknown> } };
+export type Env = { Variables: { user: Me; body: Record<string, unknown> } };
 
 /** What the API reads from; `db` only for its own sessions. The host, checks and services only when they are on. */
 export type WebDeps = {
@@ -141,6 +144,10 @@ export type WebDeps = {
   gameUpdates?: GameUpdates;
   /** Only with the agents (and systemd) integrations. */
   gameSettings?: GameSettings;
+  /** With game updates. */
+  modUpdates?: ModUpdates;
+  /** With the agents integration. */
+  moderation?: Moderation;
   saveUploads?: SaveUploads;
   /** With packs. */
   uploads?: Uploads;
@@ -151,7 +158,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   // A factorio server is run by an Agent (its `server`).
@@ -595,6 +602,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
       }
     });
   }
+  gameExtrasRoutes(app, { modUpdates, moderation, actor, body: (c) => jsonBody(c.req) });
   // Game settings are written while the server is stopped too, so they come before the online check below.
   if (gameSettings) {
     /** Runs a game settings call for a server an Agent runs, mapping its refusals to their status. */

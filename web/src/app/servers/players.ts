@@ -6,6 +6,7 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
 import { formatDuration } from '../units';
+import { ModerationSection } from './moderation';
 import { lookupError, PlayerCard } from './player';
 import ServerPage from './server';
 
@@ -21,8 +22,11 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
  */
 @Component({
   selector: 'app-server-players',
-  imports: [HlmButton, HlmSkeleton, HlmToggleGroupImports, PlayerCard],
+  imports: [HlmButton, HlmSkeleton, HlmToggleGroupImports, ModerationSection, PlayerCard],
   template: `
+    @if (server.card()?.game === 'factorio') {
+      <app-moderation />
+    }
     <form class="flex max-w-md gap-2" (submit)="$event.preventDefault(); look(name.value)" data-lookup>
       <input #name class="flex-1 rounded-md border px-3 py-1.5 text-sm" placeholder="Player name" aria-label="Player" [value]="asked() ?? ''" />
       <button hlmBtn type="submit">Look up</button>

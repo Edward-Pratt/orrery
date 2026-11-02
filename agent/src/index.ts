@@ -10,6 +10,7 @@ import { GameEvents, toGame } from './events.ts';
 import { HostSampler } from './host.ts';
 import { HubClient } from './hub.ts';
 import { AGENT_LOG, AgentLog, Logs, logTo } from './logs.ts';
+import { Moderation } from './moderation.ts';
 import { RconSession } from './rcon.ts';
 import { Saves } from './saves.ts';
 import { GameSettings } from './settings.ts';
@@ -87,6 +88,8 @@ function run(): void {
       saveChunk: ({ upload, offset, data }) => saves.uploadChunk(upload, offset, Buffer.from(data, 'base64')),
       saveUploadEnd: async ({ upload }) => ({ name: await saves.uploadEnd(upload, hub.latestInstalled?.factorio) }),
       saveUploadCancel: ({ upload }) => saves.uploadCancel(upload),
+      playerLists: () => moderation.lists(),
+      moderate: (req) => moderation.act(req),
     },
   });
   const updates: Updates = new Updates({
@@ -133,6 +136,14 @@ function run(): void {
     password: config.rconPassword,
     settings: join(config.server.data, 'config', 'server-settings.json'),
     autoPause: () => settings.autoPause,
+  });
+  const moderation = new Moderation({
+    data,
+    run,
+    players: () => status.players,
+    unit: () => service.state,
+    verification: () => settings.verification,
+    adminsChanged: () => void settings.refresh(),
   });
   const events = new GameEvents({
     port: config.server.agentUdpPort,

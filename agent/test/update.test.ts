@@ -898,6 +898,26 @@ test("a restart of the agent in the stop step leaves a server stopped before the
   assert.deepEqual(w.unit.calls, ['stop', 'start']);
 });
 
+test('an update of a server stopped before it that fails after updateResume, before the swap, leaves it stopped', async (t) => {
+  const w = await world(t);
+  t.mock.method(console, 'error', () => {});
+  await w.unit.act('stop');
+  w.unit.calls.length = 0;
+  t.mock.method(w.saves, 'keep', async () => {
+    throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+  });
+  w.offer('2.1.25');
+  w.mod('orrery', '0.2.0');
+  await w.u.update(w.request('2.1.25', [['orrery', '0.2.0']]));
+  await w.step('stop', 'waiting');
+  await w.u.resume(); // the hub stopped nothing: the server was stopped already
+  assert.equal((await w.done()).outcome, 'failed in staging');
+  assert.deepEqual(w.unit.calls, [], 'the owner stopped it: it stays stopped');
+  assert.equal(w.unit.state.active, 'inactive');
+  await until(async () => !(await exists(join(w.state, 'update.json'))), 2000, 'update.json removed once reported');
+
+});
+
 test('a hub that restarts during its own stop: the cancel it sends then starts the server the update stopped', async (t) => {
   const w = await world(t);
   w.offer('2.1.25');

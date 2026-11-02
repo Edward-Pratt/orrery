@@ -1,5 +1,8 @@
 import type { CatalogMod, FactorioRelease, GameModPick, ModBrowse, ModCheck, PortalCategory, PortalListing, PortalSort, UnresolvedDependency } from './api.ts';
 import { LIMITS } from './protocol.ts';
+import { choose, compareVersions, GAME_MODS, LINE, lineOf, plain, release, validName, VERSION, type Dependency, type ModRelease, type PortalMod } from './factorio-releases.ts';
+
+export { compareVersions, GAME_MODS, lineOf, MOD_NAME, validName, VERSION } from './factorio-releases.ts';
 
 /**
  * factorio.com's and the mod portal's requests (`fetch`), all with `redirect: 'manual'`: a public read follows
@@ -11,10 +14,10 @@ export type PortalFetch = (url: string, init: { redirect: 'follow' | 'manual'; s
 /** The owner's factorio.com account (`FACTORIO_USERNAME`, `FACTORIO_TOKEN`): only for mod download links. */
 export type FactorioAccount = { username: string; token: string };
 
-/** Why a game update action wasn't done: 400 (bad input), 404 (no such thing), 409 (not now) or 502 (factorio.com or the portal failed). */
+/** Why a game action wasn't done: 400 (bad input), 404 (no such thing), 409 (not now), 429 (too many) or 502 (factorio.com, the portal or an Agent failed). */
 export class GameRefused extends Error {
-  readonly status: 400 | 404 | 409 | 502;
-  constructor(status: 400 | 404 | 409 | 502, message: string) {
+  readonly status: 400 | 404 | 409 | 429 | 502;
+  constructor(status: 400 | 404 | 409 | 429 | 502, message: string) {
     super(message);
     this.status = status;
   }
@@ -22,19 +25,6 @@ export class GameRefused extends Error {
 /** An answer over its cap (502): a thumbnail's short page over it only means "no thumbnail". */
 class OverCap extends GameRefused {}
 
-/**
- * A mod's name as the Agent accepts it, with no `..` and not `.` alone (a URL reads that as "this folder", so
- * `/api/mods/./full` would be `/api/mods/full`): also every name taken from the portal.
- */
-export const MOD_NAME = /^[A-Za-z0-9_. -]+$/;
-export const validName = (name: string) => name.length <= LIMITS.text && MOD_NAME.test(name) && !name.includes('..') && name !== '.';
-/** A Factorio or mod version as the Agent accepts it. */
-export const VERSION = /^\d+\.\d+\.\d+$/;
-/**
- * The mods that come with Factorio itself: not on the mod portal, at the game's own version, enabled or not by the
- * server's `mod-list.json` (the dashboard's list is the same).
- */
-export const GAME_MODS = new Set(['base', 'elevated-rails', 'quality', 'recycler', 'space-age']);
 
 /** The Agent's Host: Factorio's ARM64 headless build (setup refuses any other machine). */
 const PLATFORM = 'linux-arm64';
@@ -84,84 +74,15 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const CATEGORY = /^[a-z0-9-]{1,32}$/;
 /** Resolving runs again with the limits of its own picks until they settle; this many times at most. */
 const ROUNDS = 10;
-const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const LINE = /^\d+\.\d+$/;
-
-type Op = '<' | '<=' | '=' | '>=' | '>';
-/** A release's dependency: `required` (no prefix, or `~`), `optional` (`?`, `(?)`), `incompatible` (`!`). */
-type Dependency = { kind: 'required' | 'optional' | 'incompatible'; name: string; op?: Op; version?: string; text: string };
-/** A release from the portal that passed every check: `bad` is a required dependency it names in a way no mod can have. */
-type ModRelease = { version: string; line: string; sha1: string; downloadUrl: string; dependencies: Dependency[]; bad: string | null };
-/** A mod on the portal: its releases that passed the checks, newest first. */
-type PortalMod = { name: string; title: string; releases: ModRelease[] };
 
 /** A mod as resolved for an update: what the catalog shows, and what the update needs to fetch it. */
 export type ResolvedMod = CatalogMod & { sha1: string; downloadUrl: string };
 export type Resolution = { mods: ResolvedMod[]; unresolved: UnresolvedDependency[] };
 
-/** A version as numbers, a missing part as 0 ("2.1" is 2.1.0). */
-const parts = (v: string) => [...v.split('.').map(Number), 0, 0].slice(0, 3);
-/** Below 0: `a` is older. */
-export function compareVersions(a: string, b: string): number {
-  const x = parts(a);
-  const y = parts(b);
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
-  return 0;
-}
-function meets(version: string, op: Op, limit: string): boolean {
-  const c = compareVersions(version, limit);
-  return op === '<' ? c < 0 : op === '<=' ? c <= 0 : op === '=' ? c === 0 : op === '>=' ? c >= 0 : c > 0;
-}
-/** A Factorio version's line ("2.1.24" → "2.1"), which a release's `factorio_version` names. */
-export const lineOf = (factorio: string) => factorio.split('.').slice(0, 2).join('.');
-
-const DEPENDENCY = /^(?:(!|\?|\(\?\)|~)\s*)?(.*?)(?:\s*(<=|>=|<|>|=)\s*(\d{1,5}\.\d{1,5}(?:\.\d{1,5})?))?$/;
-/** A dependency as the portal writes it ("? flib >= 0.16"); `bad` when its name isn't one a mod can have. */
-function dependency(text: string): Dependency | { kind: Dependency['kind']; bad: true } {
-  const m = DEPENDENCY.exec(text.trim())!; // every string matches: the name takes what's left
-  const kind = m[1] === '!' ? 'incompatible' : m[1] === '?' || m[1] === '(?)' ? 'optional' : 'required';
-  const name = m[2]!.trim();
-  if (!validName(name)) return { kind, bad: true };
-  return { kind, name, text: text.trim(), ...(m[3] && { op: m[3] as Op, version: m[4]! }) };
-}
-
-/** A release from the portal, checked; null when any part of it fails (a bad version, sha1 or link). */
-function release(r: unknown): ModRelease | null {
-  if (!r || typeof r !== 'object') return null;
-  const { version, sha1, download_url: url, info_json: info } = r as Record<string, unknown>;
-  if (typeof version !== 'string' || !VERSION.test(version)) return null;
-  if (typeof sha1 !== 'string' || !SHA1.test(sha1)) return null;
-  if (typeof url !== 'string' || !/^\/download\/[^?#\\]+$/.test(url) || url.includes('..')) return null;
-  const { factorio_version: line, dependencies: deps = [] } = (info && typeof info === 'object' ? info : {}) as Record<string, unknown>;
-  if (typeof line !== 'string' || !LINE.test(line)) return null;
-  if (!Array.isArray(deps) || deps.length > LIMITS.mods || !deps.every((d) => typeof d === 'string' && d.length <= LIMITS.text)) return null;
-  const dependencies: Dependency[] = [];
-  let bad: string | null = null;
-  for (const text of deps as string[]) {
-    const d = dependency(text);
-    if ('bad' in d) {
-      if (d.kind === 'required') bad ??= text; // an optional or incompatible one can't name any mod there is
-    } else dependencies.push(d);
-  }
-  return { version, line, sha1, downloadUrl: url, dependencies, bad };
-}
 
 const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`;
 
-/** Control characters, and the bidi overrides, which could turn a portal string around on screen. */
-const CONTROL = /[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu;
-/**
- * A portal string as plain text on one line: a line break or other space becomes one space, control characters go,
- * and it is cut to `max` characters (counting `…`, which ends a cut one when `ellipsis`); '' when it isn't a string.
- */
-function plain(value: unknown, max: number, ellipsis = false): string {
-  if (typeof value !== 'string') return '';
-  const text = value.replace(/\s+/gu, ' ').replace(CONTROL, '').replace(/ {2,}/g, ' ').trim();
-  const chars = [...text];
-  if (chars.length <= max) return text;
-  return ellipsis ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : chars.slice(0, max).join('').trimEnd();
-}
 
 /**
  * A row of the portal's list for a line, checked and made slim; null when it has nothing to add for that line (a
@@ -317,7 +238,7 @@ export class FactorioCatalog {
             continue;
           }
           const fits = mod.releases.filter((r) => r.line === line);
-          const pick = this.#choose(mod.name, fits, item.version, limits.get(mod.name) ?? [], factorio, gameMods);
+          const pick = choose(mod.name, fits, item.version, limits.get(mod.name) ?? [], factorio, gameMods);
           if ('reason' in pick) {
             unresolved.push({ mod: pick.mod ?? by, dependency: pick.dependency ?? item.dep, reason: pick.reason });
             continue;
@@ -583,34 +504,6 @@ export class FactorioCatalog {
     } catch {
       throw new GameRefused(502, `${what} isn't JSON.`);
     }
-  }
-
-  /** The newest release that fits every limit; else why not, as an unresolved dependency's parts. */
-  #choose(
-    name: string,
-    fits: ModRelease[],
-    version: string | null,
-    limits: { by: string; dep: Dependency }[],
-    factorio: string,
-    gameMods: Set<string>,
-  ): ModRelease | { reason: string; mod?: string; dependency?: string } {
-    const line = lineOf(factorio);
-    if (!fits.length) return { reason: `${name} has no release for Factorio ${line}.` };
-    const candidates = version === null ? fits : fits.filter((r) => r.version === version);
-    if (!candidates.length) return { reason: `${name} ${version} isn't a release for Factorio ${line}.` };
-    let why: { reason: string; mod?: string; dependency?: string } | undefined;
-    for (const r of candidates) {
-      const which = version === null ? `the newest for Factorio ${line} is ${r.version}` : `${r.version} is picked`;
-      const game = r.dependencies.find(
-        (d) => GAME_MODS.has(d.name) && d.op && (d.kind === 'required' || (d.kind === 'optional' && gameMods.has(d.name))) && !meets(factorio, d.op, d.version!),
-      );
-      const limit = limits.find((l) => !meets(r.version, l.dep.op!, l.dep.version!));
-      if (game) why ??= { mod: name, dependency: game.text, reason: `Factorio ${factorio} is picked (${name}: ${which}).` };
-      else if (r.bad !== null) why ??= { mod: name, dependency: r.bad, reason: `Not a name a mod can have (${name}: ${which}).` };
-      else if (limit) why ??= { mod: limit.by, dependency: limit.dep.text, reason: `No release of ${name} for Factorio ${line} meets it (${which}).` };
-      else return r;
-    }
-    return why!;
   }
 
   /**

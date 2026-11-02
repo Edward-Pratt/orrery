@@ -47,6 +47,8 @@ Lengths count characters (UTF-16 code units).
 | `pending[]` (`settings`, a `settingsSet` reply's `pending` and `applied`) | 16 entries, each 1 to 64 characters |
 | `extra[]` (`settings`) | 32 entries, each 1 to 64 characters |
 | `game_password` (`settingsSet`) | 64 characters |
+| `bans[]` (a `playerLists` answer, and a `moderate` answer's `lists`) | 500 entries, each name 1 to 60 characters |
+| a ban's `reason`, and a `moderate`'s `reason` | 200 characters |
 | a `saveChunk`'s `data` (base64 of at most 512 KiB) | 700,000 characters |
 | an uploaded save's `size` (`saveUploadStart`) | 1 GiB |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
@@ -209,6 +211,8 @@ worst case of about 50 s (its `systemctl` checks, 20 s of live commands and the 
 | `saveChunk` | `id`, `upload`, `offset`, `data` (base64) | writes the piece at `offset`, which must be the bytes received so far, never past `size`. The hub sends one at a time, each after the last's reply | — |
 | `saveUploadEnd` | `id`, `upload` | checks every byte arrived, the sha256, and that the file is a Factorio save (a zip with one top folder, safe names, `level.dat0`) no newer than the installed Factorio, then stores it as `uploaded-<time>-<name>.zip`, timed 2 s before the newest save so no start loads it unasked (loading it is a `restore`); the partial file is removed whatever happens. Answered within 5 min | `{ name }` |
 | `saveUploadCancel` | `id`, `upload` | drops the upload and its partial file (none is fine) | — |
+| `playerLists` | `id` | reads the server's bans and admins from Factorio's own files (see "Moderation") | `PlayerLists` |
+| `moderate` | `id`, `action` (`kick`, `ban`, `unban`, `promote` or `demote`), `player`, optional `reason` (a kick's or a ban's) | runs that Factorio command for the player, then reads how it ended (see "Moderation") | `{ outcome, lists }` |
 
 The hub sends `update`, `updateResume` and `updateCancel` for game updates, and `deploy` for the Agent's own
 deploys (both below), only to an Agent whose `agentHello` names `agent-v1.1.0` or later (the hub's `AGENT_FLOOR`; the
@@ -361,6 +365,31 @@ The hub sends `settingsSet` only to an Agent whose `agentHello` names `agent-v1.
 - An Agent older than them never sends `settings`. One sent `settingsSet` all the same answers it `ok: false` with
   `unknown type`, which the hub passes on as the Agent's refusal.
 
+### Moderation
+
+A factorio server's players, from the Players tab. A player's name follows the admins' rule, `^[A-Za-z0-9_.-]{1,60}$`
+(Factorio's own: letters, digits and `._-`). `PlayerLists` is `{ bans: { name, reason }[], bansTotal, hidden, admins,
+verification, problem }`: the banlist (`server-banlist.json` in the write-data folder: a name, or `{ username, reason }`,
+every other key ignored, an address included) sorted by name, at most 500 (`bansTotal` counts all whose names pass the
+rule, `hidden` those that don't), a reason one printable line of at most 200 characters or null; the adminlist's
+names that pass the rule, at most 100; `require_user_verification` as the running server started with it (else the
+file's; null when unknown); `problem`, in fixed words, why a file can't be read (a missing one is an empty list).
+
+`moderate`'s command is built by the Agent from a fixed table, the checked name and the reason cleaned again (each
+control character, line or paragraph separator, bidi control and BOM a space, runs of spaces one, cut to 200):
+`/kick <name> [reason]`, `/ban <name> [reason]`, `/unban <name>`, `/promote <name>`, `/demote <name>`; a reason sent
+with another action is not used. A kick goes only to a player online at the latest `/orrery-status` (else a fresh
+one's), under that status's spelling; anyone else is `notOnline`, with nothing sent. The `outcome` comes from the files
+read before and after (and, for a kick, two fresh statuses), never from Factorio's reply: `done`, `already` (banned
+already, not banned, an admin already, not an admin), `notOnline` or `unconfirmed` (sent, but the file or the status
+doesn't show it within 3 s). The Agent runs one `moderate` at a time and refuses one while its unit isn't active or
+RCON doesn't answer.
+
+The hub sends both only to an Agent whose `agentHello` names `agent-v1.4.0` or later (`MODERATION_FLOOR`; the repo's
+`agent-v0.0.0` counts as later), and came without a protocol bump: a hub older than them never sends them; an older
+Agent sent one all the same answers `ok: false` with `unknown type`, which the hub passes on as a 502 naming
+`agent-v1.4.0`.
+
 ### Liveness
 
 - With no line for 20 s on the Agent connection, or a close without `bye`, the hub marks the Agent lost: it drops
@@ -410,6 +439,9 @@ at the hub, without the Agent knowing.
 | `backup` | 1 per 10 s, bursts of 3 |
 | `events` | only a change takes from it (a repeat is free): 1 per 10 s, bursts of 3 |
 | any other | the line budget only (`updateDone` and `deployResult` are taken once each, the one its update or deploy waits for; the rest are ignored) |
+
+What the hub sends, it bounds itself: one `playerLists` in flight per server, its answer reused for 2 s; one
+`moderate` in flight per server, and 20 a minute.
 
 What an Agent's pushes can post is bounded too: its Host's disk notices cover only the first 32 mounts its samples
 name, each mount's change told at most once per 10 min (a change meanwhile is told after the wait, if it still holds),

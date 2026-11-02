@@ -150,7 +150,7 @@ the Logs tab against `gtnh`'s folder.
 | 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
 | 5 | Packs v2: the pack library (chunked uploads, GitHub Actions artifacts), Java runtimes, New server with `add-server.sh`, the Mod renamed `orrery`: #134 · Map: #123 · Layout: `docs/adr/0003-host-directory-layout.md` | hub + web + mod + deploy (no protocol bump) | L | #90; staging set up for its smoke test |
 
-## Factorio through an Agent — release 1 shipped (2026-11-01), release 2 built (not yet cut)
+## Factorio through an Agent — releases 1 and 2 shipped (2026-11-01)
 
 Notes: `docs/notes/factorio-agent.md` (the design, the build plan M0 to M8 and the smoke checks; local until the owner
 commits a cleaned copy, because the repo is public and the notes name the friend's VM details) · Decision:
@@ -176,10 +176,9 @@ and the Agent updates by re-running the setup at the new `agent-v` tag; its dash
 under Releases. A local end-to-end loop (hub, Agent and a headless server) passed its 14 scenarios; real players,
 Discord, Podman, real systemd timeouts and the tailnet are checked only by the smoke tests in the notes, after the cut.
 
-**Release 2 — built on the branch `factorio-agent-2`, not yet cut:** to cut as the next hub and dashboard minors, then
-`agent-v1.1.0` (`FLOOR`'s Agent release: `agent-v1.0.0` can't deploy itself), in that order. Production deploys the
-hub first, then the dashboard; the friend then runs the setup from `agent-v1.1.0` (once, also over an Agent on
-`agent-v1.0.0`), and later Agent releases deploy from the dashboard.
+**Release 2 — shipped 2026-11-01** as `hub-v2.15.0`, `web-v0.13.0` and `agent-v1.1.1` (`agent-v1.1.0` is a burned tag
+with no GitHub release). The friend ran the setup once from the Agent tag; later Agent releases deploy from the
+dashboard (the first was `agent-v1.2.0`).
 
 | Milestone | Where | Size |
 |---|---|---|
@@ -191,30 +190,46 @@ adding a mod and its dependency, a gate failure rolled back to the pre-update sa
 restart during an update, and an Agent deploy through the real `deploy-agent.sh`. The real portal, ARM64 build,
 Podman and polkit are not in it: they are left to the smoke checks in the notes, after the cut.
 
-## Game tab: the mod browser — building on `fa/mod-browser`, not yet cut
+## Game tab: the mod browser — shipped (`hub-v2.16.0`, `web-v0.14.0`; Import mod list in `hub-v2.17.0`, `web-v0.15.1`)
 
 Notes: `docs/notes/mod-browser.md`. A Browse view in the Update game sheet: the mod portal's mods for the picked
 Factorio line, searched, filtered by category, sorted, with thumbnails, summaries and download counts, and Add, which
 puts a mod in the update with its required dependencies (a portal mod pack's mods too). The hub reads the portal and
 serves the thumbnails; the dashboard never talks to it. With it, a release on both channels reads as stable, and "What
-changes" says when the server runs the picks already. To cut as `hub-v2.16.0` (deployed first), then `web-v0.14.0`;
-no Agent, mod or protocol change.
+changes" says when the server runs the picks already. No Agent, mod or protocol change. Import mod list (a client's
+`mod-list.json` or pasted names, checked with `POST …/game/check`) followed in the next hub and dashboard minors.
 
-## Factorio game settings, new worlds and save uploads — stage A built on `fa/world-settings`, not yet cut
+## Factorio game settings, new worlds and save uploads — Settings and save uploads shipped, new worlds designed
 
 Notes: `docs/notes/factorio-world-settings.md`. On the factorio server an Agent runs, in two stages, each released
 on its own:
 
 | Stage | What | Where | State |
 |---|---|---|---|
-| A | Game settings from a Settings tab: name, description, max players, game password, user verification (off for family-shared players, with its warning and an alert in Discord's alerts channel), autosaves, the idle kick, pausing, Lua commands and the admins; written to `server-settings.json` and applied live where Factorio can, with a start gate that puts back the last good settings when the next start fails | hub + agent + web (additive messages `settings` and `settingsSet`, no protocol bump) | built, not yet cut |
-| B | A new world from map settings (keeping the current world as a save) and a save uploaded from the dashboard, each loaded at the next start | hub + agent + web | designed only |
+| A | Game settings from a Settings tab: name, description, max players, game password, user verification (off for family-shared players, with its warning and an alert in Discord's alerts channel), autosaves, the idle kick, pausing, Lua commands and the admins; written to `server-settings.json` and applied live where Factorio can, with a start gate that puts back the last good settings when the next start fails | hub + agent + web (additive messages `settings` and `settingsSet`, no protocol bump) | shipped: `hub-v2.18.0`, `web-v0.16.0`, `agent-v1.2.0` |
+| B | A save uploaded from the dashboard (Saves tab, Upload save…), loaded by a Restore | hub + agent + web (`saveUploadStart`, `saveChunk`, `saveUploadEnd`, `saveUploadCancel` over the Agent connection, not the design's separate fetch connection) | shipped: `hub-v2.19.0` (`hub-v2.19.1`), `web-v0.17.0`, `agent-v1.3.0` |
+| B | A new world from map settings (keeping the current world as a save), and the restore extended (stop and start, mod checks, a pre-restore save, rollback) | hub + agent + web + factorio (`orrery` 1.1.0) + a setup re-run | designed only |
 
-Stage A is cut as the next hub minor (`hub-v2.16.0` if it ships with the mod browser above, which it now includes),
-then the dashboard's (`web-v0.14.0` likewise), then `agent-v1.2.0` (`SETTINGS_FLOOR`: an older Agent gets the deploy
-text), deployed from the Host page in that order. The dashboard's texts for an older hub name `hub-v2.16.0`: change
-them if the mod browser is cut on its own first. Not covered by the tests, so left to the smoke check after the cut:
-`/config` with players online, and the start gate on the real Podman unit.
+Not covered by the tests, so left to smoke checks on production: `/config` with players online, and the start gate
+on the real Podman unit.
+
+## Factorio: portal mod update notices and player moderation — built on `fa/game-extras`, not yet cut
+
+Notes: `docs/notes/factorio-game-extras.md`. On a factorio server an Agent runs:
+
+| Part | What | Where |
+|---|---|---|
+| 1 | Portal mod updates: the Game tab marks each installed portal mod with a newer release that fits the installed Factorio, counts them, and **Update N mods…** plans them all in the Update game sheet; Discord hears about new ones at most once a day in the server's channel | hub + web (no Agent change) |
+| 2 | Moderation in the Players tab: who is online, Kick, Ban (with a reason), Unban, Promote and Demote, the bans and the admins, through Factorio's own commands that the Agent builds | hub + agent + web (additive messages `playerLists` and `moderate`, no protocol bump; `/kick`, `/ban` and `/unban` allowed by the owner on 2026-11-02) |
+
+Also a fix: a game update of a server stopped before it that fails after the hub resumes it, before the swap, leaves the
+server stopped. To cut as `hub-v2.20.0`, then `web-v0.18.0`, then `agent-v1.4.0` (`MODERATION_FLOOR`: an older Agent
+gets the deploy text), deployed from the Host page in that order; the friend does nothing. Left to the smoke check on
+production: a kick and a ban of a player who is online (what they see, and that the save isn't flagged), and the first
+Discord notice.
+
+Then, in order: New world (stage B above), then off-site save copies (`docs/notes/factorio-save-copies.md`, to
+redesign against the transfer save uploads use).
 
 ## Later / if needed
 

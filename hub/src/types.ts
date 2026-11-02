@@ -100,7 +100,14 @@ export type AgentRequest =
   | { type: 'saveUploadStart'; id: string; upload: string; name: string; size: number; sha256: string }
   | { type: 'saveChunk'; id: string; upload: string; offset: number; data: string }
   | { type: 'saveUploadEnd'; id: string; upload: string }
-  | { type: 'saveUploadCancel'; id: string; upload: string };
+  | { type: 'saveUploadCancel'; id: string; upload: string }
+  /**
+   * Moderation of the server's players: `playerLists` reads its bans and admins from Factorio's files; `moderate`
+   * runs one of Factorio's own commands, which the Agent builds from the checked `player` and `reason` (kick and ban
+   * only), and answers how it ended with the lists read again.
+   */
+  | { type: 'playerLists'; id: string }
+  | { type: 'moderate'; id: string; action: ModerateAction; player: string; reason?: string };
 /** Everything the hub sends on an Agent connection: the handshake's answer, then requests. */
 export type HubAgentMsg = Extract<HubMsg, { type: 'welcome' | 'reject' }> | AgentRequest;
 /** What an `ok` reply's `data` holds, for the requests that answer with data (the others send none). */
@@ -112,7 +119,25 @@ export type AgentReplyData = {
   settingsSet: { applied: string[]; pending: string[] };
   /** The stored save's name in `saves/`. */
   saveUploadEnd: { name: string };
+  playerLists: PlayerLists;
+  moderate: { outcome: ModerateOutcome; lists: PlayerLists };
 };
+
+/** What the dashboard may do to a factorio server's player, through its Agent and Factorio's own commands. */
+export type ModerateAction = 'kick' | 'ban' | 'unban' | 'promote' | 'demote';
+/** A ban as the server's banlist has it: the name (lowercased by Factorio) and the reason given, if any. */
+export type Ban = { name: string; reason: string | null };
+/**
+ * A factorio server's bans and admins as its Agent read them from Factorio's files: at most 500 bans by name
+ * (`bansTotal` counts all whose names pass the rule; `hidden`, those that don't), the admins, and whether
+ * server-settings.json checks players' accounts (null: unreadable). `problem`: why a file can't be read.
+ */
+export type PlayerLists = { bans: Ban[]; bansTotal: number; hidden: number; admins: string[]; verification: boolean | null; problem: string | null };
+/**
+ * How a moderation action ended: `done`; `already` (banned already, not banned, an admin already, not an admin);
+ * `notOnline` (a kick of someone not on: nothing sent); `unconfirmed` (sent, but the file or the status doesn't show it).
+ */
+export type ModerateOutcome = 'done' | 'already' | 'notOnline' | 'unconfirmed';
 
 /** Who may run Lua commands on a factorio server: as server-settings.json's `allow_commands`. */
 export type AllowCommands = 'true' | 'false' | 'admins-only';
@@ -251,6 +276,8 @@ export type Notice = { severity: Severity } & (
    * `sent` of `size`, `storing` while the Agent checks it, then `done` with the stored `name`, or `failed` with `error`.
    */
   | { kind: 'saveUpload'; state: 'sending' | 'storing' | 'done' | 'failed'; file: string; sent: number; size: number; name?: string; error?: string }
+  /** Newer portal mod releases fit a factorio server's Factorio: the first 10 by name, and how many in all. */
+  | { kind: 'modUpdates'; factorio: string; mods: { name: string; from: string; to: string }[]; count: number }
 );
 /** A pack update's steps, in order; `rollback` only when the health gate saw no hello. */
 export type PackStep = 'prepare' | 'backup' | 'stop' | 'swap' | 'gate' | 'rollback';

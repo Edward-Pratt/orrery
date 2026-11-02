@@ -8,6 +8,8 @@ import { dirname } from 'node:path';
 /** How far back from a file's end a tail reads at most, so one giant line can't fill the memory. */
 const TAIL_BYTES = 4 * 1024 * 1024;
 const CHUNK = 64 * 1024;
+/** The most a small config file read whole (`readIn`) may hold: far over any real one (a few KiB). */
+const FILE_MAX = 1024 * 1024;
 
 export type Plain = { fh: FileHandle; st: Stats };
 
@@ -82,5 +84,29 @@ export async function tail(path: string, count: number): Promise<string[] | null
     return lines.slice(-count).map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
   } finally {
     await fh.close();
+  }
+}
+
+/** `fn` on `dir` opened once (`O_DIRECTORY`, `O_NOFOLLOW`): a folder the container swapped for a link is refused. */
+export async function within<T>(dir: string, fn: (base: string) => Promise<T>): Promise<T> {
+  const fh = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    return await fn(`/proc/self/fd/${fh.fd}`);
+  } finally {
+    await fh.close();
+  }
+}
+
+/** A plain file's text in an opened folder (`files.ts`'s `openPlain`): null when missing or not a regular file; throws over 1 MiB. */
+export async function readIn(base: string, name: string): Promise<string | null> {
+  const file = await openPlain(`${base}/${name}`);
+  if (!file) return null;
+  try {
+    if (file.st.size > FILE_MAX) throw new Error(`${name} is over 1 MiB`);
+    const buf = Buffer.alloc(file.st.size);
+    const { bytesRead } = await file.fh.read(buf, 0, buf.length, 0);
+    return buf.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    await file.fh.close();
   }
 }

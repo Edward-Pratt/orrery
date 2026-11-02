@@ -25,9 +25,9 @@ import { readFileSync, statSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { parseDaily } from './daily.ts';
-import { GAMES, rateOf, type LagConfig } from './lag.ts';
+import { GAMES, rateOf, type LagConfig } from './servers/lag.ts';
 import { LIMITS } from './protocol.ts';
-import { QUEST_MODES, type QuestMode } from './quests.ts';
+import { QUEST_MODES, type QuestMode } from './servers/quests.ts';
 import type { Game } from './types.ts';
 
 /** A server entry as written in config.json. */

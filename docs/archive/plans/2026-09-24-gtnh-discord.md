@@ -226,7 +226,7 @@ git commit -m "feat(hub): npm project and mod protocol parser"
 ### Task 2: Uptime database
 
 **Files:**
-- Create: `hub/src/db.ts`
+- Create: `hub/src/stats/db.ts`
 - Test: `hub/test/db.test.ts`
 
 **Interfaces:**
@@ -301,7 +301,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/db.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/db.ts`:
+`hub/src/stats/db.ts`:
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -386,7 +386,7 @@ Expected: `ℹ pass 10`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/db.ts hub/test/db.test.ts
+git add hub/src/stats/db.ts hub/test/db.test.ts
 git commit -m "feat(hub): SQLite uptime log"
 ```
 
@@ -395,7 +395,7 @@ git commit -m "feat(hub): SQLite uptime log"
 ### Task 3: ServerHub (TCP server, registry, public API)
 
 **Files:**
-- Create: `hub/src/servers.ts`
+- Create: `hub/src/servers/servers.ts`
 - Test: `hub/test/servers.test.ts`
 
 **Interfaces:**
@@ -621,7 +621,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/servers.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/servers.ts`:
+`hub/src/servers/servers.ts`:
 
 ```ts
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -864,7 +864,7 @@ Expected: `ℹ pass 23`, `ℹ fail 0`, and `tsc` prints nothing. The `[cmd] test
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/servers.ts hub/test/servers.test.ts
+git add hub/src/servers/servers.ts hub/test/servers.test.ts
 git commit -m "feat(hub): ServerHub with handshake, liveness and commands"
 ```
 
@@ -873,7 +873,7 @@ git commit -m "feat(hub): ServerHub with handshake, liveness and commands"
 ### Task 4: Discord frontend
 
 **Files:**
-- Create: `hub/src/discord.ts`
+- Create: `hub/src/discord/discord.ts`
 - Test: `hub/test/discord.test.ts`
 
 **Interfaces:**
@@ -942,7 +942,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/discord.ts`.
 
 - [ ] **Step 3: Implement**
 
-`hub/src/discord.ts`:
+`hub/src/discord/discord.ts`:
 
 ````ts
 import {
@@ -1108,7 +1108,7 @@ Expected: `ℹ pass 28`, `ℹ fail 0`, and `tsc` prints nothing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hub/src/discord.ts hub/test/discord.test.ts
+git add hub/src/discord/discord.ts hub/test/discord.test.ts
 git commit -m "feat(hub): Discord relay, alerts and slash commands"
 ```
 

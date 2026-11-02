@@ -24,7 +24,7 @@ else
       # parsers and LIMITS), factorio.ts (GAME_MODS) and agents.ts (HANDSHAKE_MS). agents.ts loads servers.ts and
       # its imports too, but no constant the agent compares lives there: a change to them that breaks loading
       # fails the hub's own tests, so they stay hub-only.
-      hub/src/protocol.ts | hub/src/factorio.ts | hub/src/agents.ts) hub=true agent=true ;;
+      hub/src/protocol.ts | hub/src/updates/factorio.ts | hub/src/agents/agents.ts) hub=true agent=true ;;
       hub/*) hub=true ;;
       web/*) web=true ;;
       mod/*) mod=true ;;

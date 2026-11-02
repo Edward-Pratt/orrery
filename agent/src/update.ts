@@ -130,7 +130,7 @@ export const STALL_MS = 60_000;
 /** The `installed` message's fields. */
 export type InstalledMsg = Omit<Extract<AgentMsg, { type: 'installed' }>, 'type'>;
 
-/** The game's own mods, as the hub counts them in an update's `to` (`GAME_MODS` in hub/src/factorio.ts; a test compares). */
+/** The game's own mods, as the hub counts them in an update's `to` (`GAME_MODS` in hub/src/updates/factorio.ts; a test compares). */
 export const GAME_MODS: readonly string[] = ['base', 'elevated-rails', 'quality', 'recycler', 'space-age'];
 
 /**

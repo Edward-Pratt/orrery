@@ -11,7 +11,7 @@ set -euo pipefail
 GTNH_DIR=${GTNH_DIR:-/home/opc/GTNH}
 BACKUP_DIR=${BACKUP_DIR:-$GTNH_DIR/backups}
 GTNH_SERVICE=${GTNH_SERVICE:-gtnh}
-NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}.*\.zip$' # as hub/src/backups.ts
+NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}.*\.zip$' # as hub/src/backups/backups.ts
 
 die() { echo "restore-backup: $*" >&2; exit 1; }
 

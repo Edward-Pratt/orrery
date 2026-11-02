@@ -1,0 +1,816 @@
+// Web integration: the Hono HTTP API under `/api` (`webApi`), Discord OAuth login for admin-role members (`OAuth`,
+// real `discordOAuth`), sessions in SQLite (with the Discord avatar hash; a failed login redirects to
+// `/?login=admin|state|discord` for the dashboard's login card), `GET /api/environment` (`{ environment }`, the one
+// read without a session), `GET /api/me` (`id`, `username`, `avatar`), `POST /api/logout`, reads
+// (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` (404
+// unlisted, 502 if journalctl fails) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
+// Agent's) and `/api/hosts/:id/samples?hours=` (404 unknown id) with the host or agents on, and `/api/host` and
+// `/api/host/samples?hours=`, the hub's own alone, only with the host on, kept for one release for an older
+// dashboard; `/api/servers` cards (with `lagging` and the linked service's id and state); `/api/servers/:id` status,
+// TPS, top per period, backups, `logs` (it has a folder, or an Agent runs it); `/api/servers/:id/logs` (`Stats.logs`,
+// newest first; 502 if its Agent can't answer) and `/api/servers/:id/logs/:name` (the last 1000 lines, `{ lines }` as
+// a service's logs; a name not in the listing, so `..`, slashes and symlinks too, is 404; 502 if the file can't be
+// read or the Agent can't answer), 404 for an unknown server or one with neither a folder nor an Agent, not audited;
+// `/api/servers/:id/players/:name`, 404 if never seen; `/api/servers/:id/history?hours=` with `asOf`, the newest
+// event id, so the dashboard skips replayed events already counted; `/api/audit[?server=][&actor=][&before=id]`, a
+// batch of 200 newest first with `older` (`before` is an entry's `id`, paged by (ts, rowid); 400 if not an id);
+// unknown server ids 404; features per server: chat, TPS and the console (and TPS itself) over a game connection, so
+// for a server with a mod token or one an Agent runs, quests only with a mod token, `update` for a server an Agent
+// runs while game updates are on (`GameUpdates`); the card's `paused` from `ServerState`; `agents` in
+// `/api/integrations`), `GET /api/events` (SSE: `LiveFeed`'s buffer after `Last-Event-ID`, then live events;
+// keep-alive comments); actions (`POST /api/servers/:id/chat` (a linked admin named by their name in that server's
+// game, `Stats.linkedPlayer`), `/command` (400 with why for a factorio server's over 256 characters,
+// `CommandRefused`), `/restart`, `/restart/cancel`, `/backup` (`ServerHub.backup`: a Mod's `backup start`, a factorio
+// server's save): 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the admin;
+// `POST /api/services/:id/start|stop|restart`: 404 unlisted, 409 if a countdown is running, 502 if systemctl (or the
+// service's Agent) fails; `POST /api/servers/:id/restore` with systemd whenever a server has a restore source (a
+// folder and the restore script, or an Agent), registered before the online check: `Restores`' 404/409, 502 with the
+// script's (or the Agent's) error); with game updates (agents and systemd on), registered before the online check,
+// for a server an Agent runs (else 404): `GET /api/servers/:id/game` (`GameState`), `POST …/game/catalog`
+// (`GameCatalog`), `…/game/update` (202 `{ id }`) and `…/game/update/cancel` (204) (`GameRefused`'s status, its
+// message as text), and the mod browser's reads, `GET …/game/mods?factorio=&q=&category=&sort=&page=` (`ModBrowse`;
+// 400 for a bad parameter, 502 if the portal can't be read) and `GET …/game/mods/:name/thumbnail` (the PNG,
+// `image/png` with `x-content-type-options: nosniff` and `cache-control: private, max-age=86400`; 404 with `private,
+// max-age=3600` when it has none; 502 uncached), and the Import mod list's `POST …/game/check` (`{ factorio, names
+// }`: `ModCheckAnswer`; 400 for a bad body, 502 if the portal's list can't be read); with game settings (agents and
+// systemd on), a separate block registered before the online check, for a server an Agent runs (else 404): `GET
+// /api/servers/:id/settings` (`GameSettingsState`) and `PUT …/settings` (`GameSettingsRequest`, answering
+// `GameSettingsAnswer`; `GameRefused`'s 400/409/502 as text), and `features.settings` on its card; with GitHub on,
+// `GET /api/deploys[?before=id]` (`Deploys.answer`, 50 history rows a batch), `POST /api/deploys/check` (asks GitHub,
+// answers the same) and `POST /api/deploys` (`{ part, tag, server?, host? }`: `server` for a Mod, `host`, the Agent's
+// id, for an Agent; 202 with the row id; `DeployRefused`'s 404/409, 400 bad input, 502 if systemctl, the download or
+// the Agent's `deploy` fails); with packs (systemd and Minecraft on), `POST /api/uploads` (`{ fileName, size }`),
+// `GET /api/uploads/:upload` and `PUT /api/uploads/:upload?offset=` (a raw chunk; `UploadRefused`'s status, 409 as `{
+// received }`), and, registered before the online check, for servers `Packs.has` (else 404): `GET
+// /api/servers/:id/pack`, `POST …/compare`, `…/adopt`, `…/update` (202), `…/update/cancel`, `…/extras` (then
+// `PUT`/`DELETE …/extras/:id`), `…/edits` (then `PUT`/`DELETE …/edits/:id`), `…/edits/preview` (`PackRefused`'s or
+// `LibraryRefused`'s status); with the library (as uploads), `GET /api/library`, `POST /api/library/packs` (`{ upload
+// | url, name, version, mc?, loader? }`: 202 with the add's number), `POST /api/library/cancel`, `DELETE
+// /api/library/packs/:id` (`LibraryRefused`'s status; 409 while used), `POST /api/library/runtimes` (`{ feature }`:
+// 202) and `DELETE /api/library/runtimes/:name`, and for a pack's server `PUT /api/servers/:id/pack/runtime` (`{
+// runtime: name | null }`), `GET /api/library/packs/:id/scripts`, and `library` in `/api/integrations`; with packs,
+// the library and GitHub (`newServer` in `/api/integrations`), registered before `/servers/:id`: `POST /api/servers`
+// (202 `{ id }`; `PackRefused`'s status), `GET /api/servers/pending` and `DELETE /api/servers/pending/:id`; every
+// other route needs a session. `serveWebApi` serves it on 127.0.0.1.
+
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import type { Server } from 'node:http';
+import { serve } from '@hono/node-server';
+import { Hono, type Context } from 'hono';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { streamSSE } from 'hono/streaming';
+import type {
+  AuditLog,
+  CheckStatus,
+  CommandOutput,
+  DeployAnswer,
+  DeploysAnswer,
+  HostHistory,
+  HostNow,
+  EnvironmentInfo,
+  Integrations,
+  CompareReport,
+  LibraryAddAnswer,
+  LibraryState,
+  EditPreview,
+  GameCatalog,
+  GameState,
+  GameUpdateAnswer,
+  ModBrowse,
+  ModCheckAnswer,
+  Me,
+  NewServerAnswer,
+  PendingServers,
+  StartScripts,
+  PackState,
+  PackUpdateAnswer,
+  PlayerAnswer,
+  UploadAnswer,
+  UploadProgress,
+  ServerCard,
+  ServerDetail,
+  ServerHistory,
+  ServerLog,
+  ServerLogFiles,
+  ServiceActionAnswer,
+  ServiceLogs,
+  ServiceStatus,
+} from '../api.ts';
+import type { Checks } from '../services/checks.ts';
+import { DeployRefused, type Deploys } from '../updates/deploys.ts';
+import { GameRefused } from '../updates/factorio.ts';
+import { gameExtrasRoutes } from './web-game-extras.ts';
+import type { Moderation } from '../servers/moderation.ts';
+import type { ModUpdates } from '../updates/mod-updates.ts';
+import type { SaveUploads } from '../backups/save-uploads.ts';
+import type { GameUpdates } from '../updates/game-updates.ts';
+import type { GameSettings } from '../servers/game-settings.ts';
+import type { GameSettingsAnswer, GameSettingsState, SaveUploadAnswer, SaveUploadRequest } from '../api.ts';
+import type { HostMonitor, Hosts } from '../agents/host.ts';
+import type { Config, WebIntegration } from '../config.ts';
+import type { Db } from '../stats/db.ts';
+import { rateOf, type LagMonitor } from '../servers/lag.ts';
+import { LibraryRefused, type Library } from '../packs/library.ts';
+import type { LiveFeed } from '../stats/live.ts';
+import { PackRefused, startScripts, type Packs } from '../packs/packs.ts';
+import { UploadRefused, type Uploads } from '../packs/uploads.ts';
+import type { RestartScheduler } from '../servers/restarts.ts';
+import { RestoreRefused, type Restores } from '../backups/restore.ts';
+import { CountdownRunning, VERBS, type Services } from '../services/services.ts';
+import { CommandRefused, mcText, type FeedEvent, type ServerHub, type ServerState } from '../servers/servers.ts';
+import type { Stats } from '../stats/stats.ts';
+
+/** A user's membership in a guild. */
+export type Member = { id: string; username: string; avatar: string | null; roles: string[] };
+
+/** The Discord OAuth endpoints the login uses, passed in so tests need no network. */
+export type OAuth = {
+  /** Exchanges a callback's code for an access token. */
+  token: (code: string, redirectUri: string) => Promise<string>;
+  /** The token's user in a guild; undefined if they are not a member. */
+  member: (accessToken: string, guildId: string) => Promise<Member | undefined>;
+};
+
+const DAY_S = 24 * 60 * 60;
+/** Keeps proxies from closing an idle event stream. */
+const KEEP_ALIVE_MS = 25_000;
+const COOKIE = { httpOnly: true, secure: true, sameSite: 'Lax', path: '/api' } as const;
+/** Sessions are stored hashed, so a copy of the database logs nobody in. */
+const hash = (id: string) => createHash('sha256').update(id).digest('hex');
+/** How often a session's admin role is asked of Discord again, so one taken away ends the session. */
+const RECHECK_MS = 10 * 60_000;
+
+/** A session's Discord access token, sealed with a key from its cookie: like the session, unreadable from a database copy. */
+const sealKey = (session: string) => createHash('sha256').update(`token:${session}`).digest();
+function seal(token: string, session: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', sealKey(session), iv);
+  const sealed = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), sealed]).toString('base64');
+}
+function unseal(sealed: string, session: string): string {
+  const b = Buffer.from(sealed, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', sealKey(session), b.subarray(0, 12));
+  decipher.setAuthTag(b.subarray(12, 28));
+  return Buffer.concat([decipher.update(b.subarray(28)), decipher.final()]).toString('utf8');
+}
+
+const AUDIT_LIMIT = 200;
+/** An upload's chunk: the one request that isn't JSON. */
+const CHUNK = /^\/api\/uploads\/[^/]+$/;
+const MAX_HOURS = 90 * 24;
+
+/** A history period's `hours` query (default 24); undefined unless a whole number from 1 to 2160. */
+function hoursOf(c: Context): number | undefined {
+  const hours = Number(c.req.query('hours') ?? 24);
+  return Number.isInteger(hours) && hours >= 1 && hours <= MAX_HOURS ? hours : undefined;
+}
+const BAD_HOURS = `Give hours from 1 to ${MAX_HOURS}`;
+
+/** A request's JSON object body; empty if it has none (or isn't an object). */
+async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown>> {
+  const body = await req.json().catch(() => undefined);
+  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+}
+
+export type Env = { Variables: { user: Me; body: Record<string, unknown> } };
+
+/** What the API reads from; `db` only for its own sessions. The host, checks and services only when they are on. */
+export type WebDeps = {
+  db: Db;
+  live: LiveFeed;
+  hub: ServerHub;
+  stats: Stats;
+  restarts: RestartScheduler;
+  lag: LagMonitor;
+  /** Only with the checks integration. */
+  checks?: Checks;
+  /** Only with the host or agents integration: the hub's own Host and each Agent's. */
+  hosts?: Hosts;
+  /** Only with the systemd integration. */
+  services?: Services;
+  /** Only with the systemd integration, and a server with a restore source: a folder and the restore script, or an Agent. */
+  restores?: Restores;
+  /** Only with the GitHub integration. */
+  deploys?: Deploys;
+  /** Only with the systemd and Minecraft integrations. */
+  packs?: Packs;
+  /** Only with the agents (and systemd) integrations. */
+  gameUpdates?: GameUpdates;
+  /** Only with the agents (and systemd) integrations. */
+  gameSettings?: GameSettings;
+  /** With game updates. */
+  modUpdates?: ModUpdates;
+  /** With the agents integration. */
+  moderation?: Moderation;
+  saveUploads?: SaveUploads;
+  /** With packs. */
+  uploads?: Uploads;
+  /** With packs. */
+  library?: Library;
+  integrations: Config['integrations'];
+  environment: Config['environment'];
+};
+
+/** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
+export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
+  // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
+  const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
+  // A factorio server is run by an Agent (its `server`).
+  const agentServed = (id: string) => Boolean(integrations.agents?.agents.some((a) => a.server === id));
+  // Chat, a rate (from heartbeats) and the console come over a game connection: the Mod's, or an Agent's.
+  const connects = (id: string) => hasMod(id) || agentServed(id);
+  const card = (s: ServerState, status = stats.status(s.id)!): ServerCard => {
+    const linked = services?.ofServer(s.id);
+    return {
+      id: s.id,
+      name: s.name,
+      game: s.game,
+      rate: rateOf(s.game),
+      online: s.online,
+      hung: s.hung,
+      paused: s.paused,
+      tps: connects(s.id) ? s.tps : null,
+      players: s.players,
+      uptimeDay: status.uptimeDay,
+      restart: restarts.pending(s.id) ?? null,
+      lagging: lag.isLagging(s.id),
+      service: linked ? { id: linked.id, state: linked.state } : null,
+      features: { chat: connects(s.id), tps: connects(s.id), quests: hasMod(s.id), console: connects(s.id), update: Boolean(gameUpdates?.has(s.id)), settings: Boolean(gameSettings?.has(s.id)), upload: Boolean(saveUploads?.has(s.id)) },
+      packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
+    };
+  };
+  /** Runs a library or New server action as the admin, mapping its refusals to their status. */
+  const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
+    try {
+      const answer = await fn(actor(c.get('user')), c.get('user'));
+      return answer === undefined ? c.body(null, 204) : c.json(answer, status);
+    } catch (err) {
+      if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
+      throw err;
+    }
+  };
+  // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
+  const newServer = Boolean(packs && library && deploys);
+  const redirectUri = new URL('/api/callback', web.publicUrl).href;
+  const origin = new URL(web.publicUrl).origin;
+  const app = new Hono<Env>().basePath('/api');
+  const actor = (user: Me) => `web:${user.username} (${user.id})`;
+
+  app.get('/environment', (c) => c.json({ environment } satisfies EnvironmentInfo));
+  app.get('/login', (c) => {
+    const state = randomBytes(16).toString('base64url');
+    setCookie(c, 'state', state, { ...COOKIE, maxAge: 600 });
+    const params = new URLSearchParams({
+      client_id: web.clientId,
+      response_type: 'code',
+      scope: 'identify guilds.members.read',
+      redirect_uri: redirectUri,
+      state,
+    });
+    return c.redirect(`https://discord.com/oauth2/authorize?${params}`);
+  });
+
+  app.get('/callback', async (c) => {
+    const state = getCookie(c, 'state');
+    deleteCookie(c, 'state', COOKIE); // one use
+    const code = c.req.query('code');
+    // a failed login goes back to the dashboard's login card, which says why
+    const failed = (why: 'state' | 'discord' | 'admin') => c.redirect(new URL(`/?login=${why}`, web.publicUrl).href);
+    if (!state || c.req.query('state') !== state || !code) return failed('state');
+    let member: Member | undefined;
+    let token: string;
+    try {
+      token = await oauth.token(code, redirectUri);
+      member = await oauth.member(token, web.guildId);
+    } catch (err) {
+      console.error('[web] Discord login failed:', (err as Error).message);
+      return failed('discord');
+    }
+    if (!member?.roles.includes(web.adminRoleId)) return failed('admin');
+    const id = randomBytes(32).toString('base64url');
+    db.addWebSession(hash(id), member.id, member.username, member.avatar, Date.now() + web.sessionDays * DAY_S * 1000);
+    db.setWebSessionCheck(hash(id), seal(token, id), Date.now());
+    setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
+    console.log(`[web] ${member.username} (${member.id}) logged in`);
+    return c.redirect(new URL('/', web.publicUrl).href);
+  });
+
+  /**
+   * Asks Discord again whether a session's user still has the admin role; ends the session if not (or if Discord no
+   * longer takes the token). Discord being unreachable keeps it: the next check asks again.
+   */
+  const recheck = async (id: string, session: string, sealed: string, user: Me) => {
+    let member: Member | undefined;
+    try {
+      member = await oauth.member(unseal(sealed, session), web.guildId);
+    } catch (err) {
+      console.error(`[web] re-checking ${user.username} (${user.id}) failed:`, (err as Error).message);
+      return;
+    }
+    if (member?.roles.includes(web.adminRoleId)) return;
+    db.deleteWebSession(id);
+    const why = member ? 'lost the admin role' : 'not in the guild, or Discord refused the token';
+    console.log(`[web] ${user.username} (${user.id}) is no longer an admin (${why}): logged out`);
+  };
+  app.use(async (c, next) => {
+    const session = getCookie(c, 'session');
+    const id = session && hash(session);
+    const user = id ? db.webSession(id) : undefined;
+    if (!id || !user) return c.text('Not logged in', 401);
+    // ponytail: sessions from before re-checks have no row and run to their expiry unchecked.
+    const check = db.webSessionCheck(id);
+    if (check && Date.now() - check.checked >= RECHECK_MS) {
+      db.markWebSessionChecked(id, Date.now()); // first, so concurrent requests ask Discord once
+      void recheck(id, session!, check.token, user); // in the background: this request goes on, the next one sees the outcome
+    }
+    c.set('user', user);
+    await next();
+  });
+  // CSRF, with SameSite=Lax: a state-changing request must come from the dashboard, and be JSON (a cross-site form
+  // can't send that without a CORS preflight, which is never answered).
+  app.use(async (c, next) => {
+    if (c.req.method === 'GET' || c.req.method === 'HEAD') return next();
+    if (c.req.header('origin') !== origin) return c.text('Wrong origin', 403);
+    const type = c.req.header('content-type')?.split(';')[0]!.trim().toLowerCase();
+    // The one exception: an upload's chunk is raw bytes (a cross-site form can't send that type either).
+    const chunk = c.req.method === 'PUT' && CHUNK.test(c.req.path);
+    if (type !== (chunk ? 'application/octet-stream' : 'application/json')) return c.text(chunk ? 'Send the chunk as application/octet-stream' : 'Send JSON', 415);
+    await next();
+  });
+  app.get('/me', (c) => c.json(c.get('user') satisfies Me));
+  app.post('/logout', (c) => {
+    db.deleteWebSession(hash(getCookie(c, 'session')!));
+    deleteCookie(c, 'session', COOKIE);
+    return c.body(null, 204);
+  });
+  app.get('/integrations', (c) =>
+    c.json({
+      minecraft: !!integrations.minecraft,
+      discord: !!integrations.discord,
+      web: true,
+      checks: !!integrations.checks,
+      host: !!integrations.host,
+      systemd: !!integrations.systemd,
+      github: !!integrations.github,
+      agents: !!integrations.agents,
+      library: !!library,
+      newServer,
+    } satisfies Integrations),
+  );
+  if (deploys) {
+    app.get('/deploys', (c) => {
+      const before = c.req.query('before');
+      if (before !== undefined && !/^[1-9]\d{0,15}$/.test(before)) return c.text('before must be a deploy id', 400);
+      return c.json(deploys.answer(before === undefined ? undefined : Number(before)) satisfies DeploysAnswer);
+    });
+    app.post('/deploys/check', async (c) => {
+      hub.audit(actor(c.get('user')), 'deploy check', 'github', integrations.github!.repo);
+      await deploys.check();
+      return c.json(deploys.answer() satisfies DeploysAnswer);
+    });
+    app.post('/deploys', async (c) => {
+      const { part, tag, server, host } = await jsonBody(c.req);
+      if (
+        (part !== 'hub' && part !== 'web' && part !== 'mod' && part !== 'agent') ||
+        typeof tag !== 'string' ||
+        (part === 'mod') !== (typeof server === 'string') ||
+        (part === 'agent') !== (typeof host === 'string')
+      ) {
+        return c.text('Give a part (hub, web, mod or agent), a tag and, for a Mod, its server; for an Agent, its host', 400);
+      }
+      const user = c.get('user');
+      const on = (part === 'mod' ? server : host) as string | undefined;
+      try {
+        return c.json({ id: await deploys.deploy(part, tag, actor(user), on, user.username) } satisfies DeployAnswer, 202);
+      } catch (err) {
+        if (err instanceof DeployRefused) return c.text(err.message, err.status);
+        return c.text(`The deploy failed: ${(err as Error).message}`, 502);
+      }
+    });
+  }
+  if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
+  if (services) {
+    app.get('/services', (c) => c.json(services.list() satisfies ServiceStatus[]));
+    app.get('/services/:id/logs', async (c) => {
+      try {
+        const lines = await services.logs(c.req.param('id'));
+        return lines ? c.json({ lines } satisfies ServiceLogs) : c.notFound();
+      } catch (err) {
+        return c.text(`journalctl failed: ${(err as Error).message}`, 502);
+      }
+    });
+    for (const verb of VERBS) {
+      app.post(`/services/:id/${verb}`, async (c) => {
+        const id = c.req.param('id');
+        if (!services.has(id)) return c.notFound();
+        const user = c.get('user');
+        try {
+          return c.json({ at: await services.act(id, verb, actor(user), user.username) } satisfies ServiceActionAnswer);
+        } catch (err) {
+          if (err instanceof CountdownRunning) return c.text(`${err.message}: cancel it first.`, 409);
+          return c.text(`systemctl failed: ${(err as Error).message}`, 502);
+        }
+      });
+    }
+  }
+  const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
+  const history = (h: HostMonitor, c: Context) => {
+    const hours = hoursOf(c);
+    return hours ? c.json(h.history(hours) satisfies HostHistory) : c.text(BAD_HOURS, 400);
+  };
+  if (hosts?.list().length) {
+    app.get('/hosts', (c) => c.json(hosts.list().map(now) satisfies HostNow[]));
+    app.get('/hosts/:id/samples', (c) => {
+      const h = hosts.get(c.req.param('id'));
+      return h ? history(h, c) : c.notFound();
+    });
+  }
+  const host = integrations.host && hosts?.get(integrations.host.id);
+  if (host) {
+    // ponytail: the hub's own host, for a dashboard older than `/hosts`; drop a release after.
+    app.get('/host', (c) => c.json(now(host)));
+    app.get('/host/samples', (c) => history(host, c));
+  }
+  if (newServer) {
+    // Before `/servers/:id`: "pending" isn't a server id.
+    app.post('/servers', (c) => act(c, async (by, user) => ({ id: await packs!.install(await jsonBody(c.req), by, user.username) }) satisfies NewServerAnswer, 202));
+    app.get('/servers/pending', (c) => c.json(packs!.pending() satisfies PendingServers));
+    app.delete('/servers/pending/:id', (c) => act(c, (by) => packs!.discard(c.req.param('id'), by)));
+  }
+  app.get('/servers', (c) => c.json(hub.list().map((s) => card(s)) satisfies ServerCard[]));
+  app.get('/servers/:id', async (c) => {
+    const id = c.req.param('id');
+    const state = hub.get(id);
+    if (!state) return c.notFound();
+    const status = stats.status(id)!;
+    return c.json({
+      card: card(state, status),
+      service: services?.ofServer(id) ?? null,
+      status,
+      tps: connects(id) ? stats.tps(id)! : null,
+      top: { day: stats.top(id, 'day')!, week: stats.top(id, 'week')!, all: stats.top(id, 'all')! },
+      backups: (await stats.backups(id))!,
+      pack: packs?.has(id) ?? false,
+      logs: stats.hasLogs(id),
+    } satisfies ServerDetail);
+  });
+  // Reads, so not audited. A file is only ever one of the listing's names, never a path from the request.
+  app.get('/servers/:id/logs', async (c) => {
+    try {
+      const files = await stats.logs(c.req.param('id'));
+      return files ? c.json(files satisfies ServerLogFiles) : c.notFound();
+    } catch (err) {
+      return c.text(`Listing the logs failed: ${(err as Error).message}`, 502); // an Agent's, which can't answer
+    }
+  });
+  app.get('/servers/:id/logs/:name', async (c) => {
+    const name = c.req.param('name');
+    try {
+      const lines = await stats.log(c.req.param('id'), name);
+      return lines ? c.json({ lines } satisfies ServerLog) : c.notFound();
+    } catch (err) {
+      return c.text(`Reading ${name} failed: ${(err as Error).message}`, 502);
+    }
+  });
+  app.get('/servers/:id/history', (c) => {
+    const id = c.req.param('id');
+    if (!hub.get(id)) return c.notFound();
+    const hours = hoursOf(c);
+    if (!hours) return c.text(BAD_HOURS, 400);
+    const asOf = live.lastId; // read first: an event after it may or may not be in the history, so it is replayed
+    return c.json({ ...stats.history(id, hours, connects(id))!, asOf } satisfies ServerHistory);
+  });
+  app.get('/servers/:id/players/:name', (c) => {
+    const answer = stats.playtime(c.req.param('id'), { player: c.req.param('name') });
+    // Never seen: an unknown name, not a player with no playtime.
+    if (!answer || (answer.found && answer.lastSeen === null)) return c.notFound();
+    return c.json(answer satisfies PlayerAnswer);
+  });
+  app.get('/audit', (c) => {
+    const server = c.req.query('server');
+    if (server !== undefined && !hub.get(server)) return c.notFound();
+    const before = c.req.query('before');
+    if (before !== undefined && !/^[1-9]\d{0,15}$/.test(before)) return c.text('before must be an entry id', 400);
+    const filter = { target: server, actor: c.req.query('actor'), before: before === undefined ? undefined : Number(before) };
+    return c.json(stats.audit(AUDIT_LIMIT, filter) satisfies AuditLog);
+  });
+  // Restore needs the server down, so it comes before the online check below, with checks of its own.
+  if (restores) {
+    app.post('/servers/:id/restore', async (c) => {
+      const name = (await jsonBody(c.req)).name;
+      if (typeof name !== 'string') return c.text('Give a backup name', 400);
+      try {
+        const output = await restores.restore(c.req.param('id'), name, actor(c.get('user')));
+        return c.json({ output: output.split('\n').filter((line) => line !== '') } satisfies CommandOutput);
+      } catch (err) {
+        if (err instanceof RestoreRefused) return c.text(err.message, err.status);
+        return c.text(`The restore failed: ${(err as Error).message}`, 502);
+      }
+    });
+  }
+  // Packs work on a stopped server too (an update checks for itself), so they come before the online check below.
+  if (uploads) {
+    /** Runs an upload action, mapping its refusals to their status (a 409 with how much arrived). */
+    const upload = async (c: Context<Env>, fn: (id: string) => Promise<object>) => {
+      try {
+        return c.json(await fn(c.req.param('upload')!));
+      } catch (err) {
+        if (!(err instanceof UploadRefused)) throw err;
+        return err.status === 409 ? c.json({ received: err.received! } satisfies UploadProgress, 409) : c.text(err.message, err.status);
+      }
+    };
+    app.post('/uploads', async (c) => {
+      const body = await jsonBody(c.req);
+      return upload(c, async () => ({ upload: await uploads.create(body.fileName, body.size) }) satisfies UploadAnswer);
+    });
+    app.get('/uploads/:upload', (c) => upload(c, async (id) => ({ received: uploads.received(id) }) satisfies UploadProgress));
+    app.put('/uploads/:upload', async (c) => {
+      const offset = c.req.query('offset') ?? '';
+      if (!/^(0|[1-9]\d{0,15})$/.test(offset)) return c.text('Give the offset in bytes', 400);
+      return upload(c, async (id) => ({ received: await uploads.append(id, Number(offset), c.req.raw.body) }) satisfies UploadProgress);
+    });
+  }
+  if (library) {
+    app.get('/library', (c) => c.json(library.state() satisfies LibraryState));
+    app.post('/library/packs', (c) =>
+      act(c, async (by, user) => ({ add: library.addPack(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),
+    );
+    app.post('/library/cancel', (c) => act(c, async (by) => library.cancel(by)));
+    app.delete('/library/packs/:id', (c) =>
+      act(c, async (by) => {
+        const id = c.req.param('id');
+        if (!/^[1-9]\d{0,15}$/.test(id)) throw new LibraryRefused(404, 'No such pack in the library.');
+        await library.deletePack(Number(id), by);
+      }),
+    );
+    app.post('/library/runtimes', (c) =>
+      act(c, async (by, user) => ({ add: library.addRuntime(await jsonBody(c.req), by, user.username) }) satisfies LibraryAddAnswer, 202),
+    );
+    app.delete('/library/runtimes/:name', (c) => act(c, (by) => library.deleteRuntime(c.req.param('name'), by)));
+    app.get('/library/packs/:id/scripts', (c) =>
+      act(c, async () => {
+        const id = c.req.param('id');
+        if (!/^[1-9]\d{0,15}$/.test(id)) throw new LibraryRefused(404, 'No such pack in the library.');
+        try {
+          return { scripts: await startScripts(library.zip(Number(id))) } satisfies StartScripts;
+        } catch (err) {
+          throw err instanceof PackRefused ? new LibraryRefused(err.status, err.message) : err;
+        }
+      }),
+    );
+  }
+  if (packs) {
+    /** Runs a pack action for a server that has packs, mapping its refusals to their status. */
+    const pack = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<unknown>, status: 200 | 202 = 200) => {
+      const id = c.req.param('id')!;
+      if (!packs.has(id)) return c.notFound();
+      try {
+        const answer = await fn(id, c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer as object, status);
+      } catch (err) {
+        if (err instanceof PackRefused || err instanceof LibraryRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    const id = (c: Context<Env>, key: string) => Number(/^[1-9]\d{0,15}$/.test(c.req.param(key) ?? '') ? c.req.param(key) : NaN);
+    app.get('/servers/:id/pack', (c) => pack(c, async (sid) => (await packs.state(sid)) satisfies PackState));
+    app.post('/servers/:id/pack/compare', (c) =>
+      pack(c, async (sid, user) => (await packs.compare(sid, await jsonBody(c.req), actor(user))) satisfies CompareReport),
+    );
+    app.post('/servers/:id/pack/adopt', (c) =>
+      pack(c, async (sid, user) => (await packs.adopt(sid, (await jsonBody(c.req)).keep, actor(user), user.username)) satisfies PackState),
+    );
+    app.post('/servers/:id/pack/update', (c) =>
+      pack(
+        c,
+        async (sid, user) => {
+          const body = await jsonBody(c.req);
+          return { id: packs.update(sid, body.pending === true ? 'pending' : body, actor(user), user.username) } satisfies PackUpdateAnswer;
+        },
+        202,
+      ),
+    );
+    app.put('/servers/:id/pack/runtime', (c) =>
+      pack(c, async (sid, user) => (await packs.setRuntime(sid, (await jsonBody(c.req)).runtime, actor(user))) satisfies PackState),
+    );
+    app.post('/servers/:id/pack/update/cancel', (c) => pack(c, async (sid, user) => packs.cancel(sid, actor(user), user.username)));
+    app.post('/servers/:id/pack/extras', (c) =>
+      pack(c, async (sid, user) => (await packs.addExtra(sid, await jsonBody(c.req), actor(user), user.username)) satisfies PackState),
+    );
+    app.put('/servers/:id/pack/extras/:extra', (c) =>
+      pack(c, async (sid, user) => (await packs.updateExtra(sid, id(c, 'extra'), await jsonBody(c.req), actor(user))) satisfies PackState),
+    );
+    app.delete('/servers/:id/pack/extras/:extra', (c) =>
+      pack(c, async (sid, user) => (await packs.removeExtra(sid, id(c, 'extra'), actor(user))) satisfies PackState),
+    );
+    app.post('/servers/:id/pack/edits/preview', (c) =>
+      pack(c, async (sid) => {
+        const { path, find } = await jsonBody(c.req);
+        return (await packs.previewEdit(sid, path, find)) satisfies EditPreview;
+      }),
+    );
+    app.post('/servers/:id/pack/edits', (c) =>
+      pack(c, async (sid, user) => (await packs.addEdit(sid, await jsonBody(c.req), actor(user), user.username)) satisfies PackState),
+    );
+    app.put('/servers/:id/pack/edits/:edit', (c) =>
+      pack(c, async (sid, user) => (await packs.updateEdit(sid, id(c, 'edit'), await jsonBody(c.req), actor(user))) satisfies PackState),
+    );
+    app.delete('/servers/:id/pack/edits/:edit', (c) =>
+      pack(c, async (sid, user) => (await packs.removeEdit(sid, id(c, 'edit'), actor(user))) satisfies PackState),
+    );
+  }
+  // Game updates start a stopped server too, so they come before the online check below.
+  if (gameUpdates) {
+    /** Runs a game update action for a server an Agent runs, mapping its refusals to their status. */
+    const game = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<unknown>, status: 200 | 202 = 200) => {
+      const id = c.req.param('id')!;
+      if (!gameUpdates.has(id)) return c.notFound();
+      try {
+        const answer = await fn(id, c.get('user'));
+        return answer === undefined ? c.body(null, 204) : c.json(answer as object, status);
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/servers/:id/game', (c) => game(c, async (sid) => gameUpdates.state(sid) satisfies GameState));
+    app.post('/servers/:id/game/catalog', (c) => game(c, async (sid) => (await gameUpdates.catalog(sid, await jsonBody(c.req))) satisfies GameCatalog));
+    app.post('/servers/:id/game/update', (c) =>
+      game(c, async (sid, user) => ({ id: await gameUpdates.update(sid, await jsonBody(c.req), actor(user), user.username) }) satisfies GameUpdateAnswer, 202),
+    );
+    app.post('/servers/:id/game/update/cancel', (c) => game(c, async (sid, user) => gameUpdates.cancel(sid, actor(user), user.username)));
+    // The mod browser: reads of the mod portal, through the hub (the dashboard never talks to it).
+    app.post('/servers/:id/game/check', (c) => game(c, async (sid) => (await gameUpdates.check(sid, await jsonBody(c.req))) satisfies ModCheckAnswer));
+    app.get('/servers/:id/game/mods', (c) => game(c, async (sid) => (await gameUpdates.browse(sid, c.req.query())) satisfies ModBrowse));
+    app.get('/servers/:id/game/mods/:name/thumbnail', async (c) => {
+      const id = c.req.param('id');
+      if (!gameUpdates.has(id)) return c.notFound();
+      try {
+        const image = await gameUpdates.thumbnail(id, c.req.param('name'));
+        if (!image) return c.text('No thumbnail.', 404, { 'cache-control': 'private, max-age=3600' });
+        // A checked PNG only, never sniffed as anything else; by name, so not immutable: a mod can change its thumbnail.
+        return c.body(image, 200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=86400' });
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    });
+  }
+  gameExtrasRoutes(app, { modUpdates, moderation, actor, body: (c) => jsonBody(c.req) });
+  // Game settings are written while the server is stopped too, so they come before the online check below.
+  if (gameSettings) {
+    /** Runs a game settings call for a server an Agent runs, mapping its refusals to their status. */
+    const settings = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<object>) => {
+      const id = c.req.param('id')!;
+      if (!gameSettings.has(id)) return c.notFound();
+      try {
+        return c.json(await fn(id, c.get('user')));
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    };
+    app.get('/servers/:id/settings', (c) => settings(c, async (sid) => gameSettings.state(sid) satisfies GameSettingsState));
+    app.put('/servers/:id/settings', (c) =>
+      settings(c, async (sid, user) => (await gameSettings.set(sid, await jsonBody(c.req), actor(user), user.username)) satisfies GameSettingsAnswer),
+    );
+  }
+  // An uploaded save goes to a stopped server too, so before the online check below.
+  if (saveUploads) {
+    app.post('/servers/:id/saves', async (c) => {
+      const id = c.req.param('id');
+      if (!saveUploads.has(id)) return c.notFound();
+      try {
+        const body = (await jsonBody(c.req)) as Partial<SaveUploadRequest>;
+        return c.json(saveUploads.add(id, body.upload, actor(c.get('user'))) satisfies SaveUploadAnswer, 202);
+      } catch (err) {
+        if (err instanceof GameRefused) return c.text(err.message, err.status);
+        throw err;
+      }
+    });
+  }
+  // Actions: the server must be known and online. The body is read first, so each action runs on what was checked.
+  app.post('/servers/:id/*', async (c, next) => {
+    c.set('body', await jsonBody(c.req));
+    const state = hub.get(c.req.param('id'));
+    if (!state) return c.notFound();
+    if (!state.online) return c.text(`${state.name} is offline`, 409);
+    await next();
+  });
+  app.post('/servers/:id/chat', (c) => {
+    const id = c.req.param('id');
+    const user = c.get('user');
+    const message = c.get('body').message;
+    // Linked people appear in game under their name in that server's game, as from Discord; Discord shows the admin's avatar.
+    const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : undefined;
+    const author = stats.linkedPlayer(id, user.id) ?? user.username;
+    if (typeof message !== 'string' || !hub.say(id, author, message, 'dashboard', avatar)) {
+      return c.text('Give a message', 400);
+    }
+    hub.audit(actor(user), 'chat', id, mcText(message, 256));
+    return c.body(null, 204);
+  });
+  const run = async (c: Context<Env>, command: unknown) => {
+    try {
+      if (typeof command !== 'string') throw new Error('empty command');
+      return c.json({ output: await hub.runCommand(c.req.param('id')!, command, actor(c.get('user'))) } satisfies CommandOutput);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message === 'empty command') return c.text('Give a command', 400);
+      if (err instanceof CommandRefused) return c.text(message, 400);
+      return c.text(message, 502); // timed out, or the server went away
+    }
+  };
+  // Output that comes later (spark's profiler link) goes on the event stream.
+  app.post('/servers/:id/command', (c) => run(c, c.get('body').command));
+  // A Mod's `backup start`, or a factorio server's save; the finished/failed notice follows on the event stream.
+  app.post('/servers/:id/backup', async (c) => {
+    try {
+      return c.json({ output: await hub.backup(c.req.param('id'), actor(c.get('user'))) } satisfies CommandOutput);
+    } catch (err) {
+      return c.text((err as Error).message, 502); // timed out, or the server went away
+    }
+  });
+  app.post('/servers/:id/restart', (c) => {
+    const id = c.req.param('id');
+    if (restarts.pending(id)) return c.text('A restart is already scheduled: cancel it first.', 409);
+    try {
+      restarts.schedule(id, c.get('body').minutes as number, actor(c.get('user')), c.get('user').username);
+    } catch (err) {
+      return c.text((err as Error).message, 400); // known, online, nothing pending: only bad minutes are left to throw
+    }
+    return c.body(null, 204);
+  });
+  app.post('/servers/:id/restart/cancel', (c) =>
+    restarts.cancel(c.req.param('id'), actor(c.get('user')), c.get('user').username)
+      ? c.body(null, 204)
+      : c.text('No restart is scheduled.', 409),
+  );
+  // Every hub event, live: first the buffered ones after Last-Event-ID (all of them without it), then new ones.
+  app.get('/events', (c) =>
+    streamSSE(c, async (stream) => {
+      const send = (id: number, e: FeedEvent) => stream.writeSSE({ id: String(id), data: JSON.stringify(e) });
+      const onEvent = (id: number, e: FeedEvent) => void send(id, e);
+      // ponytail: a client that stops reading queues events in memory until its connection drops.
+      for (const [id, e] of live.since(Number(c.req.header('last-event-id')) || 0)) void send(id, e);
+      live.on('event', onEvent);
+      const keepAlive = setInterval(() => void stream.write(': keep-alive\n\n'), KEEP_ALIVE_MS);
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      clearInterval(keepAlive);
+      live.off('event', onEvent);
+    }),
+  );
+  return app;
+}
+
+export type WebApi = ReturnType<typeof webApi>;
+
+/** Serves the API on 127.0.0.1 (0: any free port); resolves once listening. */
+export function serveWebApi(app: WebApi, port: number): Promise<{ port: number; close: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) =>
+      resolve({
+        port: info.port,
+        close: () =>
+          new Promise((done) => {
+            server.close(() => done());
+            (server as Server).closeAllConnections(); // open event streams never end on their own
+          }),
+      }),
+    );
+    server.once('error', reject);
+  });
+}
+
+/** The real Discord OAuth endpoints; the client secret stays in here. */
+export function discordOAuth(clientId: string, clientSecret: string): OAuth {
+  const API = 'https://discord.com/api/v10';
+  const call = (url: string, init: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+  const json = async (what: string, res: Response) => {
+    if (!res.ok) throw new Error(`${what}: HTTP ${res.status}`);
+    return res.json() as Promise<Record<string, any>>;
+  };
+  return {
+    token: async (code, redirectUri) => {
+      const body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      });
+      const res = await call(`${API}/oauth2/token`, { method: 'POST', body });
+      return (await json('token exchange', res)).access_token as string;
+    },
+    member: async (accessToken, guildId) => {
+      const res = await call(`${API}/users/@me/guilds/${guildId}/member`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      if (res.status === 404) return undefined; // not in the guild
+      if (res.status === 401) return undefined; // the token was revoked or expired: no longer known as a member
+      const m = await json('guild member', res);
+      return { id: m.user.id, username: m.user.username, avatar: m.user.avatar ?? null, roles: m.roles };
+    },
+  };
+}

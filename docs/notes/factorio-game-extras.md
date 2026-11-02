@@ -115,7 +115,7 @@ older accounts and LAN names may fall outside the registration rule, and nothing
 
 ### What the hub works out
 
-New method `FactorioCatalog.updates(factorio, mods, gameMods)` in `hub/src/factorio.ts`, added at the end of the
+New method `FactorioCatalog.updates(factorio, mods, gameMods)` in `hub/src/updates/factorio.ts`, added at the end of the
 class next to `check`:
 
 1. `line = lineOf(factorio)`. The names are the installed mods that aren't `GAME_MODS` (so `orrery` counts: it is a
@@ -142,7 +142,7 @@ them, and when one bites it shows as an unresolved dependency, as it does today.
 already cached by the mod browser) and two mod reads. At most one list read, 20 reads for unlisted names and 20
 for candidates per call, and the caches make a second call within 5 minutes free.
 
-### `hub/src/mod-updates.ts`: `ModUpdates`
+### `hub/src/updates/mod-updates.ts`: `ModUpdates`
 
 Hub core, made by `startHub` whenever `GameUpdates` is (game updates on, agents and systemd). For a server an Agent
 runs (`GameUpdates.has`; others 404):
@@ -168,13 +168,13 @@ runs (`GameUpdates.has`; others 404):
   the first 10 updates by name, `{ name, from, to }`, and `count` all of them. It goes on the stream as every notice
   does; the Game tab reads it as "ask again".
 
-`hub/src/db.ts`: a table `mod_update_notices (server_id TEXT PRIMARY KEY, mods TEXT NOT NULL, at INTEGER NOT NULL)`,
+`hub/src/stats/db.ts`: a table `mod_update_notices (server_id TEXT PRIMARY KEY, mods TEXT NOT NULL, at INTEGER NOT NULL)`,
 `mods` a JSON list of at most 500 keys, with `modUpdateNotice(id)` and `setModUpdateNotice(id, mods, at)`. A row for a
 server that left the config is harmless and stays.
 
 ### Route and types
 
-`hub/src/web.ts` gets a block `if (modUpdates)`, kept apart from the game update routes:
+`hub/src/web/web.ts` gets a block `if (modUpdates)`, kept apart from the game update routes:
 
 - `GET /api/servers/:id/game/updates` gives `ModUpdatesState`. 404 for an unknown server or one no Agent runs. A
   read, not audited. It can't cause more portal reads than the caches above allow.
@@ -356,7 +356,7 @@ is tied to it with `aria-describedby`.
 **Asking again**: on open, on Refresh, after each own action (from its answer), and on the server's `join` and
 `leave` events, debounced 2 s. Nothing polls.
 
-### Hub: `hub/src/moderation.ts`, `Moderation`
+### Hub: `hub/src/servers/moderation.ts`, `Moderation`
 
 Hub core, made by `startHub` with `integrations.agents`. For a server an Agent runs (`has`; others 404). It uses
 `Agents` (requests and versions), `ServerHub` (the server's state and players, and `audit`), and nothing else.
@@ -381,7 +381,7 @@ Hub core, made by `startHub` with `integrations.agents`. For a server an Agent r
     the Agent answered or failed: for example `griefer_1 (reason: stealing iron): done`, `bob: not online`,
     `alice: failed: the server isn't running`. A reason in the audit is cut to 200, as sent.
 
-`hub/src/web.ts` gets a block `if (moderation)`, kept apart from the others:
+`hub/src/web/web.ts` gets a block `if (moderation)`, kept apart from the others:
 
 - `GET /api/servers/:id/moderation` gives `ModerationState`. 404 unknown, or no Agent runs it. Not audited.
 - `POST /api/servers/:id/moderation` takes `ModerateRequest` and answers `ModerateAnswer`.
@@ -624,8 +624,8 @@ design above:
 - **A ban, unban, promote or demote** reads the files again until they show it, 3 s at most, before `unconfirmed`, as
   Settings' admins wait for the adminlist. An unreadable `/orrery-status` never confirms a kick.
 - **Rate**: 20 actions in any rolling minute per server, not a token bucket.
-- **Modules**: `hub/src/mod-updates.ts`, `hub/src/moderation.ts`, `hub/src/web-game-extras.ts` (both route blocks),
-  `hub/src/api-game-extras.ts` (re-exported by `api.ts`), `hub/src/factorio-releases.ts` (the catalog's pure release
+- **Modules**: `hub/src/updates/mod-updates.ts`, `hub/src/servers/moderation.ts`, `hub/src/web/web-game-extras.ts` (both route blocks),
+  `hub/src/api-game-extras.ts` (re-exported by `api.ts`), `hub/src/updates/factorio-releases.ts` (the catalog's pure release
   helpers, moved so `ModUpdates` reuses `choose`), `agent/src/moderation.ts`, `web/src/app/servers/mod-updates.ts`,
   `web/src/app/servers/moderation.ts`.
 - **The release-2 open minor** is fixed in the same release: a game update of a server stopped before it that fails

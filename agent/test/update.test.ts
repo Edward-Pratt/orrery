@@ -15,7 +15,7 @@ import { Saves } from '../src/saves.ts';
 import type { UnitState } from '../src/service.ts';
 import type { Status } from '../src/status.ts';
 import { compareGlibc, glibcNeed, Refused, unpack, unxz } from '../src/unpack.ts';
-import { GAME_MODS as HUB_GAME_MODS } from '../../hub/src/factorio.ts';
+import { GAME_MODS as HUB_GAME_MODS } from '../../hub/src/updates/factorio.ts';
 import { ALLOWED_HOSTS, GAME_MODS, checkUpdate, installedOf, labels, Updates, type Http, type InstalledMsg, type UpdatesOptions } from '../src/update.ts';
 import type { Request } from '../src/wire.ts';
 import { eventually, fakeHub } from './fake-hub.ts';

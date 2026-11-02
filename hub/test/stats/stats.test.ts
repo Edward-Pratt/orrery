@@ -1,0 +1,288 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test, type TestContext } from 'node:test';
+import type { Agents, AgentEvents } from '../../src/agents/agents.ts';
+import { Db } from '../../src/stats/db.ts';
+import type { ServerHub, ServerState } from '../../src/servers/servers.ts';
+import { Stats } from '../../src/stats/stats.ts';
+import { yesterday } from '../../src/stats/summary.ts';
+
+process.env.TZ = 'Europe/London'; // the daily summary's day is a local (UK) calendar day
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+const NOW = 100 * DAY;
+
+const gtnh: ServerState = { id: 'gtnh', name: 'GTNH', game: 'minecraft', online: true, hung: false, paused: false, tps: 19.5, players: ['Steve'], dims: [] };
+const space: ServerState = { ...gtnh, id: 'space', name: 'Space Age', game: 'factorio', tps: 60, players: ['engineer'] };
+
+function setup(folders: { dir?: string; backupDir?: string } = {}) {
+  const db = new Db(':memory:');
+  const hub = { get: (id: string) => ({ gtnh, space })[id] } as unknown as Pick<ServerHub, 'get'>;
+  return { db, stats: new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10, ...folders }]) };
+}
+
+async function tempDir(t: TestContext): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'stats-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+async function backup(dir: string, name: string, mtimeMs: number, bytes: number): Promise<void> {
+  await writeFile(join(dir, name), 'x'.repeat(bytes));
+  await utimes(join(dir, name), mtimeMs / 1000, mtimeMs / 1000);
+}
+
+test('status gives the live state and 24 h / 7 d uptime', () => {
+  const { db, stats } = setup();
+  db.record('gtnh', 'up', 'started', NOW - 8 * DAY); // before both windows: counts from each window's start
+  db.record('gtnh', 'down', 'crashed', NOW - 2 * DAY);
+  db.record('gtnh', 'up', 'started', NOW - 12 * HOUR);
+  const s = stats.status('gtnh', NOW);
+  assert.deepEqual(s?.state, gtnh);
+  assert.equal(s?.uptimeDay, 0.5);
+  assert.equal(s?.uptimeWeek, (5 * DAY + 12 * HOUR) / (7 * DAY));
+});
+
+test('status with no recorded history has unknown uptime, not zero', () => {
+  const { stats } = setup();
+  const s = stats.status('gtnh', NOW);
+  assert.equal(s?.uptimeDay, null);
+  assert.equal(s?.uptimeWeek, null);
+});
+
+test('tps gives last-hour samples and hour / day averages and minimums', () => {
+  const { db, stats } = setup();
+  db.recordTps('gtnh', NOW - 2 * HOUR, 5, null, null); // day only
+  db.recordTps('gtnh', NOW - HOUR, 10, null, null); // exactly at the hour's start: in the hour
+  db.recordTps('gtnh', NOW - MIN, 20, null, null);
+  db.recordTps('gtnh', NOW - DAY - MIN, 1, null, null); // outside both windows
+  const t = stats.tps('gtnh', NOW);
+  assert.deepEqual(t?.state, gtnh);
+  assert.deepEqual(t?.lastHour, [
+    { ts: NOW - HOUR, tps: 10 },
+    { ts: NOW - MIN, tps: 20 },
+  ]);
+  assert.deepEqual(t?.hour, { avg: 15, min: 10 });
+  assert.deepEqual(t?.day, { avg: 35 / 3, min: 5 });
+});
+
+test('tps without samples has no averages', () => {
+  const { stats } = setup();
+  const t = stats.tps('gtnh', NOW);
+  assert.deepEqual(t?.lastHour, []);
+  assert.equal(t?.hour, null);
+  assert.equal(t?.day, null);
+});
+
+test('an unknown server is not found, not zeros', () => {
+  const { stats } = setup();
+  assert.equal(stats.status('nope', NOW), undefined);
+  assert.equal(stats.tps('nope', NOW), undefined);
+  assert.equal(stats.playtime('nope', { player: 'Steve' }, NOW), undefined);
+  assert.equal(stats.top('nope', 'week', NOW), undefined);
+});
+
+test('playtime by name gives total, last 7 days and last seen; names match case-insensitively', () => {
+  const { db, stats } = setup();
+  db.openSession('gtnh', 'Steve', NOW - 10 * DAY);
+  db.closeSession('gtnh', 'Steve', NOW - 10 * DAY + 2 * HOUR);
+  db.openSession('gtnh', 'Steve', NOW - 7 * DAY - HOUR); // straddles the week's start: only its last hour counts
+  db.closeSession('gtnh', 'Steve', NOW - 7 * DAY + HOUR);
+  assert.deepEqual(stats.playtime('gtnh', { player: 'steve' }, NOW), {
+    found: true,
+    player: 'steve',
+    totalMs: 4 * HOUR,
+    weekMs: HOUR,
+    lastSeen: NOW - 7 * DAY + HOUR,
+  });
+});
+
+test('playtime by Discord user uses the linked name, and says when there is none or no input', () => {
+  const { db, stats } = setup();
+  db.link('123', 'Steve', 'uuid', NOW);
+  db.openSession('gtnh', 'Steve', NOW - HOUR);
+  assert.deepEqual(stats.playtime('gtnh', { discordId: '123' }, NOW), {
+    found: true,
+    player: 'Steve',
+    totalMs: HOUR,
+    weekMs: HOUR,
+    lastSeen: { online: true },
+  });
+  assert.deepEqual(stats.playtime('gtnh', { discordId: '999' }, NOW), { found: false, reason: 'notLinked' });
+  assert.deepEqual(stats.playtime('gtnh', {}, NOW), { found: false, reason: 'noInput' });
+  assert.equal(stats.linkedPlayer('gtnh', '123'), 'Steve');
+  assert.equal(stats.linkedPlayer('gtnh', '999'), undefined);
+});
+
+test("a linked Discord user's name is the one in the server's game, for chat and /playtime alike", () => {
+  const { db, stats } = setup();
+  db.link('123', 'Steve', 'uuid', NOW);
+  db.linkFactorio('123', 'engineer', NOW);
+  db.linkFactorio('456', 'pilot', NOW); // a Factorio link only
+  db.openSession('space', 'engineer', NOW - HOUR);
+  assert.equal(stats.linkedPlayer('gtnh', '123'), 'Steve');
+  assert.equal(stats.linkedPlayer('space', '123'), 'engineer');
+  assert.equal(stats.linkedPlayer('gtnh', '456'), undefined);
+  assert.equal(stats.linkedPlayer('space', '456'), 'pilot');
+  assert.equal(stats.linkedPlayer('nope', '123'), undefined);
+  assert.deepEqual(stats.playtime('space', { discordId: '123' }, NOW), {
+    found: true,
+    player: 'engineer',
+    totalMs: HOUR,
+    weekMs: HOUR,
+    lastSeen: { online: true },
+  });
+});
+
+test('top covers the last 24 hours, the last 7 days or all time', () => {
+  const { db, stats } = setup();
+  const play = (player: string, start: number, ms: number) => {
+    db.openSession('gtnh', player, start);
+    db.closeSession('gtnh', player, start + ms);
+  };
+  play('Old', NOW - 30 * DAY, 10 * HOUR);
+  play('Week', NOW - 3 * DAY, 5 * HOUR);
+  play('Day', NOW - 2 * HOUR, HOUR);
+  assert.deepEqual(stats.top('gtnh', 'day', NOW), [{ player: 'Day', ms: HOUR }]);
+  assert.deepEqual(stats.top('gtnh', 'week', NOW), [
+    { player: 'Week', ms: 5 * HOUR },
+    { player: 'Day', ms: HOUR },
+  ]);
+  assert.deepEqual(
+    stats.top('gtnh', 'all', NOW)?.map((r) => r.player),
+    ['Old', 'Week', 'Day'],
+  );
+});
+
+test('backups: none configured is its own answer, not an empty list', async () => {
+  const { stats } = setup();
+  assert.deepEqual(await stats.backups('gtnh'), { configured: false });
+  assert.equal(await stats.backups('nope'), undefined);
+});
+
+test('backups lists the folder newest first, with free space', async (t) => {
+  const dir = await tempDir(t);
+  const { stats } = setup({ backupDir: dir });
+  const empty = await stats.backups('gtnh');
+  assert.deepEqual(empty?.configured && empty.backups, []);
+  await backup(dir, '2026-09-23-06-00-00.zip', NOW - DAY, 100);
+  await backup(dir, '2026-09-24-06-00-00.zip', NOW, 200);
+  const b = await stats.backups('gtnh');
+  assert.ok(b?.configured);
+  assert.deepEqual(
+    b.backups.map((x) => [x.name, x.size]),
+    [
+      ['2026-09-24-06-00-00.zip', 200],
+      ['2026-09-23-06-00-00.zip', 100],
+    ],
+  );
+  assert.equal(typeof b.free, 'number');
+  assert.equal(b.growth, 100);
+});
+
+test("an Agent's server's Backups are the saves it last pushed, newest first with their kind, and its free space", async () => {
+  const db = new Db(':memory:');
+  const hub = { get: (id: string) => ({ gtnh, space })[id] } as unknown as Pick<ServerHub, 'get'>;
+  const events = new EventEmitter<AgentEvents>();
+  const agents = Object.assign(events, {
+    list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: true, version: null }],
+    request: () => Promise.reject(new Error('not asked')),
+  }) as unknown as Pick<Agents, 'list' | 'request' | 'on'>;
+  const stats = new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10 }, { id: 'space', backupMinFreeGB: 5 }], agents);
+  // Before its first push: a Backup source with nothing known yet.
+  assert.deepEqual(await stats.backups('space'), { configured: true, backups: [], free: null, growth: null, minFree: 5 * 1024 ** 3 });
+  const save = (name: string, mtime: number, size: number, kind: 'named' | 'auto' | 'world', current = false) => ({ name, size, mtime, kind, current });
+  events.emit('saves', 'vm', {
+    type: 'saves',
+    saves: [save('_autosave1.zip', NOW - HOUR, 300, 'auto'), save('world.zip', NOW - 2 * DAY, 100, 'world', true), save('orrery-x.zip', NOW, 400, 'named')],
+    free: 20 * 1024 ** 3,
+  });
+  events.emit('saves', 'other', { type: 'saves', saves: [], free: 0 }); // no such Agent: ignored
+  assert.deepEqual(await stats.backups('space'), {
+    configured: true,
+    backups: [
+      { name: 'orrery-x.zip', size: 400, mtimeMs: NOW, kind: 'named', current: false },
+      { name: '_autosave1.zip', size: 300, mtimeMs: NOW - HOUR, kind: 'auto', current: false },
+      { name: 'world.zip', size: 100, mtimeMs: NOW - 2 * DAY, kind: 'world', current: true },
+    ],
+    free: 20 * 1024 ** 3,
+    growth: 150,
+    minFree: 5 * 1024 ** 3,
+  });
+  assert.equal(stats.backupSource('gtnh'), undefined); // neither a folder nor an Agent
+  assert.deepEqual(await stats.backups('gtnh'), { configured: false });
+});
+
+test('audit reads the log newest first, all servers or one', () => {
+  const { db, stats } = setup();
+  db.audit({ actor: 'discord:a (1)', action: 'command', target: 'gtnh', details: 'list' }, 1);
+  db.audit({ actor: 'hub:daily', action: 'restart', target: 'other', details: '' }, 2);
+  assert.deepEqual(stats.audit(10).entries.map((e) => e.target), ['other', 'gtnh']);
+  assert.deepEqual(stats.audit(10, { target: 'gtnh' }).entries.map((e) => e.ts), [1]);
+  // Older entries remain only while the batch was full.
+  assert.deepEqual(stats.audit(1).older, true);
+  assert.deepEqual(stats.audit(2).older, false);
+});
+
+test('backups in a folder that has gone away: none listed, free space unknown', async () => {
+  const { stats } = setup({ backupDir: '/nonexistent/stats-test' });
+  assert.deepEqual(await stats.backups('gtnh'), { configured: true, backups: [], free: null, growth: null, minFree: 10 * 1024 ** 3 });
+});
+
+test('crash logs come from the server folder; none without one', async (t) => {
+  const dir = await tempDir(t);
+  await writeFile(join(dir, 'hs_err_pid42.log'), 'boom');
+  assert.deepEqual(await setup({ dir }).stats.crashLogs('gtnh', 0), [join(dir, 'hs_err_pid42.log')]);
+  assert.deepEqual(await setup().stats.crashLogs('gtnh', 0), []);
+});
+
+const SUMMARY_AT = Date.UTC(2026, 8, 24, 8, 0); // 09:00 BST on 24 Sep: yesterday = 23 Sep (local)
+
+test('the daily summary gathers uptime, peak, unique players, playtime, top 3, starts and crashes', async () => {
+  const { db, stats } = setup();
+  const { from } = yesterday(SUMMARY_AT);
+  db.record('gtnh', 'up', 'started', from);
+  db.record('gtnh', 'down', 'crashed', from + 12 * HOUR);
+  db.record('gtnh', 'up', 'started', from + 18 * HOUR);
+  for (const [p, start, hours] of [['A', 1, 3], ['B', 2, 1], ['C', 3, 2], ['D', 4, 0.5]] as const) {
+    db.openSession('gtnh', p, from + start * HOUR);
+    db.closeSession('gtnh', p, from + (start + hours) * HOUR);
+  }
+  db.recordPeak('gtnh', '2026-09-23', 3);
+  const s = await stats.summary('gtnh', SUMMARY_AT);
+  assert.ok(s);
+  assert.equal(s.day, '2026-09-23');
+  assert.equal(s.uptime, 18 / 24);
+  assert.equal(s.peak, 3);
+  assert.equal(s.unique, 4);
+  assert.equal(s.totalMs, 6.5 * HOUR);
+  assert.deepEqual(s.top.map((p) => p.player), ['A', 'C', 'B']);
+  assert.equal(s.starts, 2);
+  assert.equal(s.crashes, 1);
+  assert.equal(s.backups, undefined); // no Backup folder: no Backup line
+  assert.equal(await stats.summary('nope', SUMMARY_AT), undefined);
+});
+
+test('the daily summary covers a 25-hour DST day', async () => {
+  const { db, stats } = setup();
+  const at = Date.UTC(2026, 9, 26, 9, 0); // 26 Oct; 25 Oct had the clocks go back
+  const { from } = yesterday(at);
+  db.record('gtnh', 'up', 'started', from);
+  db.record('gtnh', 'down', 'stopped', from + 20 * HOUR);
+  const s = await stats.summary('gtnh', at);
+  assert.equal(s?.day, '2026-10-25');
+  assert.equal(s?.uptime, 20 / 25);
+});
+
+test('the daily summary has a Backup line only with a Backup folder', async (t) => {
+  const dir = await tempDir(t);
+  await backup(dir, '2026-09-23-06-00-00.zip', SUMMARY_AT - HOUR, 100);
+  const s = await setup({ backupDir: dir }).stats.summary('gtnh', SUMMARY_AT);
+  assert.equal(s?.backups?.count, 1);
+  assert.equal(s?.backups?.total, 100);
+});

@@ -54,15 +54,15 @@ Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `m
 - **Minecraft integration** = a mod port and a token per server. Mods connect **out** to the hub (TCP
   `127.0.0.1:25580`, newline-delimited JSON, protocol v1). Off: no port is opened. The socket stays in `ServerHub`.
 - **Agents integration** = the Agent port (`integrations.agents.listen`, the hub's tailnet address) and an Agent per
-  remote Host, each running one factorio server. Agents dial **out** to it; `Agents` (`hub/src/agents.ts`) checks the
+  remote Host, each running one factorio server. Agents dial **out** to it; `Agents` (`hub/src/agents/agents.ts`) checks the
   peer address before reading a byte and hands each Agent's game connection to `ServerHub`. Off: no Agent port.
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
-  API of `ServerHub` (`hub/src/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats.ts`), `LiveFeed`
-  (`hub/src/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
+  API of `ServerHub` (`hub/src/servers/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats/stats.ts`), `LiveFeed`
+  (`hub/src/stats/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
   (`Hosts`, `Agents`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
-  for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web.ts`). Same
+  for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web/web.ts`). Same
   frontend rule as Discord, plus its own session rows in `Db`. Off: no HTTP port and no `DISCORD_CLIENT_SECRET` needed.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge. The Factorio mod is the same, and talks only to its
@@ -124,7 +124,7 @@ its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, teste
 (Releases): a hub or dashboard deploy runs its `orrery-deploy@` / `orrery-deploy-web@` unit, a Mod deploy puts the jar in
 place at the end of the server's countdown, and an Agent deploy (a row per Host) sends its Agent `deploy`, which starts
 `orrery-agent-deploy@<tag>` on that Host. Only `hub-v2.6.0` / `web-v0.5.0` / `agent-v1.1.0` and later deploy (`FLOOR` in
-`hub/src/deploys.ts`; an Agent running a release below `agent-v1.1.0` is refused too, as it can't deploy itself). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
+`hub/src/updates/deploys.ts`; an Agent running a release below `agent-v1.1.0` is refused too, as it can't deploy itself). By hand still: units, polkit rules and the `/usr/local/lib/orrery` copies of `deploy-web.sh`,
 `install-web.sh` and `add-server.sh` when a release changes them, and `install-web.sh` for a first install or an archive.
 On an Agent's Host, an Agent deploy changes only the Agent's code: a release that changes `orrery-agent.service`,
 `orrery-agent-deploy@.service`, `60-orrery-agent.rules`, `factorio.container` or `deploy-agent.sh` still needs the

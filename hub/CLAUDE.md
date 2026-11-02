@@ -18,22 +18,13 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]), env D
 
 ## Modules
 
-Each file in `src/` starts with a comment that says its job and its contract: what it owns, what it checks and what it
-never does. That comment is the file's documentation, so read it before changing the file, and change it with the
-file. `src/start.ts` wires them all from config, so it is the map. By area:
-
-- Wire and types: `protocol.ts`, `types.ts`, `api.ts`, `api-game-extras.ts`.
-- Connections and frontends: `servers.ts` (the Mod port and game connections), `agents.ts` (the Agent port),
-  `discord.ts` and `format.ts` (the bot), `web.ts` and `web-game-extras.ts` (the HTTP API).
-- Hosts, services and checks: `host.ts`, `services.ts`, `checks.ts`, `health.ts`.
-- A server's life: `restarts.ts`, `restore.ts`, `backups.ts`, `logs.ts`, `crashlogs.ts`, `game-settings.ts`,
-  `moderation.ts`.
-- Packs and the library: `packs.ts`, `library.ts`, `uploads.ts`, `save-uploads.ts`.
-- Game updates and the portal: `game-updates.ts`, `mod-updates.ts`, `factorio.ts`, `factorio-releases.ts`.
-- Deploys: `deploys.ts`.
-- What the hub remembers and tells: `db.ts`, `stats.ts`, `playtime.ts`, `lag.ts`, `quests.ts`, `links.ts`,
-  `summary.ts`, `daily.ts`, `units.ts`, `live.ts`.
-- Config and start-up: `config.ts`, `check-config.ts`, `start.ts`, `index.ts`.
+`src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts`, `check-config.ts`), the contract the agent and the
+dashboard import (`types.ts`, `protocol.ts`, `api.ts`, `api-game-extras.ts`) and two small helpers (`daily.ts`,
+`units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
+what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
+`stats/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
+change it with the file. `start.ts` wires them all from config, so it is the map. Tests mirror the folders under
+`test/`; `test/fake-mod.ts` and `test/fake-agent.ts` serve them all.
 
 ## Dependencies
 

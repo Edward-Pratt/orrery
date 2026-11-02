@@ -14,10 +14,10 @@ export type PortalFetch = (url: string, init: { redirect: 'follow' | 'manual'; s
 /** The owner's factorio.com account (`FACTORIO_USERNAME`, `FACTORIO_TOKEN`): only for mod download links. */
 export type FactorioAccount = { username: string; token: string };
 
-/** Why a game update action wasn't done: 400 (bad input), 404 (no such thing), 409 (not now) or 502 (factorio.com or the portal failed). */
+/** Why a game action wasn't done: 400 (bad input), 404 (no such thing), 409 (not now), 429 (too many) or 502 (factorio.com, the portal or an Agent failed). */
 export class GameRefused extends Error {
-  readonly status: 400 | 404 | 409 | 502;
-  constructor(status: 400 | 404 | 409 | 502, message: string) {
+  readonly status: 400 | 404 | 409 | 429 | 502;
+  constructor(status: 400 | 404 | 409 | 429 | 502, message: string) {
     super(message);
     this.status = status;
   }

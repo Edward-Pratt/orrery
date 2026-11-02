@@ -398,6 +398,11 @@ export class GameSettings {
     return this.#state.startedWith?.model?.fields.auto_pause ?? null;
   }
 
+  /** `require_user_verification` as the running server started with it; null when that isn't known. */
+  get verification(): boolean | null {
+    return this.#state.startedWith?.model?.fields.require_user_verification ?? null;
+  }
+
   /** The files read now, as the `settings` push. */
   async report(): Promise<GameSettingsReport> {
     const rolledBack = this.#state.rolledBack; // as it was before the files were read: never newer than they are

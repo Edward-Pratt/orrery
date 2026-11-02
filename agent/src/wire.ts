@@ -26,6 +26,9 @@ export const LIMITS = {
   /** Game settings: the server's name, the admins, the `pending` (and `applied`) keys, the `extra` keys. */
   serverName: 100,
   admins: 100,
+  /** Moderation: the bans in a `playerLists` answer, and a ban's (or a `moderate`'s) reason in characters. */
+  bans: 500,
+  reason: 200,
   pending: 16,
   extra: 32,
   text: 256,
@@ -234,6 +237,14 @@ const AGENT: Schemas<HubAgentMsg> = {
   saveChunk: { id, upload: uploadId, offset: int(0, LIMITS.saveBytes), data: base64 },
   saveUploadEnd: { id, upload: uploadId },
   saveUploadCancel: { id, upload: uploadId },
+  playerLists: { id },
+  // A player's name by the admin rule; a reason by its length only (`moderation.ts` cleans it again, and uses one only with a kick or a ban).
+  moderate: {
+    id,
+    action: oneOf('kick', 'ban', 'unban', 'promote', 'demote'),
+    player: matching(GAME_SETTINGS.admin),
+    reason: (v) => (v === undefined ? undefined : str(LIMITS.reason)(v)),
+  },
 };
 
 /** The hub's messages on the game connection that the agent carries out in game, as the mod's RCON commands. */

@@ -5,6 +5,7 @@ import { Checks } from './checks.ts';
 import { Deploys, type DeploysOptions, type GitHub } from './deploys.ts';
 import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './factorio.ts';
 import { GameSettings } from './game-settings.ts';
+import { Moderation } from './moderation.ts';
 import { ModUpdates, type ModUpdatesOptions } from './mod-updates.ts';
 import { GameUpdates, type GameUpdatesOptions } from './game-updates.ts';
 import { Hosts, type HostReaders } from './host.ts';
@@ -223,6 +224,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   gameUpdates?.start();
   const modUpdates = gameUpdates && new ModUpdates({ hub, db, catalog, gameUpdates, servers: config.servers.map((s) => s.id) }, deps.modUpdates);
   modUpdates?.start();
+  const moderation = agents && new Moderation({ hub, agents, servers: config.servers });
   // Game settings, with an Agent's server: listening before any Agent can connect.
   const gameSettings =
     agents &&
@@ -339,7 +341,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const app =
     web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
+      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
       : undefined;
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

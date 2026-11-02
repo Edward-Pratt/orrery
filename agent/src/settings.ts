@@ -8,15 +8,13 @@ import { constants, lstat, mkdir, open, readdir, rename, rm, unlink, writeFile }
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { GameSettingsFields, GameSettingsReport } from '../../hub/src/types.ts';
-import { openPlain, tail } from './files.ts';
+import { readIn, tail, within } from './files.ts';
 import { StartGate } from './gate.ts';
 import type { UnitState } from './service.ts';
 import { GAME_SETTINGS, LIMITS, cut, printable, settingsFieldOk, type Request } from './wire.ts';
 
 export const SETTINGS_FILE = 'server-settings.json';
 export const ADMINS_FILE = 'server-adminlist.json';
-/** Far over any real file of either (a few KiB); a bigger one is not read. */
-const FILE_MAX = 1024 * 1024;
 
 /** The keys the dashboard changes, in the file's order (the password and the admins aside). */
 export const KEYS = [
@@ -277,30 +275,6 @@ function readState(file: string): State {
   if (Array.isArray(raw.failedLive)) state.failedLive = raw.failedLive.filter((k): k is string => typeof k === 'string' && ORDER.includes(k));
   if (typeof raw.rolledBack === 'string') state.rolledBack = cut(printable(raw.rolledBack), LIMITS.detail);
   return state;
-}
-
-/** `fn` on `dir` opened once (`O_DIRECTORY`, `O_NOFOLLOW`): a folder the container swapped for a link is refused. */
-async function within<T>(dir: string, fn: (base: string) => Promise<T>): Promise<T> {
-  const fh = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try {
-    return await fn(`/proc/self/fd/${fh.fd}`);
-  } finally {
-    await fh.close();
-  }
-}
-
-/** A plain file's text in an opened folder (`files.ts`'s `openPlain`): null when missing or not a regular file; throws over 1 MiB. */
-async function readIn(base: string, name: string): Promise<string | null> {
-  const file = await openPlain(`${base}/${name}`);
-  if (!file) return null;
-  try {
-    if (file.st.size > FILE_MAX) throw new Error(`${name} is over 1 MiB`);
-    const buf = Buffer.alloc(file.st.size);
-    const { bytesRead } = await file.fh.read(buf, 0, buf.length, 0);
-    return buf.subarray(0, bytesRead).toString('utf8');
-  } finally {
-    await file.fh.close();
-  }
 }
 
 const PARTIAL = /^\.server-(settings|adminlist)\.json\.[0-9a-f]{12}\.partial$/;

@@ -1,3 +1,4 @@
+// `HostSampler` and the `/proc` readers: a real sample the hub accepts.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseAgentLine } from '../../hub/src/protocol.ts';

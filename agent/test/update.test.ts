@@ -1,3 +1,43 @@
+// modular-exempt: every scenario drives the one fake Host that `world` builds; split it on touch, not for a header move.
+//
+// With `fake-release.ts` (`tar`, a tar builder with GNU long names and pax headers; `fakeElf`, an ELF whose version
+// needs ask for given `GLIBC_2.x`; `releaseTar`, a headless tarball of them): a Host in a temp folder, a fake unit, a
+// fake Factorio answering `/orrery-status` from the files while the unit is active (or not, for a `broken` version),
+// real `Saves`, and factorio.com and the portal as injected routes (no network). A version of `../../x`, a mod name
+// with `..`, an http URL, an unlisted host (and a look-alike, a port, a user, no `orrery`) each refused, with no query
+// string in the error, and a redirect off the list not followed; a sha256 that differs from factorio.com's list or a
+// sha1 from the portal's fails prepare before any download, a download that doesn't match after it; a fake ELF needing
+// glibc 2.41 fails prepare, never a release (and `glibcNeed` on 64-bit LE and 32-bit BE files); a full update while
+// the server runs (pre-update save, the hub's stop, swap, gate; mod-settings.dat as Factorio left it at the stop;
+// mods.prev; the newest 3 releases kept; every message the hub's `parseAgentLine` takes); a gate failure rolled back
+// to the old release, mods.prev with its mod-settings.dat and the world as the stop saved it copied as the newest (the
+// swap's copy, not the older pre-update save); on a stopped server, the world as it was before the swap, not as the
+// new release wrote it at the rollback's stop; a copy for the rollback that fails (`keep`, a full disk) ending the
+// update `failed before swap` with nothing moved and the pre-update save held until the end; a rollback whose
+// `update.json` writes fail still rolled back and started, and a swap whose own write fails ending `failed before
+// swap` with nothing moved; one that fails before flipping back keeping the release it came from; a restart mid-swap
+// (the agent dying as it starts the new Factorio) rolled back from `state/update.json`, a restart in the stop step
+// leaving a server stopped before the update stopped (and starting one the hub stopped), and an `updateDone` kept
+// until a connect, and while its write fails (`update.json` kept, sent again on each connect, a new `update` refused
+// meanwhile); a planted `/srv/factorio/update.json` (and `/srv/factorio/state/update.json`) ignored, a malformed own
+// one removed; a failing download (an HTTP error naming the signed link, a 403 after a redirect) with no query string
+// in the steps, `agent.log` or the journal; archive entries escaping the target (`..`, absolute, symlinks out, a chain
+// of them, writes below a symlink, hard links out, devices, FIFOs, pax paths) refused, and so is a release with one;
+// `updateCancel` during a download and while waiting for the stop cleaning both `.incoming` folders and `mods.next`,
+// refused after the swap, and one after `updateResume` (or while the hub's stop still runs, as after a hub restart)
+// never stopping the unit and starting the one stopped for it once stopped, a server stopped before the update left
+// stopped (also when it fails after `updateResume`, before the swap: `failed in staging`, never started); the stop
+// step only ever `waiting`; `updateResume` and `updateCancel` through `HubClient` with request ids of their own (with
+// none running: `ok: false`); an update on a stopped server keeping a copy of the newest save; an update refused while
+// a deploy runs (`idle`), nothing written; the game's own mods kept on or off as the current `mod-list.json` has them
+// (space-age off stays off), one new in the release enabled and expected by the gate, `installed` without the one off;
+// a current `mod-list.json` that isn't Factorio's list (or is a symlink) failing prepare with nothing changed;
+// `from`/`to` against the hub's `GAME_MODS` and docs/protocol.md's example, and from a kept `installed` after a
+// restart with the server stopped; a stalled answer and a stalled body ("No data from …") and a `Content-Length` over
+// the cap; the step throttle, the latest step on connect and a running step again after the beat time (never `stop`
+// `waiting`); a rollback with the hub unreachable `rolled back` (the forward gate still needing the game connection),
+// and a recovery one after a restart; `HubClient`'s `installed` (kept in `installed.json` across a restart, a bad file
+// never sent) and `send`; a `.tar.xz` through the Host's `xz` (skipped without one).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

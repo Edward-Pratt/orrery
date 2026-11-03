@@ -1,3 +1,6 @@
+// Every constant against the hub's, the line cap, `url` and `GAME_SETTINGS` included; an update's URLs taken up to
+// 2048 characters, refused at 2049; a `settingsSet`'s every field at and past its rule, its password left out, null or
+// set; `printable`, also in command output and log lines.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as hub from '../../hub/src/protocol.ts';

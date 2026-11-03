@@ -1,3 +1,6 @@
+// `parseStatus`, `readAutoPause` and `StatusPoller`: UPS, paused from players, `tick_paused` and Δtick, untrusted
+// replies (a name with a control character dropped), `auto_pause` from symlinks and FIFOs, the poller's `status`,
+// `stalled` and `down`.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';

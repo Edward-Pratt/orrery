@@ -1,3 +1,6 @@
+// `Rcon` against the fake RCON server (`fakeRcon` in `fake-rcon.ts`), and `RconSession`: one connection, in order, a
+// new one after a timeout or a closed server; the commands queued behind a timed-out one run once on the new
+// connection, the timed-out one never sent again.
 import assert from 'node:assert/strict';
 import { createServer, type AddressInfo } from 'node:net';
 import { test } from 'node:test';

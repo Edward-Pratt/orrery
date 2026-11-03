@@ -25,7 +25,7 @@ file (and `image.json`, read from beside it) and `ORRERY_AGENT_ROOT` the agent's
 `import type` only: a release tarball is `agent/` alone, so no runtime import may leave `agent/`. `src/wire.ts` holds
 the agent's copies of `PROTOCOL_VERSION` and `LIMITS`; `test/wire.test.ts` checks them against
 `hub/src/protocol.ts`, so change them together. `src/update.ts`'s `GAME_MODS` (the game's own mods, for an update's
-`to`) is a copy of `hub/src/updates/factorio.ts`'s, checked by `test/update.test.ts`. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
+`to`) is a copy of `hub/src/updates/factorio.ts`'s, checked by `test/update-messages.test.ts`. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
 set on 2026-10-31 while the owner was away: `docs/adr/0004`), its `\n` included, both ways.
 
 The release is `agent-v` + `package.json`'s `version`, which stays `0.0.0` in the repo (like `factorio/info.json`):
@@ -116,45 +116,6 @@ commands answered in order; `writeSize` cuts each reply packet into small writes
 Agent port: a TCP server that parses every line with the hub's own `parseAgentLine` / `parseModLine` (a line the
 real hub would refuse lands in `invalid`, which tests assert empty) and answers each first line with a welcome, a
 reject, a reset or nothing; `eventually` polls a condition.
-
-- `test/status.test.ts` (UPS, paused from players, `tick_paused` and Δtick, untrusted replies (a name with a control character dropped), `auto_pause` from
-  symlinks and FIFOs, the poller's `status`, `stalled` and `down`), `test/host.test.ts` (a real sample the hub accepts),
-  `test/config.test.ts`, `test/wire.test.ts` (every constant against the 
-hub's, the line cap, `url` and `GAME_SETTINGS` included; an update's URLs taken up
-  to 2048 characters, refused at 2049; a `settingsSet`'s every field at and past its rule, its password left out, null or set; `printable`, also in command output and log lines);
- `test/rcon.test.ts` also covers
-  `RconSession` (one connection, in order, a new one after a timeout or a closed server; the commands queued behind a
-  timed-out one run once on the new connection, the timed-out one never sent again).
-- `test/update.test.ts`, with `test/fake-release.ts` (`tar`, a tar builder with GNU long names and pax headers;
-  `fakeElf`, an ELF whose version needs ask for given `GLIBC_2.x`; `releaseTar`, a headless tarball of them): a Host
-  in a temp folder, a fake unit, a fake Factorio answering `/orrery-status` from the files while the unit is active
-  (or not, for a `broken` version), real `Saves`, and factorio.com and the portal as injected routes (no network). A
-  version of `../../x`, a mod name with `..`, an http URL, an unlisted host (and a look-alike, a port, a user, no
-  `orrery`) each refused, with no query string in the error, and a redirect off the list not followed; a sha256 that
-  differs from factorio.com's list or a sha1 from the portal's fails prepare before any download, a download that
-  doesn't match after it; a fake ELF needing glibc 2.41 fails prepare, never a release (and `glibcNeed` on 64-bit LE
-  and 32-bit BE files); a full update while the server runs (pre-update save, the hub's stop, swap, gate; mod-settings.dat
-  as Factorio left it at the stop; mods.prev; the newest 3 releases kept; every message the hub's `parseAgentLine`
-  takes); a gate failure rolled back to the old release, mods.prev with its mod-settings.dat and the world as the stop saved
-  it copied as the newest (the swap's copy, not the older pre-update save); on a stopped server, the world as it was
-  before the swap, not as the new release wrote it at the rollback's stop; a copy for the rollback that fails (`keep`, a full disk) ending the update `failed before swap` with nothing moved and the pre-update save held until the end; a rollback whose `update.json` writes fail
-  still rolled back and started, and a swap whose own write fails ending `failed before swap` with nothing moved; one that fails before flipping back keeping the release it came from; a restart mid-swap (the agent dying as it starts the new Factorio) rolled back from
-  `state/update.json`, a restart in the stop step leaving a server stopped before the update stopped (and starting one the hub stopped), and an `updateDone` kept until a connect, and while its write fails (`update.json` kept, sent again
-  on each connect, a new `update` refused meanwhile); a planted `/srv/factorio/update.json` (and
-  `/srv/factorio/state/update.json`) ignored, a malformed own one removed; a failing download (an HTTP error naming the
-  signed link, a 403 after a redirect) with no query string in the steps, `agent.log` or the journal; archive entries
-  escaping the target (`..`, absolute, symlinks out, a chain of them, writes below a symlink, hard links out, devices,
-  FIFOs, pax paths) refused, and so is a release with one; `updateCancel` during a download and while waiting for the
-  stop cleaning both `.incoming` folders and `mods.next`, refused after the swap, and one after `updateResume` (or while
-  the hub's stop still runs, as after a hub restart) never stopping the unit and starting the one stopped for it once
-  stopped, a server stopped before the update left stopped (also when it fails after `updateResume`, before the swap: `failed in staging`, never started); the stop step only ever `waiting`; `updateResume` and `updateCancel` through `HubClient`
-  with request ids of their own (with none running: `ok: false`); an update on a stopped server keeping a copy of the newest save; an update refused while a deploy runs (`idle`), nothing written;
-  the game's own mods kept on or off as the current `mod-list.json` has them (space-age off stays off), one new in the release enabled and expected by the gate, `installed` without the one off; a current `mod-list.json` that isn't Factorio's list (or is a symlink) failing prepare with nothing changed; `from`/`to` against the hub's `GAME_MODS` and docs/protocol.md's example, and from a kept `installed` after a restart
-  with the server stopped; a stalled answer and a stalled body ("No data from …") and a `Content-Length` over the cap;
-  the step throttle, the latest step on connect and a running step again after the beat time (never `stop` `waiting`);
-  a rollback with the hub unreachable `rolled back` (the forward gate still needing the game connection), and a
-  recovery one after a restart; `HubClient`'s `installed` (kept in `installed.json` across a restart, a bad file never
-  sent) and `send`; a `.tar.xz` through the Host's `xz` (skipped without one).
 
 Keep timing-sensitive tests on small timeouts, not sleeps of seconds; stop every poller and client in `t.after`.
 Times are relative to `Date.now()` (or a fake clock), never a fixed date, so no test turns red on a later day. A

@@ -36,19 +36,19 @@ function publicServer(s: ServerState, stats: Stats, now: number): PublicServer {
   };
 }
 
-/** Registers the reads without a session on `app`. */
-export function publicRoutes(app: Hono<Env>, { environment, status, hub, stats }: PublicDeps): void {
+/** Registers the reads without a session on `app`; `now` is the clock the 15 s keep is measured on. */
+export function publicRoutes(app: Hono<Env>, { environment, status, hub, stats }: PublicDeps, now = Date.now): void {
   app.get('/environment', (c) => c.json({ environment } satisfies EnvironmentInfo));
   if (!status) return;
   let kept: { at: number; answer: PublicStatus } | undefined;
   app.get('/public/status', (c) => {
-    const now = Date.now();
-    if (!kept || now - kept.at >= STATUS_MS) {
+    const at = now();
+    if (!kept || at - kept.at >= STATUS_MS) {
       const servers = status.servers.flatMap((id) => {
         const s = hub.get(id);
-        return s ? [publicServer(s, stats, now)] : [];
+        return s ? [publicServer(s, stats, at)] : [];
       });
-      kept = { at: now, answer: { servers } };
+      kept = { at, answer: { servers } };
     }
     c.header('cache-control', `public, max-age=${STATUS_MS / 1000}`);
     return c.json(kept.answer satisfies PublicStatus);

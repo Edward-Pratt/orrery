@@ -29,8 +29,9 @@ export const PUBLIC_CONFIG: ApplicationConfig = { providers: [provideBrowserGlob
 /** Whether `path` is the Status page's: `/status`, with or without a trailing slash. */
 export const isStatusPath = (path: string): boolean => path.replace(/\/$/, '') === '/status';
 
+// `app-root`, as `App`'s: `index.html` holds that one element, and `main.ts` boots one of the two into it.
 @Component({
-  selector: 'app-status-page',
+  selector: 'app-root',
   imports: [Logo, Status],
   template: `
     <main class="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-6 px-4 py-8 md:py-12">

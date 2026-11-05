@@ -26,6 +26,7 @@ import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { checks, isObj, SNOWFLAKE, type Obj } from './config-check.ts';
 import { parseDaily } from './daily.ts';
+import { checkWeb } from './web/web-config.ts';
 import { GAMES, rateOf, type LagConfig } from './servers/lag.ts';
 import { LIMITS } from './protocol.ts';
 import { QUEST_MODES, type QuestMode } from './servers/quests.ts';
@@ -362,24 +363,7 @@ export function validateConfig(raw: unknown): string[] {
     hostLimits(host, where);
   }
   const web = integrations.web;
-  if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
-  else if (web) {
-    const where = 'integrations.web';
-    port(web, where);
-    const url = str(web, 'publicUrl', where);
-    const parsed = url === undefined ? undefined : URL.parse(url);
-    if (url !== undefined && (parsed?.protocol !== 'https:' || parsed.pathname !== '/')) {
-      err(where, '"publicUrl" must be an https URL with no path');
-    }
-    id(web, 'clientId', where);
-    num(web, 'sessionDays', where, (n) => n > 0, 'a positive number');
-    for (const key of ['guildId', 'adminRoleId']) {
-      if (web[key] !== undefined) id(web, key, where);
-      else if (!isObj(discord) || discord[key] === undefined) {
-        err(where, `"${key}" is required (or set integrations.discord.${key})`);
-      }
-    }
-  }
+  checkWeb(checks(errors), web, discord);
   const agents = integrations.agents;
   /** Factorio server id -> the Agents that name it. */
   const served = new Map<string, string[]>();

@@ -13,3 +13,6 @@ hub/db-backups/
 .claude/worktrees/
 # Angular CLI cache when ng runs from the root (web/ ignores its own)
 .angular/
+
+# local build log of the Factorio Agent work (workflow dumps, e2e runs); holds real tailnet addresses
+docs/notes/factorio-build-log/

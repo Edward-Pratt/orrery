@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -42,23 +41,10 @@ import { startHub } from '../src/start.ts';
 import type { Stats } from '../src/stats/stats.ts';
 import type { OAuth, WebApi } from '../src/web/web.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
+import { ADMIN, config, fakeOAuth, login, loginCookie, startLogin, WEB, webHub } from './web/web-hub.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
-
-function config(t: TestContext, integrations: Config['integrations']): Config {
-  const dir = mkdtempSync(join(tmpdir(), 'hub-start-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  return {
-    environment: 'production',
-    dbPath: join(dir, 'hub.db'),
-    healthcheckUrl: 'https://example.invalid/ping',
-    servers: [
-      { id: 'gtnh', name: 'GTNH', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },
-    ],
-    integrations,
-  };
-}
 
 /** The mod lifecycle rows the hub wrote, read after it closed its database. */
 function lifecycle(dbPath: string) {
@@ -185,73 +171,6 @@ test('startup with Discord configured and no DISCORD_TOKEN fails with a clear me
       err.status === 1 && /integrations\.discord is configured but DISCORD_TOKEN is not set/.test(err.stderr),
   );
 });
-
-const WEB = {
-  listenPort: 0,
-  publicUrl: 'https://dash.orrery.run',
-  clientId: '4'.repeat(18),
-  guildId: '7'.repeat(18),
-  adminRoleId: '8'.repeat(18),
-  sessionDays: 7,
-};
-const ADMIN = { id: '5'.repeat(18), username: 'alex', avatar: 'a1b2c3', roles: ['9'.repeat(18), WEB.adminRoleId] };
-const PLAYER = { id: '6'.repeat(18), username: 'sam', avatar: null, roles: ['9'.repeat(18)] };
-
-/** A fake Discord OAuth backend: code `admin`/`player` logs in that member; records every call. */
-function fakeOAuth() {
-  const calls: string[] = [];
-  const oauth: OAuth = {
-    token: async (code, redirectUri) => {
-      calls.push(`token ${code}`);
-      assert.equal(redirectUri, 'https://dash.orrery.run/api/callback');
-      return `access-${code}`;
-    },
-    member: async (accessToken, guildId) => {
-      calls.push(`member ${accessToken}`);
-      assert.equal(guildId, WEB.guildId);
-      return { admin: ADMIN, player: PLAYER }[accessToken.slice('access-'.length)];
-    },
-  };
-  return { oauth, calls };
-}
-
-/** A hub with only the web integration: no bot is started. */
-async function webHub(t: TestContext, oauth: OAuth) {
-  const handle = await startHub(config(t, { web: WEB }), {
-    startFrontend: () => assert.fail('Discord is off'),
-    get: async () => ({ ok: true, status: 200 }),
-    oauth,
-  });
-  t.after(() => handle.close());
-  assert.ok(handle.web);
-  return handle.web.app;
-}
-
-/** The `name=value` pairs a response sets, as a Cookie header. */
-const cookies = (res: Response) =>
-  res.headers
-    .getSetCookie()
-    .map((c) => c.split(';')[0])
-    .join('; ');
-
-/** Starts a login and returns Discord's authorize URL and the state cookie. */
-async function startLogin(app: WebApi) {
-  const res = await app.request('/api/login');
-  assert.equal(res.status, 302);
-  return { authorize: new URL(res.headers.get('location')!), cookie: cookies(res) };
-}
-
-async function login(app: WebApi, code: string) {
-  const { authorize, cookie } = await startLogin(app);
-  const state = authorize.searchParams.get('state');
-  return app.request(`/api/callback?code=${code}&state=${state}`, { headers: { cookie } });
-}
-
-async function loginCookie(app: WebApi) {
-  const res = await login(app, 'admin');
-  assert.equal(res.status, 302);
-  return cookies(res).split('; ').find((c) => c.startsWith('session='))!;
-}
 
 test('an admin logs in with Discord and /api/me returns them', async (t) => {
   const app = await webHub(t, fakeOAuth().oauth);

@@ -12,7 +12,7 @@ import { localHost } from './agents/host.ts';
 import { execRestore } from './backups/restore.ts';
 import { execRun } from './services/services.ts';
 import { startHub } from './start.ts';
-import { discordOAuth } from './web/web.ts';
+import { discordOAuth } from './web/auth.ts';
 
 // fetch tries a name's addresses in turn, giving each only 250 ms by default. One lost SYN (resent after 1 s) on every
 // IPv4 address then fails the connect with ETIMEDOUT, within ~0.5 s on a host without IPv6, whose attempts fail at once.

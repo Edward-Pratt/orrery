@@ -213,7 +213,7 @@ on its own:
 Not covered by the tests, so left to smoke checks on production: `/config` with players online, and the start gate
 on the real Podman unit.
 
-## Factorio: portal mod update notices and player moderation — built on `fa/game-extras`, not yet cut
+## Factorio: portal mod update notices and player moderation — cut as `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, not yet deployed
 
 Notes: `docs/notes/factorio-game-extras.md`. On a factorio server an Agent runs:
 
@@ -223,13 +223,29 @@ Notes: `docs/notes/factorio-game-extras.md`. On a factorio server an Agent runs:
 | 2 | Moderation in the Players tab: who is online, Kick, Ban (with a reason), Unban, Promote and Demote, the bans and the admins, through Factorio's own commands that the Agent builds | hub + agent + web (additive messages `playerLists` and `moderate`, no protocol bump; `/kick`, `/ban` and `/unban` allowed by the owner on 2026-11-02) |
 
 Also a fix: a game update of a server stopped before it that fails after the hub resumes it, before the swap, leaves the
-server stopped. To cut as `hub-v2.20.0`, then `web-v0.18.0`, then `agent-v1.4.0` (`MODERATION_FLOOR`: an older Agent
-gets the deploy text), deployed from the Host page in that order; the friend does nothing. Left to the smoke check on
+server stopped. Cut 2026-11-02 as `hub-v2.20.0`, `web-v0.18.0` and `agent-v1.4.0` (`MODERATION_FLOOR`: an older
+Agent gets the deploy text), to deploy from the Host page in that order; the friend does nothing. Left to the smoke check on
 production: a kick and a ban of a player who is online (what they see, and that the save isn't flagged), and the first
 Discord notice.
 
 Then, in order: New world (stage B above), then off-site save copies (`docs/notes/factorio-save-copies.md`, to
 redesign against the transfer save uploads use).
+
+## Status page — designed
+
+Notes: `docs/notes/public-status.md`. A public page on `status.orrery.run`, with no login, for players: each listed
+server's name, game, state, the players online (count and names) and uptime over 7 and 30 days, polled every 30 s.
+The hub's `GET /api/public/status` answers only the servers listed in `integrations.web.status`, field by field; the
+page is a route in the dashboard's build, served on its own Caddy site that proxies nothing else. Hub + web + Caddy and
+a DNS record, no Agent or mod change. To cut as the next hub minor, then the next dashboard minor.
+
+## The App: orrery on Android — designed
+
+Notes: `docs/notes/android-app.md`. A native Android app (Kotlin, Jetpack Compose): the servers, services, checks and
+Hosts at a glance; start, stop and restart; a server's restart and backup; and push notifications for problems and
+recoveries through Firebase Cloud Messaging. The hub gains bearer sessions (a PKCE login through the existing Discord
+login), phone registrations tied to their session, and an FCM sender. A new part `android/`, released as a signed APK
+on `android-vX.Y.Z` tags. After the status page, whose first commit moves the hub's login code out of `web.ts`.
 
 ## Later / if needed
 

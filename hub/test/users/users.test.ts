@@ -36,8 +36,10 @@ test('an invite becomes a password once, within a day, and the user can then log
   assert.deepEqual(users.list(), [{ id, username: 'Alex', disabled: false, discordId: '123456789012345678', lastLogin: null, hasPassword: false, grants: [{ roleId: 'owner', role: 'Owner', servers: null }] }]);
   assert.deepEqual(audit.at(-1), { actor: 'cli:edward', action: 'user invited', target: 'user:Alex', details: 'Owner' });
   assert.equal(await users.login('alex', PASSWORD), undefined); // no password yet
-  await refusedAsync(() => users.acceptInvite(token, 'short'), 400, /at least 12/);
-  const user = await users.acceptInvite(token, PASSWORD);
+  await refusedAsync(() => users.acceptInvite(token, 'short'), 400, /at least 12/); // a typo doesn't burn the link
+  const [user, second] = await Promise.allSettled([users.acceptInvite(token, PASSWORD), users.acceptInvite(token, PASSWORD)]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : x.reason)));
+  assert.equal(user.username, 'Alex'); // one of the two got in
+  assert.ok(second instanceof UsersRefused && second.status === 404);
   assert.equal(user.lastLogin, clock.now);
   await refusedAsync(() => users.acceptInvite(token, PASSWORD), 404, /no longer valid/);
   await refusedAsync(() => users.acceptInvite('made-up', PASSWORD), 404, /no longer valid/);
@@ -58,11 +60,13 @@ test('an invite becomes a password once, within a day, and the user can then log
 
 test('invite input is checked: the name, a taken name, the Discord id, the grants', async () => {
   const { users, role, owner } = setup();
-  const { actor } = await owner();
+  const { id: alex, actor } = await owner();
+  users.setDiscordId(alex, '123456789012345678', actor);
   refused(() => users.invite({ username: 'a', grants: [] }, actor), 400, /2 to 32/);
   refused(() => users.invite({ username: 'has space', grants: [] }, actor), 400, /2 to 32/);
   refused(() => users.invite({ username: 'ALEX', grants: [] }, actor), 409, /named alex exists/);
   refused(() => users.invite({ username: 'sam', grants: [], discordId: '12' }, actor), 400, /17 to 20 digits/);
+  refused(() => users.invite({ username: 'sam', grants: [], discordId: '123456789012345678' }, actor), 409, /alex has that Discord id/);
   refused(() => users.invite({ username: 'sam', grants: 'owner' }, actor), 400, /as a list/);
   refused(() => users.invite({ username: 'sam', grants: [{ roleId: 'nope' }] }, actor), 400, /Unknown role/);
   refused(() => users.invite({ username: 'sam', grants: [{ roleId: role('Viewer') }, { roleId: role('Viewer') }] }, actor), 400, /granted twice/);
@@ -84,8 +88,11 @@ test('a users manager who is not an owner hands out only what they hold, and nev
   refused(() => users.invite({ username: 'kim', grants: [{ roleId: 'owner' }] }, manager), 403, /Only an owner may grant Owner/);
   refused(() => users.invite({ username: 'kim', grants: [{ roleId: role('Admin') }] }, manager), 403, /can't grant Admin: it has servers.console/);
   refused(() => users.invite({ username: 'kim', grants: [{ roleId: role('Operator') }] }, manager), 403, /it has servers.moderation/);
-  const { id: kim } = users.invite({ username: 'kim', grants: [{ roleId: role('Viewer') }] }, manager);
+  refused(() => users.invite({ username: 'kim', grants: [], discordId: '123456789012345678' }, manager), 403, /Only an owner may set a Discord id/);
+  const { id: kim, token: kimToken } = users.invite({ username: 'kim', grants: [{ roleId: role('Viewer') }] }, manager);
   users.setGrants(kim, [{ roleId: managerRole.id, servers: null }], manager); // their own permissions, unscoped: allowed
+  await refusedAsync(() => users.acceptInvite(kimToken, PASSWORD), 404, /no longer valid/); // a grant change ends open links
+  refused(() => users.setDiscordId(kim, '123456789012345678', manager), 403, /Only an owner/);
   for (const fn of [
     () => users.setGrants(ownerId, [], manager),
     () => users.disable(ownerId, manager),

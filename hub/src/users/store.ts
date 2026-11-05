@@ -1,6 +1,7 @@
 // `UsersStore`, held by `Db` as `db.users` on the same handle: the SQL behind Users, Roles, Grants and Invites
 // (`users`, `roles` (`permissions` as JSON, unknown names dropped on read), `grants` (`servers` as JSON, null for
-// every server), `invites` (stored as `hashToken` of the link's token, like a session)), and the dashboard's login
+// every server), `invites` (stored as `hashToken` of the link's token, like a session; `takeInvite` uses one up as it
+// reads it)), and the dashboard's login
 // sessions (`web_sessions`, stored hashed, and `web_session_checks`, each one's sealed Discord access token and when
 // its admin role was last checked), moved from `Db`, which still prunes expired sessions nightly. Session writes never
 // throw: a database error is logged (`#write`), as `Db`'s are; the users tables' writes throw, as `startDeploy` does,
@@ -69,6 +70,11 @@ export class UsersStore {
 
   user(id: string): UserRow | undefined {
     const row = this.#db.prepare(`SELECT ${USER} FROM users WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row && toUser(row);
+  }
+
+  userByDiscordId(discordId: string): UserRow | undefined {
+    const row = this.#db.prepare(`SELECT ${USER} FROM users WHERE discord_id = ?`).get(discordId) as Record<string, unknown> | undefined;
     return row && toUser(row);
   }
 
@@ -185,6 +191,12 @@ export class UsersStore {
   /** An unexpired invite by its hashed token. */
   invite(id: string, now: number): InviteRow | undefined {
     const row = this.#db.prepare('SELECT id, user_id AS userId, expires, by FROM invites WHERE id = ? AND expires > ?').get(id, now) as InviteRow | undefined;
+    return row && { ...row };
+  }
+
+  /** The unexpired invite, used up in the same statement: a second taker finds nothing. */
+  takeInvite(id: string, now: number): InviteRow | undefined {
+    const row = this.#db.prepare('DELETE FROM invites WHERE id = ? AND expires > ? RETURNING id, user_id AS userId, expires, by').get(id, now) as InviteRow | undefined;
     return row && { ...row };
   }
 

@@ -1,8 +1,10 @@
 // `Users`: who may use the dashboard. A user is invited (`invite`: a username of 2 to 32 letters, digits, dots,
-// dashes or underscores, unique without case; grants; an optional Discord id, 17 to 20 digits, for dashboard chat
-// under their linked name) and gets in by an Invite, a one-use link token (`INVITE_MS`, 24 h; stored as `hashToken`)
-// that `acceptInvite` turns into a password and a login; `reset` mints one for an existing user (the old password
-// works until it is used). `login` is timing-flat: an unknown, passwordless or disabled name is verified against a
+// dashes or underscores, unique without case; grants; an optional Discord id, 17 to 20 digits, unique, set by owners
+// only, for dashboard chat under their linked name) and gets in by an Invite, a one-use link token (`INVITE_MS`,
+// 24 h; stored as `hashToken`; used up before the password is hashed, so two takers can't both get in) that
+// `acceptInvite` turns into a password and a login; `reset` mints one for an existing user (the old password works
+// until it is used). A grant change ends the user's open invites: a link minted for a lesser user must not open a
+// greater one. `login` is timing-flat: an unknown, passwordless or disabled name is verified against a
 // dummy hash before it is refused; a success re-hashes a password made at a lower cost and sets `last_login`.
 // `changePassword` needs the current one and ends the user's other sessions and open invites. `setGrants`, `setDiscordId`, `disable`,
 // `enable`, `remove` and `endSessions` take an `Actor` (the audit label, their user id, their grants) and refuse
@@ -90,7 +92,7 @@ export class Users {
     if (!USERNAME.test(username)) throw new UsersRefused(400, 'A username is 2 to 32 letters, digits, dots, dashes or underscores');
     const taken = this.#store.userByName(username);
     if (taken) throw new UsersRefused(409, `A user named ${taken.username} exists`);
-    const discordId = checkDiscordId(input.discordId);
+    const discordId = this.#checkDiscordId(input.discordId, actor);
     const grants = this.#checkGrants(actor, input.grants);
     const id = randomBytes(12).toString('base64url');
     let token = '';
@@ -113,11 +115,13 @@ export class Users {
 
   /** The invite's user, now with this password and logged in: their invites and earlier sessions are gone. */
   async acceptInvite(token: unknown, password: unknown): Promise<UserRow> {
-    const invite = typeof token === 'string' ? this.#store.invite(hashToken(token), this.#now()) : undefined;
+    const found = typeof token === 'string' ? this.#store.invite(hashToken(token), this.#now()) : undefined;
+    if (!found || this.#store.user(found.userId)?.disabled !== false) throw new UsersRefused(404, NO_INVITE);
+    const reason = checkPassword(password);
+    if (reason) throw new UsersRefused(400, reason); // checked before the link is used up: a typo doesn't burn it
+    const invite = this.#store.takeInvite(found.id, this.#now());
     const user = invite && this.#store.user(invite.userId);
     if (!user || user.disabled) throw new UsersRefused(404, NO_INVITE);
-    const reason = checkPassword(password);
-    if (reason) throw new UsersRefused(400, reason);
     this.#store.setPassword(user.id, await hashPassword(password as string, this.#cost));
     this.#store.deleteInvitesOf(user.id);
     this.#store.deleteSessionsOf(user.id);
@@ -156,13 +160,16 @@ export class Users {
     const user = this.#target(userId, actor);
     const grants = this.#checkGrants(actor, input);
     if (!grants.some((g) => g.roleId === OWNER_ROLE)) this.#notLastOwner(userId, 'demoted');
-    this.#store.setGrants(userId, grants);
-    this.#audit({ actor: actor.label, action: 'user changed', target: `user:${user.username}`, details: this.#describe(grants) });
+    this.#store.transaction(() => {
+      this.#store.setGrants(userId, grants);
+      this.#store.deleteInvitesOf(userId);
+    });
+    this.#audit({ actor: actor.label, action: 'user changed', target: `user:${user.username}`, details: `${this.#describe(grants)}; open invite links ended` });
   }
 
   setDiscordId(userId: string, discordId: unknown, actor: Actor): void {
     const user = this.#target(userId, actor);
-    const id = checkDiscordId(discordId);
+    const id = this.#checkDiscordId(discordId, actor, userId);
     this.#store.setDiscordId(userId, id);
     this.#audit({ actor: actor.label, action: 'user changed', target: `user:${user.username}`, details: id ? `Discord id ${id}` : 'Discord id removed' });
   }
@@ -249,6 +256,16 @@ export class Users {
     return servers as string[];
   }
 
+  /** A Discord id, 17 to 20 digits or none; owners set them (a chat line goes out under the linked name), and no two users share one. */
+  #checkDiscordId(input: unknown, actor: Actor, self?: string): string | null {
+    if (input === undefined || input === null || input === '') return null;
+    if (typeof input !== 'string' || !DISCORD_ID.test(input)) throw new UsersRefused(400, 'A Discord id is 17 to 20 digits');
+    if (!isOwner(actor.grants)) throw new UsersRefused(403, 'Only an owner may set a Discord id');
+    const holder = this.#store.userByDiscordId(input);
+    if (holder && holder.id !== self) throw new UsersRefused(409, `${holder.username} has that Discord id`);
+    return input;
+  }
+
   #describe(grants: GrantRow[]): string {
     if (!grants.length) return 'no roles';
     return grants.map((g) => `${this.#roles.get(g.roleId)?.name ?? g.roleId}${g.servers ? ` on ${g.servers.join(', ')}` : ''}`).join('; ');
@@ -257,9 +274,3 @@ export class Users {
 
 /** The audit actor for what a user does to their own account, as the web routes name them. */
 const self = (u: UserRow) => `web:${u.username} (${u.id})`;
-
-function checkDiscordId(input: unknown): string | null {
-  if (input === undefined || input === null || input === '') return null;
-  if (typeof input !== 'string' || !DISCORD_ID.test(input)) throw new UsersRefused(400, 'A Discord id is 17 to 20 digits');
-  return input;
-}

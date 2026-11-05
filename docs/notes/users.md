@@ -19,9 +19,10 @@ Contents: [Resume here](#resume-here), [Decisions to confirm](#decisions-to-conf
 
 ## Resume here
 
-State on 2026-11-05, branch `users` from `main` at `16b27b1`, **not pushed**, three commits: `68b2a12` (this note,
+State on 2026-11-05, branch `users` from `main` at `16b27b1`, **not pushed**, five commits: `68b2a12` (this note,
 the ROADMAP section, the Android note's login), `03ef75d` (the pure move of the session SQL into
-`hub/src/users/store.ts`), `a649cc3` (the model). `npm test` 586 green, `npm run typecheck` and
+`hub/src/users/store.ts`), `a649cc3` (the model), `9430610` (this section) and the security-review fixes after it
+(invites end on a grant change, an invite is used up before the hash, Discord ids owner-set and unique). `npm test` 586 green, `npm run typecheck` and
 `.github/check-file-length` clean. The decisions above are not yet confirmed by the owner: the model follows them.
 
 **Built (build order step 1):** `hub/src/users/` with `test/users/`: `permissions.ts` (`can`, `canAnywhere`,
@@ -163,6 +164,9 @@ Rules:
   with `users` but not `owner` manages users at or below their level only: a grant hands out only permissions they
   hold themself, unscoped, and a reset, a grant change, a disable, a delete or a log-out touches only a user whose
   every permission they hold (a reset of a higher user would be that account). No one reaches above their level.
+- A grant change ends the user's open invite links (a link minted for a lesser user must not open a greater one),
+  and an invite is used up before the password is hashed, so two takers can't both get in. Discord ids are set by
+  owners only and no two users share one: a dashboard chat line goes into the game under the linked name.
 - A role can't be deleted while granted. A permission name the hub doesn't know is refused (400) when a role is saved.
 
 ### What a user is to the dashboard

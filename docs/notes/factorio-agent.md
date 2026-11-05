@@ -204,7 +204,7 @@ the `FACTORIO_API_KEY` secret is needed for release 1.
 
 ### Done by hand on 2026-10-31
 
-- Tailnet: final grants policy with tests live (set through the API; the browser editor hung). VM `vnics-name`
+- Tailnet: final grants policy with tests live (set through the API; the browser editor hung). VM `<vm-name>`
   (100.90.80.70) tagged `tag:factorio`; hub `orrery-hub` (100.101.102.103) joined; hub firewalld zone `tailnet`
   holds `tailscale0` with only the rich rule. From the VM: 22 times out, 25584 refused (nothing listens yet).
 - S11 passed (302 to `dl-mod.factorio.com`, query key `secure` only). #143 (Packs v2 smoke) passed.

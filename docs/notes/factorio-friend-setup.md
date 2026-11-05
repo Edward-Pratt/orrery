@@ -146,7 +146,7 @@ three calls with `policy.hujson`, and runs the live tests again.
 ## State on 2026-10-31 (evening)
 
 - Tailnet policy: the final grants policy with tests is live (saved through the API; `status` says FINISHED).
-- The VM `vnics-name` is tagged `tag:factorio`, tailnet IP **100.90.80.70** (`agents[].address`). Its tailscaled
+- The VM `<vm-name>` is tagged `tag:factorio`, tailnet IP **100.90.80.70** (`agents[].address`). Its tailscaled
   had been stopped for 22 h; starting it fixed "no such host" for `orrery-hub`.
 - The hub host `orrery-hub` joined with `tag:orrery-hub`, tailnet IP **100.101.102.103**
   (`integrations.agents.listen.host`, and the agent's `hub.host`). Direct connection (`tailscale ping`, 1 ms).
@@ -172,7 +172,7 @@ three calls with `policy.hujson`, and runs the live tests again.
 - **Docker runs on the VM** (dockerd, containerd), plus java (likely Minecraft, 25565-25575), Caddy, PCP (pmlogger),
   the OCI cloud and unified-monitoring agents (fluentd/ruby). The design didn't name Docker; it coexists: Factorio's
   container uses `Network=host`, Podman creates no networks, and setup never touches Docker.
-- Tailscale 1.104.4: RunSSH false, ShieldsUp false, AdvertiseTags set, Hostname "" (name `vnics-name`). DNS is
+- Tailscale 1.104.4: RunSSH false, ShieldsUp false, AdvertiseTags set, Hostname "" (name `<vm-name>`). DNS is
   MagicDNS (`100.100.100.100`); orrery doesn't rely on it.
 - Outbound HTTPS OK: factorio.com API and sha256sums, mods.factorio.com, nodejs.org, github.com, raw/objects
   githubusercontent, container-registry.oracle.com and registry-1.docker.io (401 = reachable).

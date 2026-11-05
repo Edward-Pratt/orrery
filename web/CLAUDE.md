@@ -25,6 +25,7 @@ pages hold: read those before changing them, and change them with the code. By a
 - Shared pieces: `app/status.ts`, `app/chart.ts`, `app/feedback.ts`, `app/uploads.ts`, `app/units.ts`,
   `app/events.ts`, `app/attention.ts`, `app/logo.ts` (the mark; `public/favicon.svg` and `favicon.ico` are its copies).
 - Pages: `app/audit.ts`, and the folders `app/host/`, `app/library/`, `app/services/` and `app/servers/`.
+- The Status page, booted on its own for `/status` by `main.ts`, without the shell: `app/public/`.
 - Tests: `test-setup.ts`, `app/testing.ts`.
 
 ## Rules
@@ -32,7 +33,9 @@ pages hold: read those before changing them, and change them with the code. By a
 - Every POST, PUT and DELETE sends `content-type: application/json`, even with no body (HttpClient adds none for `null`):
   the hub rejects anything else (CSRF). The one exception is an upload's chunk (`PUT /api/uploads/:upload`), raw
   `application/octet-stream`; files go up only through `uploads.ts`'s `Uploader`. The browser adds `Origin` itself.
-- Any 401 means logged out: the `loggedOutOn401` interceptor calls `Session.lost()` (the event stream does too).
+- Any 401 means logged out: the `loggedOutOn401` interceptor calls `Session.lost()` (the event stream does too). Not on
+  the Status page (`app/public/`): it has no session and no interceptor, and a 401 there means the hub has no Status
+  page.
 - A deploy deletes the old build's chunks: a lazy page that fails to load after the first navigation reloads the page (`reload.ts`). The New server sheet's and the Game tab's Browse view's `@defer` say to reload instead; `chart.ts`'s lazy `echarts` import has no such fallback yet.
 - Features come from the card (`features.chat`, `features.tps`, `features.console`, `features.update`, `features.settings`): a server without the mod shows
   none of them; a factorio server has all five (`update`, the Game tab, only a factorio server has, while the hub's game updates are on;

@@ -231,12 +231,12 @@ Discord notice.
 Then, in order: New world (stage B above), then off-site save copies (`docs/notes/factorio-save-copies.md`, to
 redesign against the transfer save uploads use).
 
-## Status page — hub built, dashboard next
+## Status page — hub and dashboard built, Caddy next
 
 Notes: `docs/notes/public-status.md`. A public page on `status.orrery.run`, with no login, for players: each listed
 server's name, game, state, the players online (count and names) and uptime over 7 and 30 days, polled every 30 s.
 The hub's `GET /api/public/status` answers only the servers listed in `integrations.web.status`, field by field; the
-page is a route in the dashboard's build, served on its own Caddy site that proxies nothing else. Hub + web + Caddy and
+page boots alone from the dashboard's build (no shell, no session), served on its own Caddy site that proxies nothing else. Hub + web + Caddy and
 a DNS record, no Agent or mod change. To cut as the next hub minor, then the next dashboard minor.
 
 ## The App: orrery on Android — designed

@@ -4,6 +4,7 @@
 import { Component, inject } from '@angular/core';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { StagingBadge } from './environment';
+import { Logo } from './logo';
 import { Session } from './session';
 
 /** Why the hub sent a failed login back here (`/?login=<why>`). */
@@ -16,12 +17,12 @@ const REASONS = new Map([
 /** The logged-out view: a centred card, no sidebar; says so when the hub ended the session under the open page. */
 @Component({
   selector: 'app-login',
-  imports: [HlmButton, StagingBadge],
+  imports: [HlmButton, StagingBadge, Logo],
   template: `
     <div class="grid min-h-dvh place-items-center p-4">
       <div class="flex w-full max-w-sm flex-col items-center gap-5 rounded-xl border bg-card p-8 text-center text-card-foreground">
+        <app-logo class="size-20" [animated]="true" />
         <span class="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <span class="size-3 rounded-full bg-brand ring-4 ring-brand/20"></span>
           orrery
           <app-staging-badge />
         </span>

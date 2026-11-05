@@ -18,6 +18,7 @@ import { Attention, AttentionStrip } from './attention';
 import { Environment, StagingBadge } from './environment';
 import { Integrations } from './integrations';
 import { Login } from './login';
+import { Logo } from './logo';
 import { Session } from './session';
 import { MODES, Theme } from './theme';
 
@@ -86,7 +87,7 @@ export class UserMenu {
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
   viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText })],
   template: `
     <hlm-toaster />
@@ -99,7 +100,7 @@ export class UserMenu {
         <div class="min-h-dvh md:flex">
           <aside class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r bg-sidebar px-3 py-5 md:flex">
             <span class="flex items-center gap-2 px-3 text-lg font-bold tracking-tight">
-              <span class="size-3 rounded-full bg-brand ring-4 ring-brand/20"></span> orrery <app-staging-badge />
+              <app-logo class="size-7" /> orrery <app-staging-badge />
             </span>
             <nav class="mt-8 flex flex-col gap-0.5" aria-label="Pages">
               @for (p of visible(); track p.path) {
@@ -118,7 +119,7 @@ export class UserMenu {
             <div class="mt-auto px-1"><app-user-menu [user]="session.user()!" [showName]="true" /></div>
           </aside>
           <header class="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-2 backdrop-blur md:hidden">
-            <span class="flex items-center gap-2 font-bold"><span class="size-2.5 rounded-full bg-brand"></span> orrery <app-staging-badge /></span>
+            <span class="flex items-center gap-2 font-bold"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
             <app-user-menu [user]="session.user()!" [showName]="false" />
           </header>
           <div class="min-w-0 flex-1">

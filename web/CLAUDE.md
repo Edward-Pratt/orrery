@@ -23,7 +23,7 @@ pages hold: read those before changing them, and change them with the code. By a
 - The shell and the session: `app/app.ts`, `app/app.routes.ts`, `app/login.ts`, `app/session.ts`, `app/reload.ts`,
   `app/theme.ts`, `app/integrations.ts`, `app/environment.ts`.
 - Shared pieces: `app/status.ts`, `app/chart.ts`, `app/feedback.ts`, `app/uploads.ts`, `app/units.ts`,
-  `app/events.ts`, `app/attention.ts`.
+  `app/events.ts`, `app/attention.ts`, `app/logo.ts` (the mark; `public/favicon.svg` and `favicon.ico` are its copies).
 - Pages: `app/audit.ts`, and the folders `app/host/`, `app/library/`, `app/services/` and `app/servers/`.
 - Tests: `test-setup.ts`, `app/testing.ts`.
 

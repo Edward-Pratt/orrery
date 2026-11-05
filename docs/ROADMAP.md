@@ -247,6 +247,18 @@ recoveries through Firebase Cloud Messaging. The hub gains bearer sessions (a PK
 login), phone registrations tied to their session, and an FCM sender. A new part `android/`, released as a signed APK
 on `android-vX.Y.Z` tags. After the status page, whose first commit moves the hub's login code out of `web.ts`.
 
+## Users: local accounts, roles and permissions — designed
+
+Notes: `docs/notes/users.md`. The dashboard stops logging in through Discord: a User is a row in `hub.db` with a
+username and a password (`scrypt`), Roles are editable sets of a fixed permission vocabulary, a Grant gives a user a
+role for every server or some, and an Invite (a one-use link, also how a password is reset) is how a user gets in.
+The hub refuses an action the user's roles don't cover (writes default-deny), and the dashboard hides it. A Users
+page (users, roles, the user's own account) and a CLI (`npm run users -- invite <name>`) for the first owner and a
+locked-out one. The bot's own admin-role check stays. One hub and one dashboard release, back to back; the old config
+keys and `DISCORD_CLIENT_SECRET` are tolerated one release. A second factor (TOTP) is the release after. Meant to
+land before the App, whose login (`docs/notes/android-app.md`) is designed on the Discord login and would be written
+twice otherwise: the owner's call, item 8 of the note's decisions.
+
 ## Later / if needed
 
 - More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).

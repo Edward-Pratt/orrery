@@ -24,7 +24,9 @@
 import { readFileSync, statSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
+import { checks, isObj, SNOWFLAKE, type Obj } from './config-check.ts';
 import { parseDaily } from './daily.ts';
+import { checkWeb } from './web/web-config.ts';
 import { GAMES, rateOf, type LagConfig } from './servers/lag.ts';
 import { LIMITS } from './protocol.ts';
 import { QUEST_MODES, type QuestMode } from './servers/quests.ts';
@@ -95,6 +97,8 @@ export type WebIntegration = {
   guildId: string;
   adminRoleId: string;
   sessionDays: number;
+  /** The Status page's servers, by id, in the order shown; without it there is no Status page. */
+  status?: { servers: string[] };
 };
 
 /** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. May name its service. */
@@ -186,9 +190,6 @@ function resolve(s: ServerEntry): ServerSettings {
   };
 }
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
-const SNOWFLAKE = /^\d{17,20}$/;
 /** An Agent's id, which is also its Host's. */
 const AGENT_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** A systemd unit name (with systemd's `\x2d`-style escapes); never an option, since it is passed to systemctl. */
@@ -206,80 +207,7 @@ function isDir(path: string): boolean {
 export function validateConfig(raw: unknown): string[] {
   if (!isObj(raw)) return ['config must be a JSON object'];
   const errors: string[] = [];
-  const err = (where: string, msg: string) => errors.push(where ? `${where}: ${msg}` : msg);
-  const str = (o: Obj, key: string, where: string, required = true): string | undefined => {
-    const v = o[key];
-    if (v === undefined) {
-      if (required) err(where, `"${key}" is required`);
-      return undefined;
-    }
-    if (typeof v !== 'string' || v === '') {
-      err(where, `"${key}" must be a non-empty string`);
-      return undefined;
-    }
-    return v;
-  };
-  const id = (o: Obj, key: string, where: string, required = true) => {
-    const v = str(o, key, where, required);
-    if (v !== undefined && !SNOWFLAKE.test(v)) err(where, `"${key}" must be a Discord ID (17–20 digits)`);
-  };
-  const num = (o: Obj, key: string, where: string, ok: (n: number) => boolean, rule: string) => {
-    const v = o[key];
-    if (v !== undefined && (typeof v !== 'number' || !ok(v))) err(where, `"${key}" must be ${rule}`);
-  };
-
-  const port = (o: Obj, where: string, key = 'listenPort') => {
-    const v = o[key];
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 65535) {
-      err(where, `"${key}" must be a port number (1–65535)`);
-    }
-  };
-  /** A Host's warning limits, in `integrations.host` and an Agent's `host`. */
-  const hostLimits = (o: Obj, where: string) => {
-    num(o, 'memoryMaxPercent', where, (n) => n >= 1 && n <= 100, 'a number from 1 to 100');
-    num(o, 'memoryMinutes', where, (n) => Number.isInteger(n) && n >= 1, 'a whole number of at least 1');
-    num(o, 'diskMinFreeGB', where, (n) => n > 0, 'a positive number');
-  };
-  /** A map keyed by server id: reports unknown ids and returns its entries. */
-  const byServer = (o: Obj, key: string, where: string, ids: Set<string> | undefined): [string, unknown][] => {
-    const v = o[key];
-    if (!isObj(v)) {
-      err(where, `"${key}" must be an object keyed by server id`);
-      return [];
-    }
-    const entries = Object.entries(v);
-    if (ids) for (const [sid] of entries) if (!ids.has(sid)) err(`${where}.${key}`, `"${sid}" is not a server id`);
-    return entries;
-  };
-
-  /** An optional http(s) URL. */
-  const httpUrl = (o: Obj, key: string, where: string, required = false) => {
-    const url = str(o, key, where, required);
-    if (url !== undefined && !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) err(where, `"${key}" must be an http(s) URL`);
-  };
-  /** An integration's list of entries, each with its own id; `each` checks the rest of an entry. Returns the ids. */
-  const list = (o: Obj, key: string, what: string, each: (e: Obj, where: string) => void, at = 'integrations'): Set<string> => {
-    const seen = new Set<string>();
-    const v = o[key];
-    if (!Array.isArray(v)) {
-      err(at, `"${key}" must be a list`);
-      return seen;
-    }
-    for (const [i, e] of v.entries()) {
-      if (!isObj(e)) {
-        err(`${key}[${i}]`, 'must be an object');
-        continue;
-      }
-      const eid = str(e, 'id', `${key}[${i}]`);
-      const where = eid === undefined ? `${key}[${i}]` : `${what} "${eid}"`;
-      each(e, where);
-      if (eid !== undefined) {
-        if (seen.has(eid)) err(where, 'duplicate id');
-        seen.add(eid);
-      }
-    }
-    return seen;
-  };
+  const { err, str, id, num, port, hostLimits, byServer, httpUrl, list } = checks(errors);
 
   if (raw.environment !== undefined && !ENVIRONMENTS.includes(raw.environment as Environment)) {
     err('', `"environment" must be ${ENVIRONMENTS.join(' or ')}`);
@@ -437,24 +365,7 @@ export function validateConfig(raw: unknown): string[] {
     hostLimits(host, where);
   }
   const web = integrations.web;
-  if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
-  else if (web) {
-    const where = 'integrations.web';
-    port(web, where);
-    const url = str(web, 'publicUrl', where);
-    const parsed = url === undefined ? undefined : URL.parse(url);
-    if (url !== undefined && (parsed?.protocol !== 'https:' || parsed.pathname !== '/')) {
-      err(where, '"publicUrl" must be an https URL with no path');
-    }
-    id(web, 'clientId', where);
-    num(web, 'sessionDays', where, (n) => n > 0, 'a positive number');
-    for (const key of ['guildId', 'adminRoleId']) {
-      if (web[key] !== undefined) id(web, key, where);
-      else if (!isObj(discord) || discord[key] === undefined) {
-        err(where, `"${key}" is required (or set integrations.discord.${key})`);
-      }
-    }
-  }
+  checkWeb(checks(errors), web, discord, ids);
   const agents = integrations.agents;
   /** Factorio server id -> the Agents that name it. */
   const served = new Map<string, string[]>();

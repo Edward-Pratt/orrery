@@ -1,6 +1,6 @@
 # Status page: a public page for players
 
-Status: designed, not built. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
+Status: hub built (branch `status-page-hub`, step 3 of the build order), dashboard and Caddy not yet. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
 `web-v0.17.0`, `agent-v1.3.0`; cut and not deployed: `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, `web-v0.19.0`).
 File and line references are at that commit.
 
@@ -47,7 +47,8 @@ A new optional section, `integrations.web.status`:
 ```
 
 - The section switches the page on (ADR 0002: an integration's parts are switched on by their section). Without it,
-  `/api/public/status` is not registered: 404.
+  `/api/public/status` is not registered, so it falls to the session check like any unknown path: 401 logged out
+  (404 with a session). The Status page then says "Can't reach orrery right now".
 - `servers` lists which servers appear, in order. A server is **never** public by default: one added later (a Pack
   install) stays off the page until its id is listed. `check-config` refuses an unknown id, a duplicate, or an empty
   list.
@@ -95,7 +96,10 @@ The page is part of the dashboard's build (one build, one deploy), not a second 
   `/api/environment`, for the staging badge and the tab title) at start, and `Integrations`, `Attention` and
   `LiveEvents` fetch once logged in. The build makes the public check come first (route data `public: true`, read from
   the router) and creates none of those services on a public route: the tab title there is plain "orrery".
-- Any 401 handling (`loggedOutOn401`) never fires there: the public route sends no request that can 401.
+- The public route sends one request, `/api/public/status`, which answers 401 when the hub has no
+  `integrations.web.status` or is older than this release (an unknown path falls to the session check). The
+  `loggedOutOn401` interceptor must skip it, or it would call `Session.lost()` on the public page: a 401 there is
+  "Can't reach orrery right now", nothing more.
 - Phone first: the cards stack; the page is light or dark from the system setting (no Theme menu there).
 
 ## Caddy and DNS
@@ -144,7 +148,7 @@ fixture file first, as a pure move):
 
 - With the section: 200 without a cookie; only the listed servers, in config order; each object's keys are exactly the
   six fields (a key-set assertion, so a new field fails the test); state for online, paused, hung and offline servers.
-- Without the section: 404.
+- Without the section: 401 without a session (as any unknown path).
 - `Cache-Control` is set; two calls within 15 s read uptime once (a counting fake `Stats`).
 - The CSRF and session checks still guard everything else (an existing route still answers 401 without a cookie).
 - `check-config`: unknown id, duplicate id, empty list, `status` without `web`.
@@ -170,7 +174,7 @@ Dashboard (`web/src/app/public/status.spec.ts`):
 - Cut `hub-v2.21.0`, deploy it, add `integrations.web.status` to production's `config.json`, restart the hub; then
   `web-v0.20.0` and deploy it; then by hand: the DNS record and the Caddyfile.
 - An older dashboard on a newer hub: nothing changes (the route is new). A newer dashboard on an older hub: the page
-  says "Can't reach orrery right now" (404). Deploy the hub first.
+  says "Can't reach orrery right now" (401, as for any unknown path). Deploy the hub first.
 - Smoke on production: open `https://status.orrery.run` logged out on a phone; `/` redirects to `/status` (and only `/`: `/status` itself and
   an unknown path serve the page, not a loop); the cards
   match the dashboard; `https://status.orrery.run/api/servers` is 404; stop a server and see **Down** within 45 s.

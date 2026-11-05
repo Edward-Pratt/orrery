@@ -1,7 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { reflectComponentType } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { PublicServer, PublicStatus } from '@hub/api';
+import { App } from '../app';
 import { isStatusPath, POLL_MS, StatusPage } from './status-page';
 
 const server = (s: Partial<PublicServer> & Pick<PublicServer, 'name' | 'state'>): PublicServer => ({ game: 'minecraft', players: [], uptimeWeek: null, uptimeMonth: null, ...s });
@@ -71,6 +73,10 @@ describe('the Status page', () => {
     const el = await render();
     expect(text(el.querySelector('[data-unreachable]'))).toBe("Can't reach orrery right now.");
     expect(el.querySelector('[data-server]')).toBeNull();
+  });
+
+  it("boots into index.html's one root element, as the dashboard does", () => {
+    expect(reflectComponentType(StatusPage)?.selector).toBe(reflectComponentType(App)?.selector);
   });
 
   it('is the page for /status, with or without a trailing slash, and for nothing else', () => {

@@ -2,7 +2,7 @@
 
 The Status page (`status-page.ts`): the one page anyone can open without logging in, on `status.orrery.run` (and
 `/status` on the dashboard's address). `main.ts` boots `StatusPage` instead of the dashboard's `App` when the path is
-`/status` (`isStatusPath`), with `PUBLIC_CONFIG`: an HTTP client and nothing else, so there is no router, no shell, no
+`/status` (`isStatusPath`), into the same `<app-root>` (so both components have that selector), with `PUBLIC_CONFIG`: an HTTP client and nothing else, so there is no router, no shell, no
 session and no `loggedOutOn401` interceptor. Its one request is `GET /api/public/status`, every 30 s; any failure,
 a 401 included, is "Can't reach orrery right now", never a logout.
 

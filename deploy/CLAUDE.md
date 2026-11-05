@@ -4,7 +4,8 @@ What each file here is for, and which test covers it. The rules for the whole re
 how releases are cut and deployed is in `docs/RELEASING.md`.
 
 Systemd units for the production host (hub; GTNH server with a FIFO console, no tmux — SELinux-safe), `orrery-hub.rules` (polkit: the hub's user may start/stop/restart exactly the listed units; **keep its `UNITS` in sync with `integrations.systemd`**, except the servers `add-server.sh` added, each with its own `60-orrery-<id>.rules`: remove that file when its server leaves the config, and the services an Agent backs, which the hub never runs systemctl on: its Agent does, on its own Host), the `Caddyfile` (TLS for the dashboard and Grafana;
-serves the dashboard from `/var/www/orrery`, `/api` to the hub), `install-web.sh` (installs a dashboard release
+serves the dashboard from `/var/www/orrery`, `/api` to the hub; `status.orrery.run` serves the same folder for the
+Status page, passing only `/api/public/*` to the hub), `install-web.sh` (installs a dashboard release
 there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
 tested by `test-restore-backup.sh`) and the deploys, which the hub starts per tag through polkit:
 `orrery-deploy@.service` runs `deploy-hub.sh` as the hub's user (builds `<root>/releases/<tag>`, flips the

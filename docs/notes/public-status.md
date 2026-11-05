@@ -1,6 +1,6 @@
 # Status page: a public page for players
 
-Status: hub built (branch `status-page-hub`, step 3 of the build order), dashboard and Caddy not yet. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
+Status: hub built (#166), dashboard built (branch `status-page-web`), Caddy not yet. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
 `web-v0.17.0`, `agent-v1.3.0`; cut and not deployed: `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, `web-v0.19.0`).
 File and line references are at that commit.
 
@@ -86,21 +86,21 @@ export type PublicServer = {
 
 ## Dashboard
 
-The page is part of the dashboard's build (one build, one deploy), not a second app:
+The page is part of the dashboard's build (one build, one deploy), not a second app, but it boots **alone**:
 
-- A lazy route `status` → `web/src/app/public/status.ts` (new folder `app/public/` with its `CLAUDE.md`), using
-  `Logo`, `status.ts`'s colours, and a 30 s poll of `/api/public/status` with `HttpClient`.
-- The shell (`app.ts`) shows a public route **alone**: no sidebar, no login card. On `status.orrery.run` every
-  `/api/*` but `/api/public/*` is 404, so the public route must send **no request but `/api/public/status`**. Today
-  the shell asks for the session (`session.ts`, `/api/me`) and the environment (`environment.ts`,
-  `/api/environment`, for the staging badge and the tab title) at start, and `Integrations`, `Attention` and
-  `LiveEvents` fetch once logged in. The build makes the public check come first (route data `public: true`, read from
-  the router) and creates none of those services on a public route: the tab title there is plain "orrery".
-- The public route sends one request, `/api/public/status`, which answers 401 when the hub has no
-  `integrations.web.status` or is older than this release (an unknown path falls to the session check). The
-  `loggedOutOn401` interceptor must skip it, or it would call `Session.lost()` on the public page: a 401 there is
-  "Can't reach orrery right now", nothing more.
-- Phone first: the cards stack; the page is light or dark from the system setting (no Theme menu there).
+- `web/src/main.ts` boots `StatusPage` (`web/src/app/public/status-page.ts`, folder `app/public/` with its
+  `CLAUDE.md`) instead of the dashboard's `App` when the path is `/status` or `/status/`, with its own providers (an
+  HTTP client only). So there is no router, no shell, no session and no interceptor: nothing that asks `/api/me`,
+  `/api/environment`, `/api/integrations` or the event stream, which are all 404 on `status.orrery.run`. This
+  replaces the design's first idea (a route flagged public inside the shell), which every later shell change could
+  have broken. `App` and its tests are untouched.
+- One request, `GET /api/public/status`, every 30 s. Any failure, including the 401 a hub without
+  `integrations.web.status` (or an older hub) answers, keeps the last answer greyed out under "Can't reach orrery
+  right now"; the next poll tries again.
+- It reuses `Logo`, `Status` with `publicServerState` (in `status.ts`, next to `serverState`), `Theme` (the
+  system's light or dark, unless this browser picked one on the dashboard), `formatDuration` for "Updated … ago",
+  and Angular's `formatPercent` with the uptime row's `1.0-1` digits. Tab title: "orrery status".
+- Phone first: the cards stack, one column at any width (max 2xl).
 
 ## Caddy and DNS
 
@@ -153,11 +153,11 @@ fixture file first, as a pure move):
 - The CSRF and session checks still guard everything else (an existing route still answers 401 without a cookie).
 - `check-config`: unknown id, duplicate id, empty list, `status` without `web`.
 
-Dashboard (`web/src/app/public/status.spec.ts`):
+Dashboard (`web/src/app/public/status-page.spec.ts`):
 
-- Renders each state and the player names; a failed fetch shows "Can't reach orrery right now".
-- The shell on `/status`: no request but `/api/public/status` (`HttpTestingController.verify()` after it renders),
-  no login card, no sidebar.
+- No request but `/api/public/status` (`HttpTestingController.verify()`); each state's word, the players, the uptime
+  line; a 401 then a good answer: the error line and greyed cards, then cleared; never answered: the error alone.
+- `isStatusPath`: `/status` and `/status/` only.
 
 ## Build order
 
@@ -166,7 +166,7 @@ Dashboard (`web/src/app/public/status.spec.ts`):
    bearer sessions (`docs/notes/android-app.md`) change that module, not `web.ts`.
 2. Hub: config section and `check-config`, `PublicStatus` types, `web-public.ts` and one registration line in
    `web.ts`, tests.
-3. Dashboard: the public shell path, `app/public/status.ts`, tests.
+3. Dashboard: `app/public/status-page.ts` booted by `main.ts`, tests.
 4. `deploy/Caddyfile`.
 
 ## Release and deploy

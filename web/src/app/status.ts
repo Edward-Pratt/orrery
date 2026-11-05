@@ -1,8 +1,8 @@
 // `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`;
-// teal `--brand`; Figtree).
+// teal `--brand`; Figtree); `serverState` for a server's card and `publicServerState` for the Status page.
 
 import { Component, input } from '@angular/core';
-import type { ServerCard } from '@hub/api';
+import type { PublicState, ServerCard } from '@hub/api';
 
 export type Health = 'ok' | 'warn' | 'down';
 
@@ -28,3 +28,12 @@ export const serverState = (c: ServerCard): { health: Health; label: string } =>
   health: !c.online || c.hung ? 'down' : c.lagging ? 'warn' : 'ok',
   label: c.hung ? 'Not responding' : !c.online ? 'Offline' : c.lagging ? 'Lagging' : 'Online',
 });
+
+/** How a server shows on the Status page: its state's word, "Not responding" as on its card. */
+export const publicServerState = (state: PublicState): { health: Health; label: string } => PUBLIC_STATES[state];
+const PUBLIC_STATES: Record<PublicState, { health: Health; label: string }> = {
+  up: { health: 'ok', label: 'Up' },
+  paused: { health: 'ok', label: 'Up · paused' },
+  hung: { health: 'down', label: 'Not responding' },
+  down: { health: 'down', label: 'Down' },
+};

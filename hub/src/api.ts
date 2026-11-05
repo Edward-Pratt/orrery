@@ -82,9 +82,6 @@ export type {
 /** `GET /api/me`: the logged-in admin; `avatar` is their Discord avatar hash (null: none). */
 export type Me = { id: string; username: string; avatar: string | null };
 
-/** `GET /api/environment`, the one read without a session: which Environment this hub is, for the dashboard's badge. */
-export type EnvironmentInfo = { environment: 'production' | 'staging' };
-
 /**
  * `GET /api/integrations`: which integrations are switched on, whether the hub has the Pack `library` (systemd and
  * Minecraft), and whether New server is offered (`newServer`: the library and GitHub on).
@@ -677,3 +674,4 @@ export type ModCheck = { name: string; found: 'fits' | 'noRelease' | 'missing' |
 export type ModCheckAnswer = { line: string; mods: ModCheck[] };
 
 export type * from './api-game-extras.ts';
+export type * from './api-public.ts';

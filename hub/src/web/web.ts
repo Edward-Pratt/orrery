@@ -1,5 +1,5 @@
-// Web integration: the Hono HTTP API under `/api` (`webApi`): `GET /api/environment` (`{ environment }`, the one
-// read without a session), then the Discord login, the session and CSRF checks, `GET /api/me` and `POST /api/logout`
+// Web integration: the Hono HTTP API under `/api` (`webApi`): the reads without a session (`publicRoutes`, in
+// `web-public.ts`), then the Discord login, the session and CSRF checks, `GET /api/me` and `POST /api/logout`
 // (`authRoutes`, in `auth.ts`), reads
 // (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` (404
 // unlisted, 502 if journalctl fails) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
@@ -64,7 +64,6 @@ import type {
   DeploysAnswer,
   HostHistory,
   HostNow,
-  EnvironmentInfo,
   Integrations,
   CompareReport,
   LibraryAddAnswer,
@@ -99,6 +98,7 @@ import { GameRefused } from '../updates/factorio.ts';
 import { authRoutes, type OAuth } from './auth.ts';
 export type { OAuth };
 import { gameExtrasRoutes } from './web-game-extras.ts';
+import { publicRoutes } from './web-public.ts';
 import type { Moderation } from '../servers/moderation.ts';
 import type { ModUpdates } from '../updates/mod-updates.ts';
 import type { SaveUploads } from '../backups/save-uploads.ts';
@@ -221,7 +221,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   const app = new Hono<Env>().basePath('/api');
   const actor = (user: Me) => `web:${user.username} (${user.id})`;
 
-  app.get('/environment', (c) => c.json({ environment } satisfies EnvironmentInfo));
+  publicRoutes(app, { environment });
   authRoutes(app, web, oauth, db);
   app.get('/integrations', (c) =>
     c.json({

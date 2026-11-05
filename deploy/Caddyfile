@@ -1,5 +1,5 @@
 # Caddy in front of the dashboard (installed by deploy/install-web.sh), the hub's web API
-# (integrations.web.listenPort) and Grafana. TLS certificates are automatic.
+# (integrations.web.listenPort), the Status page and Grafana. TLS certificates are automatic.
 # Install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
 # SELinux: Caddy may connect to local ports only with `sudo setsebool -P httpd_can_network_connect 1`.
 
@@ -11,6 +11,24 @@ dash.orrery.run {
 		}
 	}
 	# The dashboard; unknown paths get index.html, so its own routes (/servers/gtnh) work on reload.
+	handle {
+		root * /var/www/orrery
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# The Status page (docs/notes/public-status.md): the dashboard's build, which boots the page alone on /status. Only the
+# public read reaches the hub from here (no login, no event stream, no actions); every other /api path is 404, and
+# the session cookie, host-only on dash.orrery.run, is never sent here.
+status.orrery.run {
+	handle /api/public/* {
+		reverse_proxy 127.0.0.1:25581
+	}
+	handle /api/* {
+		respond 404
+	}
+	redir / /status
 	handle {
 		root * /var/www/orrery
 		try_files {path} /index.html

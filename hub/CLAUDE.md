@@ -23,7 +23,7 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]), env D
 `api-game-extras.ts`, `api-public.ts`) and two small helpers (`daily.ts`,
 `units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
 what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
-`stats/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
+`stats/`, `users/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
 change it with the file. `start.ts` wires them all from config, so it is the map. Tests mirror the folders under
 `test/`; `test/fake-mod.ts` and `test/fake-agent.ts` serve them all.
 

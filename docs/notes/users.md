@@ -1,6 +1,6 @@
 # Users: local accounts, roles and permissions instead of the Discord login
 
-Status: designed, not built. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
+Status: designed; build order step 1 (the hub's model, `hub/src/users/`) built 2026-11-05 on branch `users`. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
 `web-v0.20.0`, `agent-v1.4.0` cut and its deploy unchecked). File and line references are at that commit.
 
 The owner asked to move the dashboard off Discord logins: a users database, a page to manage them, role-based
@@ -93,22 +93,24 @@ The vocabulary, in `hub/src/users/permissions.ts`, with the label and the one-li
 
 Rules:
 
-- `can(user, permission, serverId?)`: for a `servers.*` permission, some grant whose role holds it and whose scope is
-  null or names `serverId`; asked with no server (an upload, which names none), some grant that holds it at all. For
-  every other permission, some grant whose role holds it **and whose scope is null**. An `owner` grant holds every
-  permission.
+- `can(grants, permission, serverId?)`: some grant whose role holds the permission and is unscoped, or, for a scoped
+  permission asked with a server, names that server. So a scoped grant gives none of its role's unscoped permissions,
+  and a scoped permission asked with no server (an unlinked service) needs an unscoped grant.
+  `canAnywhere(grants, permission)`: a scoped permission held on any server (an upload, which names none). An
+  `owner` grant holds every permission. Built: `hub/src/users/permissions.ts`.
 - A service linked to a server (`Services.ofServer`, `hub/src/services/services.ts:121`, and the inverse) is checked
   as that server: `services.control` and `services.logs` on `factorio.service` pass for a grant scoped to `factorio`,
   which is how the scoped operator starts a stopped server. An unlinked service (`caddy.service`) needs an unscoped
   grant.
-- A seeded set on first start, only while `roles` is empty: `owner` (fixed), `admin` (everything but `users`),
-  `operator` (`servers.chat`, `servers.control`, `servers.moderation`, `services.control`, `services.logs`) and
-  `viewer` (nothing: reads only). All but `owner` are ordinary rows, renamed or deleted at will.
+- A seeded set on first start, only while `roles` is empty: Owner (id `owner`, fixed), Admin (everything but
+  `users`), Operator (`servers.chat`, `servers.control`, `servers.moderation`, `services.control`, `services.logs`)
+  and Viewer (nothing: reads only). All but Owner are ordinary rows, renamed or deleted at will.
 - At least one enabled user with a password and an unscoped `owner` grant must remain: disabling, deleting or
   ungranting the last one is refused (409). A user can't disable or delete themself (409: another owner does it).
 - Only an owner may grant or revoke `owner`, edit a user who holds `owner`, or create, edit and delete roles. A user
-  with `users` but not `owner` may invite, grant roles to and disable users, and mint resets, but a grant may hand out
-  only permissions the granter holds themself, unscoped: no one can give what they don't have.
+  with `users` but not `owner` manages users at or below their level only: a grant hands out only permissions they
+  hold themself, unscoped, and a reset, a grant change, a disable, a delete or a log-out touches only a user whose
+  every permission they hold (a reset of a higher user would be that account). No one reaches above their level.
 - A role can't be deleted while granted. A permission name the hub doesn't know is refused (400) when a role is saved.
 
 ### What a user is to the dashboard
@@ -394,7 +396,7 @@ not listed is refused by the default-deny middleware; a read not listed needs on
 | `services.logs` | `GET /services/:id/logs`; a linked service is checked as its server |
 | `deploys` | `POST /deploys`, `POST /deploys/check` |
 | `library` | `POST /library/packs`, `POST /library/cancel`, `DELETE /library/packs/:id`, `POST /library/runtimes`, `DELETE /library/runtimes/:name`, `POST /servers`, `DELETE /servers/pending/:id` |
-| `library` or `servers.control` | `POST /uploads`, `GET /uploads/:upload`, `PUT /uploads/:upload` (a pack zip or a save; the save's `POST …/saves` checks its server) |
+| `library` or `servers.control` anywhere (`canAnywhere`) | `POST /uploads`, `GET /uploads/:upload`, `PUT /uploads/:upload` (a pack zip or a save; the save's `POST …/saves` checks its server) |
 | `audit` | `GET /audit` |
 | `users` | `GET /users`, `POST /users`, `PUT /users/:id`, `POST /users/:id/reset`, `POST /users/:id/logout`, `DELETE /users/:id`, `GET /roles`, `GET /permissions`; owner only: `POST /roles`, `PUT /roles/:id`, `DELETE /roles/:id` |
 | a session, no permission | `GET /me`, `PUT /me/password`, `POST /me/logout-all`, `POST /logout`, `GET /integrations`, `GET /events`, `GET /servers`, `GET /servers/pending`, `GET /servers/:id`, `…/history`, `…/players/:name`, `GET …/pack`, `GET …/game`, `…/game/updates`, `…/game/mods`, `…/game/mods/:name/thumbnail`, `GET …/moderation`, `GET /services`, `GET /checks`, `GET /hosts`, `…/samples`, `GET /host`, `GET /deploys`, `GET /library`, `GET /library/packs/:id/scripts` |

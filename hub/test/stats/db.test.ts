@@ -276,9 +276,9 @@ test('a web session from before avatars reads as avatar null', async (t) => {
   old.exec("INSERT INTO web_sessions VALUES ('s', '5', 'alex', 9999999999999)");
   old.close();
   const db = new Db(path);
-  assert.deepEqual(db.webSession('s'), { id: '5', username: 'alex', avatar: null });
-  db.addWebSession('t', '6', 'sam', 'abc', 9999999999999);
-  assert.equal(db.webSession('t')?.avatar, 'abc');
+  assert.deepEqual(db.users.webSession('s'), { id: '5', username: 'alex', avatar: null });
+  db.users.addWebSession('t', '6', 'sam', 'abc', 9999999999999);
+  assert.equal(db.users.webSession('t')?.avatar, 'abc');
 });
 
 test("Factorio links have their own table: an older hub after a Rollback reads and writes `links` as before", async (t) => {

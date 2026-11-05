@@ -85,8 +85,8 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, oauth: OAuth, db
     }
     if (!member?.roles.includes(web.adminRoleId)) return failed('admin');
     const id = randomBytes(32).toString('base64url');
-    db.addWebSession(hash(id), member.id, member.username, member.avatar, Date.now() + web.sessionDays * DAY_S * 1000);
-    db.setWebSessionCheck(hash(id), seal(token, id), Date.now());
+    db.users.addWebSession(hash(id), member.id, member.username, member.avatar, Date.now() + web.sessionDays * DAY_S * 1000);
+    db.users.setWebSessionCheck(hash(id), seal(token, id), Date.now());
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
     console.log(`[web] ${member.username} (${member.id}) logged in`);
     return c.redirect(new URL('/', web.publicUrl).href);
@@ -105,19 +105,19 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, oauth: OAuth, db
       return;
     }
     if (member?.roles.includes(web.adminRoleId)) return;
-    db.deleteWebSession(id);
+    db.users.deleteWebSession(id);
     const why = member ? 'lost the admin role' : 'not in the guild, or Discord refused the token';
     console.log(`[web] ${user.username} (${user.id}) is no longer an admin (${why}): logged out`);
   };
   app.use(async (c, next) => {
     const session = getCookie(c, 'session');
     const id = session && hash(session);
-    const user = id ? db.webSession(id) : undefined;
+    const user = id ? db.users.webSession(id) : undefined;
     if (!id || !user) return c.text('Not logged in', 401);
     // ponytail: sessions from before re-checks have no row and run to their expiry unchecked.
-    const check = db.webSessionCheck(id);
+    const check = db.users.webSessionCheck(id);
     if (check && Date.now() - check.checked >= RECHECK_MS) {
-      db.markWebSessionChecked(id, Date.now()); // first, so concurrent requests ask Discord once
+      db.users.markWebSessionChecked(id, Date.now()); // first, so concurrent requests ask Discord once
       void recheck(id, session!, check.token, user); // in the background: this request goes on, the next one sees the outcome
     }
     c.set('user', user);
@@ -136,7 +136,7 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, oauth: OAuth, db
   });
   app.get('/me', (c) => c.json(c.get('user') satisfies Me));
   app.post('/logout', (c) => {
-    db.deleteWebSession(hash(getCookie(c, 'session')!));
+    db.users.deleteWebSession(hash(getCookie(c, 'session')!));
     deleteCookie(c, 'session', COOKIE);
     return c.body(null, 204);
   });

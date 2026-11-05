@@ -93,7 +93,12 @@ export class Stats {
   status(serverId: string, now = Date.now()): StatusAnswer | undefined {
     const state = this.#hub.get(serverId);
     if (!state) return undefined;
-    return { state, uptimeDay: this.#db.uptime(serverId, now - DAY, now), uptimeWeek: this.#db.uptime(serverId, now - 7 * DAY, now) };
+    return { state, uptimeDay: this.uptime(serverId, 1, now), uptimeWeek: this.uptime(serverId, 7, now) };
+  }
+
+  /** Share of the last `days` the server was up (0–1), null if nothing is known. */
+  uptime(serverId: string, days: number, now = Date.now()): number | null {
+    return this.#db.uptime(serverId, now - days * DAY, now);
   }
 
   /** Live state, the last hour's samples (oldest first), and average/minimum over the last hour and day. */

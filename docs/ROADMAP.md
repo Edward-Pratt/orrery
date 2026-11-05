@@ -231,7 +231,7 @@ Discord notice.
 Then, in order: New world (stage B above), then off-site save copies (`docs/notes/factorio-save-copies.md`, to
 redesign against the transfer save uploads use).
 
-## Status page — designed
+## Status page — hub built, dashboard next
 
 Notes: `docs/notes/public-status.md`. A public page on `status.orrery.run`, with no login, for players: each listed
 server's name, game, state, the players online (count and names) and uptime over 7 and 30 days, polled every 30 s.

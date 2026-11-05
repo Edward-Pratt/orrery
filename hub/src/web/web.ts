@@ -221,7 +221,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   const app = new Hono<Env>().basePath('/api');
   const actor = (user: Me) => `web:${user.username} (${user.id})`;
 
-  publicRoutes(app, { environment });
+  publicRoutes(app, { environment, status: web.status, hub, stats });
   authRoutes(app, web, oauth, db);
   app.get('/integrations', (c) =>
     c.json({

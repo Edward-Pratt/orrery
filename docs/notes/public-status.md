@@ -1,6 +1,6 @@
 # Status page: a public page for players
 
-Status: designed, not built. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
+Status: hub built (branch `status-page-hub`, step 3 of the build order), dashboard and Caddy not yet. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
 `web-v0.17.0`, `agent-v1.3.0`; cut and not deployed: `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, `web-v0.19.0`).
 File and line references are at that commit.
 
@@ -47,7 +47,8 @@ A new optional section, `integrations.web.status`:
 ```
 
 - The section switches the page on (ADR 0002: an integration's parts are switched on by their section). Without it,
-  `/api/public/status` is not registered: 404.
+  `/api/public/status` is not registered, so it falls to the session check like any unknown path: 401 logged out
+  (404 with a session). The Status page then says "Can't reach orrery right now".
 - `servers` lists which servers appear, in order. A server is **never** public by default: one added later (a Pack
   install) stays off the page until its id is listed. `check-config` refuses an unknown id, a duplicate, or an empty
   list.
@@ -144,7 +145,7 @@ fixture file first, as a pure move):
 
 - With the section: 200 without a cookie; only the listed servers, in config order; each object's keys are exactly the
   six fields (a key-set assertion, so a new field fails the test); state for online, paused, hung and offline servers.
-- Without the section: 404.
+- Without the section: 401 without a session (as any unknown path).
 - `Cache-Control` is set; two calls within 15 s read uptime once (a counting fake `Stats`).
 - The CSRF and session checks still guard everything else (an existing route still answers 401 without a cookie).
 - `check-config`: unknown id, duplicate id, empty list, `status` without `web`.

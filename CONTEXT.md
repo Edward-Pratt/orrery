@@ -42,6 +42,10 @@ _Avoid_: adapter, plugin, client
 The browser app for managing everything the hub knows. A separate app from the hub, talking only to it; each integration adds its own pages. Not an integration itself.
 _Avoid_: web UI, panel, site
 
+**Status page**:
+The public page on `status.orrery.run`, with no login, for players: each server listed for it in config (and no other), its state, who is online, and its uptime. Part of the dashboard's build, reading only the hub's one public status read. Not the Discord `/status` command.
+_Avoid_: status (alone), public dashboard
+
 **Protocol version**:
 The number a Mod or an Agent announces when it connects, the same number for both. It is the only compatibility contract between the hub and either.
 

@@ -97,6 +97,8 @@ export type WebIntegration = {
   guildId: string;
   adminRoleId: string;
   sessionDays: number;
+  /** The Status page's servers, by id, in the order shown; without it there is no Status page. */
+  status?: { servers: string[] };
 };
 
 /** A URL requested every `intervalSeconds`; up means HTTP 2xx within the request timeout. May name its service. */
@@ -363,7 +365,7 @@ export function validateConfig(raw: unknown): string[] {
     hostLimits(host, where);
   }
   const web = integrations.web;
-  checkWeb(checks(errors), web, discord);
+  checkWeb(checks(errors), web, discord, ids);
   const agents = integrations.agents;
   /** Factorio server id -> the Agents that name it. */
   const served = new Map<string, string[]>();

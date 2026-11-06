@@ -50,7 +50,7 @@ export type ModerationDeps = {
  * Moderation of the players of the servers an Agent runs (`has`; others 404, `GameRefused`): who is online (the
  * latest heartbeat), their bans and admins (the Agent's `playerLists`, one request per server at a time, reused for
  * 2 s), and kick, ban, unban, promote and demote through the Agent's `moderate`, one at a time per server and 20 a
- * minute, audited as the admin. Hub core.
+ * minute, audited as the user. Hub core.
  */
 export class Moderation {
   #d: ModerationDeps;

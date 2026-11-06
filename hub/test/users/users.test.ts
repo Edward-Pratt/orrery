@@ -133,7 +133,7 @@ test('disabling ends sessions at once; a disabled user cannot log in or accept a
   const { actor } = await owner();
   const { id: sam, token } = users.invite({ username: 'sam', grants: [] }, actor);
   await users.acceptInvite(token, PASSWORD);
-  db.users.addWebSession(hashToken('cookie'), sam, 'sam', null, Number.MAX_SAFE_INTEGER);
+  db.users.addWebSession(hashToken('cookie'), sam, 'sam', Number.MAX_SAFE_INTEGER);
   const { token: before } = users.reset(sam, actor);
   users.disable(sam, actor);
   assert.equal(db.users.webSession(hashToken('cookie')), undefined);
@@ -154,8 +154,8 @@ test('a reset link works once and the old password until then; a password change
   await users.acceptInvite(token, 'a brand new password');
   assert.equal(await users.login('alex', PASSWORD), undefined);
   assert.equal((await users.login('alex', 'a brand new password'))?.id, alex);
-  db.users.addWebSession(hashToken('phone'), alex, 'alex', null, Number.MAX_SAFE_INTEGER);
-  db.users.addWebSession(hashToken('laptop'), alex, 'alex', null, Number.MAX_SAFE_INTEGER);
+  db.users.addWebSession(hashToken('phone'), alex, 'alex', Number.MAX_SAFE_INTEGER);
+  db.users.addWebSession(hashToken('laptop'), alex, 'alex', Number.MAX_SAFE_INTEGER);
   await refusedAsync(() => users.changePassword(alex, 'wrong wrong wrong', 'another new password'), 403, /Wrong password/);
   await refusedAsync(() => users.changePassword(alex, 'a brand new password', 'short'), 400, /at least 12/);
   const { token: stale } = users.reset(alex, actor);
@@ -170,7 +170,7 @@ test('deleting a user takes their grants, invites and sessions with them', async
   const { db, users, roles, role, owner } = setup();
   const { actor } = await owner();
   const { id: sam } = users.invite({ username: 'sam', grants: [{ roleId: role('Viewer') }] }, actor);
-  db.users.addWebSession(hashToken('cookie'), sam, 'sam', null, Number.MAX_SAFE_INTEGER);
+  db.users.addWebSession(hashToken('cookie'), sam, 'sam', Number.MAX_SAFE_INTEGER);
   users.remove(sam, actor);
   assert.equal(db.users.user(sam), undefined);
   assert.equal(db.users.grantedCount(role('Viewer')), 0);

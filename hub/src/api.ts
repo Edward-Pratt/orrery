@@ -165,7 +165,7 @@ export type DeployAnswer = { id: number };
 export type ServiceLogs = { lines: string[] };
 
 /**
- * The answer to `POST /api/services/:id/start`, `/stop` and `/restart` (no body; audited as the admin). The action
+ * The answer to `POST /api/services/:id/start`, `/stop` and `/restart` (no body; audited as the user). The action
  * doesn't wait for systemd: the new state follows as `state` events. Stopping or restarting a service whose linked
  * server has players online first counts down in game (the server card's `restart`, cancelled like a restart): `at`
  * is when it will run, null if it ran at once. A service an Agent runs is acted on by that Agent (`serviceAct`). 404
@@ -294,7 +294,7 @@ export type LiveEvent = FeedEvent;
  * `content-type: application/json`, even with no body (else 403/415). Actions answer 404 for an unknown server,
  * 409 if it is offline, 400 for bad input and 502 if it doesn't answer.
  */
-/** `POST /api/servers/:id/chat`: said in game as the admin (their Minecraft name if linked). 204. */
+/** `POST /api/servers/:id/chat`: said in game as the user (the name their Discord id linked, else their username). 204. */
 export type ChatRequest = { message: string };
 
 /**
@@ -325,7 +325,7 @@ export type CommandOutput = { output: string[] };
 
 /**
  * Packs (only for a server with a folder, a linked service and a Mod token; others 404). Every path is relative to the
- * server's folder. Actions are audited as the admin; `PackRefused` answers 400 (bad input), 404 or 409 (not now; Extras and Config edits change
+ * server's folder. Actions are audited as the user; `PackRefused` answers 400 (bad input), 404 or 409 (not now; Extras and Config edits change
  * only while no update runs).
  */
 /** The installed pack, as its library entry recorded it: `source` is its URL, or the uploaded file's name; `how` it arrived. */
@@ -581,7 +581,7 @@ export type GameSettingsAnswer = { applied: string[]; pending: string[] };
  * Game updates (a factorio server only; others 404): moving it to another Factorio version or set of mods, with the
  * Pack update's steps (`PackStepState`, the `packUpdate*` notices) and history rows (`PackUpdateRow`: `from` and `to`
  * like "2.1.24 · 5 mods", the mod changes in `changes`). The routes are registered before the online check, so they
- * answer for a stopped server too. Actions are audited as the admin.
+ * answer for a stopped server too. Actions are audited as the user.
  */
 /**
  * `GET /api/servers/:id/game`: what the server runs (`installed`, as its Agent last reported it: the Factorio version

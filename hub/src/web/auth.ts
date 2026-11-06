@@ -63,7 +63,7 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, { users, session
 
   const startSession = (c: Context<Env>, user: UserRow) => {
     const id = randomBytes(32).toString('base64url');
-    sessions.addWebSession(hashToken(id), user.id, user.username, null, Date.now() + web.sessionDays * DAY_S * 1000);
+    sessions.addWebSession(hashToken(id), user.id, user.username, Date.now() + web.sessionDays * DAY_S * 1000);
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
   };
   let verifying = 0;

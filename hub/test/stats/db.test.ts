@@ -267,7 +267,7 @@ test('the audit log reads newest first, limited, filtered, and pages back across
   assert.doesNotThrow(() => db.audit({ actor: 'x', action: 'command', target: 'a', details: '' }));
 });
 
-test('a web session from before avatars reads as avatar null', async (t) => {
+test('a web session table from before avatars gets the column an older hub reads, and its rows still read', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'orrery-db-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'old.db');
@@ -276,9 +276,9 @@ test('a web session from before avatars reads as avatar null', async (t) => {
   old.exec("INSERT INTO web_sessions VALUES ('s', '5', 'alex', 9999999999999)");
   old.close();
   const db = new Db(path);
-  assert.deepEqual(db.users.webSession('s'), { id: '5', username: 'alex', avatar: null });
-  db.users.addWebSession('t', '6', 'sam', 'abc', 9999999999999);
-  assert.equal(db.users.webSession('t')?.avatar, 'abc');
+  assert.deepEqual(db.users.webSession('s'), { id: '5', username: 'alex' });
+  assert.ok((new DatabaseSync(path).prepare('PRAGMA table_info(web_sessions)').all() as { name: string }[]).some((c) => c.name === 'avatar'));
+  db.close();
 });
 
 test("Factorio links have their own table: an older hub after a Rollback reads and writes `links` as before", async (t) => {

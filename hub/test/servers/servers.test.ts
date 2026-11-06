@@ -206,10 +206,10 @@ test('say cleans text and skips empty messages', async (t) => {
   assert.ok(say.message.startsWith('line1 line2 xyyy'));
 });
 
-test('say sends its source to the mod and keeps the avatar on the event', async (t) => {
+test('say sends its source to the mod and puts the line on the event stream', async (t) => {
   const { hub, port, events } = await setup(t);
   const mod = await online(port);
-  assert.equal(hub.say('gtnh', 'alex', 'hi', 'dashboard', 'https://cdn.example/a.png'), true);
+  assert.equal(hub.say('gtnh', 'alex', 'hi', 'dashboard'), true);
   assert.deepEqual(await mod.next(), { type: 'say', author: 'alex', message: 'hi', source: 'dashboard' });
   assert.deepEqual(events.at(-1), {
     serverId: 'gtnh',
@@ -217,7 +217,6 @@ test('say sends its source to the mod and keeps the avatar on the event', async 
     author: 'alex',
     message: 'hi',
     source: 'dashboard',
-    avatar: 'https://cdn.example/a.png',
   });
 });
 

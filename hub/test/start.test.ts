@@ -229,7 +229,7 @@ test('with web off the hub has no HTTP API', async (t) => {
   await handle.close();
 });
 
-/** A web + Minecraft hub with a logged-in admin: its API, session cookie, hub and mod port. */
+/** A web + Minecraft hub with a logged-in owner: its API, session cookie, hub and mod port. */
 async function liveHub(t: TestContext) {
   let hub: ServerHub | undefined;
   const handle = await startHub(config(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB }), {
@@ -395,7 +395,7 @@ test('the event stream needs a session, and a closed stream leaves no listener o
 });
 
 /**
- * A Minecraft + Discord + web hub with a logged-in admin and two servers: `gtnh` (with the mod and a Backup folder
+ * A Minecraft + Discord + web hub with a logged-in owner and two servers: `gtnh` (with the mod and a Backup folder
  * holding two backups a day apart) and `web` (no mod token).
  */
 async function apiHub(t: TestContext) {
@@ -1701,7 +1701,7 @@ test('the hub starts while the Agent port waits for its address, and closes with
   assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] 192.0.2.1 is not on this machine yet: trying again every 0.02 s']);
 });
 
-test("a link is redeemed in each game, chat from the dashboard names the admin by the server's game, and /unlink clears both", async (t) => {
+test("a link is redeemed in each game, chat from the dashboard names the user by the server's game, and /unlink clears both", async (t) => {
   const cfg = agentConfig(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
   delete cfg.healthcheckUrl;
   let links: Links | undefined;

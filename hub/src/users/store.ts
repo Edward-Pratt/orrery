@@ -222,24 +222,16 @@ export class UsersStore {
     }
   }
 
-  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. */
-  addWebSession(id: string, userId: string, username: string, avatar: string | null, expires: number): void {
-    this.#write(
-      'add web session',
-      'INSERT INTO web_sessions (id, user_id, username, avatar, expires) VALUES (?, ?, ?, ?, ?)',
-      id,
-      userId,
-      username,
-      avatar,
-      expires,
-    );
+  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. `avatar` (the Discord login's) stays null. */
+  addWebSession(id: string, userId: string, username: string, expires: number): void {
+    this.#write('add web session', 'INSERT INTO web_sessions (id, user_id, username, expires) VALUES (?, ?, ?, ?)', id, userId, username, expires);
   }
 
   /** The user (id and username) of an unexpired session. */
-  webSession(id: string, now = Date.now()): { id: string; username: string; avatar: string | null } | undefined {
+  webSession(id: string, now = Date.now()): { id: string; username: string } | undefined {
     const row = this.#db
-      .prepare('SELECT user_id AS id, username, avatar FROM web_sessions WHERE id = ? AND expires > ?')
-      .get(id, now) as { id: string; username: string; avatar: string | null } | undefined;
+      .prepare('SELECT user_id AS id, username FROM web_sessions WHERE id = ? AND expires > ?')
+      .get(id, now) as { id: string; username: string } | undefined;
     return row && { ...row };
   }
 

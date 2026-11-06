@@ -4,7 +4,7 @@
 // names the slowest dimension only in TPS (Minecraft); `agentLost`/`agentBack` and `eventsOff`/`eventsOn` host
 // notices; a factorio server's `packUpdateStarted`/`packUpdateFinished` worded as a game update, its `modUpdates` as
 // a "Portal mod updates" embed in its own channel (each update's name and versions through `inline()`, the first 10,
-// then "and N more"), its `verificationOff`/`verificationOn` (the admin's name only when a save made it) and
+// then "and N more"), its `verificationOff`/`verificationOn` (the dashboard user's name only when a save made it) and
 // `settingsRolledBack` (naming the game password and user verification as put back too) notices (the `settings` one
 // not posted), `formatEvent(e, game)`, its `from` (the version the Agent reported) and the Agent's pre-update save
 // through `inline()`; deploy notices, the Agent's as "the agent on <id>", with `from` escaped: a Mod's or an Agent's

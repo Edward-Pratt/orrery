@@ -19,7 +19,7 @@
 // changed key with its old and new value, the password only as "game password changed" or "removed", admins as `+bob,
 // -alice`; a refusal with its reason). Notices: `settings` (stream only, on each report change and save: the
 // dashboard asks again), `verificationOff`/`verificationOn` (user verification changed from what the hub last knew:
-// by a save, with the admin's name, or by a report, `by` null: a rollback or a hand edit; a report read while a save
+// by a save, with the user's name, or by a report, `by` null: a rollback or a hand edit; a report read while a save
 // is under way is left to the save, and a save refused or unanswered goes by the latest report; the first value a
 // restarted hub learns posts none) and `settingsRolledBack` (a report whose `rolledBack` changed from one the hub had
 // heard: also audited as `hub:agent`, `game settings rollback`, with the Agent's detail; a restarted hub's first
@@ -157,7 +157,7 @@ export function auditDetails(req: GameSettingsRequest, before: GameSettingsRepor
  * others 404). The Agent reads and writes the files: the hub keeps its latest `settings` report in memory (none before
  * its first), checks a save by the same rules (`settingsRequest`) and sends it as `settingsSet`, never keeping or
  * logging the password. Each change of the report, and each save, goes on the server's stream as a `settings` notice;
- * user verification turning off or on (a save, with the admin's name, or a report: a rollback, a hand edit), and a
+ * user verification turning off or on (a save, with the user's name, or a report: a rollback, a hand edit), and a
  * rollback the Agent reports, are notices for Discord's alerts channel too. Hub core.
  */
 export class GameSettings {
@@ -201,7 +201,7 @@ export class GameSettings {
   /**
    * Checks a save (400 naming the field), refuses it while `blocked` (409), sends it to the Agent and answers what
    * applied at once and what waits for a restart (502 with the Agent's reason when it didn't take it). `by` is the
-   * audit's actor, `byName` the admin's name for Discord. The password is passed on once and kept nowhere.
+   * audit's actor, `byName` the user's name for Discord. The password is passed on once and kept nowhere.
    */
   async set(serverId: string, body: Record<string, unknown>, by: string, byName: string): Promise<GameSettingsAnswer> {
     const name = this.#name(serverId);

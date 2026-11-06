@@ -25,7 +25,7 @@ async function answer(c: Context<Env>, has: (id: string) => boolean, fn: (id: st
 /**
  * A factorio server's portal mod updates (`GET …/game/updates`) and its players' moderation (`GET` and `POST
  * …/moderation`), each with its module on, registered by `webApi` before the online check: the lists are read while
- * the server is stopped too, and an action's refusal says why itself. `actor` names the admin in the audit.
+ * the server is stopped too, and an action's refusal says why itself. `actor` names the user in the audit.
  */
 export function gameExtrasRoutes(
   app: Hono<Env>,

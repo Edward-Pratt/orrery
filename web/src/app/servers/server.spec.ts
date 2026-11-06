@@ -229,7 +229,7 @@ describe('server chat section', () => {
     const { el, events, render } = await setup('/gtnh/chat');
     events.push(1, { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'hi' });
     events.push(2, { serverId: 'gtnh', type: 'say', author: 'bob', message: 'from Discord', source: 'discord' });
-    events.push(3, { serverId: 'gtnh', type: 'say', author: 'alex', message: 'from here', source: 'dashboard', avatar: 'https://x/a.png' });
+    events.push(3, { serverId: 'gtnh', type: 'say', author: 'alex', message: 'from here', source: 'dashboard' });
     await render();
     const tags = [...el.querySelectorAll('[data-chat] li')].map((li) => li.querySelector('[data-source]')?.textContent?.trim() ?? null);
     expect(tags).toEqual([null, 'Discord', 'Dashboard']);

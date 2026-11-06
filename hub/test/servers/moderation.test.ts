@@ -74,7 +74,7 @@ test('a stopped server: the lists still come, actions are blocked', async (t) =>
   assert.equal((await h.post({ action: 'unban', player: 'griefer_1' })).status, 409);
 });
 
-test('POST: exactly the request reaches the Agent, the answer and an audit row as the admin; a refusal is a 502', async (t) => {
+test('POST: exactly the request reaches the Agent, the answer and an audit row as the user; a refusal is a 502', async (t) => {
   const h = await moderationHub(t);
   const res = h.post({ action: 'ban', player: 'griefer_2', reason: 'stealing iron', extra: 'x' });
   const sent = await h.reply({ outcome: 'done', lists: LISTS });

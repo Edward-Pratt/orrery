@@ -20,7 +20,7 @@
 // keep-alive comments); actions (`POST /api/servers/:id/chat` (a user with a Discord id that linked, named by their
 // name in that server's game, `Stats.linkedPlayer`), `/command` (400 with why for a factorio server's over 256 characters,
 // `CommandRefused`), `/restart`, `/restart/cancel`, `/backup` (`ServerHub.backup`: a Mod's `backup start`, a factorio
-// server's save): 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the admin;
+// server's save): 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the user;
 // `POST /api/services/:id/start|stop|restart`: 404 unlisted, 409 if a countdown is running, 502 if systemctl (or the
 // service's Agent) fails; `POST /api/servers/:id/restore` with systemd whenever a server has a restore source (a
 // folder and the restore script, or an Agent), registered before the online check: `Restores`' 404/409, 502 with the
@@ -205,7 +205,7 @@ export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats
       packUpdate: packs?.has(s.id) ? { running: packs.busy(s.id), rolledBack: packs.rollback(s.id) } : null,
     };
   };
-  /** Runs a library or New server action as the admin, mapping its refusals to their status. */
+  /** Runs a library or New server action as the user, mapping its refusals to their status. */
   const act = async (c: Context<Env>, fn: (by: string, user: Me) => Promise<object | void>, status: 200 | 202 = 200) => {
     try {
       const answer = await fn(actor(c.get('user')), c.get('user'));

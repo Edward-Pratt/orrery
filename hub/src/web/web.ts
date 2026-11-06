@@ -1,6 +1,6 @@
 // Web integration: the Hono HTTP API under `/api` (`webApi`): the reads without a session (`publicRoutes`, in
-// `web-public.ts`), then the Discord login, the session and CSRF checks, `GET /api/me` and `POST /api/logout`
-// (`authRoutes`, in `auth.ts`), reads
+// `web-public.ts`), then the CSRF check, the login, invites and session check (`authRoutes`, in `auth.ts`), the
+// permission each route needs (`permitRoutes`, `permit.ts`), the Users page (`usersRoutes`, `web-users.ts`), reads
 // (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` with their
 // actions (`servicesRoutes`, in `web-services.ts`) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
 // Agent's) and `/api/hosts/:id/samples?hours=` (404 unknown id) with the host or agents on, and `/api/host` and
@@ -17,8 +17,8 @@
 // for a server with a mod token or one an Agent runs, quests only with a mod token, `update` for a server an Agent
 // runs while game updates are on (`GameUpdates`); the card's `paused` from `ServerState`; `agents` in
 // `/api/integrations`), `GET /api/events` (SSE: `LiveFeed`'s buffer after `Last-Event-ID`, then live events;
-// keep-alive comments); actions (`POST /api/servers/:id/chat` (a linked admin named by their name in that server's
-// game, `Stats.linkedPlayer`), `/command` (400 with why for a factorio server's over 256 characters,
+// keep-alive comments); actions (`POST /api/servers/:id/chat` (a user with a Discord id that linked, named by their
+// name in that server's game, `Stats.linkedPlayer`), `/command` (400 with why for a factorio server's over 256 characters,
 // `CommandRefused`), `/restart`, `/restart/cancel`, `/backup` (`ServerHub.backup`: a Mod's `backup start`, a factorio
 // server's save): 404 unknown, 409 offline, 400 bad input, 502 if the server doesn't answer; audited as the admin;
 // `POST /api/services/:id/start|stop|restart`: 404 unlisted, 409 if a countdown is running, 502 if systemctl (or the
@@ -50,7 +50,7 @@
 // runtime: name | null }`), `GET /api/library/packs/:id/scripts`, and `library` in `/api/integrations`; with packs,
 // the library and GitHub (`newServer` in `/api/integrations`), registered before `/servers/:id`: `POST /api/servers`
 // (202 `{ id }`; `PackRefused`'s status), `GET /api/servers/pending` and `DELETE /api/servers/pending/:id`; every
-// other route needs a session. `serveWebApi` serves it on 127.0.0.1.
+// other route needs a session, and each write a permission. `serveWebApi` serves it on 127.0.0.1.
 
 import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
@@ -92,8 +92,10 @@ import type {
 import type { Checks } from '../services/checks.ts';
 import { DeployRefused, type Deploys } from '../updates/deploys.ts';
 import { GameRefused } from '../updates/factorio.ts';
-import { authRoutes, type OAuth } from './auth.ts';
-export type { OAuth };
+import { authRoutes } from './auth.ts';
+import { permitRoutes } from './permit.ts';
+import { actor, jsonBody, type SessionUser } from './request.ts';
+import { usersRoutes } from './web-users.ts';
 import { gameExtrasRoutes } from './web-game-extras.ts';
 import { publicRoutes } from './web-public.ts';
 import { servicesRoutes } from './web-services.ts';
@@ -106,6 +108,9 @@ import type { GameSettingsAnswer, GameSettingsState, SaveUploadAnswer, SaveUploa
 import type { HostMonitor, Hosts } from '../agents/host.ts';
 import type { Config, WebIntegration } from '../config.ts';
 import type { Db } from '../stats/db.ts';
+import { LoginLimit } from '../users/login-limit.ts';
+import type { Roles } from '../users/roles.ts';
+import type { Users } from '../users/users.ts';
 import { rateOf, type LagMonitor } from '../servers/lag.ts';
 import { LibraryRefused, type Library } from '../packs/library.ts';
 import type { LiveFeed } from '../stats/live.ts';
@@ -131,17 +136,13 @@ function hoursOf(c: Context): number | undefined {
 }
 const BAD_HOURS = `Give hours from 1 to ${MAX_HOURS}`;
 
-/** A request's JSON object body; empty if it has none (or isn't an object). */
-async function jsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown>> {
-  const body = await req.json().catch(() => undefined);
-  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-}
-
-export type Env = { Variables: { user: Me; body: Record<string, unknown> } };
+export type Env = { Variables: { user: SessionUser; session: string; permitted: boolean; body: Record<string, unknown> } };
 
 /** What the API reads from; `db` only for its own sessions. The host, checks and services only when they are on. */
 export type WebDeps = {
   db: Db;
+  users: Users;
+  roles: Roles;
   live: LiveFeed;
   hub: ServerHub;
   stats: Stats;
@@ -176,8 +177,8 @@ export type WebDeps = {
   environment: Config['environment'];
 };
 
-/** The HTTP API under /api: Discord login for admins, sessions, and every other route behind a session. */
-export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
+/** The HTTP API under /api: logins, sessions, and every other route behind a session and its permissions. */
+export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
   // Chat, TPS and quests come from the mod, so only a server with a mod token has them.
   const hasMod = (id: string) => Boolean(integrations.minecraft?.tokens[id]);
   // A factorio server is run by an Agent (its `server`).
@@ -217,10 +218,11 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
   // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
   const newServer = Boolean(packs && library && deploys);
   const app = new Hono<Env>().basePath('/api');
-  const actor = (user: Me) => `web:${user.username} (${user.id})`;
 
   publicRoutes(app, { environment, status: web.status, hub, stats });
-  authRoutes(app, web, oauth, db);
+  authRoutes(app, web, { users, sessions: db.users, limit: new LoginLimit() });
+  permitRoutes(app, (id) => services?.serverOf(id));
+  usersRoutes(app, { users, roles, publicUrl: web.publicUrl });
   app.get('/integrations', (c) =>
     c.json({
       minecraft: !!integrations.minecraft,
@@ -556,10 +558,9 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     const id = c.req.param('id');
     const user = c.get('user');
     const message = c.get('body').message;
-    // Linked people appear in game under their name in that server's game, as from Discord; Discord shows the admin's avatar.
-    const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : undefined;
-    const author = stats.linkedPlayer(id, user.id) ?? user.username;
-    if (typeof message !== 'string' || !hub.say(id, author, message, 'dashboard', avatar)) {
+    // A user with a linked Discord id appears in game under their name in that server's game, as from Discord.
+    const author = (user.discordId && stats.linkedPlayer(id, user.discordId)) || user.username;
+    if (typeof message !== 'string' || !hub.say(id, author, message, 'dashboard')) {
       return c.text('Give a message', 400);
     }
     hub.audit(actor(user), 'chat', id, mcText(message, 256));

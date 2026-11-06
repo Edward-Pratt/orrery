@@ -1,6 +1,6 @@
 # Users: local accounts, roles and permissions instead of the Discord login
 
-Status: designed; build order step 1 (the hub's model, `hub/src/users/`) built 2026-11-05 on branch `users`. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
+Status: designed; build order steps 1 and 2 (the hub's model and its API) built 2026-11-05 and 2026-11-06 on branch `users`. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
 `web-v0.20.0`, `agent-v1.4.0` cut and its deploy unchecked). File and line references are at that commit.
 
 The owner asked to move the dashboard off Discord logins: a users database, a page to manage them, role-based
@@ -19,56 +19,47 @@ Contents: [Resume here](#resume-here), [Decisions to confirm](#decisions-to-conf
 
 ## Resume here
 
-State on 2026-11-05, branch `users` from `main` at `16b27b1`, **not pushed**, five commits: `68b2a12` (this note,
-the ROADMAP section, the Android note's login), `03ef75d` (the pure move of the session SQL into
-`hub/src/users/store.ts`), `a649cc3` (the model), `9430610` (this section) and the security-review fixes after it
-(invites end on a grant change, an invite is used up before the hash, Discord ids owner-set and unique). `npm test` 586 green, `npm run typecheck` and
-`.github/check-file-length` clean. The decisions above are not yet confirmed by the owner: the model follows them.
+State on 2026-11-06, branch `users` from `main` at `16b27b1`, **not pushed**. Step 1 (the model) is `68b2a12` to
+`77bfd51`; step 2 (the hub's API) is the pure move `09c97c9` (the services routes into `hub/src/web/web-services.ts`)
+and the commit after it. `npm test` (595) and `npm run typecheck` green, `.github/check-file-length main` clean. The
+dashboard (`web/`) **does not build** on this branch until step 3: `Me` lost `avatar` and gained `owner` and
+`permissions`, and the login card still links to the removed `/api/login` redirect. Don't push or merge step 2
+without step 3 (decision 5). The decisions below are still not confirmed by the owner: the build follows them.
 
-**Built (build order step 1):** `hub/src/users/` with `test/users/`: `permissions.ts` (`can`, `canAnywhere`,
-`isOwner`, `permissionsOf`, `OWNER_GRANTS`), `password.ts` (scrypt, `cost` for tests), `store.ts` (`db.users`: the
-four tables, the sessions, `resolve`, `ownerCount`, `transaction`, `hashToken`), `roles.ts` (`Roles`, `RoleRefused`,
-the seed Owner, Admin, Operator, Viewer), `users.ts` (`Users`, `UsersRefused`, `Actor`, `UserView`: `invite`, `reset`,
-`acceptInvite`, `login`, `changePassword`, `setGrants`, `setDiscordId`, `disable`, `enable`, `remove`,
-`endSessions`, `resolve`, `list`), `login-limit.ts` (`LoginLimit.locked/fail/clear`). Nothing uses them yet: the
-Discord login still runs through `db.users.webSession` and friends.
+**Built in step 2**, and where it differs from the plan below:
 
-**Next (build order step 2, the hub's API), in this order:**
+- `hub/src/api-users.ts`: `Me` moved here whole (not one line in `api.ts`), with the login, invite and Users page types.
+- `hub/src/web/auth.ts` rewritten: CSRF first, `POST /api/login`, `GET`/`POST /api/invites/:token`, the session check
+  (`SessionUser` into `c.get('user')`, the session's hash into `c.get('session')`), `GET /api/me`, and also `PUT
+  /api/me/password` and `POST /api/me/logout-all` (here, not in `web-users.ts`: they share the login's limits). A try
+  is counted (`LoginLimit.fail`) **before** its password check, so tries sent at once can't all pass `locked`; a
+  success `clear`s the pair, so every try counts against its address. New: at most `MAX_VERIFYING` (2) password
+  checks at once, the rest 429 "The hub is busy" (Node's thread pool has 4 threads; a flood must not starve files
+  and DNS). `LoginLimit` is built in `webApi` (the App's login will move it to `start.ts`).
+- `hub/src/web/permit.ts`: `RULES` is the appendix's table; a POST, PUT, DELETE or PATCH no rule passed is 403 "No
+  permission allows this request", so a write to an unknown path is 403, not 404. `Services.serverOf` added.
+- `hub/src/web/web-users.ts`: the Users page's routes; `PUT /api/users/:id` is `Users.update`, all or none (one
+  transaction, the audit rows in it). `Users` gained `update`, `invitee`, `inviteLink`, `reset` naming its user, and
+  `endSessions` of one's own always allowed.
+- `hub/src/web/request.ts`: `jsonBody` (moved from `web.ts`), `SessionUser`, `actor`, `usersActor`.
+- Wiring: `start.ts` builds `Roles` and `Users` with the web integration; `HubHandle.web` holds `users` (the seam
+  tests make their first owner with). `index.ts` reads no `DISCORD_CLIENT_SECRET`; `WebIntegration` lost the three
+  keys; `web-config.ts`'s `resolveWeb` warns of each left in and drops it. `UsersStore` lost the Discord re-check's
+  three methods; `Db(path, timeout)` for the CLI.
+- `hub/src/users-cli.ts`: `npm run users -- invite <username> [config path]` (`cliInvite`).
+- Tests: `test/web/web-hub.ts`'s `loginAs` (invite, then `POST /api/invites/:token`; `POST /api/login` once the user
+  has a password) and `ACTOR` (the last login's, as ids are random); `test/web/auth.test.ts`, `permit.test.ts`,
+  `users-routes.test.ts`, `test/users-cli.test.ts`. The Discord login's tests are gone from `start.test.ts`.
+- Docs: `docs/adr/0005-local-users.md` (0002's login sentence marked superseded), `CONTEXT.md`'s Users section, both
+  `CLAUDE.md`s' web paragraphs, `hub/src/web/CLAUDE.md`, `hub/src/users/CLAUDE.md`, `README.md`, the example
+  configs, `deploy/orrery-hub.service` and `deploy/orrery-hub-staging.service` (step 3 is the env file alone, step
+  10 ends with the CLI invite).
 
-1. Pure moves, each its own commit, so `web.ts` (663 lines) and `api.ts` (677) don't grow: the services routes
-   (`GET /services`, the `VERBS` loop at `web.ts:282`, `GET /services/:id/logs`) into `hub/src/web/web-services.ts`;
-   the new API types go in a new `hub/src/api-users.ts` as they are written.
-2. `auth.ts` rewritten: the CSRF middleware first (so the login gets Origin and JSON), then `POST /api/login`
-   (`{ username, password }`; `LoginLimit.locked` → 429 with `Retry-After`; `Users.login`; a failure counts and
-   answers 401 "Wrong username or password"; a success clears the pair, writes `db.users.addWebSession` with the
-   user's id and null avatar, sets the cookie), `GET` and `POST /api/invites/:token` (`Users.acceptInvite`, then the
-   same session and cookie), the session middleware (`webSession` → `users.resolve` → a disabled or missing user is
-   401 → `c.set('user', SessionUser)`: `Me` plus `discordId`), `GET /api/me` (`permissionsOf`, `isOwner`), `POST
-   /api/logout`. The address is the last `X-Forwarded-For` entry, else the socket's. Gone: `/login` redirect,
-   `/callback`, `recheck`, `seal`/`unseal`, `OAuth`, `discordOAuth`, the local `hash` (use `hashToken`).
-3. `permit.ts`: the rules table from the [appendix](#appendix-permission-for-each-route), `permit(...permissions)`
-   registered with `app.on(method, path, …)` before the routes, the default-deny middleware for POST, PUT and DELETE
-   without a passed rule, 403 "Needs <permission> on <server>". A linked service is checked as its server:
-   `Services` needs the inverse of `ofServer` (`hub/src/services/services.ts:121`), e.g. `serverOf(serviceId)`.
-4. `web-users.ts`: the routes in the [Hub](#hub) table; `RoleRefused` and `UsersRefused` map to their `status`;
-   role writes need `isOwner`; the invite link is `${web.publicUrl}/?invite=${token}`; the actor is
-   `{ label: actor(user), userId: user.id, grants }`.
-5. `Me` (`api.ts:83`) as in [Model](#model); `Env.Variables.user` (`web.ts:142`) becomes `SessionUser`; the chat
-   route (`web.ts:582`) reads `discordId` and passes no avatar.
-6. Wiring: `start.ts` builds `Roles`, `Users` (`knownServer` from `config.servers`, `db.audit`) and `LoginLimit`,
-   drops the `oauth` dependency and its throw (`start.ts:70`, `:128`, `:366`); `index.ts` stops reading
-   `DISCORD_CLIENT_SECRET`; `WebIntegration` (`config.ts:93`) loses `clientId`, `guildId`, `adminRoleId` and their
-   defaulting (`config.ts:456`, `:504`); `web-config.ts` warns on the three for one release.
-7. `hub/src/users-cli.ts` and `"users": "node src/users-cli.ts"` in `package.json`: `invite <username>` as in
-   [Bootstrap](#bootstrap), opening the database with `{ timeout: 5000 }`, actor `cli:<os user>`.
-8. Tests: `test/web/web-hub.ts` keeps `login`, `loginCookie` and `ADMIN`'s call surface (52 uses in
-   `start.test.ts`) and inside creates the user through `Users` at a low cost and posts credentials; `fakeOAuth` and
-   `PLAYER`'s role go; new `test/web/auth.test.ts`, `users-routes.test.ts`, `test/users-cli.test.ts`;
-   `web-config.test.ts` and `start.test.ts`'s configs lose the three keys.
-9. Docs in the same commits: `hub/CLAUDE.md` (the trust-boundaries paragraph), `hub/src/web/CLAUDE.md`, `README.md:53`,
-   `hub/config.example.json`, `config.staging.example.json`, `deploy/orrery-hub-staging.service` step 3.
-
-Then step 3, the dashboard, and the by-hand steps under [Release and deploy](#release-and-deploy).
+**Next: step 3, the dashboard** ([Dashboard](#dashboard)): `app/session.ts` (`Me`, `can()`, a 403 refreshing `/api/me`),
+`app/login.ts` (the form, the invite card from `?invite=`), `app/app.ts` (initials only, Account, the Users nav),
+`can()` on every action, `app/users/` with its `CLAUDE.md`, `web/CLAUDE.md`'s local setup (`npm run users -- invite
+me` against the local hub, no Discord redirect URL), and the dashboard tests. Then `cd web && npm test && npm run
+build`, the whole "Verify before claiming done" list, and [Release and deploy](#release-and-deploy).
 
 ## Decisions to confirm
 

@@ -34,7 +34,7 @@ Wants=network-online.target
 User=opc
 # No WorkingDirectory=: systemd (init_t) may not read the `current` symlink (user_home_t) under SELinux, so it fails
 # with 200/CHDIR. node follows it itself, and the hub needs no working directory (every path it uses is absolute).
-# DISCORD_TOKEN=... (and DISCORD_CLIENT_SECRET=... with integrations.web, GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
+# DISCORD_TOKEN=... (and GITHUB_TOKEN=... with integrations.github) lives in /etc (root-only), not in /home: SELinux blocks systemd reading files in /home.
 #   sudo install -m 600 -o root -g root hub/.env /etc/orrery.env
 EnvironmentFile=/etc/orrery.env
 # FACTORIO_USERNAME=... and FACTORIO_TOKEN=... (the owner's factorio.com account, for game updates' mod download

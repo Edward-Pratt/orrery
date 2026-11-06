@@ -3,8 +3,8 @@
 // browser's `ModBrowse`, `PortalListing`, `PortalCategory`, `PortalSort`, the Import mod list's `ModCheckRequest`,
 // `ModCheck`, `ModCheckAnswer`, and the game settings ones: `GameSettingsState`, `GameSettingsRequest`,
 // `GameSettingsAnswer`; `Features.settings`, left out by an older hub), for the dashboard (`web/`) to import
-// type-only. Imports only `types.ts`, so it compiles without `@types/node` (`npm run typecheck` checks it with
-// `tsconfig.api.json`); `web.ts` checks each payload against it with `satisfies`.
+// type-only; Users' (`Me` among them) are in `api-users.ts`. Imports only pure files, so it compiles without
+// `@types/node` (`npm run typecheck` checks it with `tsconfig.api.json`); routes check payloads with `satisfies`.
 
 /**
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
@@ -78,9 +78,6 @@ export type {
   TpsAnswer,
   UptimeState,
 } from './types.ts';
-
-/** `GET /api/me`: the logged-in admin; `avatar` is their Discord avatar hash (null: none). */
-export type Me = { id: string; username: string; avatar: string | null };
 
 /**
  * `GET /api/integrations`: which integrations are switched on, whether the hub has the Pack `library` (systemd and
@@ -675,3 +672,4 @@ export type ModCheckAnswer = { line: string; mods: ModCheck[] };
 
 export type * from './api-game-extras.ts';
 export type * from './api-public.ts';
+export type * from './api-users.ts';

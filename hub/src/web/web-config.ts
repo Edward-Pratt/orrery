@@ -1,16 +1,25 @@
 // `integrations.web`'s own check, called by `validateConfig`: an object with the port, an https `publicUrl` with no
-// path, the OAuth `clientId`, positive `sessionDays`, `guildId` and `adminRoleId` (each a Discord ID, or taken from
-// `integrations.discord`'s), and the optional `status` (`servers`: a non-empty list of server ids, each once). Hub
-// core, offline.
+// path, positive `sessionDays`, and the optional `status` (`servers`: a non-empty list of server ids, each once). The
+// Discord login's keys (`OLD_KEYS`: `clientId`, `guildId`, `adminRoleId`) are ignored for one release, the Rollback
+// window, with a warning from `resolveWeb` (which `loadConfig` calls, defaulting `sessionDays` to 7). Hub core, offline.
 
 import { isObj, type Checks } from '../config-check.ts';
+import type { WebIntegration } from '../config.ts';
 
-/**
- * Checks `integrations.web` (`web`, undefined when it is off) against `discord`, the raw `integrations.discord`, and
- * the server ids (`ids`, undefined when `servers` itself is broken).
- */
-export function checkWeb(c: Checks, web: unknown, discord: unknown, ids: Set<string> | undefined): void {
-  const { err, str, id, num, port } = c;
+/** The Discord login's keys: a hub rolled back to before Users still needs them, so they warn rather than fail. */
+export const OLD_KEYS = ['clientId', 'guildId', 'adminRoleId'] as const;
+
+/** `integrations.web` as the hub uses it, with a warning for each key of the Discord login left in. */
+export function resolveWeb(web: WebIntegration, warn: (line: string) => void = console.warn): WebIntegration {
+  for (const key of OLD_KEYS) {
+    if (Object.hasOwn(web, key)) warn(`integrations.web: "${key}" is no longer used (dashboard logins are local Users): remove it after the Rollback window`);
+  }
+  return { listenPort: web.listenPort, publicUrl: web.publicUrl, sessionDays: web.sessionDays ?? 7, ...(web.status && { status: web.status }) };
+}
+
+/** Checks `integrations.web` (`web`, undefined when it is off) against the server ids (`ids`, undefined when `servers` itself is broken). */
+export function checkWeb(c: Checks, web: unknown, ids: Set<string> | undefined): void {
+  const { err, str, num, port } = c;
   if (web !== undefined && !isObj(web)) err('integrations', '"web" must be an object');
   else if (web) {
     const where = 'integrations.web';
@@ -20,14 +29,7 @@ export function checkWeb(c: Checks, web: unknown, discord: unknown, ids: Set<str
     if (url !== undefined && (parsed?.protocol !== 'https:' || parsed.pathname !== '/')) {
       err(where, '"publicUrl" must be an https URL with no path');
     }
-    id(web, 'clientId', where);
     num(web, 'sessionDays', where, (n) => n > 0, 'a positive number');
-    for (const key of ['guildId', 'adminRoleId']) {
-      if (web[key] !== undefined) id(web, key, where);
-      else if (!isObj(discord) || discord[key] === undefined) {
-        err(where, `"${key}" is required (or set integrations.discord.${key})`);
-      }
-    }
     if (web.status !== undefined) checkStatus(c, web.status, ids);
   }
 }

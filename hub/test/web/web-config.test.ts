@@ -6,8 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateConfig } from '../../src/config.ts';
 
-const ID = '123456789012345678';
-const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID, guildId: ID, adminRoleId: ID };
+const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run' };
 
 /** A valid config with two servers and the web integration, its `status` set to `status` (left out if undefined). */
 const withStatus = (status?: unknown) => ({

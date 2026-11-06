@@ -2,12 +2,13 @@
 // dashes or underscores, unique without case; grants; an optional Discord id, 17 to 20 digits, unique, set by owners
 // only, for dashboard chat under their linked name) and gets in by an Invite, a one-use link token (`INVITE_MS`,
 // 24 h; stored as `hashToken`; used up before the password is hashed, so two takers can't both get in) that
-// `acceptInvite` turns into a password and a login; `reset` mints one for an existing user (the old password works
-// until it is used). A grant change ends the user's open invites: a link minted for a lesser user must not open a
+// `acceptInvite` turns into a password and a login (`invitee` names whom a token is for); `reset` mints one for an
+// existing user (the old password works until it is used); `inviteLink` is the dashboard's link for a token. A grant change ends the user's open invites: a link minted for a lesser user must not open a
 // greater one. `login` is timing-flat: an unknown, passwordless or disabled name is verified against a
 // dummy hash before it is refused; a success re-hashes a password made at a lower cost and sets `last_login`.
 // `changePassword` needs the current one and ends the user's other sessions and open invites. `setGrants`, `setDiscordId`, `disable`,
-// `enable`, `remove` and `endSessions` take an `Actor` (the audit label, their user id, their grants) and refuse
+// `enable`, `update` (the Users page's edit: grants, Discord id and disabled, all or none), `remove` and `endSessions`
+// (one's own always allowed) take an `Actor` (the audit label, their user id, their grants) and refuse
 // (`UsersRefused`, with its status): a user who holds `owner` is changed by owners only, and only an owner grants
 // `owner`, never scoped; an actor changes (resets, demotes, disables, deletes, logs out) only a user whose every
 // permission they hold unscoped themself, and a grant hands out only such permissions (an owner holds all), so no
@@ -16,6 +17,7 @@
 // disabled user's sessions and invites end at once. Every change is audited (target `user:<username>`). Hub core.
 
 import { randomBytes } from 'node:crypto';
+import type { UserView } from '../api-users.ts';
 import type { AuditEntry } from '../types.ts';
 import { can, isOwner, type Grant } from './permissions.ts';
 import { checkPassword, COST, dummyHash, hashPassword, verifyPassword, type Cost } from './password.ts';
@@ -32,17 +34,6 @@ export class UsersRefused extends Error {
 
 /** Who asks: their audit label, their user id (null for the CLI) and their grants. */
 export type Actor = { label: string; userId: string | null; grants: readonly Grant[] };
-
-/** A user as the Users page lists them. */
-export type UserView = {
-  id: string;
-  username: string;
-  disabled: boolean;
-  discordId: string | null;
-  lastLogin: number | null;
-  hasPassword: boolean;
-  grants: { roleId: string; role: string; servers: string[] | null }[];
-};
 
 export const INVITE_MS = 24 * 60 * 60_000;
 const USERNAME = /^[A-Za-z0-9._-]{2,32}$/;
@@ -106,11 +97,18 @@ export class Users {
   }
 
   /** A new invite token for an existing user: how a password is reset. */
-  reset(userId: string, actor: Actor): { token: string } {
+  reset(userId: string, actor: Actor): { id: string; username: string; token: string } {
     const user = this.#target(userId, actor);
     const token = this.#mint(user.id, actor.label);
     this.#audit({ actor: actor.label, action: 'password reset', target: `user:${user.username}`, details: 'an invite link was made' });
-    return { token };
+    return { id: user.id, username: user.username, token };
+  }
+
+  /** The username an unexpired invite is for; undefined for an unknown, used or expired token, or a disabled user. */
+  invitee(token: string): string | undefined {
+    const found = this.#store.invite(hashToken(token), this.#now());
+    const user = found && this.#store.user(found.userId);
+    return user && !user.disabled ? user.username : undefined;
   }
 
   /** The invite's user, now with this password and logged in: their invites and earlier sessions are gone. */
@@ -198,8 +196,20 @@ export class Users {
     this.#audit({ actor: actor.label, action: 'user deleted', target: `user:${user.username}`, details: '' });
   }
 
+  /** The Users page's edit: each of `grants`, `discordId` (null removes it) and `disabled` present, all or none. */
+  update(userId: string, input: Record<string, unknown>, actor: Actor): void {
+    if (input.disabled !== undefined && typeof input.disabled !== 'boolean') throw new UsersRefused(400, 'disabled is true or false');
+    this.#store.transaction(() => {
+      if (input.grants !== undefined) this.setGrants(userId, input.grants, actor);
+      if (input.discordId !== undefined) this.setDiscordId(userId, input.discordId, actor);
+      if (input.disabled === true) this.disable(userId, actor);
+      else if (input.disabled === false) this.enable(userId, actor);
+    });
+  }
+
   endSessions(userId: string, actor: Actor): void {
-    const user = this.#target(userId, actor);
+    const user = userId === actor.userId ? this.#store.user(userId) : this.#target(userId, actor);
+    if (!user) throw new UsersRefused(404, 'No such user');
     this.#store.deleteSessionsOf(userId);
     this.#audit({ actor: actor.label, action: 'sessions ended', target: `user:${user.username}`, details: '' });
   }
@@ -271,6 +281,9 @@ export class Users {
     return grants.map((g) => `${this.#roles.get(g.roleId)?.name ?? g.roleId}${g.servers ? ` on ${g.servers.join(', ')}` : ''}`).join('; ');
   }
 }
+
+/** The dashboard's link for an invite token: its login card reads `?invite=`. */
+export const inviteLink = (publicUrl: string, token: string): string => new URL(`/?invite=${token}`, publicUrl).href;
 
 /** The audit actor for what a user does to their own account, as the web routes name them. */
 const self = (u: UserRow) => `web:${u.username} (${u.id})`;

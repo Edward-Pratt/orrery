@@ -6,10 +6,7 @@
     "minecraft": { "listenPort": 25583, "tokens": { "demo": "replace-with-openssl-rand-hex-32" } },
     "web": {
       "listenPort": 25582,
-      "publicUrl": "https://staging.orrery.run",
-      "clientId": "000000000000000000",
-      "guildId": "000000000000000000",
-      "adminRoleId": "000000000000000000"
+      "publicUrl": "https://staging.orrery.run"
     },
     "host": { "id": "oracle" },
     "github": {

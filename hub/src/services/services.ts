@@ -10,7 +10,7 @@
 // players online it first runs the server's 5-minute countdown (`RestartScheduler`), firing the action at its end
 // (`CountdownRunning` if one already runs: 409); `now(id, verb, by)` acts at once, with no countdown whoever is
 // online (how a factorio server's countdown ends: `RestartScheduler`'s `restart`), audited the same; `ofServer` is a
-// server's linked service; `read(id)` reads one unit now (a pack update polls a stop with it; agent-backed: its last
+// server's linked service, `serverOf` a service's server; `read(id)` reads one unit now (a pack update polls a stop with it; agent-backed: its last
 // pushed state); `environment(id)` its `Environment=` (whether it names a server's Java link; none for an
 // agent-backed one). Units go after `--` or as `--unit=`. Agent-backed services are left out of the hub host's polkit
 // `UNITS` (`deploy/orrery-hub.rules`): an explicit exception to keeping it in sync with `integrations.systemd`, as
@@ -121,6 +121,11 @@ export class Services {
   ofServer(serverId: string): ServiceStatus | undefined {
     const id = [...this.#servers].find(([, server]) => server === serverId)?.[0];
     return this.list().find((s) => s.id === id);
+  }
+
+  /** The server a service runs as (`ofServer`'s inverse), if it is linked to one: the dashboard's permissions check it as that server. */
+  serverOf(serviceId: string): string | undefined {
+    return this.#servers.get(serviceId);
   }
 
   /**

@@ -6,8 +6,9 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 npm test            # node --test "test/*.test.ts"
 npm run typecheck   # tsc, noEmit
 npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
-npm start           # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord)
-                    # and DISCORD_CLIENT_SECRET (only with integrations.web), GITHUB_TOKEN (with integrations.github; also lets the library fetch Actions artifacts),
+npm run users -- invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link
+npm start           # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord),
+                    # GITHUB_TOKEN (with integrations.github; also lets the library fetch Actions artifacts),
                     # FACTORIO_USERNAME and FACTORIO_TOKEN (optional, for game updates' mod links; without both, a warning, and every game update is refused: each has `orrery`, a portal mod)
 ```
 
@@ -19,8 +20,8 @@ npm start           # node src/index.ts; reads ./config.json (or argv[2]), env D
 ## Modules
 
 `src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts` with its field checks `config-check.ts`,
-`check-config.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
-`api-game-extras.ts`, `api-public.ts`) and two small helpers (`daily.ts`,
+`check-config.ts`, `users-cli.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
+`api-game-extras.ts`, `api-public.ts`, `api-users.ts`) and two small helpers (`daily.ts`,
 `units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
 what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
 `stats/`, `users/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
@@ -100,17 +101,33 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
 - `/cmd`: admin role check + `deferReply`. Every action on a server (commands via `runCommand`, restarts scheduled
   or cancelled) goes to the `audit` table with its actor: `discord:<username> (<id>)`, or `hub:<why>`
   (`hub:daily`, `hub:restart`) for the hub's own, or `web:<username> (<id>)` from the dashboard (chat from it too).
-- Web: binds `127.0.0.1` (Caddy adds TLS in front). Login is Discord OAuth with a single-use `state` cookie; only
-  members with the admin role get a session. Session ids are random, sent only in an httpOnly, Secure, SameSite=Lax
-  cookie, stored hashed, and expire server-side. Every 10 minutes a request re-asks Discord, in the background, whether the user still has the admin role (with the access token from login, stored sealed with the cookie); losing it, or Discord refusing the token, ends the session, while Discord being down keeps it. Every `/api` route but login/callback, `/api/environment` (the Environment's name only) and, with `integrations.web.status`, `/api/public/status` (the Status page: only the listed servers, built field by field: name, game, state, the player names online and uptime; never an id, an address, a token, a path or a Discord name) needs one. Every request
-  but GET/HEAD (logout too) must also carry `Origin` = the public URL's origin (else 403) and a JSON content type
-  (else 415): CSRF, alongside SameSite=Lax. The one exception to JSON is an upload's chunk, `PUT /api/uploads/:upload` (exactly
-  that method and path), which takes only `application/octet-stream` (no cross-site form can send it); its Origin is
-  checked all the same. Chat from the dashboard goes through `ServerHub.say` like Discord's. The OAuth client
-  secret comes from `DISCORD_CLIENT_SECRET`, never config.
+- Web: binds `127.0.0.1` (Caddy adds TLS in front). Logins are local Users (`users/`, `docs/adr/0005`): a username
+  and a password, hashed with scrypt (per-user salt, `timingSafeEqual`; never logged, answered or audited), checked
+  against a dummy hash for an unknown or passwordless name so the time says nothing; one 401 text for every failure.
+  Logins are limited (`LoginLimit`: 5 failures lock a name from an address, 20 lock the address, 15 min; a try is
+  counted before its check, so tries sent at once can't all pass) and at most `MAX_VERIFYING` password checks run at
+  once (the rest 429), so a flood can't fill Node's thread pool. The address is the last `X-Forwarded-For` entry,
+  Caddy's, which holds only because the hub binds loopback: if it ever listens elsewhere, ignore the header. Invites
+  and sessions are random, stored as their sha256 (a database copy logs nobody in); an invite is one use, 24 h, used
+  up before the password is hashed, and its link is answered once to whoever minted it. Session ids are sent only in
+  an httpOnly, Secure, SameSite=Lax cookie on `/api` and expire server-side; the session's user and grants are read
+  afresh on every request, so a disabled user or a changed grant counts at once. Every `/api` route but the login,
+  the invites, `/api/environment` (the Environment's name only) and, with `integrations.web.status`,
+  `/api/public/status` (the Status page: only the listed servers, built field by field: name, game, state, the player
+  names online and uptime; never an id, an address, a token, a path or a Discord name) needs a session; every write
+  needs a rule in `web/permit.ts` that its user's grants meet (default deny: a write without a rule is 403), and three
+  reads too (a server's logs, its game settings, the audit log). No one grants, or changes a user holding, what they
+  don't hold themself; `owner` is granted, and roles edited, by owners only; the last owner stays. The dashboard
+  hiding a button is never the check. Every request but GET/HEAD (the login and logout too) must also carry `Origin`
+  = the public URL's origin (else 403) and a JSON content type (else 415): CSRF, alongside SameSite=Lax. The one
+  exception to JSON is an upload's chunk, `PUT /api/uploads/:upload` (exactly that method and path), which takes only
+  `application/octet-stream` (no cross-site form can send it); its Origin is checked all the same. Chat from the
+  dashboard goes through `ServerHub.say` like Discord's, under the name its user's Discord id linked (owners set it).
+  The users CLI writes the live database as the hub's OS user: a shell as that user can mint an owner, which is the
+  host's trust boundary already.
 
 ## Tests
 
 `test/servers.test.ts` drives a real socket with a fake mod (`fakeMod`, `online`, `until` helpers in `test/fake-mod.ts`) — use it
 for any hub behaviour change. `test/agents.test.ts` does the same for the Agent port: a fake Agent's two connections on real
-sockets on 127.0.0.1 (an ephemeral port), the expected peer address set through the Agent's config `address`. `test/fake-agent.ts` holds a whole hub with a fake Agent on the Agent port and a fake portal (`PortalFetch`, with the mod browser's list, categories, short pages and a thumbnail), for `test/game-updates.test.ts` (game updates), `test/game-settings.test.ts` (game settings) and `test/agent-deploys.test.ts` (Agent deploys); `test/factorio.test.ts` drives the catalog on a fake portal alone. `test/start.test.ts` starts a whole hub via `startHub` with a stub frontend and a fake Discord OAuth, driving the web API through `app.request` (no port); its web hub and login helpers are in `test/web/web-hub.ts`, which new web tests in `test/web/` share. Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.
+sockets on 127.0.0.1 (an ephemeral port), the expected peer address set through the Agent's config `address`. `test/fake-agent.ts` holds a whole hub with a fake Agent on the Agent port and a fake portal (`PortalFetch`, with the mod browser's list, categories, short pages and a thumbnail), for `test/game-updates.test.ts` (game updates), `test/game-settings.test.ts` (game settings) and `test/agent-deploys.test.ts` (Agent deploys); `test/factorio.test.ts` drives the catalog on a fake portal alone. `test/start.test.ts` starts a whole hub via `startHub` with a stub frontend, driving the web API through `app.request` (no port); its web hub and login helpers are in `test/web/web-hub.ts` (`loginAs` makes a user through `HubHandle.web.users` and logs them in through their invite), which new web tests in `test/web/` share. Keep timing-sensitive tests on small `HubOptions` timeouts, not sleeps of seconds.

@@ -2,8 +2,9 @@
 // (`users`, `roles` (`permissions` as JSON, unknown names dropped on read), `grants` (`servers` as JSON, null for
 // every server), `invites` (stored as `hashToken` of the link's token, like a session; `takeInvite` uses one up as it
 // reads it)), and the dashboard's login
-// sessions (`web_sessions`, stored hashed, and `web_session_checks`, each one's sealed Discord access token and when
-// its admin role was last checked), moved from `Db`, which still prunes expired sessions nightly. Session writes never
+// sessions (`web_sessions`, stored hashed; `user_id` a user's id, rows from the Discord login name none), moved from
+// `Db`, which still prunes expired sessions nightly; `web_session_checks` (the Discord login's re-checks) is written no
+// more, only cleared with its session, and never dropped (an older hub after a Rollback reads it). Session writes never
 // throw: a database error is logged (`#write`), as `Db`'s are; the users tables' writes throw, as `startDeploy` does,
 // since a refused change must reach the route. `setGrants`, `deleteUser` and `transaction(fn)` are transactions. `resolve(userId)` is
 // the per-request read: the user and their grants as `Grant`s; `ownerCount` and `isOwnerUser` serve the last-owner
@@ -234,7 +235,7 @@ export class UsersStore {
     );
   }
 
-  /** The logged-in Discord user of an unexpired session. */
+  /** The user (id and username) of an unexpired session. */
   webSession(id: string, now = Date.now()): { id: string; username: string; avatar: string | null } | undefined {
     const row = this.#db
       .prepare('SELECT user_id AS id, username, avatar FROM web_sessions WHERE id = ? AND expires > ?')
@@ -245,23 +246,6 @@ export class UsersStore {
   deleteWebSession(id: string): void {
     this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
     this.#write('delete web session check', 'DELETE FROM web_session_checks WHERE id = ?', id);
-  }
-
-  /**
-   * A session's Discord access token (sealed: only the session's cookie opens it) and when its admin role was last
-   * checked; undefined for a session from before checks.
-   */
-  webSessionCheck(id: string): { token: string; checked: number } | undefined {
-    const row = this.#db.prepare('SELECT token, checked FROM web_session_checks WHERE id = ?').get(id) as { token: string; checked: number } | undefined;
-    return row && { ...row };
-  }
-
-  setWebSessionCheck(id: string, token: string, checked: number): void {
-    this.#write('web session check', 'INSERT OR REPLACE INTO web_session_checks (id, token, checked) VALUES (?, ?, ?)', id, token, checked);
-  }
-
-  markWebSessionChecked(id: string, checked: number): void {
-    this.#write('web session checked', 'UPDATE web_session_checks SET checked = ? WHERE id = ?', checked, id);
   }
 }
 

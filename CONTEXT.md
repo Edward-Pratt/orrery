@@ -62,7 +62,7 @@ A factorio server's own settings: its name, description, player limit, game pass
 _Avoid_: config (the hub's), server settings (`ServerSettings` is the hub's per-server config), options, preferences
 
 **Admin**:
-A player name a factorio server treats as an admin in game. Not a dashboard admin (a Discord member with the admin role). While user verification is off the name is not checked, so anyone with the game password can join under it. Changed in the Settings tab, and promoted and demoted from the Players tab too.
+A player name a factorio server treats as an admin in game. Not a User of the dashboard, nor a Discord member with the admin role (who may run the bot's admin commands). While user verification is off the name is not checked, so anyone with the game password can join under it. Changed in the Settings tab, and promoted and demoted from the Players tab too.
 _Avoid_: operator, op, moderator
 
 **Moderation**:
@@ -71,6 +71,28 @@ _Avoid_: admin tools, mod actions
 
 **Ban**:
 A name on a factorio server's banlist, with an optional reason Factorio shows them. By name only, so it stops no one while user verification is off.
+
+### Users
+
+**User**:
+Someone who logs in to the dashboard, with a username and a password, kept in the hub's database. May carry a Discord id, so their dashboard chat goes in game under the name that Discord user linked. Not a player, and not a Discord member.
+_Avoid_: account, login (for the person), member, admin (an Admin is a player name in game)
+
+**Role**:
+A named set of Permissions, given to Users by Grants. Owner is built in: it holds every Permission, can't be changed, and only an owner grants it; the hub starts with Admin, Operator and Viewer too, which owners rename, change or delete.
+_Avoid_: group, access level, rank
+
+**Permission**:
+One thing the hub lets a User do, from a fixed list in the hub (`servers.chat`, `servers.restore`, `deploys`, `users`, …). Most are for servers, and hold only on the servers a Grant names; a linked service counts as its server. Every write needs one; reads need none but a server's logs, its game settings and the audit log.
+_Avoid_: right, privilege, scope, ACL
+
+**Grant**:
+A Role given to a User, for every server or for the servers listed; one listing servers gives only the Role's server Permissions, on those servers.
+_Avoid_: assignment, membership
+
+**Invite**:
+A one-use link, for 24 hours, that lets its User set a password and logs them in; also how a password is reset. Made on the Users page, or for an owner by `npm run users -- invite` on the host.
+_Avoid_: token (it holds one), signup, reset link (it is an Invite)
 
 ### Backups
 

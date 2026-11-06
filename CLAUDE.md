@@ -36,9 +36,10 @@ Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `m
   (`hub/src/stats/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
   (`Hosts`, `Agents`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`); they
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
-- **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with Discord OAuth login
-  for admin-role members (its own `guildId`/`adminRoleId`, else `integrations.discord`'s; no bot needed) and SQLite sessions (`hub/src/web/web.ts`). Same
-  frontend rule as Discord, plus its own session rows in `Db`. Off: no HTTP port and no `DISCORD_CLIENT_SECRET` needed.
+- **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with local Users (`hub/src/users/`:
+  passwords, Roles of Permissions, per-server Grants, invites; `docs/adr/0005`; no bot needed), each route's permission in
+  `hub/src/web/permit.ts`, and SQLite sessions (`hub/src/web/web.ts`). Same frontend rule as Discord, plus `Users`, `Roles`
+  and its own session rows in `Db`. Off: no HTTP port. The first owner: `npm run users -- invite <name>` on the host.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge. The Factorio mod is the same, and talks only to its
   server's Agent (events out over local UDP, commands in over RCON), never to the hub.
@@ -93,7 +94,7 @@ workflow builds, how each part deploys, what still needs a hand, and the by-hand
 
 ## Secrets
 
-`hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`, `DISCORD_CLIENT_SECRET`) are git-ignored. Never commit them.
+`hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`) are git-ignored. Never commit them.
 `GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
 the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
 `FACTORIO_USERNAME` and `FACTORIO_TOKEN` (the owner's factorio.com account: a game update asks `mods.factorio.com` with them

@@ -1,6 +1,6 @@
 // SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down, and `lost` to
 // unknown) and uptime math; player sessions, daily peaks and stats queries; the dashboard's login sessions' tables
-// (`web_sessions`, `web_session_checks`; their reads and writes are `users/store.ts`, held as `db.users`); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
+// (`web_sessions`, and `web_session_checks`, the Discord login's, kept; their SQL is `users/store.ts`, `db.users`); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
 // never pruned); account links (`links`: a Discord user's Minecraft name and uuid, `link`, `unlinkPlayer`,
 // `linkByDiscord`, `linkByPlayer`; `factorio_links`, its own table so `links` stays as an older hub reads it: a
 // Discord user's Factorio name, unique without case, `linkFactorio`, `unlinkFactorioPlayer`, `factorioLinkByDiscord`,
@@ -86,8 +86,8 @@ export class Db {
   /** The dashboard's login sessions, on the same database (`users/store.ts`). */
   readonly users: UsersStore;
 
-  constructor(path: string) {
-    this.#db = new DatabaseSync(path);
+  constructor(path: string, timeout = 0) {
+    this.#db = new DatabaseSync(path, { timeout }); // the users CLI waits up to 5 s for the running hub's writes
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS events (server_id TEXT NOT NULL, ts INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_server_ts ON events (server_id, ts);

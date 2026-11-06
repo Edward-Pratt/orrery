@@ -2,7 +2,8 @@
 // `PAIR_MAX` (5) failures in `WINDOW_MS` (15 min) lock the pair for `LOCK_MS` (15 min); never the name alone, so five
 // wrong guesses at the owner's name from elsewhere lock no one out. Per address, `ADDRESS_MAX` (20) failures in the
 // window lock the address. `locked(username, address)` answers the seconds to wait, 0 when the attempt may go on;
-// `fail` counts one; `clear` forgets the pair on a success (the address's count stays). Expired entries are swept
+// `fail` counts one (the routes count a try before its password check, so tries sent at once can't all pass `locked`;
+// a success then `clear`s the pair, while the address's count stays: every try counts against its address). Expired entries are swept
 // on every call and at most `KEPT` (10,000) of each are held, the oldest dropped, so a flood can't grow the hub's
 // memory. Hub core.
 

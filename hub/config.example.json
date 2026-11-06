@@ -33,7 +33,6 @@
     "web": {
       "listenPort": 25581,
       "publicUrl": "https://dash.orrery.run",
-      "clientId": "YOUR_DISCORD_OAUTH_APP_ID",
       "sessionDays": 7
     }
   }

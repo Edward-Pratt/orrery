@@ -1,4 +1,4 @@
-// `startHub(config, { startFrontend, get, oauth, host, run, restore, github, deploys, download, packs, uploadIdleMs,
+// `startHub(config, { startFrontend, get, host, run, restore, github, deploys, download, packs, uploadIdleMs,
 // hub, agents, portal, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub` (`HubOptions`),
 // `agents` (`AgentsOptions`), `gameUpdates` (`GameUpdatesOptions`): shorter timings for tests; `download`: the
 // library's HTTP requests, default `fetch`; `portal`: factorio.com's and the mod portal's, default `fetch`;
@@ -17,7 +17,7 @@
 // `RestartScheduler`'s `paused`, `Restores`, `Deploys` and `DeploysAnswer.packing`; `Restores`' `deploying(id)`: a
 // hub deploy, or the server's Agent's (`agentBusy`); `Deploys` with GitHub, given `Agents` for the Agents' releases
 // and deploys, and `deploying` from it for `Packs` (a hub deploy or the server's Mod's) and `GameUpdates` (a hub
-// deploy or the server's Agent's); Discord: `startFrontend`; web: the HTTP API, with the injected `oauth`); its
+// deploy or the server's Agent's); Discord: `startFrontend`; web: `Roles`, `Users` and the HTTP API); its
 // handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort` promise,
 // and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
 
@@ -51,7 +51,9 @@ import { Stats } from './stats/stats.ts';
 import { scheduleSummaries } from './stats/summary.ts';
 import { SaveUploads } from './backups/save-uploads.ts';
 import { Uploads } from './packs/uploads.ts';
-import { serveWebApi, webApi, type OAuth, type WebApi } from './web/web.ts';
+import { Roles } from './users/roles.ts';
+import { Users } from './users/users.ts';
+import { serveWebApi, webApi, type WebApi } from './web/web.ts';
 
 /** What the hub needs from a frontend once it is running. */
 export type Frontend = { stop: () => void };
@@ -67,8 +69,6 @@ export type HubDeps = {
   ) => Promise<Frontend>;
   /** The HTTP GET of the health ping and of checks. */
   get: Get;
-  /** Discord OAuth for dashboard logins; needed only with the web integration. */
-  oauth?: OAuth;
   /** Readers of this machine's CPU, memory and disks; needed only with the host integration. */
   host?: HostReaders;
   /** Runs systemctl and journalctl; needed only with the systemd integration. */
@@ -112,8 +112,8 @@ export type HubHandle = {
    * integration is off.
    */
   agentPort?: Promise<number>;
-  /** The HTTP API and its port; undefined when the web integration is off. */
-  web?: { port: number; app: WebApi };
+  /** The HTTP API, its port and its `Users` (tests make their first owner with it); undefined when the web integration is off. */
+  web?: { port: number; app: WebApi; users: Users };
   /** Every hub event, numbered, with recent ones buffered for replay. */
   live: LiveFeed;
   /** Every Host the hub knows: the hub's own with the host integration, and any other added to it. */
@@ -125,7 +125,6 @@ export type HubHandle = {
 /** Wires and starts a whole hub from a config. */
 export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle> {
   const { minecraft, discord, web, checks: checkList, host: hostCfg, systemd, github, agents: agentsCfg } = config.integrations;
-  if (web && !deps.oauth) throw new Error('integrations.web needs Discord OAuth');
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
   if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
   if (github && !(deps.github && deps.run)) throw new Error('integrations.github needs a GitHub reader and a systemctl runner');
@@ -362,10 +361,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await uploads?.start();
   await library?.start();
   await packs?.start(); // after the frontend: it hears every notice from the start
-  const app =
-    web && deps.oauth
-      ? webApi(web, deps.oauth, { db, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment })
-      : undefined;
+  const roles = web && new Roles(db.users, (entry) => db.audit(entry));
+  const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
+  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment });
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 
@@ -374,7 +372,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     agentPort,
     live,
     hosts,
-    web: app && http && { port: http.port, app },
+    web: app && http && users && { port: http.port, app, users },
     close: () => {
       restarts.stop();
       backups.stop();

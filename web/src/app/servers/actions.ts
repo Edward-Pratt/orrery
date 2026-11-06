@@ -9,6 +9,7 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { Feedback } from '../feedback';
+import { Session } from '../session';
 import { ServiceControl } from '../services/actions';
 import { restartLeft } from '../units';
 
@@ -21,8 +22,9 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
 /**
  * A server's actions for its state (Restart and Console online, Start offline, the countdown and Cancel while a
  * restart is pending) and a ⋯ menu. A linked server's Start and Stop are its service's. `full` (the server page's
- * header) adds "Restart in…" and "Audit log for this server" to the menu, which is then always there.
- * `changed` asks the page to fetch its card again.
+ * header) adds "Restart in…" and "Audit log for this server" to the menu. Each shows only with its permission on this
+ * server (`servers.control`, `servers.console`, `services.control`; the audit link `audit`), and the menu only with
+ * an item in it. `changed` asks the page to fetch its card again.
  */
 @Component({
   selector: 'app-server-actions',
@@ -33,14 +35,16 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
     <div class="relative flex items-center gap-2" data-actions>
       @if (c.restart; as r) {
         <span class="text-sm" data-restart-pending>{{ r.stop ? 'Stop' : 'Restart' }} at {{ r.at | date: 'HH:mm:ss' }}, <span class="tabular-nums" data-restart-left>{{ left() }}</span></span>
-        <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
-          @if (busy() === 'cancel') {
-            <hlm-spinner />
-          }
-          Cancel
-        </button>
+        @if (may().control) {
+          <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
+            @if (busy() === 'cancel') {
+              <hlm-spinner />
+            }
+            Cancel
+          </button>
+        }
       } @else if (c.online) {
-        @if (c.features.chat) {
+        @if (c.features.chat && may().control) {
           <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="restart" [disabled]="!!busy()" (click)="restart(RESTART_MINUTES)">
             @if (busy() === 'restart') {
               <hlm-spinner />
@@ -48,12 +52,12 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
             Restart
           </button>
         }
-        @if (c.features.console) {
+        @if (c.features.console && may().console) {
           <a hlmBtn variant="outline" size="sm" [routerLink]="['/servers', c.id, 'console']" data-action="console" aria-label="Console">
             <ng-icon name="lucideTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
           </a>
         }
-      } @else if (c.service) {
+      } @else if (c.service && may().service) {
         @let blocked = startBlocked();
         <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="start" [disabled]="!!busy() || !!blocked" (click)="start()">
           @if (busy() === 'start') {
@@ -65,7 +69,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
           <span class="text-sm text-muted-foreground" data-blocked>{{ blocked }}</span>
         }
       }
-      @if (full() || (c.online && !c.restart && (c.features.chat || c.service))) {
+      @if (menu().any) {
         <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
           <ng-icon name="lucideEllipsis" />
         </button>
@@ -83,16 +87,16 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
     </div>
     <ng-template #more>
       <div hlmDropdownMenu class="w-48">
-        @if (card().service) {
+        @if (menu().stop) {
           <button hlmDropdownMenuItem type="button" data-action="stop" (click)="stop()">Stop</button>
         }
-        @if (card().features.chat && (full() ? card().online && !card().restart : true)) {
+        @if (menu().restartNow) {
           <button hlmDropdownMenuItem type="button" data-action="restart-now" (click)="restartNow()">Restart now</button>
         }
-        @if (full() && card().features.chat && card().online && !card().restart) {
+        @if (menu().restartIn) {
           <button hlmDropdownMenuItem type="button" data-action="restart-in" (click)="asking.set(true)">Restart in…</button>
         }
-        @if (full()) {
+        @if (menu().audit) {
           <a hlmDropdownMenuItem routerLink="/audit" [queryParams]="{ server: card().id }" data-audit>Audit log for this server</a>
         }
       </div>
@@ -119,6 +123,27 @@ export class ServerActions {
   readonly #now = signal(Date.now());
   protected readonly left = computed(() => restartLeft(this.card().restart?.at ?? 0, this.#now()));
   protected readonly startBlocked = computed(() => START_BLOCKED[this.card().service?.state ?? ''] ?? null);
+  readonly #session = inject(Session);
+  /** What the user may do to this server: a linked service counts as its server. */
+  protected readonly may = computed(() => {
+    const id = this.card().id;
+    const s = this.#session;
+    return { control: s.can('servers.control', id), console: s.can('servers.console', id), service: s.can('services.control', id), audit: s.canAnywhere('audit') };
+  });
+  /** The ⋯ menu's items; a row shows it only online with nothing pending. */
+  protected readonly menu = computed(() => {
+    const c = this.card();
+    const { control, service, audit } = this.may();
+    const settled = c.online && !c.restart;
+    const items = {
+      stop: !!c.service && service,
+      restartNow: c.features.chat && control && (this.full() ? settled : true),
+      restartIn: this.full() && c.features.chat && control && settled,
+      audit: this.full() && audit,
+    };
+    const any = this.full() ? Object.values(items).some(Boolean) : settled && (items.stop || items.restartNow);
+    return { ...items, any };
+  });
 
   constructor() {
     // ponytail: ticks every second even with nothing pending; cheap next to the rest of the page.

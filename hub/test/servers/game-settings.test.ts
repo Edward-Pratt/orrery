@@ -4,7 +4,7 @@ import type { AuditLog, GameSettingsRequest, GameSettingsState } from '../../src
 import { formatEvent, type Post } from '../../src/discord/format.ts';
 import { auditDetails, settingsRequest } from '../../src/servers/game-settings.ts';
 import type { GameSettingsReport, Notice } from '../../src/types.ts';
-import { agentUp, eventually, gameHub, PICK } from '../fake-agent.ts';
+import { ACTOR, agentUp, eventually, gameHub, PICK } from '../fake-agent.ts';
 
 const PASSWORD = 'Sesame-0pen!Xyzzy-7731';
 const VALUES = {
@@ -152,7 +152,7 @@ test('a save reaches the Agent as checked, answers what applied, and is audited 
   assert.deepEqual(sent, { type: 'settingsSet', settings: { ...FIELDS, name: 'Our base', max_players: 8 }, game_password: PASSWORD, admins: ['alice', 'bob'] });
   assert.deepEqual(Object.keys(sent).sort(), ['admins', 'game_password', 'settings', 'type']);
   assert.deepEqual(await h.json(res), { applied: ['name', 'max_players', 'game_password', 'admins'], pending: [] });
-  assert.deepEqual(await h.audit(), [[`web:alex (${'5'.repeat(18)})`, 'game settings', 'name: "orrery Factorio" → "Our base"; max_players: 0 → 8; game password changed; admins: +bob']]);
+  assert.deepEqual(await h.audit(), [[ACTOR, 'game settings', 'name: "orrery Factorio" → "Our base"; max_players: 0 → 8; game password changed; admins: +bob']]);
   assert.ok(h.notices.some((n) => n.kind === 'settings'), 'the stream hears of it');
 
   // Left out: kept, so not sent; null: removed, sent as null.

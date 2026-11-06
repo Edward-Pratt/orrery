@@ -30,20 +30,9 @@ import { Db } from '../../src/stats/db.ts';
 import { startHub, type HubDeps } from '../../src/start.ts';
 import { formatEvent } from '../../src/discord/format.ts';
 import type { Notice } from '../../src/types.ts';
-import type { OAuth } from '../../src/web/web.ts';
+import { ACTOR, loginAs, WEB } from '../web/web-hub.ts';
 import { fakeMod, hello, sleep, TOKEN, until } from '../fake-mod.ts';
 
-const WEB = {
-  listenPort: 0,
-  publicUrl: 'https://dash.orrery.run',
-  clientId: '4'.repeat(18),
-  guildId: '7'.repeat(18),
-  adminRoleId: '8'.repeat(18),
-  sessionDays: 7,
-};
-const ADMIN = { id: '5'.repeat(18), username: 'alex', avatar: null, roles: [WEB.adminRoleId] };
-const ACTOR = `web:alex (${ADMIN.id})`;
-const oauth: OAuth = { token: async (code) => code, member: async () => ADMIN };
 const URL_OLD = 'https://packs.example/GTNH_2.7.4.zip';
 const URL_NEW = 'https://packs.example/GTNH_2.7.5.zip';
 
@@ -275,7 +264,6 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
   const handle = await startHub(w.config, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth,
     run,
     download,
     restore: setup.restore,
@@ -303,8 +291,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     }
   });
   const app = handle.web!.app;
-  const login = await app.request('/api/callback?code=x&state=s', { headers: { cookie: 'state=s' } });
-  const cookie = login.headers.getSetCookie().find((c) => c.startsWith('session='))!.split(';')[0]!;
+  const { cookie } = await loginAs(handle.web!);
   const headers = { cookie, origin: WEB.publicUrl, 'content-type': 'application/json' };
   const req = (method: string, path: string, body?: unknown) =>
     app.request(path, { method, headers: method === 'GET' ? { cookie } : headers, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });

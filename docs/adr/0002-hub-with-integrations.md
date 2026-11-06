@@ -14,6 +14,7 @@ The dashboard is Angular with Tailwind + spartan/ui and ngx-echarts, built in CI
 It reaches the hub same-origin through Caddy: REST for reads and actions, one SSE stream (event ids,
 `Last-Event-ID` resume) for live events, Discord OAuth (`guilds.members.read`, so the admin check needs no bot) and
 cookie sessions in SQLite. The hub's HTTP layer is Hono; API types live in one hub file the dashboard imports.
+(The Discord OAuth login is superseded by local Users, ADR 0005; the cookie sessions in SQLite stand.)
 
 ## Considered options
 

@@ -6,7 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { LibraryAdd, LibraryPack, LibraryRuntime, LibraryState } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn } from '../testing';
 import routes from './routes';
 import { fromFileName } from './library';
 
@@ -40,7 +40,7 @@ const RUNNING: LibraryState = { packs: [PACK], runtimes: [], running: { add: 3, 
 async function setup(state: LibraryState) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);

@@ -14,6 +14,7 @@ import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { catchError, debounceTime, EMPTY, Observable, of, startWith, Subject, Subscription, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
+import { Session } from '../session';
 import { ServerActions } from '../servers/actions';
 import { changesCard } from '../servers/changes';
 import { Health, Status } from '../status';
@@ -26,7 +27,8 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
 /**
  * Services and their checks in one list (or, with systemd off, just the checks, titled "Checks"). A service that runs
  * a server links to it and offers that server's actions (`ServerActions`, as its page header does). Each source is
- * fetched only with its integration on, and kept current by the live stream.
+ * fetched only with its integration on, and kept current by the live stream. An unlinked service's actions need
+ * `services.control` and its logs `services.logs`, both for every server; without them it is read only.
  */
 @Component({
   selector: 'app-services',
@@ -53,14 +55,14 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
               <app-server-actions [card]="server" [full]="true" (changed)="refetchCards.next()" />
             } @else {
               <div class="flex items-center gap-2" data-actions>
-                @if (stopped(s)) {
+                @if (session.can('services.control') && stopped(s)) {
                   <button hlmBtn size="sm" data-action="start" [disabled]="!!control.busy()" (click)="act('start', s)">
                     @if (busy(s) === 'start') {
                       <hlm-spinner />
                     }
                     Start
                   </button>
-                } @else {
+                } @else if (session.can('services.control')) {
                   <button hlmBtn variant="outline" size="sm" data-action="restart" [disabled]="!!control.busy()" (click)="act('restart', s)">
                     @if (busy(s) === 'restart') {
                       <hlm-spinner />
@@ -68,14 +70,20 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
                     Restart
                   </button>
                 }
-                <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
-                  <ng-icon name="lucideEllipsis" />
-                </button>
+                @if (session.can('services.control') || session.can('services.logs')) {
+                  <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
+                    <ng-icon name="lucideEllipsis" />
+                  </button>
+                }
               </div>
               <ng-template #more>
                 <div hlmDropdownMenu class="w-40">
-                  <button hlmDropdownMenuItem type="button" data-action="stop" (click)="act('stop', s)">Stop</button>
-                  <button hlmDropdownMenuItem type="button" data-action="logs" (click)="openLogs(s)">View logs</button>
+                  @if (session.can('services.control')) {
+                    <button hlmDropdownMenuItem type="button" data-action="stop" (click)="act('stop', s)">Stop</button>
+                  }
+                  @if (session.can('services.logs')) {
+                    <button hlmDropdownMenuItem type="button" data-action="logs" (click)="openLogs(s)">View logs</button>
+                  }
                 </div>
               </ng-template>
             }
@@ -149,6 +157,7 @@ export default class Services {
   readonly #destroyRef = inject(DestroyRef);
   readonly #events = inject(LiveEvents);
   protected readonly control = inject(ServiceControl);
+  protected readonly session = inject(Session);
   readonly #on$ = inject(Integrations).on$.pipe(catchError(() => EMPTY));
   readonly #on = toSignal(this.#on$);
   /** Each is null until its first fetch (which shows the skeleton), and empty when its integration is off. */

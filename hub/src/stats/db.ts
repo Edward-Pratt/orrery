@@ -1,7 +1,6 @@
 // SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down, and `lost` to
-// unknown) and uptime math; player sessions, daily peaks and stats queries; dashboard login sessions (stored hashed;
-// `web_session_checks` holds each one's Discord access token, sealed with its cookie, and when its admin role was
-// last checked); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
+// unknown) and uptime math; player sessions, daily peaks and stats queries; the dashboard's login sessions' tables
+// (`web_sessions` and `web_session_checks`, the Discord login's, kept for a rollback; their SQL is `users/store.ts`, `db.users`); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
 // never pruned); account links (`links`: a Discord user's Minecraft name and uuid, `link`, `unlinkPlayer`,
 // `linkByDiscord`, `linkByPlayer`; `factorio_links`, its own table so `links` stays as an older hub reads it: a
 // Discord user's Factorio name, unique without case, `linkFactorio`, `unlinkFactorioPlayer`, `factorioLinkByDiscord`,
@@ -31,6 +30,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AuditEntry, FeedEvent, HostSample, Lifecycle } from '../servers/servers.ts';
 import type { AuditRow, DeployOutcome, DeployRow, PackOutcome, PackStep } from '../types.ts';
+import { UsersStore } from '../users/store.ts';
 
 export type AuditFilter = { target?: string; actor?: string; before?: number };
 import { localDay } from '../units.ts';
@@ -83,9 +83,11 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
 export class Db {
   #db: DatabaseSync;
   #feedInserts = new Map<string, number>(); // per server, since its last cap check
+  /** The dashboard's login sessions, on the same database (`users/store.ts`). */
+  readonly users: UsersStore;
 
-  constructor(path: string) {
-    this.#db = new DatabaseSync(path);
+  constructor(path: string, timeout = 0) {
+    this.#db = new DatabaseSync(path, { timeout }); // the users CLI waits up to 5 s for the running hub's writes
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS events (server_id TEXT NOT NULL, ts INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_server_ts ON events (server_id, ts);
@@ -137,6 +139,7 @@ export class Db {
     if (!(this.#db.prepare('PRAGMA table_info(packs)').all() as { name: string }[]).some((c) => c.name === 'library_id')) {
       this.#db.exec('ALTER TABLE packs ADD COLUMN library_id INTEGER');
     }
+    this.users = new UsersStore(this.#db);
   }
 
   /** Writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
@@ -435,8 +438,7 @@ export class Db {
   maintain(copyDir: string, now = Date.now()): void {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
-    this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
-    this.#write('prune web session checks', 'DELETE FROM web_session_checks WHERE id NOT IN (SELECT id FROM web_sessions)');
+    this.users.pruneSessions(now);
     this.#write(
       'prune feed',
       'DELETE FROM feed WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY server_id ORDER BY id DESC) AS n FROM feed) WHERE n > ?)',
@@ -463,49 +465,6 @@ export class Db {
     } catch (err) {
       console.error('[db] nightly copy failed:', (err as Error).message);
     }
-  }
-
-  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. */
-  addWebSession(id: string, userId: string, username: string, avatar: string | null, expires: number): void {
-    this.#write(
-      'add web session',
-      'INSERT INTO web_sessions (id, user_id, username, avatar, expires) VALUES (?, ?, ?, ?, ?)',
-      id,
-      userId,
-      username,
-      avatar,
-      expires,
-    );
-  }
-
-  /** The logged-in Discord user of an unexpired session. */
-  webSession(id: string, now = Date.now()): { id: string; username: string; avatar: string | null } | undefined {
-    const row = this.#db
-      .prepare('SELECT user_id AS id, username, avatar FROM web_sessions WHERE id = ? AND expires > ?')
-      .get(id, now) as { id: string; username: string; avatar: string | null } | undefined;
-    return row && { ...row };
-  }
-
-  deleteWebSession(id: string): void {
-    this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
-    this.#write('delete web session check', 'DELETE FROM web_session_checks WHERE id = ?', id);
-  }
-
-  /**
-   * A session's Discord access token (sealed: only the session's cookie opens it) and when its admin role was last
-   * checked; undefined for a session from before checks.
-   */
-  webSessionCheck(id: string): { token: string; checked: number } | undefined {
-    const row = this.#db.prepare('SELECT token, checked FROM web_session_checks WHERE id = ?').get(id) as { token: string; checked: number } | undefined;
-    return row && { ...row };
-  }
-
-  setWebSessionCheck(id: string, token: string, checked: number): void {
-    this.#write('web session check', 'INSERT OR REPLACE INTO web_session_checks (id, token, checked) VALUES (?, ?, ?)', id, token, checked);
-  }
-
-  markWebSessionChecked(id: string, checked: number): void {
-    this.#write('web session checked', 'UPDATE web_session_checks SET checked = ? WHERE id = ?', checked, id);
   }
 
   /** Records who did what to which server. Never pruned: the table is small. */

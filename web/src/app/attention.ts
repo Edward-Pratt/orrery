@@ -6,15 +6,16 @@
 // (Start/Restart through `ServiceControl`, Cancel a restart, a card's `packUpdate.rolledBack` linking to the Pack
 // tab's restore offer; cards are fetched again whenever a backup or restore started here starts or ends), and a line
 // while a backup (a factorio server: "is saving") or restore started here runs (`BackupProgress`), and a release
-// newer than the running one published more than `newerAfterDays` ago (linking to the Host page's Releases).
-// `count(page)` feeds the sidebar badges.
+// newer than the running one published more than `newerAfterDays` ago (linking to the Host page's Releases; only for
+// a user with `deploys`). Each fix shows only with its permission (`Session.can`, on the server). `count(page)` feeds
+// the sidebar badges.
 
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import type { CheckStatus, DeploysAnswer, Game, ServerCard, ServiceStatus } from '@hub/api';
+import type { CheckStatus, DeploysAnswer, Game, Permission, ServerCard, ServiceStatus } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { catchError, debounceTime, EMPTY, filter, of, skip, startWith, Subject, switchMap, take } from 'rxjs';
 import { Feedback } from './feedback';
@@ -68,6 +69,11 @@ export class Attention {
   readonly #refetchServices = new Subject<void>();
   readonly #refetchDeploys = new Subject<void>();
   readonly #running$ = toObservable(this.#progress.running);
+  readonly #session = inject(Session);
+  /** A fix offered only to a user who may run it. */
+  #fix(permission: Permission, serverId: string | undefined, fix: AttentionItem['action']): AttentionItem['action'] {
+    return this.#session.can(permission, serverId) ? fix : undefined;
+  }
 
   readonly items = computed<AttentionItem[]>(() => {
     const cards = this.#cards();
@@ -83,7 +89,7 @@ export class Attention {
           page: 'servers',
           target: c.name,
           message: !c.service ? 'is offline' : restart ? `is offline: its service runs, ${NOT_CONNECTED[c.game]}` : 'is offline: its service failed',
-          action: c.service ? { label: restart ? 'Restart' : 'Start', run: () => void this.#control.act(restart ? 'restart' : 'start', c.service!.id, c.name) } : undefined,
+          action: c.service ? this.#fix('services.control', c.id, { label: restart ? 'Restart' : 'Start', run: () => void this.#control.act(restart ? 'restart' : 'start', c.service!.id, c.name) }) : undefined,
         });
       }
       const doing = this.#progress.running()[c.id];
@@ -96,7 +102,7 @@ export class Attention {
           page: 'servers',
           target: c.name,
           message: `rolled back its pack update to ${rolledBack.to}: the world may have changed on load`,
-          action: { label: 'Restore…', run: () => void this.#router.navigate(['/servers', c.id, 'pack']) },
+          action: this.#fix('servers.pack', c.id, { label: 'Restore…', run: () => void this.#router.navigate(['/servers', c.id, 'pack']) }),
         });
       }
       if (c.restart) {
@@ -106,7 +112,7 @@ export class Attention {
           target: c.name,
           message: c.restart.stop ? 'stops' : 'restarts',
           at: c.restart.at,
-          action: { label: 'Cancel', run: () => this.#cancelRestart(c) },
+          action: this.#fix('servers.control', c.id, { label: 'Cancel', run: () => this.#cancelRestart(c) }),
         });
       }
     }
@@ -118,7 +124,7 @@ export class Attention {
           page: 'services',
           target: s.unit,
           message: 'failed',
-          action: { label: 'Start', run: () => void this.#control.act('start', s.id, s.unit) },
+          action: this.#fix('services.control', cards.find((c) => c.service?.id === s.id)?.id, { label: 'Start', run: () => void this.#control.act('start', s.id, s.unit) }),
         });
       }
     }
@@ -126,7 +132,7 @@ export class Attention {
       if (c.up === false) items.push({ key: `check:${c.id}`, page: 'services', target: c.id, message: `is down: ${c.error}` });
     }
     const deploys = this.#deploys();
-    for (const r of deploys ? releaseRows(deploys) : []) {
+    for (const r of deploys && this.#session.can('deploys') ? releaseRows(deploys) : []) {
       if (!overdue(r, deploys!)) continue;
       items.push({
         key: `release:${r.key}`,

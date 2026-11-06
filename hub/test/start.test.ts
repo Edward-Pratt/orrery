@@ -39,9 +39,9 @@ import type { HubEvent, ServerHub } from '../src/servers/servers.ts';
 import { HISTORY_POINTS } from '../src/agents/host.ts';
 import { startHub } from '../src/start.ts';
 import type { Stats } from '../src/stats/stats.ts';
-import type { OAuth, WebApi } from '../src/web/web.ts';
+import type { WebApi } from '../src/web/web.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
-import { ADMIN, config, fakeOAuth, login, loginCookie, startLogin, WEB, webHub } from './web/web-hub.ts';
+import { ACTOR, ADMIN, config, loginCookie, WEB, webHub } from './web/web-hub.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
@@ -172,152 +172,14 @@ test('startup with Discord configured and no DISCORD_TOKEN fails with a clear me
   );
 });
 
-test('an admin logs in with Discord and /api/me returns them', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
-  const { authorize } = await startLogin(app);
-  assert.equal(authorize.origin + authorize.pathname, 'https://discord.com/oauth2/authorize');
-  assert.equal(authorize.searchParams.get('client_id'), WEB.clientId);
-  assert.equal(authorize.searchParams.get('scope'), 'identify guilds.members.read');
-  assert.equal(authorize.searchParams.get('redirect_uri'), 'https://dash.orrery.run/api/callback');
-
-  const res = await login(app, 'admin');
-  assert.equal(res.status, 302);
-  assert.equal(res.headers.get('location'), 'https://dash.orrery.run/');
-  const session = res.headers.getSetCookie().find((c) => c.startsWith('session='))!;
-  assert.match(session, /HttpOnly/);
-  assert.match(session, /Secure/);
-  assert.match(session, /SameSite=Lax/);
-
-  const me = await app.request('/api/me', { headers: { cookie: session.split(';')[0] } });
-  assert.equal(me.status, 200);
-  assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex', avatar: 'a1b2c3' });
-});
-
-test('a session row from before avatars gives /api/me avatar null', async (t) => {
-  const cfg = config(t, { web: WEB });
-  const old = new DatabaseSync(cfg.dbPath);
-  old.exec('CREATE TABLE web_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL, expires INTEGER NOT NULL)');
-  old.prepare('INSERT INTO web_sessions VALUES (?, ?, ?, ?)').run(createHash('sha256').update('old-cookie').digest('hex'), ADMIN.id, 'alex', Date.now() + 60_000);
-  old.close();
-  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
-  t.after(() => handle.close());
-  const me = await handle.web!.app.request('/api/me', { headers: { cookie: 'session=old-cookie' } });
-  assert.deepEqual(await me.json(), { id: ADMIN.id, username: 'alex', avatar: null });
-});
-
-test('without a session every other /api route answers 401', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
-  for (const path of ['/api/me', '/api/nothing-here']) assert.equal((await app.request(path)).status, 401);
-  assert.equal((await app.request('/api/me', { headers: { cookie: 'session=made-up' } })).status, 401);
-});
-
-test('a member without the admin role is not allowed in', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
-  const res = await login(app, 'player');
-  assert.equal(res.status, 302);
-  assert.equal(res.headers.get('location'), 'https://dash.orrery.run/?login=admin');
-  assert.ok(!res.headers.getSetCookie().some((c) => c.startsWith('session=')));
-});
-
-test('a callback with a bad or missing state is refused before Discord is asked', async (t) => {
-  const { oauth, calls } = fakeOAuth();
-  const app = await webHub(t, oauth);
-  const { cookie } = await startLogin(app);
-  const wrong = await app.request('/api/callback?code=admin&state=guessed', { headers: { cookie } });
-  assert.equal(wrong.headers.get('location'), 'https://dash.orrery.run/?login=state');
-  const { authorize } = await startLogin(app);
-  const noCookie = await app.request(`/api/callback?code=admin&state=${authorize.searchParams.get('state')}`);
-  assert.equal(noCookie.headers.get('location'), 'https://dash.orrery.run/?login=state');
-  assert.deepEqual(calls, []);
-});
-
-test('an expired session gets 401', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
-  const app = await webHub(t, fakeOAuth().oauth);
-  const cookie = await loginCookie(app);
-  t.mock.timers.tick(7 * 24 * 60 * 60_000 - 1);
-  assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 200);
-  t.mock.timers.tick(1);
-  assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
-});
-
-test("a session ends once Discord says its user lost the admin role, re-checked every 10 minutes", async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
-  const { oauth, calls } = fakeOAuth();
-  let discord: 'admin' | 'down' | 'demoted' = 'admin';
-  const app = await webHub(t, {
-    ...oauth,
-    member: async (token, guildId) => {
-      if (discord === 'down') throw new Error('guild member: HTTP 503');
-      return discord === 'demoted' ? { ...ADMIN, roles: [] } : oauth.member(token, guildId);
-    },
-  });
-  const cookie = await loginCookie(app);
-  const me = async () => {
-    const res = await app.request('/api/me', { headers: { cookie } });
-    await new Promise((r) => setImmediate(r)); // lets a background re-check finish
-    return res.status;
-  };
-  const asked = () => calls.filter((c) => c.startsWith('member')).length;
-  assert.equal(asked(), 1); // at login
-  t.mock.timers.tick(10 * 60_000 - 1);
-  assert.equal(await me(), 200);
-  assert.equal(asked(), 1);
-  t.mock.timers.tick(1);
-  assert.equal(await me(), 200);
-  assert.equal(asked(), 2); // still an admin
-  assert.equal(await me(), 200);
-  assert.equal(asked(), 2); // not again for 10 minutes
-
-  const errors = t.mock.method(console, 'error', () => {});
-  discord = 'down';
-  t.mock.timers.tick(10 * 60_000);
-  assert.equal(await me(), 200);
-  assert.equal(await me(), 200); // Discord unreachable: the session stays
-  assert.match(String(errors.mock.calls[0]?.arguments[0]), /re-checking alex/);
-
-  const logs = t.mock.method(console, 'log', () => {});
-  discord = 'demoted';
-  t.mock.timers.tick(10 * 60_000);
-  assert.equal(await me(), 200); // the request that asks still goes through
-  assert.equal(await me(), 401);
-  assert.match(String(logs.mock.calls.at(-1)?.arguments[0]), /alex \(\d+\) is no longer an admin \(lost the admin role\): logged out/);
-});
-
-test('a re-check Discord answers with no member (left the guild, or the token refused) ends the session and says so', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
-  const { oauth } = fakeOAuth();
-  let gone = false;
-  const app = await webHub(t, { ...oauth, member: async (token, guildId) => (gone ? undefined : oauth.member(token, guildId)) });
-  const cookie = await loginCookie(app);
-  const logs = t.mock.method(console, 'log', () => {});
-  gone = true;
-  t.mock.timers.tick(10 * 60_000);
-  await app.request('/api/me', { headers: { cookie } });
-  await new Promise((r) => setImmediate(r));
-  assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
-  assert.match(String(logs.mock.calls.at(-1)?.arguments[0]), /no longer an admin \(not in the guild, or Discord refused the token\)/);
-});
-
-test('logging out ends the session on the hub', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
-  const cookie = await loginCookie(app);
-  const out = await app.request('/api/logout', {
-    method: 'POST',
-    headers: { cookie, origin: 'https://dash.orrery.run', 'content-type': 'application/json' },
-  });
-  assert.equal(out.status, 204);
-  assert.equal((await app.request('/api/me', { headers: { cookie } })).status, 401);
-});
-
 test('/api/environment answers without a session: production by default, else the configured one', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
+  const { app } = await webHub(t);
   const res = await app.request('/api/environment');
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { environment: 'production' } satisfies EnvironmentInfo);
   const handle = await startHub(
     { ...config(t, { web: WEB }), environment: 'staging' },
-    { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth },
+    { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }) },
   );
   t.after(() => handle.close());
   assert.deepEqual(await (await handle.web!.app.request('/api/environment')).json(), { environment: 'staging' });
@@ -333,7 +195,6 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('no health ping or checks'),
-    oauth: fakeOAuth().oauth,
     host: {
       cpu: () => ({ idle: 1, total: 2 }),
       load: () => [0, 0, 0],
@@ -344,7 +205,7 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   t.after(() => handle.close());
   assert.equal(handle.port, undefined);
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async (path: string) => (await app.request(path, { headers: { cookie } })).json();
   const [demo] = (await get('/api/servers')) as ServerCard[];
   assert.equal(demo!.id, 'demo');
@@ -359,7 +220,7 @@ test("staging's hub, web and host only with an offline demo server, starts witho
   } satisfies Integrations);
 });
 
-test('with web off the hub has no HTTP API and needs no OAuth', async (t) => {
+test('with web off the hub has no HTTP API', async (t) => {
   const handle = await startHub(config(t, { minecraft: MINECRAFT }), {
     startFrontend: () => assert.fail('Discord is off'),
     get: async () => ({ ok: true, status: 200 }),
@@ -368,21 +229,7 @@ test('with web off the hub has no HTTP API and needs no OAuth', async (t) => {
   await handle.close();
 });
 
-test('startup with web configured and no DISCORD_CLIENT_SECRET fails with a clear message', (t) => {
-  const cfg = config(t, { web: { ...WEB, listenPort: 25581 } });
-  const path = join(dirname(cfg.dbPath), 'config.json');
-  writeFileSync(path, JSON.stringify({ ...cfg, servers: [{ id: 'gtnh', name: 'GTNH' }] }));
-  const env = { ...process.env };
-  delete env.DISCORD_TOKEN; // web alone needs no bot token
-  delete env.DISCORD_CLIENT_SECRET;
-  assert.throws(
-    () => execFileSync(process.execPath, ['src/index.ts', path], { env, encoding: 'utf8', stdio: 'pipe', timeout: 10_000 }),
-    (err: { status: number; stderr: string }) =>
-      err.status === 1 && /integrations\.web is configured but DISCORD_CLIENT_SECRET is not set/.test(err.stderr),
-  );
-});
-
-/** A web + Minecraft hub with a logged-in admin: its API, session cookie, hub and mod port. */
+/** A web + Minecraft hub with a logged-in owner: its API, session cookie, hub and mod port. */
 async function liveHub(t: TestContext) {
   let hub: ServerHub | undefined;
   const handle = await startHub(config(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB }), {
@@ -391,11 +238,10 @@ async function liveHub(t: TestContext) {
       return { stop: () => {} };
     },
     get: async () => ({ ok: true, status: 200 }),
-    oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  return { app, cookie: await loginCookie(app), hub: hub!, live: handle.live, port: handle.port! };
+  return { app, cookie: await loginCookie(handle.web!), hub: hub!, live: handle.live, port: handle.port! };
 }
 
 type Sse = { id: number; at: number; data: HubEvent | TargetEvent };
@@ -549,7 +395,7 @@ test('the event stream needs a session, and a closed stream leaves no listener o
 });
 
 /**
- * A Minecraft + Discord + web hub with a logged-in admin and two servers: `gtnh` (with the mod and a Backup folder
+ * A Minecraft + Discord + web hub with a logged-in owner and two servers: `gtnh` (with the mod and a Backup folder
  * holding two backups a day apart) and `web` (no mod token).
  */
 async function apiHub(t: TestContext) {
@@ -573,11 +419,10 @@ async function apiHub(t: TestContext) {
       return { stop: () => {} };
     },
     get: async () => ({ ok: true, status: 200 }),
-    oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async <T>(path: string): Promise<T> => {
     const res = await app.request(path, { headers: { cookie } });
     assert.equal(res.status, 200, path);
@@ -610,10 +455,10 @@ test('server cards while offline: features only for the server with the mod', as
 test("a factorio server's card has its game and the UPS rate, the game connection's chat, rate and console, and game updates", async (t) => {
   const cfg = agentConfig(t, { web: WEB, systemd: [FACTORIO_UNIT] });
   cfg.servers.find((s) => s.id === 'space')!.service = 'factorio';
-  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth, run: async () => '' });
+  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), run: async () => '' });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cards = await cardsOf(app, await loginCookie(app));
+  const cards = await cardsOf(app, await loginCookie(handle.web!));
   const card = cards.find((c) => c.id === 'space');
   assert.deepEqual(
     { game: card!.game, rate: card!.rate, tps: card!.tps, features: card!.features },
@@ -625,10 +470,10 @@ test("a factorio server's card has its game and the UPS rate, the game connectio
 
 test("without GameUpdates (no systemd, so no Services to stop it), an Agent's server has no game updates", async (t) => {
   const cfg = agentConfig(t, { web: WEB });
-  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  const handle = await startHub(cfg, { startFrontend: async () => ({ stop: () => {} }), get: async () => ({ ok: true, status: 200 }) });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   assert.equal((await cardsOf(app, cookie)).find((c) => c.id === 'space')!.features.update, false);
   assert.equal((await app.request('/api/servers/space/game', { headers: { cookie } })).status, 404);
 });
@@ -732,10 +577,10 @@ async function logsHub(t: TestContext) {
   utimesSync(join(dir, 'crash-reports', 'crash-1.txt'), 2000, 2000);
   symlinkSync('../config.json', join(dir, 'logs', 'evil.log'));
   cfg.servers = [{ ...cfg.servers[0]!, dir }, { ...cfg.servers[0]!, id: 'web', name: 'Website' }];
-  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => UP, oauth: fakeOAuth().oauth });
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => UP });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   return { request: (path: string) => app.request(path, { headers: { cookie } }) };
 }
 
@@ -859,7 +704,6 @@ test('unknown servers and players get 404, and every read needs a session', asyn
 });
 
 const ORIGIN = 'https://dash.orrery.run';
-const ACTOR = `web:alex (${ADMIN.id})`;
 
 /** A POST the way the dashboard sends it: same origin, JSON. */
 function post(app: WebApi, cookie: string, path: string, body?: object, headers: Record<string, string> = {}) {
@@ -870,7 +714,8 @@ function post(app: WebApi, cookie: string, path: string, body?: object, headers:
   });
 }
 
-const webAudit = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('web:')).map(({ ts: _, id: __, ...e }) => e);
+/** The dashboard's actions in the audit, but for the test login's own `invite accepted`. */
+const webAudit = (log: AuditLog) => log.entries.filter((e) => e.actor.startsWith('web:') && !e.target.startsWith('user:')).map(({ ts: _, id: __, ...e }) => e);
 
 test('chat from the dashboard reaches the mod, appears on the stream and is audited', async (t) => {
   const { app, cookie, get, port } = await apiHub(t);
@@ -886,8 +731,7 @@ test('chat from the dashboard reaches the mod, appears on the stream and is audi
     type: 'say',
     author: 'alex',
     message: 'hi there',
-    source: 'dashboard',
-    avatar: `https://cdn.discordapp.com/avatars/${ADMIN.id}/a1b2c3.png?size=64`,
+    source: 'dashboard', // no avatar: Discord shows the webhook's own
   });
   assert.deepEqual(webAudit(await get<AuditLog>('/api/audit')), [
     { actor: ACTOR, action: 'chat', target: 'gtnh', details: 'hi there' },
@@ -1036,7 +880,6 @@ async function checksHub(t: TestContext, runs: (Answer | [Answer, Answer])[]) {
       if (answer instanceof Error) throw answer;
       return answer;
     },
-    oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
   const notices: TargetNotice[] = [];
@@ -1047,7 +890,7 @@ async function checksHub(t: TestContext, runs: (Answer | [Answer, Answer])[]) {
   handle.live.since().forEach(([, e]) => add(e)); // from the startup request
   handle.live.on('event', (_, e) => add(e));
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   let runsDone = 1;
   /** Waits for the check's `n`th run to be answered. */
   const answered = async (n: number) => (await until(() => requests.length === madeBy(n)), await new Promise((r) => setImmediate(r)));
@@ -1119,11 +962,10 @@ test('without checks nothing is requested and there is no checks API', async (t)
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
   t.mock.timers.tick(60 * 60_000);
-  const cookie = await loginCookie(handle.web!.app);
+  const cookie = await loginCookie(handle.web!);
   assert.equal((await handle.web!.app.request('/api/checks', { headers: { cookie } })).status, 404);
   const on = (await (await handle.web!.app.request('/api/integrations', { headers: { cookie } })).json()) as Integrations;
   assert.equal(on.checks, false);
@@ -1147,7 +989,6 @@ async function hostHub(t: TestContext) {
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
     host: {
       cpu: () => ({ idle: now.idle, total: now.idle + now.busy }),
       load: () => [0.5, 0.25, 0.125],
@@ -1169,7 +1010,7 @@ async function hostHub(t: TestContext) {
   };
   const notices = () => events.flatMap((e) => (e.type === 'notice' ? [e.kind] : []));
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async <T>(path: string) => {
     const res = await app.request(path, { headers: { cookie } });
     assert.equal(res.status, 200, path);
@@ -1351,12 +1192,11 @@ test('without the host integration nothing is sampled and there is no host API',
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: async () => ({ ok: true, status: 200 }),
-    oauth: fakeOAuth().oauth,
     host: { cpu: () => assert.fail(), load: () => assert.fail(), memory: () => assert.fail(), disk: () => assert.fail() },
   });
   t.after(() => handle.close());
   t.mock.timers.tick(60 * 60_000);
-  const cookie = await loginCookie(handle.web!.app);
+  const cookie = await loginCookie(handle.web!);
   assert.equal((await handle.web!.app.request('/api/host', { headers: { cookie } })).status, 404);
   assert.equal((await handle.web!.app.request('/api/hosts', { headers: { cookie } })).status, 404);
 });
@@ -1392,7 +1232,6 @@ async function servicesHub(t: TestContext) {
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: async () => UP,
-    oauth: fakeOAuth().oauth,
     run: systemd.run,
   });
   t.after(() => handle.close());
@@ -1410,7 +1249,7 @@ async function servicesHub(t: TestContext) {
     await new Promise((r) => setImmediate(r));
   };
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const request = (path: string) => app.request(path, { headers: { cookie } });
   return { systemd, events, next, request };
 }
@@ -1469,12 +1308,11 @@ test('without systemd nothing is run and there is no services API', async (t) =>
   const handle = await startHub(config(t, { web: WEB }), {
     startFrontend: () => assert.fail('Discord is off'),
     get: async () => UP,
-    oauth: fakeOAuth().oauth,
     run: () => assert.fail('nothing to run'),
   });
   t.after(() => handle.close());
   t.mock.timers.tick(60 * 60_000);
-  const cookie = await loginCookie(handle.web!.app);
+  const cookie = await loginCookie(handle.web!);
   assert.equal((await handle.web!.app.request('/api/services', { headers: { cookie } })).status, 404);
   const on = (await (await handle.web!.app.request('/api/integrations', { headers: { cookie } })).json()) as Integrations;
   assert.equal(on.systemd, false);
@@ -1508,7 +1346,6 @@ async function restoreHub(t: TestContext, linked = true) {
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
     run: systemd.run,
     restore,
   });
@@ -1523,7 +1360,7 @@ async function restoreHub(t: TestContext, linked = true) {
     await new Promise((r) => setImmediate(r));
   };
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const restoreOf = (name: unknown, server = 'gtnh') => post(app, cookie, `/api/servers/${server}/restore`, { name });
   const audit = async () =>
     webAudit((await (await app.request('/api/audit', { headers: { cookie } })).json()) as AuditLog).filter((e) => e.action === 'restore');
@@ -1606,12 +1443,11 @@ async function actionsHub(t: TestContext) {
   const handle = await startHub(cfg, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
     run: systemd.run,
   });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async <T>(path: string) => (await app.request(path, { headers: { cookie } })).json() as Promise<T>;
   /** The start/stop/restart calls systemctl got. */
   const actions = () => systemd.calls.filter((c) => c[0] === 'systemctl' && c[1] !== 'show');
@@ -1640,11 +1476,13 @@ test('start, stop and restart each run systemctl once, without blocking, and are
   ]);
 });
 
-test('an action on an unlisted service is 404 and never run; a failing systemctl is 502', async (t) => {
+test('an action on an unlisted service is 404 and never run, one that is no verb 403; a failing systemctl is 502', async (t) => {
   const { app, cookie, systemd, actions } = await actionsHub(t);
-  for (const path of ['nope/stop', 'gtnh.service/stop', 'toString/start', 'gtnh/kill', 'gtnh/logs']) {
+  for (const path of ['nope/stop', 'gtnh.service/stop', 'toString/start']) {
     assert.equal((await post(app, cookie, `/api/services/${path}`)).status, 404, path);
   }
+  // No route, so no permission rule: the default deny refuses them before routing.
+  for (const path of ['gtnh/kill', 'gtnh/logs']) assert.equal((await post(app, cookie, `/api/services/${path}`)).status, 403, path);
   assert.deepEqual(actions(), []);
   assert.equal((await post(app, cookie, '/api/services/caddy/stop', undefined, { origin: 'https://evil.example' })).status, 403);
   systemd.fails = true;
@@ -1829,10 +1667,10 @@ test("an Agent's bye records its server lost, as unknown, and posts nothing; a l
 
 test("with agents but no host integration, each Agent's Host is served with its own samples, and /api/host is not", async (t) => {
   const cfg = agentConfig(t, { web: WEB });
-  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }) });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async <T>(path: string) => {
     const res = await app.request(path, { headers: { cookie } });
     assert.equal(res.status, 200, path);
@@ -1863,7 +1701,7 @@ test('the hub starts while the Agent port waits for its address, and closes with
   assert.deepEqual(errors.mock.calls.map((c) => c.arguments[0]), ['[agents] 192.0.2.1 is not on this machine yet: trying again every 0.02 s']);
 });
 
-test("a link is redeemed in each game, chat from the dashboard names the admin by the server's game, and /unlink clears both", async (t) => {
+test("a link is redeemed in each game, chat from the dashboard names the user by the server's game, and /unlink clears both", async (t) => {
   const cfg = agentConfig(t, { minecraft: MINECRAFT, discord: DISCORD, web: WEB });
   delete cfg.healthcheckUrl;
   let links: Links | undefined;
@@ -1873,11 +1711,10 @@ test("a link is redeemed in each game, chat from the dashboard names the admin b
       return { stop: () => {} };
     },
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
   });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const mod = await online(handle.port!);
   const { game } = await agentOnline(await handle.agentPort!);
 
@@ -1938,12 +1775,11 @@ async function agentServicesHub(t: TestContext, players: string[]) {
       return { stop: () => {} };
     },
     get: () => assert.fail('nothing to request'),
-    oauth: fakeOAuth().oauth,
     run: systemd.run,
   });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const cookie = await loginCookie(app);
+  const cookie = await loginCookie(handle.web!);
   const get = async <T>(path: string) => (await app.request(path, { headers: { cookie } })).json() as Promise<T>;
   const { agent, game } = await agentOnline(await handle.agentPort!);
   const agentGot = recorded(agent);

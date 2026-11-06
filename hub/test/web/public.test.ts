@@ -13,7 +13,7 @@ import type { Stats } from '../../src/stats/stats.ts';
 import { publicRoutes, publicState } from '../../src/web/web-public.ts';
 import type { Env } from '../../src/web/web.ts';
 import { TOKEN } from '../fake-mod.ts';
-import { config, fakeOAuth, WEB, webHub } from './web-hub.ts';
+import { config, WEB, webHub } from './web-hub.ts';
 
 const FIELDS = ['game', 'name', 'players', 'state', 'uptimeMonth', 'uptimeWeek'];
 
@@ -22,7 +22,7 @@ async function statusHub(t: TestContext) {
   const cfg = config(t, { minecraft: { listenPort: 0, tokens: { gtnh: TOKEN } }, web: { ...WEB, status: { servers: ['tfc', 'gtnh'] } } });
   const [gtnh] = cfg.servers;
   cfg.servers.push({ ...gtnh!, id: 'hidden', name: 'Hidden' }, { ...gtnh!, id: 'tfc', name: 'TerraFirmaCraft' });
-  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }), oauth: fakeOAuth().oauth });
+  const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }) });
   t.after(() => handle.close());
   return handle.web!.app;
 }
@@ -66,7 +66,7 @@ test('the Status page keeps its answer for 15 s, then reads the servers and thei
 });
 
 test('without integrations.web.status there is no Status page, and every other read but the Environment still needs a session', async (t) => {
-  const app = await webHub(t, fakeOAuth().oauth);
+  const { app } = await webHub(t);
   assert.equal((await app.request('/api/public/status')).status, 401);
   assert.equal((await app.request('/api/environment')).status, 200);
   assert.equal((await app.request('/api/servers')).status, 401);

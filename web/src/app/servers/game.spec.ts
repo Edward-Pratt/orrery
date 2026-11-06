@@ -6,7 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { CatalogMod, GameCatalog, GameState, ModBrowse, ModCheckAnswer, ModUpdatesState, Notice, PackUpdateRow, RunningGameUpdate, ServerCard, ServerDetail, TargetEvent } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle, until } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle, until } from '../testing';
 import routes from './routes';
 
 /**
@@ -93,7 +93,7 @@ const NO_UPDATES: ModUpdatesState = { factorio: '2.1.24', checked: Date.UTC(2026
 async function setup(state: GameState = STATE, card: ServerCard = CARD, updates: ModUpdatesState | 404 = NO_UPDATES) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);
@@ -169,7 +169,7 @@ describe('server game tab', () => {
     expect(tabs).not.toContain('Pack');
     TestBed.resetTestingModule();
     const events = fakeEvents();
-    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
+    TestBed.configureTestingModule({ providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl('/space');
     TestBed.inject(HttpTestingController)

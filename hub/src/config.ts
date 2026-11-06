@@ -10,8 +10,8 @@
 // channels keyed by server id, optional `alertsChannel` for the host, services and checks), `integrations.systemd`
 // (id, unit name; the only units the hub touches), `integrations.checks` (id, URL, `intervalSeconds` ≥ 30, optional
 // linked `service`), `integrations.host` (id, mounts, memory and disk limits; defaulted by `loadConfig`),
-// `integrations.web` (port, public URL, OAuth client id, guild and admin role — each defaulting to `discord`'s —
-// session days), `integrations.github` (`repo`, `newerAfterDays` (14), and `deploys`: the environment's root, hub
+// `integrations.web` (port, public URL, session days, the Status page; the Discord login's keys warn, `web-config.ts`),
+// `integrations.github` (`repo`, `newerAfterDays` (14), and `deploys`: the environment's root, hub
 // unit, deploy unit templates and dashboard folder, defaulted to production's `PRODUCTION_DEPLOYS`; paths absolute,
 // unit names checked; with GitHub on, `dbPath` must be a file directly in that root, never under `current/`, which
 // each hub deploy replaces), and a server's `keep` (paths in its folder a pack update never touches: relative, no
@@ -26,7 +26,7 @@ import { isIPv4 } from 'node:net';
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { checks, isObj, SNOWFLAKE, type Obj } from './config-check.ts';
 import { parseDaily } from './daily.ts';
-import { checkWeb } from './web/web-config.ts';
+import { checkWeb, resolveWeb } from './web/web-config.ts';
 import { GAMES, rateOf, type LagConfig } from './servers/lag.ts';
 import { LIMITS } from './protocol.ts';
 import { QUEST_MODES, type QuestMode } from './servers/quests.ts';
@@ -86,16 +86,10 @@ export type DiscordConfig = {
 /** The mod port and a token per server id. */
 export type MinecraftIntegration = { listenPort: number; tokens: Record<string, string> };
 
-/**
- * The HTTP API: localhost port, the public URL (OAuth redirect is derived from it), the Discord OAuth app, and the
- * guild whose admin role may log in (its own, else the bot's).
- */
+/** The HTTP API: localhost port, the public URL (the CSRF origin; invite links are built on it), how long a login lasts. */
 export type WebIntegration = {
   listenPort: number;
   publicUrl: string;
-  clientId: string;
-  guildId: string;
-  adminRoleId: string;
   sessionDays: number;
   /** The Status page's servers, by id, in the order shown; without it there is no Status page. */
   status?: { servers: string[] };
@@ -365,7 +359,7 @@ export function validateConfig(raw: unknown): string[] {
     hostLimits(host, where);
   }
   const web = integrations.web;
-  checkWeb(checks(errors), web, discord, ids);
+  checkWeb(checks(errors), web, ids);
   const agents = integrations.agents;
   /** Factorio server id -> the Agents that name it. */
   const served = new Map<string, string[]>();
@@ -482,7 +476,7 @@ export function loadConfig(path: string): Config {
   }
   const c = raw as Omit<Config, 'servers' | 'environment'> & { environment?: Environment; servers: ServerEntry[] };
   const integrations = { ...c.integrations };
-  const { web, discord, host, github, agents } = integrations;
+  const { web, host, github, agents } = integrations;
   if (github) {
     integrations.github = {
       ...github,
@@ -497,13 +491,6 @@ export function loadConfig(path: string): Config {
       agents: agents.agents.map((a) => ({ ...a, host: { ...HOST_LIMITS, ...(a.host as Partial<HostLimits> | undefined) } })),
     };
   }
-  if (web) {
-    integrations.web = {
-      ...web,
-      guildId: web.guildId ?? discord!.guildId, // validated: one of them is set
-      adminRoleId: web.adminRoleId ?? discord!.adminRoleId,
-      sessionDays: web.sessionDays ?? 7,
-    };
-  }
+  if (web) integrations.web = resolveWeb(web);
   return { ...c, environment: c.environment ?? 'production', servers: c.servers.map(resolve), integrations };
 }

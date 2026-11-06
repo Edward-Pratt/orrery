@@ -3,12 +3,12 @@ import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/
 import { provideRouter, withNavigationErrorHandler } from '@angular/router';
 import { routes } from './app.routes';
 import { reloadOnStaleBuild } from './reload';
-import { loggedOutOn401 } from './session';
+import { loggedOutOn401, refreshOn403 } from './session';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes, withNavigationErrorHandler(reloadOnStaleBuild)),
-    provideHttpClient(withFetch(), withInterceptors([loggedOutOn401])),
+    provideHttpClient(withFetch(), withInterceptors([loggedOutOn401, refreshOn403])),
   ],
 };

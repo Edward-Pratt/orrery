@@ -6,7 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { ModerationState, PlayerLists, ServerCard, ServerDetail } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialogButton, fakeEvents, settle, until } from '../testing';
+import { dialogButton, fakeEvents, loggedIn, settle, until } from '../testing';
 import routes from './routes';
 
 const CARD = {
@@ -27,7 +27,7 @@ const URL = '/api/servers/space/moderation';
 async function setup(state: ModerationState | 404 = STATE, card: ServerCard = CARD) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);

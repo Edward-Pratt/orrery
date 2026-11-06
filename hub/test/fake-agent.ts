@@ -15,19 +15,16 @@ import type { PortalFetch } from '../src/updates/factorio.ts';
 import type { RestartScheduler } from '../src/servers/restarts.ts';
 import { startHub, type HubDeps } from '../src/start.ts';
 import type { FactorioMod, Notice } from '../src/types.ts';
-import type { OAuth } from '../src/web/web.ts';
+import { loginAs, WEB } from './web/web-hub.ts';
 import { fakeMod } from './fake-mod.ts';
 
-export const WEB = { listenPort: 0, publicUrl: 'https://dash.orrery.run', clientId: '4'.repeat(18), guildId: '7'.repeat(18), adminRoleId: '8'.repeat(18), sessionDays: 7 };
-export const ADMIN = { id: '5'.repeat(18), username: 'alex', avatar: null, roles: [WEB.adminRoleId] };
-export const ACTOR = `web:alex (${ADMIN.id})`;
+export { ACTOR, ADMIN, WEB } from './web/web-hub.ts';
 export const AGENT_TOKEN = 'agent-token-0123456789abcdef-0123456789';
 export const ACCOUNT = { username: 'owner', token: 'secret-token-0123456789' };
 export const AGENTS = {
   listen: { host: '127.0.0.1', port: 0 },
   agents: [{ id: 'vm', name: 'Factorio VM', token: AGENT_TOKEN, address: '127.0.0.1', server: 'space', host: { memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 } }],
 };
-export const oauth: OAuth = { token: async () => 'access', member: async () => ADMIN };
 
 /** What the Agent says the server runs: Factorio 2.1.24, the game's own mods and `orrery`. */
 export const INSTALLED: FactorioMod[] = [
@@ -131,7 +128,6 @@ export async function gameHub(
       return { stop: () => {} };
     },
     get: async () => ({ ok: true, status: 200 }),
-    oauth,
     run: async () => '',
     portal,
     factorioAccount: account ? ACCOUNT : undefined,
@@ -148,10 +144,7 @@ export async function gameHub(
   };
   t.after(close);
   const app = handle.web!.app;
-  const login = await app.request('/api/login');
-  const state = new URL(login.headers.get('location')!).searchParams.get('state');
-  const callback = await app.request(`/api/callback?code=x&state=${state}`, { headers: { cookie: login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ') } });
-  const cookie = callback.headers.getSetCookie().find((c) => c.startsWith('session='))!.split(';')[0]!;
+  const { cookie } = await loginAs(handle.web!);
   const notices: Notice[] = [];
   handle.live.on('event', (_, { at: _at, ...e }: LiveEvent) => {
     if ('serverId' in e && e.serverId === 'space' && e.type === 'notice') {

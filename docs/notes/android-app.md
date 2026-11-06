@@ -2,7 +2,8 @@
 
 Status: designed, not built. Date: 2026-11-05. Based on `main` at `81a05f8` (production: `hub-v2.19.1`,
 `web-v0.17.0`, `agent-v1.3.0`; cut and not deployed: `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, `web-v0.19.0`).
-File and line references are at that commit.
+File and line references are at that commit. The Login section, and what hangs off it, were rewritten on 2026-11-05 to
+follow `docs/notes/users.md`: the App logs in with the hub's own Users, which land first, not through Discord.
 
 The owner wants to watch the servers and start and stop things from their phone, and be told when something breaks.
 Owner decisions (2026-11-05):
@@ -26,7 +27,7 @@ keyboard:
 
 | Screen | Shows | Actions |
 |---|---|---|
-| **Login** | the logo, "Log in with Discord" | opens Discord's login in a Custom Tab |
+| **Login** | the logo, username and password | Log in |
 | **Overview** (home) | every server (state, players online, TPS/UPS, a pending restart), then the services, the checks and each Host's CPU, memory and disk; the attention strip's problems at the top | pull to refresh |
 | **Server** | state, players online, uptime today, the pending restart, the linked service and its state | Restart (with the countdown, as the dashboard), Cancel restart, Back up now, Start / Stop / Restart the linked service |
 | **Services** | each service and its state, its check if linked | Start / Stop / Restart |
@@ -35,7 +36,7 @@ keyboard:
 - Stop and Restart ask first, in a dialog naming the server and how many players are on.
 - While a screen is open the App follows the live event stream (`GET /api/events`, `Last-Event-ID` on reconnect),
   exactly as the dashboard does, so states change in place. In the background it holds no connection: push does that.
-- A 401 anywhere means logged out (the session ended, or the admin role was taken away): back to Login.
+- A 401 anywhere means logged out (the session ended, or the user was disabled or logged out everywhere): back to Login.
 - The launcher icon is the orrery mark (`web/public/favicon.svg`) as an adaptive icon, its vector converted to a
   vector drawable.
 
@@ -53,34 +54,34 @@ keyboard:
 
 ## Login
 
-The App reuses the hub's Discord login (`/api/login` → Discord → `/api/callback`), so the Discord app's redirect URL
-and the admin-role check stay exactly as they are. What's new is how the session gets from the browser into the App,
-done like RFC 8252 (OAuth for native apps) with PKCE:
+The App logs in with the same account as the dashboard: a User in the hub (`docs/notes/users.md`), with the same
+username and password, the same permissions and the same login limits. What differs is how the session is carried:
+the dashboard holds a cookie, the App a bearer token.
 
-1. The App makes a random `verifier` and opens a Custom Tab on
-   `https://dash.orrery.run/api/login?app=<S256(verifier)>`.
-2. `/api/login` keeps the challenge next to `state` (the same short-lived cookie, now `state.challenge`).
-3. `/api/callback` checks state, code and admin role as today. For an app login it creates **no cookie session**;
-   it stores a one-time **app code** (random, hashed, 60 s, single use, bound to the challenge) and redirects to
-   `orrery://login?code=<code>`. A failed app login redirects to `orrery://login?error=state|discord|admin`.
-4. The App posts `{ code, verifier }` to `POST /api/app/session`. The hub checks `S256(verifier)` against the
-   challenge, deletes the code, and answers `{ token }`: a new session, the same row as a cookie session in
-   `web_sessions` with its sealed Discord token in `web_session_checks`, expiring after `sessionDays`.
+1. The Login screen posts `{ username, password }` to `POST /api/app/session` (JSON, over HTTPS; nothing but the hub
+   ever sees the password). The hub runs the check `POST /api/login` runs (`hub/src/web/auth.ts`: `Users.login`, the
+   per-name-and-address and per-address limits, the one 401 text for every failure, 429 with `Retry-After` while
+   locked) and, instead of setting a cookie, answers `{ token }`: a new row in `web_sessions`, stored hashed,
+   expiring after `sessionDays`, the same as a cookie session.
+2. The App keeps the token in `EncryptedSharedPreferences` (see Stack) and sends it as `Authorization: Bearer
+   <token>` on every request. It never keeps the password.
+3. A failed login shows the hub's text; a 429 says how long to wait. When the second factor lands (the release after
+   Users), the screen gains a code field and the post a `code`.
 
-Another app on the phone could register `orrery://` and catch the redirect, but without the verifier the code is
-useless, and it expires in 60 s. The App keeps the token; a stolen phone is handled by the owner logging the
-session out (out of scope for v1: see the end) or removing the admin role, which the re-check honours.
+A lost phone: Log out everywhere, on Account by the user or on the Users page by someone with `users`, ends its
+session with every other; disabling the user does too. The App's next request is 401, and it goes back to Login.
 
 ## Bearer sessions in the hub
 
-- The session middleware (moved to `hub/src/web/auth.ts` by the status page's first commit:
-  `docs/notes/public-status.md`) takes **either** the `session` cookie **or** `Authorization: Bearer <token>`. When
-  the header is present, the cookie is ignored, so one request can never mix the two.
+- The session middleware (`hub/src/web/auth.ts`, as `docs/notes/users.md` rewrites it) takes **either** the `session`
+  cookie **or** `Authorization: Bearer <token>`. When the header is present, the cookie is ignored, so one request
+  can never mix the two.
 - The CSRF check exists because a browser sends the cookie on its own. A bearer token is never sent by a browser on
   its own, so a request authenticated **by the header** skips the Origin check. It still must be JSON (one rule
   fewer to special-case), and the upload chunk exception stays as it is.
-- `/api/me`, the re-check against Discord every `RECHECK_MS`, expiry and pruning are unchanged: an app session is a
-  web session that arrived another way. `POST /api/logout` with the header deletes that session.
+- `/api/me`, the permissions read on every request (`permit.ts`'s rules apply to the App's requests as they do to
+  the dashboard's), expiry and pruning are unchanged: an app session is a web session that arrived another way.
+  `POST /api/logout` with the header deletes that session.
 - `POST /api/app/session` sits before the session middleware (it is how you get one) and takes only JSON.
 
 ## Push
@@ -112,8 +113,9 @@ a title ("gtnh crashed") and a one-line body, which `select.ts` writes.
 - `POST /api/app/devices` `{ fcmToken, name }` registers this phone under the calling session (`DELETE` removes it).
   Only a bearer session may register.
 - A new table `app_devices (session_id, fcm_token, name, created)`. **A device lives only as long as its session**:
-  every path that ends a session (logout and the re-check through `deleteWebSession`, expiry through the prune at
-  `db.ts:438`) deletes its devices in the same transaction. Otherwise a demoted admin's phone would keep getting
+  every path that ends a session (logout, a disabled or deleted user, a password change and Log out everywhere,
+  through the session deletes in `hub/src/users/store.ts` once Users moves them there; expiry through the prune at
+  `db.ts:438`) deletes its devices in the same transaction. Otherwise a disabled user's phone would keep getting
   alerts. The hub's SQLite runs without `PRAGMA foreign_keys`, so no `ON DELETE CASCADE` does this: the deletes are
   explicit, with a test for each of the three paths.
 - Android 13 and later show nothing without the `POST_NOTIFICATIONS` permission: the App asks for it right after the
@@ -180,10 +182,10 @@ Like `agent/` and `factorio/`, `android/` is a part with its own versions (ADR 0
 
 - The App talks only to the hub's HTTP API, like the dashboard (the frontend rule in `CLAUDE.md`); it never talks to
   Discord's API, mods, Agents or systemd.
-- An app session is no stronger than a cookie session: same admin-role check at login, same re-check, same expiry,
-  same audit actor `web:<name> (<id>)`.
-- The app code is single use, 60 s, hashed at rest, and useless without the PKCE verifier. The token is stored
-  hashed in `web_sessions`, as now.
+- An app session is no stronger than a cookie session: same password check and login limits, same permissions on
+  every request, same expiry, same audit actor `web:<name> (<id>)`.
+- The password crosses the network once, to the hub, over HTTPS; the App keeps only the token, and the token is
+  stored hashed in `web_sessions`, as now.
 - A push carries only a title and a line; nothing secret goes through Google (no tokens, addresses, passwords or
   logs). Server ids and names, check URLs and Host ids do.
 
@@ -191,13 +193,13 @@ Like `agent/` and `factorio/`, `android/` is a part with its own versions (ADR 0
 
 Hub:
 
-- Login: `/api/login?app=` keeps the challenge; the callback for an app login sets no cookie and redirects to
-  `orrery://login?code=`; failures redirect with `error=`; `POST /api/app/session` with the right verifier answers a
-  token once, then refuses the same code; a wrong verifier, an expired code and a cookie-login state are refused.
+- Login: `POST /api/app/session` with the right password answers a token and sets no cookie; a wrong password, an
+  unknown name and a disabled user get the one 401 text; the login limits count its failures with `/api/login`'s;
+  it needs JSON and no session.
 - Bearer: a valid token authenticates; a bad one is 401; with both header and cookie the header decides; a bearer
   POST without `Origin` passes CSRF, a cookie one still fails; logout with the header ends that session.
-- Devices: register and remove; a cookie session can't register; **logout, expiry and a failed re-check delete the
-  devices**.
+- Devices: register and remove; a cookie session can't register; **logout, expiry, a disabled user and Log out
+  everywhere delete the devices**.
 - Push: `select.ts`'s list (each kind in or out, title and body); the Agent hold; `fcm.ts` with a fake `fetch` (the
   JWT's claims and signature checkable with the key's public half, the access token reused until near expiry, the
   message body, `UNREGISTERED` deleting the device, other errors logged and dropped); no section or no key sends
@@ -209,14 +211,14 @@ App (JVM unit tests, no emulator in CI):
 - Decoding `api-samples.json`.
 - The ViewModels with a fake API: overview loading, an action's confirm → call → error message, 401 → Login, the event
   stream changing a card.
-- The login steps' URL building and PKCE.
+- The login call: the token kept, the password not; 401 and 429 shown.
 
 Manual smokes (only a real phone and real FCM show these): log in, see the servers, stop and start a service, take a
 check down and get the notification with the App closed, log out and stop getting them.
 
 ## Build order
 
-1. The status page's pure move of the auth block out of `web.ts` (`docs/notes/public-status.md`), if not done yet.
+1. Users shipped (`docs/notes/users.md`): the App's login is its `Users.login` behind another route.
 2. Pure move, its own commit: `agentAlerts` out of `hub/src/discord/discord.ts` into a module both Discord and push
    use.
 3. Hub: bearer sessions and the app login, with tests.
@@ -228,7 +230,7 @@ check down and get the notification with the App closed, log out and stop gettin
 
 ## Release and deploy
 
-1. Cut `hub-v2.22.0` (or the next hub minor after the status page), deploy it. By hand on the host: create the
+1. Cut the next hub minor after Users, deploy it. By hand on the host: create the
    Firebase project, its service account key into `/etc/orrery-fcm.env` (root, mode 600), `integrations.web.push`
    in `config.json`, the updated `orrery-hub.service`, `systemctl daemon-reload`, restart the hub.
 2. Cut `android-v0.1.0` (0.x until the App is finished, like the dashboard), install the APK on the phone, and run
@@ -238,8 +240,8 @@ check down and get the notification with the App closed, log out and stop gettin
 
 ## Docs and ADRs
 
-- **ADR 0005**: the App, a native frontend with bearer sessions and FCM push (why native, why FCM, why no
-  `firebase-admin`, how the login works).
+- **ADR 0006** (0005 is Users, `docs/notes/users.md`): the App, a native frontend with bearer sessions and FCM push
+  (why native, why FCM, why no `firebase-admin`, why the token and not a cookie).
 - ADR 0001's list of parts and tags gains `android`.
 - `CLAUDE.md` (parts, secrets, verify commands, release order: hub, dashboard, agent, Factorio mod, App),
   `docs/RELEASING.md`, `android/CLAUDE.md` (new), `hub/src/web/CLAUDE.md`, `CONTEXT.md` (**App**: the Android app, a
@@ -250,6 +252,6 @@ check down and get the notification with the App closed, log out and stop gettin
 - iPhone, tablets' own layouts, Wear OS, widgets.
 - Chat, the console, packs, game updates, uploads, settings, moderation, the audit log: the dashboard keeps those.
 - Choosing which alerts reach the phone (one switch per phone for v1).
-- A sessions list in the dashboard to log a lost phone out (v1: remove and re-add the admin role, or wait for
-  expiry). A good next step.
+- A sessions list per user in the dashboard, to log one phone out and keep the rest (v1: Log out everywhere ends
+  them all). A good next step.
 - Offline caching, the Play Store, auto-update inside the App.

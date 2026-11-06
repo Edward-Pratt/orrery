@@ -9,21 +9,11 @@ import type { GitHubRelease } from '../../src/updates/deploys.ts';
 import type { RunRestore } from '../../src/backups/restore.ts';
 import type { Run } from '../../src/services/services.ts';
 import { startHub, type HubHandle } from '../../src/start.ts';
-import type { OAuth, WebApi } from '../../src/web/web.ts';
+import type { WebApi } from '../../src/web/web.ts';
+import { ACTOR, loginAs, WEB } from '../web/web-hub.ts';
 import { fakeMod, hello, TOKEN, until } from '../fake-mod.ts';
 
 const DAY = 24 * 60 * 60_000;
-const WEB = {
-  listenPort: 0,
-  publicUrl: 'https://dash.orrery.run',
-  clientId: '4'.repeat(18),
-  guildId: '7'.repeat(18),
-  adminRoleId: '8'.repeat(18),
-  sessionDays: 7,
-};
-const ADMIN = { id: '5'.repeat(18), username: 'alex', avatar: null, roles: [WEB.adminRoleId] };
-const ACTOR = `web:alex (${ADMIN.id})`;
-const oauth: OAuth = { token: async (code) => code, member: async () => ADMIN };
 const JARS = (v: string) => [`gtnhdiscord-${v}.jar`, `gtnhdiscord-${v}-dev.jar`, `gtnhdiscord-${v}-sources.jar`];
 const rel = (tag: string, daysAgo: number, more: Partial<GitHubRelease> = {}): GitHubRelease => ({
   tag,
@@ -133,7 +123,6 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
   const handle: HubHandle = await startHub(w.config, {
     startFrontend: () => assert.fail('Discord is off'),
     get: () => assert.fail('nothing to request'),
-    oauth,
     run: w.systemd.run,
     github: w.github,
     restore: setup.restore,
@@ -147,8 +136,7 @@ async function start(t: TestContext, w: World, setup: Setup = {}) {
     if ('target' in e && e.target === 'deploy') notices.push(e);
   });
   const app: WebApi = handle.web!.app;
-  const login = await app.request('/api/callback?code=x&state=s', { headers: { cookie: 'state=s' } });
-  const cookie = login.headers.getSetCookie().find((c) => c.startsWith('session='))!.split(';')[0]!;
+  const { cookie } = await loginAs(handle.web!);
   const get = async (path = '/api/deploys') => (await app.request(path, { headers: { cookie } })).json() as Promise<DeploysAnswer>;
   const post = (path: string, body?: object) =>
     app.request(path, { method: 'POST', headers: { cookie, origin: WEB.publicUrl, 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
@@ -242,11 +230,10 @@ test('a failed check is reported without failing, keeping the last list; Check n
 test('with GitHub off there are no deploy routes and no reader is needed', async (t) => {
   const w = world(t);
   delete w.config.integrations.github;
-  const handle = await startHub(w.config, { startFrontend: () => assert.fail(), get: () => assert.fail(), oauth });
+  const handle = await startHub(w.config, { startFrontend: () => assert.fail(), get: () => assert.fail() });
   t.after(() => handle.close());
   const app = handle.web!.app;
-  const login = await app.request('/api/callback?code=x&state=s', { headers: { cookie: 'state=s' } });
-  const cookie = login.headers.getSetCookie().find((c) => c.startsWith('session='))!.split(';')[0]!;
+  const { cookie } = await loginAs(handle.web!);
   assert.equal((await app.request('/api/deploys', { headers: { cookie } })).status, 404);
   assert.equal(((await (await app.request('/api/integrations', { headers: { cookie } })).json()) as { github: boolean }).github, false);
 });

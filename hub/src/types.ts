@@ -276,7 +276,7 @@ export type Notice = { severity: Severity } & (
   | { kind: 'settings' }
   /**
    * User verification turned off on a factorio server (`name`: the server's), or on again: by a save from the dashboard
-   * (`by`: the admin's name), or as its Agent reported its file (`by` null: a rollback, or a hand edit).
+   * (`by`: the user's name), or as its Agent reported its file (`by` null: a rollback, or a hand edit).
    */
   | { kind: 'verificationOff'; name: string; by: string | null }
   | { kind: 'verificationOn'; name: string; by: string | null }
@@ -305,12 +305,9 @@ export type Announcement =
   | { type: 'questBatch'; player: string; quests: QuestDone[]; count: number }
   | { type: 'linked'; player: string; discordId: string }
   | { type: 'summary'; name: string; summary: Summary };
-/**
- * Chat sent into the game (`say`; `avatar` is the admin's Discord avatar URL, on dashboard lines only, and never sent
- * to the mod), and a command's output (`late`: output that came after the result).
- */
+/** Chat sent into the game (`say`), and a command's output (`late`: output that came after the result). */
 export type HubOutput =
-  | (Extract<HubMsg, { type: 'say' }> & { avatar?: string })
+  | Extract<HubMsg, { type: 'say' }>
   | { type: 'console'; command: string; by: string; output: string[]; late?: true };
 export type HubEvent = { serverId: string } & (
   | GameMsg
@@ -432,7 +429,7 @@ export type LibraryAdd = { type: 'libraryAdd'; add: number; name: string; versio
 );
 /**
  * A New server install (`target` `install`, `id` the new server's): each step as it starts (`unpack`, `write`, `mod`),
- * then `done` or `failed` (`detail`: why). `name` is the server's name, `by` the admin's.
+ * then `done` or `failed` (`detail`: why). `name` is the server's name, `by` the user's.
  */
 export type InstallStep = { type: 'install'; step: 'unpack' | 'write' | 'mod' | 'done' | 'failed'; detail: string; name: string; by: string };
 /** Everything on the live stream: server events and the rest. */

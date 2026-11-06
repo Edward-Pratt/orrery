@@ -9,6 +9,7 @@ import { catchError, combineLatest, filter, of, switchMap } from 'rxjs';
 import { PeriodPicker, type Series, TimeSeries } from '../chart';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
+import { Session } from '../session';
 import { Releases } from './releases';
 import type { Health } from '../status';
 
@@ -76,7 +77,7 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
         </section>
       }
     </div>
-    @if (on()?.github) {
+    @if (on()?.github && session.can('deploys')) {
       <app-releases />
     }
   `,
@@ -85,6 +86,8 @@ export default class Host {
   protected readonly bars = { ok: 'bg-status-ok', warn: 'bg-status-warn', down: 'bg-status-down' };
   // ponytail: Releases live on the Host page, so they need the host integration on too.
   protected readonly on = toSignal(inject(Integrations).on$);
+  /** Releases are deploys: only for a user who may run them. */
+  protected readonly session = inject(Session);
   /** Every host with its latest sample, the hub's own first; a picker shows when there is more than one. */
   readonly hosts = signal<HostNow[]>([]);
   /** The host shown: the hub's own until another is chosen. */

@@ -11,7 +11,7 @@ import { LIMITS } from '../../src/protocol.ts';
 import { Packs, type PacksDeps } from '../../src/packs/packs.ts';
 import type { Notice } from '../../src/types.ts';
 import { beforeAgentFloor } from '../../src/agents/agents.ts';
-import { ACCOUNT, ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, PNG, ready, rel, SHA256, sha, signed } from '../fake-agent.ts';
+import { ACCOUNT, ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, PNG, ready, rel, SHA256, sha, signed, WEB } from '../fake-agent.ts';
 import { fakeMod } from '../fake-mod.ts';
 
 const kinds = (notices: Notice[]) => notices.filter((n) => n.kind !== 'packUpdateStep').map((n) => n.kind);
@@ -646,7 +646,7 @@ test("Import mod list's check: each name on the portal for the version's line or
   const check = '/api/servers/space/game/check';
   const body = { factorio: '2.1.24', names: ['helmod', 'Squeak Through', 'needy', 'gone'] };
   // A session is needed, as for every route; a server no Agent runs has none; no Agent connected is fine (a read).
-  assert.equal((await h.app.request(check, { method: 'POST', body: JSON.stringify(body) })).status, 401);
+  assert.equal((await h.app.request(check, { method: 'POST', headers: { origin: WEB.publicUrl, 'content-type': 'application/json' }, body: JSON.stringify(body) })).status, 401);
   assert.equal((await h.req('POST', '/api/servers/gtnh/game/check', body)).status, 404);
   // helmod and Squeak Through from the list, needy read on its own (not listed), gone not on the portal.
   assert.deepEqual(await h.json<ModCheckAnswer>(h.req('POST', check, body)), {

@@ -1,7 +1,28 @@
 // `fakeEvents()`: a fake `/api/events` for the `FETCH` token (each push reaches every open stream); `dialog()`,
-// `dialogButton()` and `toasts()` read the confirmation and toasts, which live outside the component under test.
+// `dialogButton()` and `toasts()` read the confirmation and toasts, which live outside the component under test;
+// `loggedIn(me)`, a `Session` already logged in (as `OWNER`, every permission, by default; `VIEWER` holds none), as
+// every page is in the app, where they render only behind a login.
 
-import type { HubEvent, LiveEvent, TargetEvent } from '@hub/api';
+import type { Provider } from '@angular/core';
+import type { HubEvent, LiveEvent, Me, Permission, TargetEvent } from '@hub/api';
+import { Session } from './session';
+
+const EVERY: readonly Permission[] = [
+  'servers.chat', 'servers.console', 'servers.control', 'servers.restore', 'servers.logs', 'servers.pack', 'servers.settings',
+  'servers.moderation', 'services.control', 'services.logs', 'deploys', 'library', 'audit', 'users',
+];
+export const OWNER: Me = { id: 'u-alex', username: 'alex', owner: true, permissions: EVERY.map((permission) => ({ permission, servers: null })) };
+export const VIEWER: Me = { id: 'u-vic', username: 'vic', owner: false, permissions: [] };
+
+/** A `Session` logged in as `me`, for a test's providers. */
+export const loggedIn = (me: Me = OWNER): Provider => ({
+  provide: Session,
+  useFactory: () => {
+    const session = new Session();
+    session.user.set(me);
+    return session;
+  },
+});
 
 /**
  * A fake `/api/events` for the FETCH token: each call opens a stream the test writes frames to (`push`, to every open

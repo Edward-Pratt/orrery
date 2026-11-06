@@ -1,7 +1,8 @@
 // Entry point: raises Node's per-address connect attempt to 2.5 s (a lost SYN at 250 ms failed whole fetches with
 // ETIMEDOUT), reads config and env (`FACTORIO_USERNAME` and `FACTORIO_TOKEN` are optional: without both, with agents
 // on, a warning, and only game updates are refused: each has `orrery`, a portal mod), starts the hub with the real
-// Discord frontend, HTTP get, Discord OAuth and GitHub reader, wires signals.
+// Discord frontend, HTTP get and GitHub reader, wires signals. Dashboard logins are local Users: a
+// `DISCORD_CLIENT_SECRET` left in the env only warns, for one release.
 
 import net from 'node:net';
 import { loadConfig } from './config.ts';
@@ -12,7 +13,6 @@ import { localHost } from './agents/host.ts';
 import { execRestore } from './backups/restore.ts';
 import { execRun } from './services/services.ts';
 import { startHub } from './start.ts';
-import { discordOAuth } from './web/auth.ts';
 
 // fetch tries a name's addresses in turn, giving each only 250 ms by default. One lost SYN (resent after 1 s) on every
 // IPv4 address then fails the connect with ETIMEDOUT, within ~0.5 s on a host without IPv6, whose attempts fail at once.
@@ -24,12 +24,7 @@ if (config.integrations.discord && !token) {
   console.error('integrations.discord is configured but DISCORD_TOKEN is not set');
   process.exit(1);
 }
-const { web } = config.integrations;
-const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-if (web && !clientSecret) {
-  console.error('integrations.web is configured but DISCORD_CLIENT_SECRET is not set');
-  process.exit(1);
-}
+if (process.env.DISCORD_CLIENT_SECRET) console.warn('[hub] DISCORD_CLIENT_SECRET is no longer used (dashboard logins are local Users): remove it after the Rollback window');
 
 const { github } = config.integrations;
 const githubToken = process.env.GITHUB_TOKEN;
@@ -59,7 +54,6 @@ const handle = await startHub(config, {
   github: github && githubToken ? githubReader(github.repo, githubToken) : undefined,
   githubToken: githubToken || undefined,
   factorioAccount,
-  oauth: web && clientSecret ? discordOAuth(web.clientId, clientSecret) : undefined,
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

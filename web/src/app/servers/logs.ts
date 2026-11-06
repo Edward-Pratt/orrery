@@ -17,7 +17,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
 
 /**
  * A server's Logs section (only with a server folder): its `logs/` files and crash reports, newest first, the chosen
- * one's last 1000 lines (`latest.log` to start), and with a linked service its journal. Nothing follows live:
+ * one's last 1000 lines (`latest.log` to start), and with a linked service its journal (with `services.logs`). Nothing follows live:
  * Refresh fetches again.
  */
 @Component({
@@ -80,7 +80,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
             <p class="text-sm text-muted-foreground">The server's logs/ files and crash reports are listed here once it has written some.</p>
           </div>
         }
-        @if (server.service(); as s) {
+        @if (journalShown() && server.service(); as s) {
           <section class="flex flex-col gap-2" data-journal>
             <div class="flex items-center gap-3">
               <h2 class="flex-1 text-sm font-medium">{{ s.unit }} journal</h2>
@@ -112,6 +112,8 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
 })
 export default class Logs {
   protected readonly server = inject(ServerPage);
+  /** The linked service's journal: its logs are the server's to the hub's permissions. */
+  protected readonly journalShown = () => !!this.server.service() && this.server.may('services.logs');
   readonly #http = inject(HttpClient);
   readonly #base = `/api/servers/${encodeURIComponent(this.server.id)}/logs`;
   protected readonly bytes = formatBytes;
@@ -133,7 +135,7 @@ export default class Logs {
   constructor() {
     if (!this.server.detail()!.logs) return;
     this.refresh();
-    if (this.server.service()) this.fetchJournal();
+    if (this.journalShown()) this.fetchJournal();
   }
 
   /** Fetches the listing again, then the chosen file (or the default, if it is gone). */

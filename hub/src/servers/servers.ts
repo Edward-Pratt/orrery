@@ -20,7 +20,7 @@
 // `/players`, and at most 256 characters, as its Agent runs no longer one: else `CommandRefused`, before it is
 // audited or sent), `audit` (entries go to the `HubOptions.audit` sink: the database), `event` emitter (game,
 // lifecycle and hub-core `notice` events, plus `say` for chat sent in game, with its `source` (`discord` or
-// `dashboard`, the latter with the admin's avatar URL, never sent to the mod), `console` for command output, late
+// `dashboard`), `console` for command output, late
 // output included, `tps` when a heartbeat's TPS moved by 0.1 or more, and `paused` when a heartbeat changed the
 // server's `paused`), `publish` (hub-core modules put typed notices — kind, severity, details — on it), `modVersion`
 // (what a server's Mod reported in its latest hello, kept after it disconnects), `paused` on each `ServerState` (from
@@ -258,16 +258,16 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   }
 
   /**
-   * Broadcasts a chat line in-game, marked with where it came from. `avatar` (the admin's, for a dashboard line) goes
-   * only on the event, not to the mod. False if the server is offline or the text is empty after cleaning.
+   * Broadcasts a chat line in-game, marked with where it came from (`author`: a Discord name, or a dashboard user's
+   * username or the name they linked). False if the server is offline or the text is empty after cleaning.
    */
-  say(id: string, author: string, message: string, source: ChatSource, avatar?: string): boolean {
+  say(id: string, author: string, message: string, source: ChatSource): boolean {
     const conn = this.#conns.get(id);
     const text = mcText(message, 256);
     if (!conn || !text) return false;
     const msg = { type: 'say', author: mcText(author, 32) || '?', message: text, source } as const;
     this.#send(conn.socket, msg);
-    this.emit('event', { ...msg, ...(avatar && { avatar }), serverId: id });
+    this.emit('event', { ...msg, serverId: id });
     return true;
   }
 

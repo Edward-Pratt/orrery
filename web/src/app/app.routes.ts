@@ -1,10 +1,12 @@
-// `servers` (always: every hub has servers; a server without a Mod token just has no Mod features) and `audit`, and
-// one lazy route per other integration with pages, matched only when it is on (`host`; systemd or checks: `services`,
-// which holds the checks too; there is no `checks` route; `library` when the hub has one).
+// `servers` (always: every hub has servers; a server without a Mod token just has no Mod features), `audit` (with the
+// `audit` permission), `account` and `users` (with `users`), and one lazy route per other integration with pages,
+// matched only when it is on (`host`; systemd or checks: `services`, which holds the checks too; there is no `checks`
+// route; `library` when the hub has one and the user holds `library`).
 
 import { Component } from '@angular/core';
 import type { Routes } from '@angular/router';
 import { enabled } from './integrations';
+import { allowed } from './session';
 
 @Component({
   selector: 'app-nothing',
@@ -19,9 +21,11 @@ export class Nothing {}
 export const routes: Routes = [
   { path: 'servers', loadChildren: () => import('./servers/routes') },
   { path: 'host', canMatch: [enabled('host')], loadChildren: () => import('./host/routes') },
-  { path: 'library', canMatch: [enabled('library')], loadChildren: () => import('./library/routes') },
+  { path: 'library', canMatch: [enabled('library'), allowed('library')], loadChildren: () => import('./library/routes') },
   { path: 'services', canMatch: [enabled('systemd', 'checks')], loadChildren: () => import('./services/routes') },
-  { path: 'audit', loadComponent: () => import('./audit') },
+  { path: 'audit', canMatch: [allowed('audit')], loadComponent: () => import('./audit') },
+  { path: 'users', canMatch: [allowed('users')], loadChildren: () => import('./users/routes') },
+  { path: 'account', loadComponent: () => import('./users/account') },
   { path: '', pathMatch: 'full', redirectTo: 'servers' },
   { path: '**', component: Nothing },
 ];

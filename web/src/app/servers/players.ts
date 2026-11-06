@@ -18,13 +18,14 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
 
 /**
  * A server's Players section, as Discord's `/top` and `/playtime`: a player lookup with its result as a card, and the
- * most-played per period: side by side, or one at a time behind a Day / Week / All control on a phone.
+ * most-played per period: side by side, or one at a time behind a Day / Week / All control on a phone. A factorio
+ * server's moderation comes first, for a user with `servers.moderation` on it.
  */
 @Component({
   selector: 'app-server-players',
   imports: [HlmButton, HlmSkeleton, HlmToggleGroupImports, ModerationSection, PlayerCard],
   template: `
-    @if (server.card()?.game === 'factorio') {
+    @if (server.card()?.game === 'factorio' && server.may('servers.moderation')) {
       <app-moderation />
     }
     <form class="flex max-w-md gap-2" (submit)="$event.preventDefault(); look(name.value)" data-lookup>

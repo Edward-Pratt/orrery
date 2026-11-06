@@ -7,7 +7,8 @@ used, memory 85/95%, a disk under 20/10% free; load has none), skeletons while l
 sample a line saying when it comes (the hub's own a minute after it starts, an Agent's once it is connected); graphs
 of the chosen period (1 h, 24 h, 7 d, 90 d; `GET /api/hosts/:id/samples?hours=`, averaged by the hub past 25 hours,
 fetched afresh for another host), each live `sample` of the host shown appended. It needs a hub that serves
-`/api/hosts`: release and deploy that hub first. With GitHub on, `releases.ts`'s Releases section (`#releases`): a row
+`/api/hosts`: release and deploy that hub first. With GitHub on, for a user with `deploys`, `releases.ts`'s Releases
+section (`#releases`): a row
 each for the hub, the dashboard, every minecraft server's Mod and every Host's Agent (`agent:<host>`, its Deploy
 posting the `host`; release 1's `hub-v2.14.0` sends `agent.hosts` empty, so it shows no Agent row) (`release-rows.ts`:
 running, latest, "newer available" only when the running one is an older listed release, so never for `dev`; an older

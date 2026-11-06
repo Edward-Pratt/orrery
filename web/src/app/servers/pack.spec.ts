@@ -6,7 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { CompareReport, Extra, LibraryPack, LibraryState, Notice, PackState, PackUpdateRow, ServerCard, ServerDetail } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -109,7 +109,7 @@ const LIBRARY: LibraryState = { packs: [entry(2, '2.7.5'), entry(1, '2.7.4')], r
 async function setup(state: PackState = INSTALLED, card: ServerCard = CARD) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);
@@ -166,7 +166,7 @@ describe('server pack tab', () => {
     expect(el.querySelector('[data-sections]')!.className).toContain('overflow-x-auto');
     TestBed.resetTestingModule();
     const events = fakeEvents();
-    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
+    TestBed.configureTestingModule({ providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl('/gtnh');
     TestBed.inject(HttpTestingController).expectOne('/api/servers/gtnh').flush({ ...DETAIL, pack: false });
@@ -512,7 +512,7 @@ describe('restoring after a pack rollback', () => {
   const BACKUPS = { configured: true, backups: [{ name: '2026-10-02-12-00-00.zip', size: 1, mtimeMs: 0 }, { name: '2026-10-01-06-00-00.zip', size: 1, mtimeMs: 0 }], free: null, growth: null, minFree: 0 };
   async function backups(card: ServerCard, service: { state: string }) {
     const events = fakeEvents();
-    TestBed.configureTestingModule({ providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
+    TestBed.configureTestingModule({ providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }] });
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl('/gtnh/backups?restore=2026-10-02-12-00-00.zip');
     TestBed.inject(HttpTestingController)

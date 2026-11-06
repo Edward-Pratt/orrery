@@ -219,7 +219,7 @@ test('the agents integration listens on an IPv4 address and a port of its own', 
     'integrations.agents.listen: "host" must be an IPv4 address',
     'integrations.agents.listen: "port" must be a port number (1–65535)',
   ]);
-  const web = { listenPort: 25581, publicUrl: 'https://orrery.example', clientId: ID };
+  const web = { listenPort: 25581, publicUrl: 'https://orrery.example' };
   assert.deepEqual(agents({ listen: { host: '100.101.102.103', port: 25580 }, agents: list }), [
     'integrations.agents.listen: "port" must differ from integrations.minecraft.listenPort',
   ]);
@@ -395,30 +395,19 @@ test("a server's keep list is relative paths in its folder, without ..", async (
   assert.deepEqual(validateConfig(c), ['server "gtnh": "keep" must be a list of paths in the server folder']);
 });
 
-const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run', clientId: ID };
+const WEB = { listenPort: 25581, publicUrl: 'https://dash.orrery.run' };
 
-test('the web integration needs a port, an https public URL, a client id, and a guild and admin role of its own or the bot\'s', async (t) => {
+test('the web integration needs a port and an https public URL; the Discord login\'s keys are no longer checked', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { integrations, ...c } = valid(dir);
   assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: { ...WEB, sessionDays: 30 } } }), []);
-  assert.deepEqual(validateConfig({ ...c, integrations: { web: { ...WEB, guildId: ID, adminRoleId: ID } } }), []);
-  assert.deepEqual(
-    validateConfig({
-      ...c,
-      integrations: { web: { listenPort: 'x', publicUrl: 'http://dash.orrery.run', clientId: 'abc', sessionDays: 0 } },
-    }),
-    [
-      'integrations.web: "listenPort" must be a port number (1–65535)',
-      'integrations.web: "publicUrl" must be an https URL with no path',
-      'integrations.web: "clientId" must be a Discord ID (17–20 digits)',
-      'integrations.web: "sessionDays" must be a positive number',
-      'integrations.web: "guildId" is required (or set integrations.discord.guildId)',
-      'integrations.web: "adminRoleId" is required (or set integrations.discord.adminRoleId)',
-    ],
-  );
-  assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: { ...WEB, guildId: 'abc' } } }), [
-    'integrations.web: "guildId" must be a Discord ID (17–20 digits)',
+  assert.deepEqual(validateConfig({ ...c, integrations: { web: WEB } }), []); // no bot needed
+  assert.deepEqual(validateConfig({ ...c, integrations: { web: { ...WEB, clientId: 'abc', guildId: 'abc', adminRoleId: 7 } } }), []);
+  assert.deepEqual(validateConfig({ ...c, integrations: { web: { listenPort: 'x', publicUrl: 'http://dash.orrery.run', sessionDays: 0 } } }), [
+    'integrations.web: "listenPort" must be a port number (1–65535)',
+    'integrations.web: "publicUrl" must be an https URL with no path',
+    'integrations.web: "sessionDays" must be a positive number',
   ]);
   const onPath = { ...WEB, publicUrl: 'https://orrery.run/dash' };
   assert.deepEqual(validateConfig({ ...c, integrations: { ...integrations, web: onPath } }), [
@@ -426,19 +415,24 @@ test('the web integration needs a port, an https public URL, a client id, and a 
   ]);
 });
 
-test('loadConfig defaults web sessions to 7 days and its guild and admin role to the bot\'s', async (t) => {
+test('loadConfig defaults web sessions to 7 days, and warns of each Discord login key left in, dropping it', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'config.json');
   const c = valid(dir);
-  const bot = { ...c.integrations.discord, guildId: '111111111111111111', adminRoleId: '222222222222222222' };
-  const own = { guildId: '333333333333333333', adminRoleId: '444444444444444444' };
+  const warn = t.mock.method(console, 'warn', () => {});
   const web = async (w: object) => {
-    await writeFile(path, JSON.stringify({ ...c, integrations: { discord: bot, web: w } }));
+    await writeFile(path, JSON.stringify({ ...c, integrations: { discord: c.integrations.discord, web: w } }));
     return loadConfig(path).integrations.web;
   };
-  assert.deepEqual(await web(WEB), { ...WEB, sessionDays: 7, guildId: bot.guildId, adminRoleId: bot.adminRoleId });
-  assert.deepEqual(await web({ ...WEB, ...own, sessionDays: 3 }), { ...WEB, ...own, sessionDays: 3 });
+  assert.deepEqual(await web(WEB), { ...WEB, sessionDays: 7 });
+  assert.equal(warn.mock.callCount(), 0);
+  const status = { servers: ['gtnh'] };
+  assert.deepEqual(await web({ ...WEB, clientId: ID, guildId: ID, adminRoleId: ID, sessionDays: 3, status }), { ...WEB, sessionDays: 3, status });
+  assert.deepEqual(
+    warn.mock.calls.map((call) => call.arguments[0]),
+    ['clientId', 'guildId', 'adminRoleId'].map((key) => `integrations.web: "${key}" is no longer used (dashboard logins are local Users): remove it after the Rollback window`),
+  );
 });
 
 test('the old config shape is rejected with each key it has to move', () => {

@@ -112,11 +112,11 @@ test("the relay webhook's name: a factorio player's is tagged (Factorio), and on
   for (const name of ['Edward (dashboard)', 'Edward(dashboard)', 'Ed ward', 'Ed\tward', 'Orrery\u00a0Bot', ')', 'discord1', 'xDiScOrDx', 'Clyde', 'myclyde']) {
     assert.equal(relayAs(chat(name), 'factorio'), null, name);
   }
-  // Unchanged: a minecraft player's name and skin (a refused one is left to sendChat), and a dashboard line's marked name and avatar.
+  // Unchanged: a minecraft player's name and skin (a refused one is left to sendChat), and a dashboard line's marked name.
   assert.deepEqual(relayAs(chat('Steve'), 'minecraft'), { username: 'Steve', avatarURL: 'https://mc-heads.net/avatar/Steve/64' });
   assert.deepEqual(relayAs(chat('discordfan'), 'minecraft'), { username: 'discordfan', avatarURL: 'https://mc-heads.net/avatar/discordfan/64' });
-  const say = { serverId: 's', type: 'say' as const, author: 'Edward', message: 'hi', source: 'dashboard' as const, avatar: 'https://cdn/a.png' };
-  assert.deepEqual(relayAs(say, 'factorio'), { username: 'Edward (dashboard)', avatarURL: 'https://cdn/a.png' });
+  const say = { serverId: 's', type: 'say' as const, author: 'Edward', message: 'hi', source: 'dashboard' as const };
+  assert.deepEqual(relayAs(say, 'factorio'), { username: 'Edward (dashboard)' });
 });
 
 test("an Agent's lost and back go to Discord at most once per 10 minutes each, per Agent: one sooner waits, a back after a held lost is held too", async (t) => {

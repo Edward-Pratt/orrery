@@ -36,7 +36,7 @@ const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDat
 
 /**
  * A server's Chat section: recent and live chat (with a factorio server's milestones: research, its force's first
- * rocket, space platform and landing on each planet), and sending into the game.
+ * rocket, space platform and landing on each planet), and sending into the game (with `servers.chat` on it).
  */
 @Component({
   selector: 'app-server-chat',
@@ -65,10 +65,12 @@ const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDat
             <li class="text-muted-foreground">No recent chat.</li>
           }
         </ol>
-        <form class="flex gap-2" (submit)="$event.preventDefault(); send(message)" data-chat-form>
-          <input #message class="flex-1 rounded-md border px-3 py-1.5 text-sm" maxlength="256" placeholder="Say something in game" aria-label="Message" />
-          <button hlmBtn type="submit">Send</button>
-        </form>
+        @if (server.may('servers.chat')) {
+          <form class="flex gap-2" (submit)="$event.preventDefault(); send(message)" data-chat-form>
+            <input #message class="flex-1 rounded-md border px-3 py-1.5 text-sm" maxlength="256" placeholder="Say something in game" aria-label="Message" />
+            <button hlmBtn type="submit">Send</button>
+          </form>
+        }
         @if (error(); as e) {
           <p class="text-sm text-destructive" role="alert">{{ e }}</p>
         }

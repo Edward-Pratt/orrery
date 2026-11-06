@@ -164,7 +164,7 @@ local function on(event, fn)
 end
 
 on("on_console_chat", function(e)
-  -- No player: plain text from the server console or RCON (an admin on the dashboard). It never reaches Discord.
+  -- No player: plain text from the server console or RCON (a user on the dashboard). It never reaches Discord.
   if not e.player_index then return end
   local player = game.get_player(e.player_index)
   if not player then return end

@@ -50,15 +50,16 @@ openssl rand -hex 24          # one token per game server
 $EDITOR config.json           # servers[]: id, name; integrations.minecraft.tokens and
                               # integrations.discord (guildId, adminRoleId, channels), keyed by server id
 echo 'DISCORD_TOKEN=<bot token>' > .env   # only needed with integrations.discord
-echo 'DISCORD_CLIENT_SECRET=<OAuth secret>' >> .env   # only needed with integrations.web
 set -a; . ./.env; set +a; npm start
+npm run users -- invite <you>  # in another shell, with integrations.web: the first owner's invite link
 ```
 
 `config.json` and `.env` are git-ignored. Each section under `integrations` is
 optional: leave out `discord` to run without the bot (and without a token), or
 `minecraft` to open no mod port. `web` serves the dashboard's API on
-`127.0.0.1` (Discord login for admins, no bot needed; it uses its own `guildId` and
-`adminRoleId`, else those under `discord`, and the OAuth app's redirect set to `<publicUrl>/api/callback`). A server needs a token when `minecraft` is on,
+`127.0.0.1`, with local Users: a username and password each, Roles of Permissions, and invites (no bot needed).
+`npm run users -- invite <name>` makes the first owner, or resets an owner who is locked out; everyone else is invited
+from the dashboard's Users page. A server needs a token when `minecraft` is on,
 but a Discord channel is optional: one left out of `channels` just isn't
 bridged to Discord. `checks` lists URLs the hub requests on a schedule (`id`, `url`,
 `intervalSeconds` ≥ 30); up means HTTP 2xx within 10 s, and going down or back up is a

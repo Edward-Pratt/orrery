@@ -1,6 +1,6 @@
 # Users: local accounts, roles and permissions instead of the Discord login
 
-Status: designed; build order steps 1 and 2 (the hub's model and its API) built 2026-11-05 and 2026-11-06 on branch `users`. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
+Status: build order steps 1 to 3 (the hub's model, its API, the dashboard) built 2026-11-05 and 2026-11-06 on branch `users`; next, step 4, the releases. Date: 2026-11-05. Based on `main` at `16b27b1` (production: `hub-v2.21.0`,
 `web-v0.20.0`, `agent-v1.4.0` cut and its deploy unchecked). File and line references are at that commit.
 
 The owner asked to move the dashboard off Discord logins: a users database, a page to manage them, role-based
@@ -20,11 +20,10 @@ Contents: [Resume here](#resume-here), [Decisions to confirm](#decisions-to-conf
 ## Resume here
 
 State on 2026-11-06, branch `users` from `main` at `16b27b1`, **not pushed**. Step 1 (the model) is `68b2a12` to
-`77bfd51`; step 2 (the hub's API) is the pure move `09c97c9` (the services routes into `hub/src/web/web-services.ts`)
-and the commit after it. `npm test` (595) and `npm run typecheck` green, `.github/check-file-length main` clean. The
-dashboard (`web/`) **does not build** on this branch until step 3: `Me` lost `avatar` and gained `owner` and
-`permissions`, and the login card still links to the removed `/api/login` redirect. Don't push or merge step 2
-without step 3 (decision 5). The decisions below are still not confirmed by the owner: the build follows them.
+`77bfd51`; step 2 (the hub's API) `09c97c9` (the pure move of the services routes), `dc95e6d` and `c912245`; step 3
+(the dashboard) the commits after them. Hub: `npm test` (595) and `npm run typecheck`; dashboard: `npm test` (299)
+and `npm run build` (first load 625.6 kB of its 650 kB budget; `main` 619.6 kB); `.github/check-file-length main`
+clean. The decisions below are still not confirmed by the owner: the build follows them.
 
 **Built in step 2**, and where it differs from the plan below:
 
@@ -55,11 +54,32 @@ without step 3 (decision 5). The decisions below are still not confirmed by the 
   configs, `deploy/orrery-hub.service` and `deploy/orrery-hub-staging.service` (step 3 is the env file alone, step
   10 ends with the CLI invite).
 
-**Next: step 3, the dashboard** ([Dashboard](#dashboard)): `app/session.ts` (`Me`, `can()`, a 403 refreshing `/api/me`),
-`app/login.ts` (the form, the invite card from `?invite=`), `app/app.ts` (initials only, Account, the Users nav),
-`can()` on every action, `app/users/` with its `CLAUDE.md`, `web/CLAUDE.md`'s local setup (`npm run users -- invite
-me` against the local hub, no Discord redirect URL), and the dashboard tests. Then `cd web && npm test && npm run
-build`, the whole "Verify before claiming done" list, and [Release and deploy](#release-and-deploy).
+**Built in step 3** (the dashboard, `web/`):
+
+- `app/session.ts`: `Session.can(permission, serverId?)`, `canAnywhere`, `owner()` (the hub's rule over
+  `Me.permissions`), `refresh()`, `refreshOn403` (a 403 asks `/api/me` again) and `allowed(permission)`, the
+  `canMatch` guard of a page (it waits for the login).
+- `app/login.ts`: the username and password form, and the invite card from `?invite=` (the token leaves the address
+  at once; the password typed twice). Plain inputs styled as `hlmInput`: the directive put the first load 17 kB over
+  budget.
+- `app/app.ts`: initials only, Account in the user menu; Library, Audit log and Users in the nav only with their
+  permission; `app.routes.ts` guards `/library`, `/audit` and `/users`, and routes `/account`.
+- Hidden without the permission: the server page's tabs (`ServerPage.may`: Console, Logs, Pack, Game, Settings),
+  `ServerActions` (Restart, Cancel, Console, a linked service's Start and Stop, the audit link; the ⋯ menu only with
+  an item), the chat box, backups' Start, Upload save and Restore, moderation, the Logs tab's journal, the Services
+  page's unlinked actions and logs, Releases on the Host page, New server with the Pending servers and Discard, and
+  the attention strip's fixes and release items. The big tab files (`pack.ts`, `game.ts`, `settings.ts`,
+  `library.ts`) are untouched: their tab or route is gated whole.
+- `app/users/`: `routes.ts` (the Users and Roles tabs), `users.ts`, `user-sheet.ts`, `roles.ts`, `role-sheet.ts`,
+  `account.ts`, with its `CLAUDE.md` and specs; `testing.ts`'s `loggedIn(me)`, `OWNER` and `VIEWER` (the specs that
+  render gated parts log in as the owner, on their providers line).
+- Also moved over: `docs/ROADMAP.md` (this section, and the App's login), `web/CLAUDE.md` and the page folders'
+  `CLAUDE.md`s; and, outside git (`docs/notes/factorio-build-log/` is ignored), the factorio e2e harness's
+  `session.mjs`, which now logs in through the CLI's invite (checked against a real `index.ts` boot).
+
+**Next: step 4, release and deploy** ([Release and deploy](#release-and-deploy)): push the branch, a PR, CI green;
+then the hub release and its deploy, the dashboard release and its deploy back to back, the CLI invite on production
+and Staging, the smoke test there, and step 5 a release later.
 
 ## Decisions to confirm
 

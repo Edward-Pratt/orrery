@@ -22,7 +22,7 @@ import { Integrations } from './integrations';
 import { Feedback } from './feedback';
 import { Login, takeInvite } from './login';
 import { Logo } from './logo';
-import { Session } from './session';
+import { reguardOnChange, Session } from './session';
 import { MODES, Theme } from './theme';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
@@ -170,6 +170,7 @@ export class App {
     const env = inject(Environment);
     const title = inject(Title);
     effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));
+    reguardOnChange();
     const feedback = inject(Feedback);
     effect(() => {
       const me = this.session.user();

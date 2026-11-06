@@ -57,8 +57,9 @@ clean. The decisions below are still not confirmed by the owner: the build follo
 **Built in step 3** (the dashboard, `web/`):
 
 - `app/session.ts`: `Session.can(permission, serverId?)`, `canAnywhere`, `owner()` (the hub's rule over
-  `Me.permissions`), `refresh()`, `refreshOn403` (a 403 asks `/api/me` again) and `allowed(permission)`, the
-  `canMatch` guard of a page (it waits for the login).
+  `Me.permissions`), `refresh()`, `refreshOn403` (a 403 asks `/api/me` again), `allowed(permission)`, the
+  `canMatch` guard of a page (it waits for the login), and `reguardOnChange()` (the shell's: when the user or their
+  permissions change, the open page's guards run again, so a page they may no longer open gives way).
 - `app/login.ts`: the username and password form, and the invite card from `?invite=` (the token leaves the address
   at once; the password typed twice). Plain inputs styled as `hlmInput`: the directive put the first load 17 kB over
   budget.

@@ -2,13 +2,14 @@
 // permissions; logout; `lost()` on a 401, setting `ended` when a session was open; `refresh()` asks `/api/me` again),
 // the `loggedOutOn401` interceptor, `refreshOn403` (a 403 means a grant may have been taken away under the open page:
 // `/api/me` is asked again, so what the user can't do hides; the request's own error, the hub's "Needs …", is its
-// caller's toast) and `allowed(permission)`, the `canMatch` guard of a page that needs one (it waits for the login).
+// caller's toast), `allowed(permission)`, the `canMatch` guard of a page that needs one (it waits for the login), and
+// `reguardOnChange()`, which runs the open page's guards again when the user or what they may do changes.
 // The dashboard hiding what the user can't do is never the check: the hub refuses it either way.
 
 import { HttpClient, HttpErrorResponse, type HttpInterceptorFn } from '@angular/common/http';
-import { inject, Injectable, signal } from '@angular/core';
+import { effect, inject, Injectable, signal } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
-import type { CanMatchFn } from '@angular/router';
+import { Router, type CanMatchFn } from '@angular/router';
 import type { Me, Permission } from '@hub/api';
 import { catchError, filter, map, of, take, throwError } from 'rxjs';
 
@@ -101,3 +102,19 @@ export const allowed =
       map(() => session.canAnywhere(permission)),
     );
   };
+
+/**
+ * Runs the open page's guards again when the user or what they may do changes (another login on this page, a grant
+ * taken away and seen by `refresh()`), so a page they may no longer open gives way. Call once, from the shell.
+ */
+export function reguardOnChange(): void {
+  const session = inject(Session);
+  const router = inject(Router);
+  let seen: string | null = null;
+  effect(() => {
+    const me = session.user();
+    const key = me ? `${me.id} ${JSON.stringify(me.permissions)}` : null;
+    if (key && seen !== null && key !== seen) void router.navigateByUrl(router.url, { onSameUrlNavigation: 'reload' });
+    if (key) seen = key;
+  });
+}

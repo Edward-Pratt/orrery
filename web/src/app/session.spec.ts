@@ -1,9 +1,13 @@
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import type { Me } from '@hub/api';
 import type { Observable } from 'rxjs';
-import { allowed, loggedOutOn401, refreshOn403, Session } from './session';
+import { settle, VIEWER } from './testing';
+import { allowed, loggedOutOn401, refreshOn403, reguardOnChange, Session } from './session';
 
 /** An operator on factorio alone, and an auditor everywhere. */
 const ALEX: Me = {
@@ -113,5 +117,31 @@ describe('Session', () => {
     session.user.set(ALEX);
     TestBed.tick();
     expect(answers).toEqual([true, false]);
+  });
+
+  it("runs the open page's guards again when the user or what they may do changes", async () => {
+    @Component({ template: 'users page' })
+    class UsersPage {}
+    @Component({ template: 'nothing here' })
+    class Nothing {}
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(withInterceptors([loggedOutOn401, refreshOn403])),
+        provideHttpClientTesting(),
+        provideRouter([{ path: 'users', canMatch: [allowed('users')], component: UsersPage }, { path: '**', component: Nothing }]),
+      ],
+    });
+    const session = TestBed.inject(Session);
+    TestBed.runInInjectionContext(reguardOnChange);
+    const manager: Me = { ...VIEWER, id: 'u-mia', permissions: [{ permission: 'users', servers: null }] };
+    session.user.set(manager);
+    TestBed.tick();
+    const harness = await RouterTestingHarness.create('/users');
+    expect(harness.routeNativeElement!.textContent).toBe('users page');
+    session.user.set({ ...manager, permissions: [] }); // the grant taken away, as refresh() would see it
+    TestBed.tick();
+    await settle();
+    harness.detectChanges();
+    expect(harness.routeNativeElement!.textContent).toBe('nothing here');
   });
 });

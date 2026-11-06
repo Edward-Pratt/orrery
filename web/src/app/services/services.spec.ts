@@ -7,7 +7,7 @@ import type { CheckStatus, Integrations, ServerCard, ServiceStatus } from '@hub/
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle, toasts } from '../testing';
 import Services from './services';
 
 const ALL: Integrations = { minecraft: true, discord: false, web: true, checks: true, host: false, systemd: true, github: false, agents: false, library: false, newServer: false };
@@ -39,7 +39,7 @@ class Page {}
 async function setup(on: Integrations = ALL, data: { services?: ServiceStatus[]; checks?: CheckStatus[]; cards?: ServerCard[] } = {}) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),

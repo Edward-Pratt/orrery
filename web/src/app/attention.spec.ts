@@ -6,9 +6,9 @@ import type { CheckStatus, DeploysAnswer, Integrations, Me, ServerCard, ServiceS
 import { App } from './app';
 import { BackupProgress } from './servers/backup-progress';
 import { FETCH } from './events';
-import { dialogButton, fakeEvents, settle } from './testing';
+import { dialogButton, fakeEvents, OWNER, settle, VIEWER } from './testing';
 
-const ALEX: Me = { id: '5', username: 'alex', avatar: null };
+const ALEX: Me = OWNER;
 const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, agents: false, library: false, newServer: false };
 const card = (id: string, more: Partial<ServerCard> = {}): ServerCard => ({
   id,
@@ -32,7 +32,7 @@ const service = (id: string, state: string, sub = 'x'): ServiceStatus => ({ id, 
 const check = (id: string, up: boolean | null): CheckStatus => ({ id, url: 'http://x', up, ms: 1, error: up === false ? 'HTTP 500' : null, checkedAt: 1, service: null });
 
 /** Opens the shell logged in, answering what the attention strip fetches. */
-async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer, on: Partial<Integrations> = {}) {
+async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks: CheckStatus[] = [], deploys?: DeploysAnswer, on: Partial<Integrations> = {}, me: Me = ALEX) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
     providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
@@ -40,7 +40,7 @@ async function open(cards: ServerCard[], services: ServiceStatus[] = [], checks:
   const fixture = TestBed.createComponent(App);
   const backend = TestBed.inject(HttpTestingController);
   await settle();
-  backend.expectOne('/api/me').flush(ALEX);
+  backend.expectOne('/api/me').flush(me);
   await settle();
   backend.match('/api/integrations').forEach((r) => r.flush({ ...ALL, github: !!deploys, ...on }));
   await settle();
@@ -147,6 +147,14 @@ describe('the attention strip', () => {
     events.push(1, { type: 'notice', serverId: 'gtnh', severity: 'info', kind: 'packUpdateStarted', from: '2.7.4', to: '2.7.5', by: 'alex' });
     await refetch([card('gtnh', { packUpdate: { running: true, rolledBack: null } })]);
     expect(lines()).toEqual([]);
+  });
+
+  it('offers a fix only to a user who may run it, and releases only to one who may deploy', async () => {
+    const stopped = card('gtnh', { online: false, service: { id: 'gtnh', state: 'failed' }, restart: { at: Date.now() + 60_000, by: 'alex', stop: false } });
+    const { lines, el } = await open([stopped], [service('caddy', 'failed')], [], deploys(30), {}, VIEWER);
+    expect(lines().length).toBe(3); // offline, restarting, caddy failed: shown all the same
+    expect(el.querySelector('[data-fix]')).toBeNull();
+    expect(lines().some((l) => l.includes('can update'))).toBe(false);
   });
 
   it('shows a lagging server', async () => {

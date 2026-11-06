@@ -3,13 +3,12 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { EnvironmentInfo, Integrations, Me } from '@hub/api';
-import { By } from '@angular/platform-browser';
-import { App, UserMenu } from './app';
+import { App } from './app';
 import { FETCH } from './events';
-import { fakeEvents, settle } from './testing';
+import { fakeEvents, OWNER, settle, VIEWER } from './testing';
 import { Theme } from './theme';
 
-const ALEX: Me = { id: '5', username: 'alex', avatar: null };
+const ALEX: Me = OWNER;
 const ALL: Integrations = { minecraft: true, discord: true, web: true, checks: true, host: true, systemd: true, github: false, agents: false, library: false, newServer: false };
 
 /** `env`: what /api/environment answers, or `error` when it fails. */
@@ -64,14 +63,22 @@ describe('the shell', () => {
   });
 
   it('lists the pages of the integrations that are on, in order', async () => {
-    const all = await open(ALEX);
-    expect(labels(all.el)).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
+    const all = await open(ALEX, { ...ALL, library: true });
+    expect(labels(all.el)).toEqual(['Servers', 'Services', 'Host', 'Library', 'Audit log', 'Users']);
     TestBed.resetTestingModule();
     const some = await open(ALEX, { ...ALL, minecraft: false, checks: false, host: false });
-    expect(labels(some.el)).toEqual(['Servers', 'Services', 'Audit log']);
+    expect(labels(some.el)).toEqual(['Servers', 'Services', 'Audit log', 'Users']);
     TestBed.resetTestingModule();
     const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, github: false, host: false });
-    expect(labels(checksOnly.el)).toEqual(['Servers', 'Checks', 'Audit log']); // the services page, without systemd
+    expect(labels(checksOnly.el)).toEqual(['Servers', 'Checks', 'Audit log', 'Users']); // the services page, without systemd
+  });
+
+  it('shows Library, Audit log and Users only to a user with that permission', async () => {
+    const viewer = await open(VIEWER, { ...ALL, library: true });
+    expect(labels(viewer.el)).toEqual(['Servers', 'Services', 'Host']);
+    TestBed.resetTestingModule();
+    const auditor = await open({ ...VIEWER, permissions: [{ permission: 'audit', servers: null }] }, { ...ALL, library: true });
+    expect(labels(auditor.el)).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
   });
 
   const openMenu = async (r: Awaited<ReturnType<typeof open>>) => {
@@ -81,11 +88,11 @@ describe('the shell', () => {
     return [...document.body.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]')];
   };
 
-  it('offers Theme and Log out in the avatar menu, and Log out logs out', async () => {
+  it('offers Account, Theme and Log out in the user menu, and Log out logs out', async () => {
     const r = await open(ALEX);
     const items = await openMenu(r);
     expect(document.body.textContent).toContain('Theme');
-    expect(items.map((i) => i.textContent!.replace(/\s+/g, ' ').trim().replace(/on$/, ''))).toEqual(['light', 'system', 'dark', 'Log out']);
+    expect(items.map((i) => i.textContent!.replace(/\s+/g, ' ').trim().replace(/on$/, ''))).toEqual(['Account', 'light', 'system', 'dark', 'Log out']);
     items.find((i) => i.textContent!.includes('Log out'))!.click();
     r.backend.expectOne('/api/logout').flush(null, { status: 204, statusText: 'No Content' });
     r.fixture.detectChanges();
@@ -104,34 +111,19 @@ describe('the shell', () => {
   it('has a phone tab bar with the same pages', async () => {
     const { el } = await open(ALEX);
     const tabs = [...el.querySelectorAll('nav.fixed a')].map((a) => a.textContent!.trim());
-    expect(tabs).toEqual(['Servers', 'Services', 'Host', 'Audit log']);
+    expect(tabs).toEqual(['Servers', 'Services', 'Host', 'Audit log', 'Users']);
   });
 
-  it('shows the Discord image with an avatar hash, initials without', async () => {
-    const withImg = await open({ ...ALEX, avatar: 'abc' });
-    // the <img> is only rendered once the browser has loaded it, which jsdom never does
-    const menu = withImg.fixture.debugElement.query(By.directive(UserMenu)).componentInstance as { avatarUrl(): string };
-    expect(menu.avatarUrl()).toBe('https://cdn.discordapp.com/avatars/5/abc.png?size=64');
-    TestBed.resetTestingModule();
-    const plain = await open(ALEX);
-    expect(plain.el.querySelector('aside img')).toBeNull();
-    expect(plain.el.querySelector('aside [data-slot="avatar"]')!.textContent).toContain('AL');
+  it("shows the user's initials", async () => {
+    const { el } = await open(ALEX);
+    expect(el.querySelector('aside img')).toBeNull();
+    expect(el.querySelector('aside [data-slot="avatar"]')!.textContent).toContain('AL');
   });
 
-  it('shows the login card, no sidebar, and the reason for a failed login', async () => {
-    const { el } = await open(null, ALL, '/?login=admin');
+  it('shows the login card and no sidebar when logged out', async () => {
+    const { el } = await open(null);
     expect(el.querySelector('aside')).toBeNull();
-    expect(el.textContent).toContain('Log in with Discord');
-    expect(el.textContent).toContain('not an admin');
-    TestBed.resetTestingModule();
-    const plain = await open(null);
-    expect(plain.el.textContent).not.toContain('not an admin');
-    TestBed.resetTestingModule();
-    expect((await open(null, ALL, '/?login=state')).el.textContent).toContain('expired');
-    TestBed.resetTestingModule();
-    expect((await open(null, ALL, '/?login=discord')).el.textContent).toContain('Discord did not answer');
-    TestBed.resetTestingModule();
-    expect((await open(null, ALL, '/?login=constructor')).el.textContent).not.toContain('function');
+    expect(el.querySelector('[data-login-form]')).not.toBeNull();
   });
 });
 

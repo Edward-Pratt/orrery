@@ -125,4 +125,11 @@ connected or one that hasn't reported leaves the fields read-only, and with no r
 server's; fetched again on its `settings` notice, card events, deploys, service states and `agentLost`/`agentBack`;
 `update-steps.ts`: `UpdateSteps` (the step card; Cancel while `cancellable`, whatever the step) and `UpdateHistory`,
 shared by both; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new section is a child
-route plus a `SECTIONS` row (whose `has` reads the detail).
+route plus a `SECTIONS` row (whose `has` reads the detail and `ServerPage.may`, a permission on this server).
+
+What a user may do decides what shows (`Session.can`, on the server; the hub refuses the rest either way): Console
+`servers.console`; Logs `servers.logs` (the linked service's journal in it `services.logs`); Pack and Game
+`servers.pack`; Settings `servers.settings`; the chat box `servers.chat`; Restart, Cancel, the backups' Start and
+Upload save `servers.control`; Restore `servers.restore`; moderation `servers.moderation`; a linked service's Start and
+Stop `services.control`; "Audit log for this server" `audit`; New server, the Pending servers and Discard `library`.
+Without them the page reads only: a viewer's is the overview, chat without the box, Players, History and Backups.

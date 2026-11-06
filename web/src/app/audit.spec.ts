@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { AuditLog, ServerCard } from '@hub/api';
-import { settle } from './testing';
+import { loggedIn, settle } from './testing';
 
 const log = (...entries: AuditLog['entries']): AuditLog => ({ entries, older: false });
 const E1 = { id: 2, ts: Date.UTC(2026, 8, 27, 12, 0, 5), actor: 'web:alex (5)', action: 'restart', target: 'gtnh', details: 'in 10 min' };
@@ -13,7 +13,7 @@ const cards = [{ id: 'gtnh', name: 'GTNH' }, { id: 'site', name: 'Website' }] as
 
 async function setup(url: string) {
   TestBed.configureTestingModule({
-    providers: [provideRouter([{ path: 'audit', loadComponent: () => import('./audit') }]), provideHttpClient(), provideHttpClientTesting()],
+    providers: [loggedIn(), provideRouter([{ path: 'audit', loadComponent: () => import('./audit') }]), provideHttpClient(), provideHttpClientTesting()],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);

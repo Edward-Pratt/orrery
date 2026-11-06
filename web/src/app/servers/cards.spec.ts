@@ -6,7 +6,7 @@ import { provideRouter, Router } from '@angular/router';
 import type { ServerCard } from '@hub/api';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { FETCH, RETRY_MS } from '../events';
-import { dialog, dialogButton, fakeEvents, settle, toasts } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle, toasts } from '../testing';
 import Cards from './cards';
 
 const GTNH: ServerCard = {
@@ -42,7 +42,7 @@ class Page {}
 async function setup(cards: ServerCard[] = [GTNH, SITE]) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideRouter([{ path: ':id', children: [] }]),
       provideHttpClient(),
       provideHttpClientTesting(),

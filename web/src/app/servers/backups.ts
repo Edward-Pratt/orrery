@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
-import type { Backup, CommandOutput, Game, RestoreRequest, SaveKind } from '@hub/api';
+import type { Backup, CommandOutput, Game, Permission, RestoreRequest, SaveKind } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideEllipsis } from '@ng-icons/lucide';
 import { HlmBadge } from '@spartan-ng/helm/badge';
@@ -57,7 +57,8 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
  * the server's name). A factorio save is marked with its kind, and "Current world" on the file Factorio last loaded;
  * restoring one copies it as the newest save, which the next start loads. The list is the server's detail, fetched
  * again by the page on each backup notice, so a finished backup shows up; progress comes from the live feed
- * (`BackupProgress`), not the requests' reply text.
+ * (`BackupProgress`), not the requests' reply text. Backing up and uploading need `servers.control` on the server,
+ * restoring `servers.restore`; without them the list is read only.
  */
 @Component({
   selector: 'app-server-backups',
@@ -78,12 +79,14 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           }
         </div>
         <div class="mb-4 flex flex-wrap items-center gap-3">
-          <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start>
-            @if (progress() === 'backup') {
-              <hlm-spinner />
-            }
-            {{ progress() === 'backup' ? words().running : words().start }}
-          </button>
+          @if (may('servers.control')) {
+            <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start>
+              @if (progress() === 'backup') {
+                <hlm-spinner />
+              }
+              {{ progress() === 'backup' ? words().running : words().start }}
+            </button>
+          }
           @if (canUpload()) {
             <app-save-upload />
           }
@@ -95,7 +98,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
             <span class="text-sm text-muted-foreground">{{ offline() }}</span>
           }
         </div>
-        @if (preselected(); as name) {
+        @if (may('servers.restore') && preselected(); as name) {
           <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-preselected>
             <span class="flex-1">Restore <span class="font-mono">{{ name }}</span>, the backup from before the pack update?</span>
             <button hlmBtn size="sm" variant="outline" [disabled]="!!restoreWhy() || !!progress()" (click)="restore(name)" data-restore-preselected>Restore…</button>
@@ -124,9 +127,11 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                   <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
                   <td class="pr-4">{{ bytes(backup.size) }}</td>
                   <td class="py-1 text-right">
-                    <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
-                      <ng-icon name="lucideEllipsis" />
-                    </button>
+                    @if (may('servers.restore')) {
+                      <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
+                        <ng-icon name="lucideEllipsis" />
+                      </button>
+                    }
                     <ng-template #menu>
                       <div hlmDropdownMenu class="w-56">
                         <button hlmDropdownMenuItem type="button" [disabled]="!!restoreWhy() || !!progress()" (click)="restore(backup.name)" data-restore>Restore</button>
@@ -144,7 +149,9 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
             <p class="font-medium">{{ words().empty }}</p>
             <p class="mb-3 text-sm text-muted-foreground">{{ words().emptyDetail }}</p>
-            <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
+            @if (may('servers.control')) {
+              <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
+            }
           </div>
         }
       </section>
@@ -178,7 +185,8 @@ export default class Backups {
   });
   protected readonly online = computed(() => this.#server.card()!.online);
   /** Uploading a save: a factorio server whose hub takes them (`features.upload`, left out by an older hub). */
-  protected readonly canUpload = computed(() => Boolean(this.#server.card()!.features.upload));
+  protected readonly canUpload = computed(() => Boolean(this.#server.card()!.features.upload) && this.may('servers.control'));
+  protected readonly may = (p: Permission) => this.#server.may(p);
   protected readonly offline = computed(() => `${this.#server.card()!.name} is offline: ${this.words().offline}.`);
   protected readonly serverName = computed(() => this.#server.card()!.name);
   /** What is running on this server, from the live feed. */

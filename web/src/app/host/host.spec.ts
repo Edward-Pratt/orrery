@@ -5,7 +5,7 @@ import { By } from '@angular/platform-browser';
 import type { DeploysAnswer, HostNow, HostSample, Integrations, Release } from '@hub/api';
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
-import { dialog, dialogButton, fakeEvents, settle } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle } from '../testing';
 import Host from './host';
 
 const GB = 1024 ** 3;
@@ -23,7 +23,7 @@ const ON: Integrations = { minecraft: true, discord: false, web: true, checks: f
 async function setup(sample: HostSample = SAMPLE, answer = true, on = ON, others: HostNow[] = []) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: FETCH, useValue: events.fetch },
@@ -166,7 +166,7 @@ describe('host page without a sample yet', () => {
   it("says the hub's own first sample comes a minute after the hub starts, an Agent's once it is connected", async () => {
     const events = fakeEvents();
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+      providers: [loggedIn(), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
     });
     const fixture = TestBed.createComponent(Host);
     const backend = TestBed.inject(HttpTestingController);

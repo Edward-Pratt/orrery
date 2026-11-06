@@ -7,5 +7,6 @@ with its integration on (server cards with minecraft or agents), services and se
 events. Start (primary) when stopped, Restart (outline) when active, ⋯ with Stop and View logs (a `sheet` on the
 right, full screen on a phone: monospace lines and Refresh). A service that runs a server (found through the server
 cards) shows "runs Creative →" and the server's own `ServerActions` (`full`) instead, so the two views never disagree.
-`actions.ts`: `ServiceControl` (one start/stop/restart request at a time; Stop and Restart ask through
+An unlinked service's Start, Restart and Stop need `services.control` and View logs `services.logs`, both for every
+server; without them its row has no actions. `actions.ts`: `ServiceControl` (one start/stop/restart request at a time; Stop and Restart ask through
 `Feedback.confirm`; used by the page, `ServerActions` and the attention strip).

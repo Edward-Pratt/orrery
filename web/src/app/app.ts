@@ -1,5 +1,6 @@
 // The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages
-// (`PAGES`), `UserMenu` (avatar → Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
+// (`PAGES`; Audit log, Library and Users only for a user with that permission), `UserMenu` (initials → Account,
+// Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
 // on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off
 // the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
 
@@ -7,9 +8,9 @@ import { Component, computed, effect, inject, input } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import type { Integrations as IntegrationsOn, Me } from '@hub/api';
+import type { Integrations as IntegrationsOn, Me, Permission } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideCpu, lucideLayers, lucideLibrary, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun } from '@ng-icons/lucide';
+import { lucideCheck, lucideCpu, lucideLayers, lucideLibrary, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun, lucideUsers } from '@ng-icons/lucide';
 import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
@@ -23,28 +24,26 @@ import { Session } from './session';
 import { MODES, Theme } from './theme';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
-const PAGES: { path: string; label: string; icon: string; on?: keyof IntegrationsOn; unless?: keyof IntegrationsOn }[] = [
+const PAGES: { path: string; label: string; icon: string; on?: keyof IntegrationsOn; unless?: keyof IntegrationsOn; needs?: Permission }[] = [
   { path: 'servers', label: 'Servers', icon: 'lucideServer', }, // every hub has servers
   { path: 'services', label: 'Services', icon: 'lucideLayers', on: 'systemd' },
   // The services page holds the checks; without systemd it is "Checks" and holds only those.
   { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
   { path: 'host', label: 'Host', icon: 'lucideCpu', on: 'host' },
-  { path: 'library', label: 'Library', icon: 'lucideLibrary', on: 'library' },
-  { path: 'audit', label: 'Audit log', icon: 'lucideScrollText', on: 'web' },
+  { path: 'library', label: 'Library', icon: 'lucideLibrary', on: 'library', needs: 'library' },
+  { path: 'audit', label: 'Audit log', icon: 'lucideScrollText', on: 'web', needs: 'audit' },
+  { path: 'users', label: 'Users', icon: 'lucideUsers', on: 'web', needs: 'users' },
 ];
 const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideMoon' };
 
-/** The admin's avatar (initials without one); opens a menu with Theme and Log out. */
+/** The user's initials; opens a menu with Account, Theme and Log out. */
 @Component({
   selector: 'app-user-menu',
-  imports: [HlmAvatarImports, HlmDropdownMenuImports, NgIcon],
+  imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports, NgIcon],
   viewProviders: [provideIcons({ lucideSun, lucideMonitor, lucideMoon })],
   template: `
     <button type="button" class="flex items-center gap-2 rounded-md p-1 hover:bg-muted" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
       <hlm-avatar>
-        @if (avatarUrl(); as src) {
-          <img hlmAvatarImage [src]="src" alt="" />
-        }
         <span hlmAvatarFallback class="bg-brand text-xs font-semibold text-white">{{ initials() }}</span>
       </hlm-avatar>
       @if (showName()) {
@@ -53,6 +52,8 @@ const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideM
     </button>
     <ng-template #menu>
       <div hlmDropdownMenu class="w-44">
+        <a hlmDropdownMenuItem routerLink="/account" data-account>Account</a>
+        <div hlmDropdownMenuSeparator></div>
         <div hlmDropdownMenuLabel>Theme</div>
         <div hlmDropdownMenuGroup>
           @for (m of modes; track m) {
@@ -77,10 +78,6 @@ export class UserMenu {
   protected readonly theme = inject(Theme);
   protected readonly modes = MODES;
   protected readonly icons = MODE_ICONS;
-  protected readonly avatarUrl = computed(() => {
-    const { id, avatar } = this.user();
-    return avatar ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png?size=64` : null;
-  });
   protected readonly initials = computed(() => this.user().username.slice(0, 2).toUpperCase());
 }
 
@@ -88,7 +85,7 @@ export class UserMenu {
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
-  viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText })],
+  viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText, lucideUsers })],
   template: `
     <hlm-toaster />
     @switch (session.user()) {
@@ -157,7 +154,9 @@ export class App {
   protected readonly session = inject(Session);
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
-  protected readonly visible = computed(() => PAGES.filter((p) => (!p.on || this.#on()?.[p.on]) && !(p.unless && this.#on()?.[p.unless])));
+  protected readonly visible = computed(() =>
+    PAGES.filter((p) => (!p.on || this.#on()?.[p.on]) && !(p.unless && this.#on()?.[p.unless]) && (!p.needs || this.session.canAnywhere(p.needs))),
+  );
 
   /** The count on a sidebar entry: only Servers, Services (or Checks) and Host have one. */
   protected badge(path: string): number {

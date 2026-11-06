@@ -7,7 +7,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { Integrations, LibraryState, NewServerRequest, PendingServer, PendingServers } from '@hub/api';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { FETCH, RETRY_MS } from '../events';
-import { dialog, dialogButton, fakeEvents, toasts } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, toasts } from '../testing';
 import routes from './routes';
 
 const ON: Integrations = { minecraft: true, discord: false, web: true, checks: false, host: false, systemd: true, github: true, agents: false, library: true, newServer: true };
@@ -37,7 +37,7 @@ class Shell {}
 async function setup(url: string) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideRouter([{ path: '', component: Shell, children: [{ path: 'servers', children: routes }] }]),
       provideHttpClient(),
       provideHttpClientTesting(),

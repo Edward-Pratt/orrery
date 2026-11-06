@@ -10,13 +10,14 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { firstValueFrom } from 'rxjs';
 import { Feedback } from '../feedback';
+import { Session } from '../session';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
 /**
  * A Pending server's page (`/servers/waiting/<id>`): installed, waiting for the setup command to run as root. It shows
  * that command with a copy button (after the line that installs the script's root copy, when the hub says it's
- * missing) and Discard (typed id), which deletes the folder and Java link.
+ * missing) and Discard (typed id; with `library`), which deletes the folder and Java link.
  */
 @Component({
   selector: 'app-waiting',
@@ -28,7 +29,9 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-lg font-semibold">{{ p.name }}</h1>
           <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn" data-badge>Waiting for setup</span>
-          <button hlmBtn variant="ghost" size="sm" class="ml-auto text-status-down" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
+          @if (mayDiscard) {
+            <button hlmBtn variant="ghost" size="sm" class="ml-auto text-status-down" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
+          }
         </div>
         <p class="text-sm text-muted-foreground" data-meta>
           <span class="font-mono">{{ p.id }}</span> · port {{ p.gamePort }} · {{ p.runtime ?? 'system java' }} · installed by {{ p.by }}
@@ -66,6 +69,7 @@ export default class Waiting {
   protected readonly server = computed(() => this.state()?.pending.find((p) => p.id === this.id()) ?? null);
   protected readonly missing = computed(() => this.state() !== null && !this.server());
   protected readonly busy = signal(false);
+  protected readonly mayDiscard = inject(Session).can('library');
   protected readonly steps = computed(() => {
     const p = this.server();
     if (!p) return [];

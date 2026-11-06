@@ -8,7 +8,7 @@ import type { BackupsAnswer, PendingRestart, PlayerAnswer, ServerCard, ServerDet
 import { TimeSeries } from '../chart';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle, until } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle, until } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -39,7 +39,7 @@ const detail = (card: ServerCard, more: Partial<ServerDetail> = {}) =>
 async function setup(url: string, card = CARD, service: ServiceStatus | null = null, more: Partial<ServerDetail> = {}) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideRouter(routes),
       provideHttpClient(),
       provideHttpClientTesting(),
@@ -93,7 +93,7 @@ describe('server page', () => {
   it('explains an unknown server', async () => {
     const events = fakeEvents();
     TestBed.configureTestingModule({
-      providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
+      providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }],
     });
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl('/nope');

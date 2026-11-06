@@ -6,11 +6,11 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { Integrations } from '@hub/api';
 import { routes } from './app.routes';
 import { FETCH } from './events';
-import { fakeEvents, settle } from './testing';
+import { fakeEvents, loggedIn, settle } from './testing';
 
 async function open(url: string, on: Integrations) {
   TestBed.configureTestingModule({
-    providers: [
+    providers: [loggedIn(),
       provideRouter(routes),
       provideHttpClient(),
       provideHttpClientTesting(),

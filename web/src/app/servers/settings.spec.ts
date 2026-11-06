@@ -6,7 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import type { GameSettingsState, Notice, ServerCard, ServerDetail } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
 import { Feedback } from '../feedback';
-import { dialog, dialogButton, fakeEvents, settle } from '../testing';
+import { dialog, dialogButton, fakeEvents, loggedIn, settle } from '../testing';
 import routes from './routes';
 import { generatePassword } from './settings';
 
@@ -49,7 +49,7 @@ const { game_password_set: _, ...FIELDS } = VALUES;
 async function setup(state: GameSettingsState | number = STATE, card: ServerCard = CARD) {
   const events = fakeEvents();
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: events.fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);

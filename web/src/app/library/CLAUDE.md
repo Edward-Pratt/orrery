@@ -1,6 +1,7 @@
 # library
 
-The Library page (`library`, after Host; only when `/api/integrations` says the hub has a `library`): its Packs,
+The Library page (`library`, after Host; only when `/api/integrations` says the hub has a `library`, and for a user with
+the `library` permission): its Packs,
 newest first (name and version, Minecraft version, loader, size, source, sha256, who added it and when, "used by"), an
 empty state, Add pack (a sheet: Link, Actions artifact (its `github.com/…/actions/runs/…/artifacts/…` link, fetched by
 the hub with its token) or Upload through `Uploader`, name and version from `fromFileName` (here), Minecraft version

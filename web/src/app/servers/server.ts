@@ -2,30 +2,31 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import type { ServerDetail, ServiceStatus } from '@hub/api';
+import type { Permission, ServerDetail, ServiceStatus } from '@hub/api';
 import { catchError, debounceTime, EMPTY, startWith, Subject, switchMap } from 'rxjs';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { changesCard } from './changes';
+import { Session } from '../session';
 import { serverState, Status } from '../status';
 import { ServerActions } from './actions';
 import { BackupProgress } from './backup-progress';
 
 /**
- * The server page's tabs (child routes), each shown only when the server has what it needs, labelled `factorio` on a
- * factorio server when that is set (its Backups are its saves).
+ * The server page's tabs (child routes), each shown only when the server has what it needs and the user may (`may`:
+ * a permission on this server), labelled `factorio` on a factorio server when that is set (its Backups are its saves).
  */
-const SECTIONS: { path: string; label: string; factorio?: string; has: (d: ServerDetail) => boolean }[] = [
+const SECTIONS: { path: string; label: string; factorio?: string; has: (d: ServerDetail, may: (p: Permission) => boolean) => boolean }[] = [
   { path: '', label: 'Overview', has: () => true },
-  { path: 'console', label: 'Console', has: (d) => d.card.features.console },
+  { path: 'console', label: 'Console', has: (d, may) => d.card.features.console && may('servers.console') },
   { path: 'chat', label: 'Chat', has: (d) => d.card.features.chat },
   { path: 'players', label: 'Players', has: () => true },
   { path: 'history', label: 'History', has: () => true },
   { path: 'backups', label: 'Backups', factorio: 'Saves', has: (d) => d.backups.configured },
-  { path: 'logs', label: 'Logs', has: (d) => d.logs },
-  { path: 'pack', label: 'Pack', has: (d) => d.pack },
-  { path: 'game', label: 'Game', has: (d) => d.card.features.update },
-  { path: 'settings', label: 'Settings', has: (d) => d.card.features.settings === true },
+  { path: 'logs', label: 'Logs', has: (d, may) => d.logs && may('servers.logs') },
+  { path: 'pack', label: 'Pack', has: (d, may) => d.pack && may('servers.pack') },
+  { path: 'game', label: 'Game', has: (d, may) => d.card.features.update && may('servers.pack') },
+  { path: 'settings', label: 'Settings', has: (d, may) => d.card.features.settings === true && may('servers.settings') },
 ];
 
 /** A server's page: header (name, state, linked service, actions), tabs, and the sections, which read the detail from here. */
@@ -52,7 +53,7 @@ const SECTIONS: { path: string; label: string; factorio?: string; has: (d: Serve
       <!-- Eight tabs don't fit a phone: the row scrolls sideways. -->
       <nav class="-mx-4 mb-4 flex gap-4 overflow-x-auto border-b px-4 text-sm whitespace-nowrap md:mx-0 md:px-0" data-sections>
         @for (s of sections; track s.path) {
-          @if (s.has(detail()!)) {
+          @if (s.has(detail()!, may)) {
             <a [routerLink]="s.path" routerLinkActive="border-b-2 border-foreground font-semibold" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px shrink-0 pb-2 hover:underline">{{ (c.game === 'factorio' && s.factorio) || s.label }}</a>
           }
         }
@@ -70,6 +71,9 @@ export default class ServerPage {
   protected readonly sections = SECTIONS;
   readonly #http = inject(HttpClient);
   readonly id = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
+  readonly #session = inject(Session);
+  /** Whether the user holds a permission on this server. */
+  readonly may = (p: Permission) => this.#session.can(p, this.id);
   /** Set before any section is shown, and fetched again when an event changes it. */
   readonly detail = signal<ServerDetail | undefined>(undefined);
   readonly card = computed(() => this.detail()?.card);

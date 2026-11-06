@@ -12,6 +12,7 @@ import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { LiveEvents, ofTarget } from '../events';
 import { Integrations } from '../integrations';
+import { Session } from '../session';
 import { changesCard } from './changes';
 import { NewServer } from './new-server';
 import { ServerRow } from './row';
@@ -83,7 +84,7 @@ import { ServerRow } from './row';
   `,
 })
 export default class Cards {
-  /** Whether New server is offered (Minecraft, GitHub and the library on). */
+  /** Whether New server is offered (Minecraft, GitHub and the library on, and the user holds `library`), with the Pending servers. */
   protected readonly newServer = signal(false);
   /** The Pending servers and the running install; null without New server. */
   readonly pending = signal<PendingServers | null>(null);
@@ -126,10 +127,11 @@ export default class Cards {
           this.#refetchPending.next();
         }
       });
+    const session = inject(Session);
     inject(Integrations)
       .on$.pipe(
         catchError(() => EMPTY),
-        filter((on) => on.newServer),
+        filter((on) => on.newServer && session.can('library')),
         switchMap(() => {
           this.newServer.set(true);
           return this.#refetchPending.pipe(

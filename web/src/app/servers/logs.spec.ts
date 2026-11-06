@@ -5,7 +5,7 @@ import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import type { ServerCard, ServerDetail, ServerLogFiles, ServiceStatus } from '@hub/api';
 import { FETCH, RETRY_MS } from '../events';
-import { fakeEvents, settle } from '../testing';
+import { fakeEvents, loggedIn, settle } from '../testing';
 import routes from './routes';
 
 const CARD: ServerCard = {
@@ -38,7 +38,7 @@ const FILES: ServerLogFiles = [
 /** Opens the server's Logs tab and answers its detail; the listing and files are left to each test. */
 async function setup(more: Partial<ServerDetail> = {}) {
   TestBed.configureTestingModule({
-    providers: [provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: fakeEvents().fetch }, { provide: RETRY_MS, useValue: 0 }],
+    providers: [loggedIn(), provideRouter(routes), provideHttpClient(), provideHttpClientTesting(), { provide: FETCH, useValue: fakeEvents().fetch }, { provide: RETRY_MS, useValue: 0 }],
   });
   const harness = await RouterTestingHarness.create();
   const backend = TestBed.inject(HttpTestingController);

@@ -1,6 +1,6 @@
 // SQLite (`node:sqlite`): up/down/unknown log (`recordLifecycle` maps hub lifecycle events to up/down, and `lost` to
 // unknown) and uptime math; player sessions, daily peaks and stats queries; the dashboard's login sessions' tables
-// (`web_sessions`, and `web_session_checks`, the Discord login's, kept; their SQL is `users/store.ts`, `db.users`); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
+// (`web_sessions` and `web_session_checks`, the Discord login's, kept for a rollback; their SQL is `users/store.ts`, `db.users`); the audit log (`audit`, `auditLog`: newest first, filtered by server, actor and a `before` cursor;
 // never pruned); account links (`links`: a Discord user's Minecraft name and uuid, `link`, `unlinkPlayer`,
 // `linkByDiscord`, `linkByPlayer`; `factorio_links`, its own table so `links` stays as an older hub reads it: a
 // Discord user's Factorio name, unique without case, `linkFactorio`, `unlinkFactorioPlayer`, `factorioLinkByDiscord`,
@@ -438,8 +438,7 @@ export class Db {
   maintain(copyDir: string, now = Date.now()): void {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
-    this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
-    this.#write('prune web session checks', 'DELETE FROM web_session_checks WHERE id NOT IN (SELECT id FROM web_sessions)');
+    this.users.pruneSessions(now);
     this.#write(
       'prune feed',
       'DELETE FROM feed WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY server_id ORDER BY id DESC) AS n FROM feed) WHERE n > ?)',

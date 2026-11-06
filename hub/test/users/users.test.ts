@@ -110,6 +110,20 @@ test('a users manager who is not an owner hands out only what they hold, and nev
   users.reset(kim, manager); // at their level: allowed
 });
 
+test('a user with a Discord id is changed by owners only: a reset would hand over that name in game', async () => {
+  const { users, roles, owner } = setup();
+  const { actor: ownerActor } = await owner();
+  const managerRole = roles.create({ name: 'Manager', permissions: ['users', 'servers.chat'] }, 'x');
+  const { id: managerId, token } = users.invite({ username: 'sam', grants: [{ roleId: managerRole.id }] }, ownerActor);
+  await users.acceptInvite(token, PASSWORD);
+  const manager: Actor = { label: `web:sam (${managerId})`, userId: managerId, grants: users.resolve(managerId)!.grants };
+  const { id: kim } = users.invite({ username: 'kim', grants: [], discordId: '123456789012345678' }, ownerActor);
+  for (const fn of [() => users.reset(kim, manager), () => users.setGrants(kim, [], manager), () => users.disable(kim, manager), () => users.remove(kim, manager), () => users.endSessions(kim, manager)]) {
+    refused(fn, 403, /Only an owner may change kim: they have a Discord id/);
+  }
+  users.reset(kim, ownerActor); // an owner may
+});
+
 test('the last owner is never demoted, disabled or deleted; nobody disables or deletes themself', async () => {
   const { users, role, owner } = setup();
   const { id: alex, actor } = await owner();
@@ -133,10 +147,10 @@ test('disabling ends sessions at once; a disabled user cannot log in or accept a
   const { actor } = await owner();
   const { id: sam, token } = users.invite({ username: 'sam', grants: [] }, actor);
   await users.acceptInvite(token, PASSWORD);
-  db.users.addWebSession(hashToken('cookie'), sam, 'sam', Number.MAX_SAFE_INTEGER);
+  db.users.addSession(hashToken('cookie'), sam, Number.MAX_SAFE_INTEGER);
   const { token: before } = users.reset(sam, actor);
   users.disable(sam, actor);
-  assert.equal(db.users.webSession(hashToken('cookie')), undefined);
+  assert.equal(db.users.session(hashToken('cookie')), undefined);
   assert.equal(await users.login('sam', PASSWORD), undefined);
   const { token: again } = users.reset(sam, actor);
   await refusedAsync(() => users.acceptInvite(again, PASSWORD), 404, /no longer valid/);
@@ -154,15 +168,15 @@ test('a reset link works once and the old password until then; a password change
   await users.acceptInvite(token, 'a brand new password');
   assert.equal(await users.login('alex', PASSWORD), undefined);
   assert.equal((await users.login('alex', 'a brand new password'))?.id, alex);
-  db.users.addWebSession(hashToken('phone'), alex, 'alex', Number.MAX_SAFE_INTEGER);
-  db.users.addWebSession(hashToken('laptop'), alex, 'alex', Number.MAX_SAFE_INTEGER);
+  db.users.addSession(hashToken('phone'), alex, Number.MAX_SAFE_INTEGER);
+  db.users.addSession(hashToken('laptop'), alex, Number.MAX_SAFE_INTEGER);
   await refusedAsync(() => users.changePassword(alex, 'wrong wrong wrong', 'another new password'), 403, /Wrong password/);
   await refusedAsync(() => users.changePassword(alex, 'a brand new password', 'short'), 400, /at least 12/);
   const { token: stale } = users.reset(alex, actor);
   await users.changePassword(alex, 'a brand new password', 'another new password', hashToken('laptop'));
   await refusedAsync(() => users.acceptInvite(stale, PASSWORD), 404, /no longer valid/); // a change takes open links too
-  assert.equal(db.users.webSession(hashToken('phone')), undefined);
-  assert.equal(db.users.webSession(hashToken('laptop'))?.username, 'alex');
+  assert.equal(db.users.session(hashToken('phone')), undefined);
+  assert.equal(db.users.session(hashToken('laptop')), alex);
   assert.equal((await users.login('alex', 'another new password'))?.id, alex);
 });
 
@@ -170,11 +184,11 @@ test('deleting a user takes their grants, invites and sessions with them', async
   const { db, users, roles, role, owner } = setup();
   const { actor } = await owner();
   const { id: sam } = users.invite({ username: 'sam', grants: [{ roleId: role('Viewer') }] }, actor);
-  db.users.addWebSession(hashToken('cookie'), sam, 'sam', Number.MAX_SAFE_INTEGER);
+  db.users.addSession(hashToken('cookie'), sam, Number.MAX_SAFE_INTEGER);
   users.remove(sam, actor);
   assert.equal(db.users.user(sam), undefined);
   assert.equal(db.users.grantedCount(role('Viewer')), 0);
-  assert.equal(db.users.webSession(hashToken('cookie')), undefined);
+  assert.equal(db.users.session(hashToken('cookie')), undefined);
   roles.remove(role('Viewer'), 'x'); // no grant holds it any more
   refused(() => users.remove(sam, actor), 404, /No such user/);
 });

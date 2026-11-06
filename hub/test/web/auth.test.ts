@@ -119,14 +119,18 @@ test('a session reads its user afresh: a changed grant counts at once, a disable
   assert.equal(await status(web, sam.cookie), 401);
 });
 
-test("a session left by the Discord login names no user: 401", async (t) => {
+test("the Discord login's sessions and Users' don't mix: theirs is 401, and a User's leaves web_sessions empty", async (t) => {
   const cfg = config(t, { web: WEB });
   const handle = await startHub(cfg, { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }) });
   t.after(() => handle.close());
   const db = new DatabaseSync(cfg.dbPath);
+  t.after(() => db.close());
   db.prepare('INSERT INTO web_sessions (id, user_id, username, expires) VALUES (?, ?, ?, ?)').run(hashToken('old-cookie'), '5'.repeat(18), 'alex', Date.now() + 60_000);
-  db.close();
   assert.equal(await status(handle.web!, 'session=old-cookie'), 401);
+  // A hub rolled back past Users reads web_sessions and would take any row there for an admin's.
+  const viewer = await loginAs(handle.web!, { username: 'vic', grants: [] });
+  assert.equal(await status(handle.web!, viewer.cookie), 200);
+  assert.deepEqual((db.prepare('SELECT user_id AS id FROM web_sessions').all() as { id: string }[]).map((r) => r.id), ['5'.repeat(18)]);
 });
 
 test('a session expires after sessionDays', async (t) => {

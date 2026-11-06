@@ -9,8 +9,9 @@
 // `changePassword` needs the current one and ends the user's other sessions and open invites. `setGrants`, `setDiscordId`, `disable`,
 // `enable`, `update` (the Users page's edit: grants, Discord id and disabled, all or none), `remove` and `endSessions`
 // (one's own always allowed) take an `Actor` (the audit label, their user id, their grants) and refuse
-// (`UsersRefused`, with its status): a user who holds `owner` is changed by owners only, and only an owner grants
-// `owner`, never scoped; an actor changes (resets, demotes, disables, deletes, logs out) only a user whose every
+// (`UsersRefused`, with its status): a user who holds `owner`, or has a Discord id (their dashboard chat goes in game
+// under that Discord user's linked name: a reset of theirs would be that name), is changed by owners only, and only an
+// owner grants `owner`, never scoped; an actor changes (resets, demotes, disables, deletes, logs out) only a user whose every
 // permission they hold unscoped themself, and a grant hands out only such permissions (an owner holds all), so no
 // one reaches above their level; the last owner (`UsersStore.ownerCount`) is never demoted, disabled or deleted;
 // nobody disables or deletes themself. A
@@ -226,6 +227,7 @@ export class Users {
     if (!resolved) throw new UsersRefused(404, 'No such user');
     if (!isOwner(actor.grants)) {
       if (resolved.grants.some((g) => g.owner)) throw new UsersRefused(403, 'Only an owner may change an owner');
+      if (resolved.user.discordId) throw new UsersRefused(403, `Only an owner may change ${resolved.user.username}: they have a Discord id`);
       const above = resolved.grants.flatMap((g) => g.permissions).find((p) => !can(actor.grants, p));
       if (above) throw new UsersRefused(403, `You can't change ${resolved.user.username}: they hold ${above}, which you don't hold`);
     }

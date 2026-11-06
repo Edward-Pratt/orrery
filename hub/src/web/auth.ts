@@ -63,7 +63,7 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, { users, session
 
   const startSession = (c: Context<Env>, user: UserRow) => {
     const id = randomBytes(32).toString('base64url');
-    sessions.addWebSession(hashToken(id), user.id, user.username, Date.now() + web.sessionDays * DAY_S * 1000);
+    sessions.addSession(hashToken(id), user.id, Date.now() + web.sessionDays * DAY_S * 1000);
     setCookie(c, 'session', id, { ...COOKIE, maxAge: web.sessionDays * DAY_S });
   };
   let verifying = 0;
@@ -119,8 +119,8 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, { users, session
   app.use(async (c, next) => {
     const cookie = getCookie(c, 'session');
     const session = cookie ? hashToken(cookie) : undefined;
-    const row = session ? sessions.webSession(session) : undefined;
-    const found = row && users.resolve(row.id); // a session from the Discord login names no user: 401
+    const userId = session ? sessions.session(session) : undefined;
+    const found = userId && users.resolve(userId);
     if (!session || !found || found.user.disabled) return c.text('Not logged in', 401);
     const { user, grants } = found;
     c.set('user', { id: user.id, username: user.username, owner: isOwner(grants), permissions: permissionsOf(grants), discordId: user.discordId, grants });
@@ -152,7 +152,7 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, { users, session
     return c.body(null, 204);
   });
   app.post('/logout', (c) => {
-    sessions.deleteWebSession(c.get('session'));
+    sessions.deleteSession(c.get('session'));
     deleteCookie(c, 'session', COOKIE);
     return c.body(null, 204);
   });

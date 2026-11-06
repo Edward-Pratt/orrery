@@ -267,7 +267,7 @@ test('the audit log reads newest first, limited, filtered, and pages back across
   assert.doesNotThrow(() => db.audit({ actor: 'x', action: 'command', target: 'a', details: '' }));
 });
 
-test('a web session table from before avatars gets the column an older hub reads, and its rows still read', async (t) => {
+test('a web session table from before avatars gets the column an older hub reads; its rows are no User sessions', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'orrery-db-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'old.db');
@@ -276,7 +276,7 @@ test('a web session table from before avatars gets the column an older hub reads
   old.exec("INSERT INTO web_sessions VALUES ('s', '5', 'alex', 9999999999999)");
   old.close();
   const db = new Db(path);
-  assert.deepEqual(db.users.webSession('s'), { id: '5', username: 'alex' });
+  assert.equal(db.users.session('s'), undefined); // the Discord login's: never read again, so a rollback's never a User's
   assert.ok((new DatabaseSync(path).prepare('PRAGMA table_info(web_sessions)').all() as { name: string }[]).some((c) => c.name === 'avatar'));
   db.close();
 });

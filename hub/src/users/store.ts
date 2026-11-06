@@ -2,9 +2,10 @@
 // (`users`, `roles` (`permissions` as JSON, unknown names dropped on read), `grants` (`servers` as JSON, null for
 // every server), `invites` (stored as `hashToken` of the link's token, like a session; `takeInvite` uses one up as it
 // reads it)), and the dashboard's login
-// sessions (`web_sessions`, stored hashed; `user_id` a user's id, rows from the Discord login name none), moved from
-// `Db`, which still prunes expired sessions nightly; `web_session_checks` (the Discord login's re-checks) is written no
-// more, only cleared with its session, and never dropped (an older hub after a Rollback reads it). Session writes never
+// sessions (`user_sessions`, stored hashed, each a user's id and its expiry; `pruneSessions` nightly, from `Db`). The
+// Discord login's `web_sessions` and `web_session_checks` are read and written no more, only pruned as they expire,
+// and never dropped: a hub rolled back past Users reads them, and must not find a User's session there (it would take
+// any one, a Viewer's too, for an admin's), so Users' sessions live in a table it doesn't know. Session writes never
 // throw: a database error is logged (`#write`), as `Db`'s are; the users tables' writes throw, as `startDeploy` does,
 // since a refused change must reach the route. `setGrants`, `deleteUser` and `transaction(fn)` are transactions. `resolve(userId)` is
 // the per-request read: the user and their grants as `Grant`s; `ownerCount` and `isOwnerUser` serve the last-owner
@@ -42,6 +43,8 @@ export class UsersStore {
       CREATE UNIQUE INDEX IF NOT EXISTS roles_name ON roles (name COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS grants (user_id TEXT NOT NULL, role_id TEXT NOT NULL, servers TEXT, PRIMARY KEY (user_id, role_id));
       CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL, by TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS user_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS user_sessions_user ON user_sessions (user_id);
     `);
   }
 
@@ -209,8 +212,7 @@ export class UsersStore {
 
   /** Every session of a user but `keep` (a hashed session id): a password change keeps the one it was made from. */
   deleteSessionsOf(userId: string, keep = ''): void {
-    this.#db.prepare('DELETE FROM web_session_checks WHERE id IN (SELECT id FROM web_sessions WHERE user_id = ? AND id <> ?)').run(userId, keep);
-    this.#db.prepare('DELETE FROM web_sessions WHERE user_id = ? AND id <> ?').run(userId, keep);
+    this.#db.prepare('DELETE FROM user_sessions WHERE user_id = ? AND id <> ?').run(userId, keep);
   }
 
   /** Session writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
@@ -222,22 +224,26 @@ export class UsersStore {
     }
   }
 
-  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. `avatar` (the Discord login's) stays null. */
-  addWebSession(id: string, userId: string, username: string, expires: number): void {
-    this.#write('add web session', 'INSERT INTO web_sessions (id, user_id, username, expires) VALUES (?, ?, ?, ?)', id, userId, username, expires);
+  /** A dashboard login; `id` is the hash of the cookie's session id, never the id itself. */
+  addSession(id: string, userId: string, expires: number): void {
+    this.#write('add session', 'INSERT INTO user_sessions (id, user_id, expires) VALUES (?, ?, ?)', id, userId, expires);
   }
 
-  /** The user (id and username) of an unexpired session. */
-  webSession(id: string, now = Date.now()): { id: string; username: string } | undefined {
-    const row = this.#db
-      .prepare('SELECT user_id AS id, username FROM web_sessions WHERE id = ? AND expires > ?')
-      .get(id, now) as { id: string; username: string } | undefined;
-    return row && { ...row };
+  /** The user id of an unexpired session. */
+  session(id: string, now = Date.now()): string | undefined {
+    const row = this.#db.prepare('SELECT user_id AS userId FROM user_sessions WHERE id = ? AND expires > ?').get(id, now) as { userId: string } | undefined;
+    return row?.userId;
   }
 
-  deleteWebSession(id: string): void {
-    this.#write('delete web session', 'DELETE FROM web_sessions WHERE id = ?', id);
-    this.#write('delete web session check', 'DELETE FROM web_session_checks WHERE id = ?', id);
+  deleteSession(id: string): void {
+    this.#write('delete session', 'DELETE FROM user_sessions WHERE id = ?', id);
+  }
+
+  /** Nightly: expired sessions, Users' and the Discord login's (with their checks). */
+  pruneSessions(now: number): void {
+    this.#write('prune sessions', 'DELETE FROM user_sessions WHERE expires <= ?', now);
+    this.#write('prune web sessions', 'DELETE FROM web_sessions WHERE expires <= ?', now);
+    this.#write('prune web session checks', 'DELETE FROM web_session_checks WHERE id NOT IN (SELECT id FROM web_sessions)');
   }
 }
 

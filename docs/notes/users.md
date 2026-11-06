@@ -178,7 +178,9 @@ Rules:
   every permission they hold (a reset of a higher user would be that account). No one reaches above their level.
 - A grant change ends the user's open invite links (a link minted for a lesser user must not open a greater one),
   and an invite is used up before the password is hashed, so two takers can't both get in. Discord ids are set by
-  owners only and no two users share one: a dashboard chat line goes into the game under the linked name.
+  owners only and no two users share one: a dashboard chat line goes into the game under the linked name. So a user
+  with a Discord id is changed (reset, regranted, disabled, deleted, logged out) by owners only: a reset would hand
+  over that name in game.
 - A role can't be deleted while granted. A permission name the hub doesn't know is refused (400) when a role is saved.
 
 ### What a user is to the dashboard
@@ -353,11 +355,12 @@ used: remove them after the Rollback window"), `index.ts` stops reading `DISCORD
 ## Rollback
 
 A rollback to `hub-v2.21.0` after this release: its config still holds the Discord keys and the env file its secret
-(kept one release), so it starts; it reads `web_sessions` rows whose `user_id` is a local id and shows their
-username on `/api/me`; a dashboard chat line builds a Discord avatar URL from that id (a dead image: Discord shows the
-default) and finds no link for it (posted under the username); rows without a `web_session_checks` row run to their
-expiry unchecked (its own comment, `auth.ts:117`). The new tables are ignored. Nothing is lost. A rollback of the
-dashboard alone puts back "Log in with Discord" against a hub without it, so roll both back or neither.
+(kept one release), so it starts, and admins log in with Discord again. Users' sessions are in `user_sessions`, a
+table it doesn't know, so it finds none of them: written to `web_sessions`, every one (a Viewer's too) would pass its
+session check as an admin's, as a row without a `web_session_checks` row runs unchecked (`auth.ts:117` at
+`hub-v2.21.0`). The security review of the push caught that; `test/web/auth.test.ts` keeps `web_sessions` free of
+Users' rows. The new tables are ignored. Nothing is lost. A rollback of the dashboard alone puts back "Log in with
+Discord" against a hub without it, so roll both back or neither.
 
 ## Tests to write
 

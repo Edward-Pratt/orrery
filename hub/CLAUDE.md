@@ -110,7 +110,8 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   Caddy's, which holds only because the hub binds loopback: if it ever listens elsewhere, ignore the header. Invites
   and sessions are random, stored as their sha256 (a database copy logs nobody in); an invite is one use, 24 h, used
   up before the password is hashed, and its link is answered once to whoever minted it. Session ids are sent only in
-  an httpOnly, Secure, SameSite=Lax cookie on `/api` and expire server-side; the session's user and grants are read
+  an httpOnly, Secure, SameSite=Lax cookie on `/api`, kept in `user_sessions` (never the Discord login's
+  `web_sessions`: a hub rolled back past Users would take any row there for an admin's) and expire server-side; the session's user and grants are read
   afresh on every request, so a disabled user or a changed grant counts at once. Every `/api` route but the login,
   the invites, `/api/environment` (the Environment's name only) and, with `integrations.web.status`,
   `/api/public/status` (the Status page: only the listed servers, built field by field: name, game, state, the player

@@ -2,9 +2,9 @@
 // /api/servers`), "Invited" until their link is used, "Disabled", and when they last logged in; Invite… and, per user,
 // a ⋯ menu: Edit… (both `user-sheet.ts`'s `UserSheet`), Reset password (a new invite link; the old password works
 // until it is used), Log out everywhere, Disable (asks: their sessions end) or Enable, and Delete (typed username).
-// None of one's own but Edit, Reset and Log out; no menu on an owner for a user who isn't one (the hub refuses it, as
-// it refuses anything above the user's own level: its text is the toast). An invite link is shown once, with Copy,
-// until Done. Fetched again after each change.
+// None of one's own but Edit, Reset and Log out; no menu on an owner, or on a user with a Discord id, for a user who
+// isn't an owner (the hub refuses it, as it refuses anything above the user's own level: its text is the toast). An
+// invite link is shown once, with Copy, until Done. Fetched again after each change.
 
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
@@ -123,8 +123,8 @@ export default class Users {
 
   protected grants = (u: UserView) => grantsText(u, (id) => this.#names().get(id) ?? id);
 
-  /** A user who holds Owner is changed by owners only. */
-  protected manageable = (u: UserView) => this.me()?.owner || !u.grants.some((g) => g.roleId === 'owner');
+  /** A user who holds Owner, or has a Discord id (their chat goes in game under its linked name), is changed by owners only. */
+  protected manageable = (u: UserView) => this.me()?.owner || (!u.grants.some((g) => g.roleId === 'owner') && !u.discordId);
 
   protected fetch(): void {
     this.#http.get<UserView[]>('/api/users').subscribe({

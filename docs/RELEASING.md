@@ -24,6 +24,14 @@ On an Agent's Host, an Agent deploy changes only the Agent's code: a release tha
 `orrery-agent-deploy@.service`, `60-orrery-agent.rules`, `factorio.container` or `deploy-agent.sh` still needs the
 friend to re-run `setup-agent-host.sh` from its tag, as do a new image (`--image`, `--refresh-image`) and `--memory-max`.
 
+Deploying from Releases needs the `deploys` permission. Dashboard logins are local Users (ADR 0005, `docs/notes/users.md`):
+an Environment's first owner, and an owner locked out with no other to help, come from the users CLI on the host as the
+hub's OS user, which prints a one-use invite link (production: `cd /home/opc/orrery/current/hub && npm run users --
+invite <you> /home/opc/orrery/config.json` as `opc`; Staging: the same from `/srv/orrery-staging/current/hub` as
+`orrery-staging`, with `/srv/orrery-staging/config.json`); everyone else is invited from the Users page. The release
+that brought Users is a hub and a dashboard release back to back (the old login card's "Log in with Discord" is a 404
+between them), then that CLI invite on each Environment.
+
 When a change ships in several parts, release them in this order, each in place before the next: hub, dashboard, agent,
 Factorio mod. The Factorio server ships in two releases (the owner's decision of 2026-10-31; `docs/ROADMAP.md`).
 **Release 1**, shipped 2026-11-01 as `hub-v2.14.0`, `web-v0.12.0`, `agent-v1.0.0` and `factorio-v1.0.0`: the Agent

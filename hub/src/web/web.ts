@@ -1,8 +1,8 @@
 // Web integration: the Hono HTTP API under `/api` (`webApi`): the reads without a session (`publicRoutes`, in
 // `web-public.ts`), then the Discord login, the session and CSRF checks, `GET /api/me` and `POST /api/logout`
 // (`authRoutes`, in `auth.ts`), reads
-// (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` (404
-// unlisted, 502 if journalctl fails) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
+// (`/api/integrations`; `/api/checks` only with checks on; `/api/services` and `/api/services/:id/logs` with their
+// actions (`servicesRoutes`, in `web-services.ts`) only with systemd on; `/api/hosts` (every Host, the hub's own first, then each
 // Agent's) and `/api/hosts/:id/samples?hours=` (404 unknown id) with the host or agents on, and `/api/host` and
 // `/api/host/samples?hours=`, the hub's own alone, only with the host on, kept for one release for an older
 // dashboard; `/api/servers` cards (with `lagging` and the linked service's id and state); `/api/servers/:id` status,
@@ -88,9 +88,6 @@ import type {
   ServerHistory,
   ServerLog,
   ServerLogFiles,
-  ServiceActionAnswer,
-  ServiceLogs,
-  ServiceStatus,
 } from '../api.ts';
 import type { Checks } from '../services/checks.ts';
 import { DeployRefused, type Deploys } from '../updates/deploys.ts';
@@ -99,6 +96,7 @@ import { authRoutes, type OAuth } from './auth.ts';
 export type { OAuth };
 import { gameExtrasRoutes } from './web-game-extras.ts';
 import { publicRoutes } from './web-public.ts';
+import { servicesRoutes } from './web-services.ts';
 import type { Moderation } from '../servers/moderation.ts';
 import type { ModUpdates } from '../updates/mod-updates.ts';
 import type { SaveUploads } from '../backups/save-uploads.ts';
@@ -115,7 +113,7 @@ import { PackRefused, startScripts, type Packs } from '../packs/packs.ts';
 import { UploadRefused, type Uploads } from '../packs/uploads.ts';
 import type { RestartScheduler } from '../servers/restarts.ts';
 import { RestoreRefused, type Restores } from '../backups/restore.ts';
-import { CountdownRunning, VERBS, type Services } from '../services/services.ts';
+import type { Services } from '../services/services.ts';
 import { CommandRefused, mcText, type FeedEvent, type ServerHub, type ServerState } from '../servers/servers.ts';
 import type { Stats } from '../stats/stats.ts';
 
@@ -269,30 +267,7 @@ export function webApi(web: WebIntegration, oauth: OAuth, { db, live, hub, stats
     });
   }
   if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
-  if (services) {
-    app.get('/services', (c) => c.json(services.list() satisfies ServiceStatus[]));
-    app.get('/services/:id/logs', async (c) => {
-      try {
-        const lines = await services.logs(c.req.param('id'));
-        return lines ? c.json({ lines } satisfies ServiceLogs) : c.notFound();
-      } catch (err) {
-        return c.text(`journalctl failed: ${(err as Error).message}`, 502);
-      }
-    });
-    for (const verb of VERBS) {
-      app.post(`/services/:id/${verb}`, async (c) => {
-        const id = c.req.param('id');
-        if (!services.has(id)) return c.notFound();
-        const user = c.get('user');
-        try {
-          return c.json({ at: await services.act(id, verb, actor(user), user.username) } satisfies ServiceActionAnswer);
-        } catch (err) {
-          if (err instanceof CountdownRunning) return c.text(`${err.message}: cancel it first.`, 409);
-          return c.text(`systemctl failed: ${(err as Error).message}`, 502);
-        }
-      });
-    }
-  }
+  if (services) servicesRoutes(app, { services, actor });
   const now = (h: HostMonitor): HostNow => ({ id: h.id, sample: h.latest() });
   const history = (h: HostMonitor, c: Context) => {
     const hours = hoursOf(c);

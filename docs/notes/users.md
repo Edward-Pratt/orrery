@@ -10,7 +10,7 @@ After this, a **User** is a row in `hub.db` with a username and a password, **Ro
 hub refuses an action the user's roles don't cover. The Discord bot keeps its own admin-role check for its slash
 commands (`hub/src/discord/discord.ts:440`): that is Discord's authorization, not the dashboard's, and stays.
 
-Contents: [Resume here](#resume-here), [Decisions to confirm](#decisions-to-confirm), [Model](#model), [Hub](#hub), [Dashboard](#dashboard),
+Contents: [Resume here](#resume-here), [Decisions](#decisions), [Model](#model), [Hub](#hub), [Dashboard](#dashboard),
 [Trust rules](#trust-rules), [Rollback](#rollback), [Tests to write](#tests-to-write), [Build order](#build-order),
 [Release and deploy](#release-and-deploy), [Docs to update](#docs-to-update), [Out of scope](#out-of-scope),
 [Appendix: permission for each route](#appendix-permission-for-each-route).
@@ -23,7 +23,7 @@ State on 2026-11-06, branch `users` from `main` at `16b27b1`, **not pushed**. St
 `77bfd51`; step 2 (the hub's API) `09c97c9` (the pure move of the services routes), `dc95e6d` and `c912245`; step 3
 (the dashboard) the commits after them. Hub: `npm test` (595) and `npm run typecheck`; dashboard: `npm test` (299)
 and `npm run build` (first load 625.6 kB of its 650 kB budget; `main` 619.6 kB); `.github/check-file-length main`
-clean. The decisions below are still not confirmed by the owner: the build follows them.
+clean.
 
 **Built in step 2**, and where it differs from the plan below:
 
@@ -82,9 +82,9 @@ clean. The decisions below are still not confirmed by the owner: the build follo
 then the hub release and its deploy, the dashboard release and its deploy back to back, the CLI invite on production
 and Staging, the smoke test there, and step 5 a release later.
 
-## Decisions to confirm
+## Decisions
 
-Each line is the pick this note builds on, then the alternative. Flip one and the rest of the note changes as noted.
+Confirmed by the owner on 2026-11-06, as built. Each line is the pick this note builds on, then the alternative.
 
 1. **Credential: username and password**, hashed with `scrypt` from `node:crypto` (no new dependency;
    `hub/CLAUDE.md` prefers built-ins). Alternative: passkeys (WebAuthn), which needs `@simplewebauthn/server` and a

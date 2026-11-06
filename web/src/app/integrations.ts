@@ -1,16 +1,25 @@
-// `Integrations` (`GET /api/integrations`, asked once) and `enabled(...names)`, the `canMatch` guard (any of them
-// on).
+// `Integrations` (`GET /api/integrations`, asked once someone is logged in: the hub answers it behind the session, and
+// a login is in-page, with no reload, so asked earlier it would be a 401 for good) and `enabled(...names)`, the
+// `canMatch` guard (any of them on).
 
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import type { CanMatchFn } from '@angular/router';
 import type { Integrations as IntegrationsOn } from '@hub/api';
-import { catchError, map, of, shareReplay } from 'rxjs';
+import { catchError, filter, map, of, shareReplay, switchMap, take } from 'rxjs';
+import { Session } from './session';
 
-/** Which integrations the hub has switched on, asked once. */
+/** Which integrations the hub has switched on, asked once, after the first login. */
 @Injectable({ providedIn: 'root' })
 export class Integrations {
-  readonly on$ = inject(HttpClient).get<IntegrationsOn>('/api/integrations').pipe(shareReplay(1));
+  readonly #http = inject(HttpClient);
+  readonly on$ = toObservable(inject(Session).user).pipe(
+    filter((me) => !!me),
+    take(1),
+    switchMap(() => this.#http.get<IntegrationsOn>('/api/integrations')),
+    shareReplay(1),
+  );
 }
 
 /** Matches a route only when the hub has at least one of the integrations `names` on. */

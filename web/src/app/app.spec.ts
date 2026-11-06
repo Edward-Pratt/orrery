@@ -5,6 +5,7 @@ import { provideRouter } from '@angular/router';
 import type { EnvironmentInfo, Integrations, Me } from '@hub/api';
 import { App } from './app';
 import { FETCH } from './events';
+import { Session } from './session';
 import { fakeEvents, OWNER, settle, VIEWER } from './testing';
 import { Theme } from './theme';
 
@@ -71,6 +72,17 @@ describe('the shell', () => {
     TestBed.resetTestingModule();
     const checksOnly = await open(ALEX, { ...ALL, minecraft: false, systemd: false, github: false, host: false });
     expect(labels(checksOnly.el)).toEqual(['Servers', 'Checks', 'Audit log', 'Users']); // the services page, without systemd
+  });
+
+  it('lists the pages after a login on the page, with no reload: integrations are asked only once logged in', async () => {
+    const r = await open(null);
+    expect(r.backend.match('/api/integrations')).toEqual([]); // asked logged out, it would be a 401 for good
+    TestBed.inject(Session).user.set(ALEX);
+    await settle();
+    r.backend.expectOne('/api/integrations').flush(ALL);
+    await settle();
+    r.fixture.detectChanges();
+    expect(labels(r.el)).toEqual(['Servers', 'Services', 'Host', 'Audit log', 'Users']);
   });
 
   it('shows Library, Audit log and Users only to a user with that permission', async () => {

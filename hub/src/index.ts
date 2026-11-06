@@ -1,7 +1,8 @@
 // Entry point: raises Node's per-address connect attempt to 2.5 s (a lost SYN at 250 ms failed whole fetches with
 // ETIMEDOUT), reads config and env (`FACTORIO_USERNAME` and `FACTORIO_TOKEN` are optional: without both, with agents
 // on, a warning, and only game updates are refused: each has `orrery`, a portal mod), starts the hub with the real
-// Discord frontend, HTTP get and GitHub reader, wires signals. Dashboard logins are local Users: no Discord secret.
+// Discord frontend, HTTP get and GitHub reader, wires signals. Dashboard logins are local Users: a
+// `DISCORD_CLIENT_SECRET` left in the env only warns, for one release.
 
 import net from 'node:net';
 import { loadConfig } from './config.ts';
@@ -23,6 +24,8 @@ if (config.integrations.discord && !token) {
   console.error('integrations.discord is configured but DISCORD_TOKEN is not set');
   process.exit(1);
 }
+if (process.env.DISCORD_CLIENT_SECRET) console.warn('[hub] DISCORD_CLIENT_SECRET is no longer used (dashboard logins are local Users): remove it after the Rollback window');
+
 const { github } = config.integrations;
 const githubToken = process.env.GITHUB_TOKEN;
 if (github && !githubToken) {

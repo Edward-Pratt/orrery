@@ -51,7 +51,7 @@ $EDITOR config.json           # servers[]: id, name; integrations.minecraft.toke
                               # integrations.discord (guildId, adminRoleId, channels), keyed by server id
 echo 'DISCORD_TOKEN=<bot token>' > .env   # only needed with integrations.discord
 set -a; . ./.env; set +a; npm start
-npm run users -- invite <you>  # with integrations.web: prints the first owner's invite link
+npm run users -- invite <you>  # in another shell, with integrations.web: the first owner's invite link
 ```
 
 `config.json` and `.env` are git-ignored. Each section under `integrations` is

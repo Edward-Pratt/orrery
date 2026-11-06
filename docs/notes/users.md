@@ -272,7 +272,7 @@ There is no email in the hub, so no self-service reset. The first owner, and an 
 to help, come from a CLI on the host, like `check-config`:
 
 ```sh
-npm run users -- invite <username>      # from the running release's hub/ folder, as the hub's OS user
+npm run users -- invite <username> [config path]   # from the running release's hub/ folder, as the hub's OS user
 ```
 
 It reads `config.json` for `dbPath` and `integrations.web.publicUrl`, opens the database with `DatabaseSync`'s
@@ -383,7 +383,8 @@ Hub first, then the dashboard, as `docs/RELEASING.md` orders them, back to back:
 card's "Log in with Discord" is a 404, and nobody is logged in during that window anyway (the hub restarts with no
 Discord login to give). Then, on the host:
 
-1. `npm run users -- invite <owner>` from the new release's `hub/` folder as the hub's user; open the link, set the
+1. `cd /home/opc/orrery/current/hub && npm run users -- invite <owner> /home/opc/orrery/config.json` as `opc` (the
+   unit's config path: the release folder has no `config.json`); open the link, set the
    password, see the Users page.
 2. Invite the others from the Users page; the friend gets `operator` scoped to `factorio`.
 3. Staging: the same command as `orrery-staging`.

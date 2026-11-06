@@ -3,7 +3,8 @@
 // owner, and an owner locked out with no other owner to help, get in: a new name becomes a user with an unscoped
 // `owner` grant (never anything less: adding users is the Users page's job); an existing one gets a reset, at the
 // level they hold. Either way it prints the invite link (`<publicUrl>/?invite=<token>`: one use, 24 h). The
-// database is opened with a 5 s busy timeout, so it writes while the hub runs. Audited as `cli:<OS user>`.
+// database is opened with a 5 s busy timeout, so it writes while the hub runs. Audited as `cli:<OS user>`. Needs
+// Node 24.2+ (`import.meta.main`).
 
 import { userInfo } from 'node:os';
 import { loadConfig } from './config.ts';

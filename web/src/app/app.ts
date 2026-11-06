@@ -1,7 +1,8 @@
 // The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages
 // (`PAGES`; Audit log, Library and Users only for a user with that permission), `UserMenu` (initials → Account,
 // Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
-// on Servers, Services (down checks count there too) and Host (overdue releases). With `checks` on and `systemd` off
+// on Servers, Services (down checks count there too) and Host (overdue releases). An invite link opened while logged in
+// leaves the address at once, with a notice to log out first. With `checks` on and `systemd` off
 // the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
 
 import { Component, computed, effect, inject, input } from '@angular/core';
@@ -18,7 +19,8 @@ import { catchError, of } from 'rxjs';
 import { Attention, AttentionStrip } from './attention';
 import { Environment, StagingBadge } from './environment';
 import { Integrations } from './integrations';
-import { Login } from './login';
+import { Feedback } from './feedback';
+import { Login, takeInvite } from './login';
 import { Logo } from './logo';
 import { Session } from './session';
 import { MODES, Theme } from './theme';
@@ -168,6 +170,11 @@ export class App {
     const env = inject(Environment);
     const title = inject(Title);
     effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));
+    const feedback = inject(Feedback);
+    effect(() => {
+      const me = this.session.user();
+      if (me && takeInvite() !== null) feedback.notice(`You are logged in as ${me.username}: log out, then open the invite link again.`);
+    });
     this.session.load();
   }
 }

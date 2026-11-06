@@ -120,6 +120,14 @@ describe('the shell', () => {
     expect(el.querySelector('aside [data-slot="avatar"]')!.textContent).toContain('AL');
   });
 
+  it('takes an invite opened while logged in out of the address, and says to log out first', async () => {
+    const { el } = await open(ALEX, ALL, '/?invite=tok');
+    expect(location.search).toBe('');
+    await settle();
+    expect(document.body.textContent).toContain('log out, then open the invite link again');
+    expect(el.querySelector('[data-login-form]')).toBeNull();
+  });
+
   it('shows the login card and no sidebar when logged out', async () => {
     const { el } = await open(null);
     expect(el.querySelector('aside')).toBeNull();

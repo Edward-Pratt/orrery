@@ -27,8 +27,8 @@ const INPUT =
 /** The hub's own text for a refusal, else its status. */
 const why = (err: HttpErrorResponse) => (typeof err.error === 'string' && err.error ? err.error : `The hub didn't answer (HTTP ${err.status}). Try again.`);
 
-/** Takes `?invite=` out of the address, answering its token. */
-function takeInvite(): string | null {
+/** Takes `?invite=` out of the address, answering its token (null without one). */
+export function takeInvite(): string | null {
   const url = new URL(location.href);
   const token = url.searchParams.get('invite');
   if (token === null) return null;

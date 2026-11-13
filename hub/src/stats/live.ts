@@ -12,7 +12,8 @@
 // not a leak. Hub core.
 
 import { EventEmitter } from 'node:events';
-import { FEED_KEPT, type Db } from './db.ts';
+import type { Db } from './db.ts';
+import { FEED_KEPT } from './feed-store.ts';
 import type { FeedEvent, LiveEvent, ServerHub } from '../servers/servers.ts';
 
 /** A server's events kept in `Db` too, so its Chat and Console panes survive a hub restart. */
@@ -38,9 +39,9 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
     // One listener per open dashboard stream (GET /api/events: the dashboard opens one per section that follows it), each
     // removed when its stream closes: many at once are normal use, not a leak, so Node's warning at 11 is off.
     this.setMaxListeners(0);
-    this.#next = Math.max(Date.now(), db.feedMaxId() + 1);
+    this.#next = Math.max(Date.now(), db.feed.maxId() + 1);
     for (const { id } of hub.list()) {
-      const stored = db.feed(id, perTarget);
+      const stored = db.feed.newest(id, perTarget);
       if (stored.length) this.#buffers.set(`server:${id}`, stored);
     }
     const buffer = (key: string, entry: [number, FeedEvent]) => {
@@ -63,7 +64,7 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
           this.#latest.delete(`paused:${e.serverId}`);
         }
         buffer(`server:${e.serverId}`, entry);
-        if (STORED.has(e.type)) db.recordFeed(entry[0], { ...e, at: entry[1].at });
+        if (STORED.has(e.type)) db.feed.record(entry[0], { ...e, at: entry[1].at });
       }
       this.emit('event', ...entry);
     });

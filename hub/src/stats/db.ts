@@ -6,9 +6,7 @@
 // Discord user's Factorio name, unique without case, `linkFactorio`, `unlinkFactorioPlayer`, `factorioLinkByDiscord`,
 // `factorioLinkByName`; a link replaces that user's and that name's earlier one in its own table only;
 // `unlinkDiscord` clears both); host samples (`recordHostSample`, `hostSamples`, as JSON); the live feed's chat and
-// console (`feed`: `recordFeed`, which every `FEED_CAP_EVERY` (100) inserts of a server deletes its rows beyond the
-// newest `FEED_CAP` (10,000), so a flood stays bounded until the nightly prune; `feed(serverId)` the newest
-// `FEED_KEPT` (500), `feedMaxId`, as JSON under their feed id); for server history, `states` (up/down rows from a
+// console (the `feed` table; its SQL is `feed-store.ts`, `db.feed`); for server history, `states` (up/down rows from a
 // window's start), `sessionsSince` and `tpsAveraged` (TPS in time buckets, in SQL); `maintain` (nightly: prune TPS
 // and host samples > 90 days, expired sessions and all but each server's newest 500 feed rows, 7 dated copies, the 3
 // newest `hub-before-*` deploy copies by time); the deploy history (`startDeploy`, `finishDeploy` (a running row
@@ -28,9 +26,10 @@
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { AuditEntry, FeedEvent, HostSample, Lifecycle } from '../servers/servers.ts';
+import type { AuditEntry, HostSample, Lifecycle } from '../servers/servers.ts';
 import type { AuditRow, DeployOutcome, DeployRow, PackOutcome, PackStep } from '../types.ts';
 import { UsersStore } from '../users/store.ts';
+import { FeedStore } from './feed-store.ts';
 
 export type AuditFilter = { target?: string; actor?: string; before?: number };
 import { localDay } from '../units.ts';
@@ -40,16 +39,6 @@ const SAMPLES_KEEP_MS = 90 * 24 * 60 * 60_000;
 const COPIES_KEPT = 7;
 /** Copies taken before a hub deploy (`hub-before-<tag>-<ms>.db`) kept: one per Rollback anyone would still want. */
 const DEPLOY_COPIES_KEPT = 3;
-/** A server's chat and console entries kept for the live feed, in its memory and in the `feed` table. */
-export const FEED_KEPT = 500;
-/**
- * A server's `feed` rows kept at most between nightly prunes, checked every `FEED_CAP_EVERY` of its inserts (so at
- * most 10,099 rows, about 10 MB of 1 KiB chat lines). Only the newest `FEED_KEPT` are ever read, so the cap loses
- * nothing anyone sees; it is 20 times that, so a Minecraft server (a few hundred lines a day) never reaches it, while
- * an Agent's chat at its budget (2/s, up to ~170,000 rows a day) stays bounded until the prune.
- */
-export const FEED_CAP = 10_000;
-export const FEED_CAP_EVERY = 100;
 
 export type State = 'up' | 'down' | 'unknown';
 export type Row = { ts: number; state: State };
@@ -82,9 +71,10 @@ export function computeUptime(rows: Row[], from: number, to: number): number | n
 /** SQLite store: server up/down transitions (uptime), player sessions (playtime), the audit log, recent chat and console (the live feed), and nightly upkeep. */
 export class Db {
   #db: DatabaseSync;
-  #feedInserts = new Map<string, number>(); // per server, since its last cap check
   /** The dashboard's login sessions, on the same database (`users/store.ts`). */
   readonly users: UsersStore;
+  /** The live feed's chat and console, on the same database (`feed-store.ts`). */
+  readonly feed: FeedStore;
 
   constructor(path: string, timeout = 0) {
     this.#db = new DatabaseSync(path, { timeout }); // the users CLI waits up to 5 s for the running hub's writes
@@ -140,6 +130,7 @@ export class Db {
       this.#db.exec('ALTER TABLE packs ADD COLUMN library_id INTEGER');
     }
     this.users = new UsersStore(this.#db);
+    this.feed = new FeedStore(this.#db);
   }
 
   /** Writes never throw: a database error (disk full, locked) is logged instead of taking the hub down. */
@@ -399,38 +390,6 @@ export class Db {
   }
 
   /**
-   * A live feed event (a chat line or console entry) under its feed id, kept as JSON. Every `FEED_CAP_EVERY` inserts of
-   * a server, its rows beyond the newest `FEED_CAP` are deleted.
-   */
-  recordFeed(id: number, e: FeedEvent & { serverId: string }): void {
-    this.#write('feed', 'INSERT INTO feed (id, server_id, at, event) VALUES (?, ?, ?, ?)', id, e.serverId, e.at, JSON.stringify(e));
-    const n = (this.#feedInserts.get(e.serverId) ?? 0) + 1;
-    this.#feedInserts.set(e.serverId, n % FEED_CAP_EVERY);
-    if (n < FEED_CAP_EVERY) return;
-    this.#write(
-      'cap feed',
-      'DELETE FROM feed WHERE server_id = ? AND id <= (SELECT id FROM feed WHERE server_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)',
-      e.serverId,
-      e.serverId,
-      FEED_CAP,
-    );
-  }
-
-  /** A server's newest `limit` stored feed events, oldest first. */
-  feed(serverId: string, limit = FEED_KEPT): [number, FeedEvent][] {
-    return this.#db
-      .prepare('SELECT id, event FROM feed WHERE server_id = ? ORDER BY id DESC LIMIT ?')
-      .all(serverId, limit)
-      .map((r): [number, FeedEvent] => [r.id as number, JSON.parse(r.event as string) as FeedEvent])
-      .reverse();
-  }
-
-  /** The highest stored feed id, of any server (removed ones too); 0 if there is none. */
-  feedMaxId(): number {
-    return ((this.#db.prepare('SELECT MAX(id) AS id FROM feed').get() as { id: number | null }).id ?? 0);
-  }
-
-  /**
    * Nightly upkeep: drops TPS and host samples older than 90 days and all but each server's newest 500 feed events
    * (every other table is small and kept for all-time stats), then writes a copy to `copyDir/hub-<local day>.db` and keeps the 7 newest copies, and the 3 newest of the
    * copies taken before hub deploys. Never throws.
@@ -439,11 +398,7 @@ export class Db {
     this.#write('prune tps', 'DELETE FROM tps WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.#write('prune host samples', 'DELETE FROM host_samples WHERE ts < ?', now - SAMPLES_KEEP_MS);
     this.users.pruneSessions(now);
-    this.#write(
-      'prune feed',
-      'DELETE FROM feed WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY server_id ORDER BY id DESC) AS n FROM feed) WHERE n > ?)',
-      FEED_KEPT,
-    );
+    this.feed.prune();
     try {
       mkdirSync(copyDir, { recursive: true });
       const file = join(copyDir, `hub-${localDay(now)}.db`);

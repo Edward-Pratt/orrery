@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Db } from '../../src/stats/db.ts';
 import { FEED_CAP, FEED_CAP_EVERY } from '../../src/stats/feed-store.ts';
-import { LiveFeed } from '../../src/stats/live.ts';
+import { IDS_RESERVED, LiveFeed } from '../../src/stats/live.ts';
 import { ServerHub } from '../../src/servers/servers.ts';
 import type { HubEvent } from '../../src/types.ts';
 
@@ -65,6 +65,76 @@ test('a Last-Event-ID from before a restart resumes after it, without duplicates
   assert.deepEqual(resumed.slice(0, -1).map(([id]) => id), ids.slice(3));
   assert.deepEqual(unstamped(resumed), [...history.slice(3), { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'after the restart' }]);
   assert.ok(resumed.at(-1)![0] > ids.at(-1)!);
+});
+
+const afterRestart: HubEvent = { serverId: 'gtnh', type: 'chat', player: 'Steve', message: 'after the restart' };
+
+test("a Last-Event-ID of an unstored event whose id ran ahead of the clock misses nothing after a restart", (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
+  const db = new Db(':memory:');
+  const hub = hubOf('gtnh');
+  const live = new LiveFeed(hub, db);
+  // 3000 events within a millisecond: ids run 3 s ahead of the clock, and none of them is stored (TPS).
+  for (let i = 0; i < 3000; i++) hub.emit('event', { serverId: 'gtnh', type: 'tps', tps: 20 - (i % 2) });
+  const seen = live.lastId; // what a dashboard following the stream sends as Last-Event-ID
+  assert.ok(seen > Date.now());
+  assert.equal(db.feed.maxId(), 0);
+
+  const restarted = hubOf('gtnh');
+  const after = new LiveFeed(restarted, db);
+  restarted.emit('event', afterRestart);
+  assert.deepEqual(unstamped(after.since(seen)), [afterRestart]);
+});
+
+test('a clock that stepped back across a restart: a Last-Event-ID of an unstored event still misses nothing', (t) => {
+  const start = 1_800_000_000_000;
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const db = new Db(':memory:');
+  const hub = hubOf('gtnh');
+  const live = new LiveFeed(hub, db);
+  hub.emit('event', { serverId: 'gtnh', type: 'tps', tps: 19.5 });
+  const seen = live.lastId;
+
+  t.mock.timers.setTime(start - 3_600_000);
+  const restarted = hubOf('gtnh');
+  const after = new LiveFeed(restarted, db);
+  restarted.emit('event', afterRestart);
+  assert.deepEqual(unstamped(after.since(seen)), [afterRestart]);
+});
+
+test("a feed that sent nothing: its lastId (a history's asOf) is below every id after a restart, the clock stepped back too", (t) => {
+  const start = 1_800_000_000_000;
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const db = new Db(':memory:');
+  const asOf = new LiveFeed(hubOf('gtnh'), db).lastId;
+
+  t.mock.timers.setTime(start - 3_600_000);
+  const restarted = hubOf('gtnh');
+  const after = new LiveFeed(restarted, db);
+  restarted.emit('event', afterRestart);
+  assert.deepEqual(unstamped(after.since(asOf)), [afterRestart]);
+});
+
+test('ids are reserved IDS_RESERVED at a time, before they are issued, and a later restart starts at the clock again', (t) => {
+  const start = 1_800_000_000_000;
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const db = new Db(':memory:');
+  const hub = hubOf('gtnh');
+  const live = new LiveFeed(hub, db);
+  assert.equal(db.feed.reserved(), start + IDS_RESERVED);
+  for (let i = 0; i < IDS_RESERVED; i++) hub.emit('event', { serverId: 'gtnh', type: 'tps', tps: 20 - (i % 2) });
+  assert.equal(live.lastId, start + IDS_RESERVED - 1);
+  assert.equal(db.feed.reserved(), start + IDS_RESERVED); // a whole block issued on one write
+  hub.emit('event', { serverId: 'gtnh', type: 'tps', tps: 19 });
+  assert.deepEqual([live.lastId, db.feed.reserved()], [start + IDS_RESERVED, start + 2 * IDS_RESERVED]);
+
+  // Restarted at once, ids go on from the reserved one; restarted once the clock has passed it, from the clock.
+  assert.equal(new LiveFeed(hubOf('gtnh'), db).lastId, start + 2 * IDS_RESERVED - 1);
+  t.mock.timers.setTime(start + 60_000);
+  assert.equal(new LiveFeed(hubOf('gtnh'), db).lastId, start + 60_000 - 1);
+  assert.equal(db.feed.reserved(), start + 60_000 + IDS_RESERVED);
+  db.feed.reserve(5); // never lowered
+  assert.equal(db.feed.reserved(), start + 60_000 + IDS_RESERVED);
 });
 
 test('notices, TPS and lifecycle events are not stored', () => {

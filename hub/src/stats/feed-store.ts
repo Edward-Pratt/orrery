@@ -2,7 +2,9 @@
 // `feed` table, each event as JSON under its feed id). `record`, which every `FEED_CAP_EVERY` (100) inserts of a
 // server deletes its rows beyond the newest `FEED_CAP` (10,000), so a flood stays bounded until the nightly prune;
 // `newest(serverId)` the newest `FEED_KEPT` (500); `maxId`; `prune` (nightly, from `Db.maintain`: all but each
-// server's newest 500 rows). Writes never throw: a database error is logged, as `Db`'s are. Hub core.
+// server's newest 500 rows); and the feed's reserved ids (`reserve`, `reserved`: one number, `feed_reserved` in `Db`'s
+// `meta` table, which an older hub after a Rollback ignores), so ids of events that are not stored are never issued
+// twice either. Writes never throw: a database error is logged, as `Db`'s are. Hub core.
 
 import type { DatabaseSync } from 'node:sqlite';
 import type { FeedEvent } from '../servers/servers.ts';
@@ -64,6 +66,21 @@ export class FeedStore {
   /** The highest stored feed id, of any server (removed ones too); 0 if there is none. */
   maxId(): number {
     return ((this.#db.prepare('SELECT MAX(id) AS id FROM feed').get() as { id: number | null }).id ?? 0);
+  }
+
+  /** The id the live feed's reserved ids end below: every id it has issued is under it. 0 if it reserved none yet. */
+  reserved(): number {
+    const row = this.#db.prepare("SELECT value FROM meta WHERE key = 'feed_reserved'").get() as { value: number } | undefined;
+    return row?.value ?? 0;
+  }
+
+  /** Reserves every id below `to` for the live feed, which calls it before issuing them. Never lowers what is reserved. */
+  reserve(to: number): void {
+    this.#write(
+      'reserve feed ids',
+      "INSERT INTO meta (key, value) VALUES ('feed_reserved', ?) ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)",
+      to,
+    );
   }
 
   /** Nightly: all but each server's newest `FEED_KEPT` rows. */

@@ -556,7 +556,7 @@ test('a chat flood at 15 lines/s for 20 s: chat over its budget is dropped, the 
   }
   const chats = events.filter((e) => e.type === 'chat').length;
   assert.equal(chats, 30 + 2 * 19); // its burst, then 2 a second: under the line rate, nothing else is dropped
-  assert.equal(db.feed('space', 1000).length, chats);
+  assert.equal(db.feed.newest('space', 1000).length, chats);
   assert.equal(game.socket.destroyed, false);
   assert.equal(hub.get('space')?.online, true);
   const said = errors.mock.calls.map((c) => String(c.arguments[0]));

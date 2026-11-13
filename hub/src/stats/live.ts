@@ -1,5 +1,7 @@
-// `LiveFeed`: numbers every hub event (ids start at the clock or above the highest stored one, so they keep rising
-// across hub restarts), stamps it with `at` (when it arrived; kept in the replay), re-emits it, and keeps the last
+// `LiveFeed`: numbers every hub event (ids start at the clock, or above every id an earlier run could have issued:
+// the highest stored one, and the ids it reserved in `Db`, `IDS_RESERVED` (1000) at a time before issuing them, so
+// they keep rising across hub restarts, also when ids ran ahead of the clock or the clock stepped back; never from a
+// client's `Last-Event-ID`), stamps it with `at` (when it arrived; kept in the replay), re-emits it, and keeps the last
 // 500 per server (and per host, service and check) in memory for replay (`since(lastId)`; `lastId` is the newest id);
 // a server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also written
 // to `Db`'s `feed` table and seed its buffer at start (servers still in the config only), so Chat and Console survive
@@ -12,8 +14,17 @@
 // not a leak. Hub core.
 
 import { EventEmitter } from 'node:events';
-import { FEED_KEPT, type Db } from './db.ts';
+import type { Db } from './db.ts';
+import { FEED_KEPT } from './feed-store.ts';
 import type { FeedEvent, LiveEvent, ServerHub } from '../servers/servers.ts';
+
+/**
+ * Ids are reserved in `Db` this many at a time, before any of them is issued: one small write per 1000 events, none
+ * per event, and no id is issued twice even after a crash. A restart starts at the reserved id at the latest, at most
+ * this far above the last id issued; the clock passes that within a second, so ids still start at the clock unless
+ * they ran ahead of it or it stepped back.
+ */
+export const IDS_RESERVED = 1000;
 
 /** A server's events kept in `Db` too, so its Chat and Console panes survive a hub restart. */
 const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'milestone', 'say', 'console']);
@@ -25,8 +36,9 @@ const STORED = new Set<string>(['chat', 'join', 'leave', 'death', 'milestone', '
  * only the latest of each is kept, a server's TPS and `paused` until it goes down (or its Agent leaves), a server's latest
  * `packUpdateStep` until its update finishes, a server's latest game `settings` notice, and a library add's latest progress until it finishes. A server's chat lines (`chat`, `join`, `leave`, `death`, `milestone`, `say`) and console entries are also stored in `Db`,
  * and seed its buffer when the hub starts (only for servers still in the config), so they survive a restart with their
- * ids and `at`; nothing else does. Ids start at the clock or above the highest stored one, whichever is later, so a
- * client's id from before a restart stays older than new ones.
+ * ids and `at`; nothing else does. Ids start at the clock, the id above the highest stored one or the id the last run's
+ * reserved ids ended below (`IDS_RESERVED`), whichever is latest, so every id from before a restart (a client's
+ * `Last-Event-ID`, a history's `asOf`), stored or not, stays older than new ones.
  */
 export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
   #next: number;
@@ -38,9 +50,12 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
     // One listener per open dashboard stream (GET /api/events: the dashboard opens one per section that follows it), each
     // removed when its stream closes: many at once are normal use, not a leak, so Node's warning at 11 is off.
     this.setMaxListeners(0);
-    this.#next = Math.max(Date.now(), db.feedMaxId() + 1);
+    this.#next = Math.max(Date.now(), db.feed.maxId() + 1, db.feed.reserved());
+    let reserved = 0;
+    const reserve = () => db.feed.reserve((reserved = this.#next + IDS_RESERVED));
+    reserve(); // before anything is issued, `lastId` too: it goes out as a history's `asOf`
     for (const { id } of hub.list()) {
-      const stored = db.feed(id, perTarget);
+      const stored = db.feed.newest(id, perTarget);
       if (stored.length) this.#buffers.set(`server:${id}`, stored);
     }
     const buffer = (key: string, entry: [number, FeedEvent]) => {
@@ -48,7 +63,10 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
       this.#buffers.set(key, buf);
       if (buf.push(entry) > perTarget) buf.shift();
     };
-    const stamp = (e: LiveEvent): [number, FeedEvent] => [this.#next++, { ...e, at: Date.now() }];
+    const stamp = (e: LiveEvent): [number, FeedEvent] => {
+      if (this.#next >= reserved) reserve();
+      return [this.#next++, { ...e, at: Date.now() }];
+    };
     hub.on('event', (e) => {
       const entry = stamp(e);
       if (e.type === 'tps') this.#latest.set(`server:${e.serverId}`, entry);
@@ -63,7 +81,7 @@ export class LiveFeed extends EventEmitter<{ event: [number, FeedEvent] }> {
           this.#latest.delete(`paused:${e.serverId}`);
         }
         buffer(`server:${e.serverId}`, entry);
-        if (STORED.has(e.type)) db.recordFeed(entry[0], { ...e, at: entry[1].at });
+        if (STORED.has(e.type)) db.feed.record(entry[0], { ...e, at: entry[1].at });
       }
       this.emit('event', ...entry);
     });

@@ -213,7 +213,7 @@ on its own:
 Not covered by the tests, so left to smoke checks on production: `/config` with players online, and the start gate
 on the real Podman unit.
 
-## Factorio: portal mod update notices and player moderation — cut as `hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`, not yet deployed
+## Factorio: portal mod update notices and player moderation — shipped (`hub-v2.20.0`, `web-v0.18.0`, `agent-v1.4.0`)
 
 Notes: `docs/notes/factorio-game-extras.md`. On a factorio server an Agent runs:
 
@@ -224,20 +224,20 @@ Notes: `docs/notes/factorio-game-extras.md`. On a factorio server an Agent runs:
 
 Also a fix: a game update of a server stopped before it that fails after the hub resumes it, before the swap, leaves the
 server stopped. Cut 2026-11-02 as `hub-v2.20.0`, `web-v0.18.0` and `agent-v1.4.0` (`MODERATION_FLOOR`: an older
-Agent gets the deploy text), to deploy from the Host page in that order; the friend does nothing. Left to the smoke check on
+Agent gets the deploy text), deployed from the Host page in that order; the friend does nothing. Left to the smoke check on
 production: a kick and a ban of a player who is online (what they see, and that the save isn't flagged), and the first
 Discord notice.
 
 Then, in order: New world (stage B above), then off-site save copies (`docs/notes/factorio-save-copies.md`, to
 redesign against the transfer save uploads use).
 
-## Status page — hub and dashboard built, Caddy next
+## Status page — shipped (`hub-v2.21.0`, `web-v0.20.0`), live on `status.orrery.run`
 
 Notes: `docs/notes/public-status.md`. A public page on `status.orrery.run`, with no login, for players: each listed
 server's name, game, state, the players online (count and names) and uptime over 7 and 30 days, polled every 30 s.
 The hub's `GET /api/public/status` answers only the servers listed in `integrations.web.status`, field by field; the
 page boots alone from the dashboard's build (no shell, no session), served on its own Caddy site that proxies nothing else. Hub + web + Caddy and
-a DNS record, no Agent or mod change. To cut as the next hub minor, then the next dashboard minor.
+a DNS record, no Agent or mod change. Cut 2026-11-05 as `hub-v2.21.0`, then `web-v0.20.0`.
 
 ## The App: orrery on Android — designed
 
@@ -247,7 +247,7 @@ recoveries through Firebase Cloud Messaging. The hub gains bearer sessions (a pa
 `Users.login` as the dashboard's), phone registrations tied to their session, and an FCM sender. A new part `android/`, released as a signed APK
 on `android-vX.Y.Z` tags. After the status page, whose first commit moves the hub's login code out of `web.ts`.
 
-## Users: local accounts, roles and permissions — built, to release
+## Users: local accounts, roles and permissions — shipped (`hub-v2.22.0`, `web-v0.21.0`, `web-v0.21.1`)
 
 Notes: `docs/notes/users.md`. The dashboard stops logging in through Discord: a User is a row in `hub.db` with a
 username and a password (`scrypt`), Roles are editable sets of a fixed permission vocabulary, a Grant gives a user a
@@ -257,7 +257,8 @@ page (users, roles, the user's own account) and a CLI (`npm run users -- invite 
 locked-out one. The bot's own admin-role check stays. One hub and one dashboard release, back to back; the old config
 keys and `DISCORD_CLIENT_SECRET` are tolerated one release. A second factor (TOTP) is the release after. Before the
 App, whose login (`docs/notes/android-app.md`) is the same password login. Built on branch `users` (hub and dashboard,
-ADR 0005); next, the two releases and the by-hand steps in the note's "Release and deploy".
+ADR 0005) and cut 2026-11-06 as `hub-v2.22.0` and `web-v0.21.0`; `web-v0.21.1` fixed the pages shown after an in-page
+login. Deployed to production.
 
 ## Later / if needed
 

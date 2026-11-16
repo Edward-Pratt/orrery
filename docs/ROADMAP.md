@@ -247,7 +247,7 @@ recoveries through Firebase Cloud Messaging. The hub gains bearer sessions (a pa
 `Users.login` as the dashboard's), phone registrations tied to their session, and an FCM sender. A new part `android/`, released as a signed APK
 on `android-vX.Y.Z` tags. After the status page, whose first commit moves the hub's login code out of `web.ts`.
 
-## Users: local accounts, roles and permissions — built, to release
+## Users: local accounts, roles and permissions — shipped (`hub-v2.22.0`, `web-v0.21.0`)
 
 Notes: `docs/notes/users.md`. The dashboard stops logging in through Discord: a User is a row in `hub.db` with a
 username and a password (`scrypt`), Roles are editable sets of a fixed permission vocabulary, a Grant gives a user a
@@ -256,8 +256,19 @@ The hub refuses an action the user's roles don't cover (writes default-deny), an
 page (users, roles, the user's own account) and a CLI (`npm run users -- invite <name>`) for the first owner and a
 locked-out one. The bot's own admin-role check stays. One hub and one dashboard release, back to back; the old config
 keys and `DISCORD_CLIENT_SECRET` are tolerated one release. A second factor (TOTP) is the release after. Before the
-App, whose login (`docs/notes/android-app.md`) is the same password login. Built on branch `users` (hub and dashboard,
-ADR 0005); next, the two releases and the by-hand steps in the note's "Release and deploy".
+App, whose login (`docs/notes/android-app.md`) is the same password login. Shipped 2026-11-06 as `hub-v2.22.0` and
+`web-v0.21.0` (PR #170, ADR 0005); the by-hand steps in the note's "Release and deploy" are the owner's.
+
+## Hardening pass — planned (2026-11-06)
+
+Notes: `docs/notes/hardening.md`. Fix what could become an issue, no feature work: dependency advisories and
+Dependabot, test timeouts and job limits, the two flaky tests, `@types/node` on the 24 line, a guard for
+`changes.sh`'s map, by-hand installs that wait for a release's assets, pnpm as the installer (CI and the hub's host,
+two hub releases because `deploy-hub.sh` runs from the running release), a release gate that trusts `main`'s CI run
+instead of re-running it, lint for the hub and the Agent, the Agent's Node version in its hello with a nightly
+notice when it falls behind, the Staging environment removed (#91; the pack-update staging and `failed in staging`
+stay), and the 36 long files split or marked exempt with `check-file-length` then failing any over-cap file. Owner
+decisions in the note: no Bun, the Agent stays Node (ADR 0004 kept), `hub.db` backups off the host come after.
 
 ## Later / if needed
 

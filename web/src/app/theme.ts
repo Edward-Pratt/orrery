@@ -2,7 +2,7 @@
 // (`dark` or `light`, Paper) on `<html>`; dark when the system can't say.
 
 import { DOCUMENT } from '@angular/common';
-import { effect, inject, Injectable, signal } from '@angular/core';
+import { computed, effect, inject, Injectable, signal } from '@angular/core';
 
 export type Mode = 'light' | 'system' | 'dark';
 export const MODES: Mode[] = ['light', 'system', 'dark'];
@@ -13,15 +13,15 @@ const KEY = 'theme';
 export class Theme {
   readonly #doc = inject(DOCUMENT);
   readonly mode = signal<Mode>(this.#stored());
+  readonly #systemDark = signal(true);
+  /** Whether the page is dark now: the mode, or for `system` the system's (dark when it can't say). */
+  readonly dark = computed(() => this.mode() === 'dark' || (this.mode() === 'system' && this.#systemDark()));
 
   constructor() {
     const dark = this.#doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)');
-    const systemDark = signal(dark?.matches ?? true);
-    dark?.addEventListener('change', (e) => systemDark.set(e.matches));
-    effect(() => {
-      const isDark = this.mode() === 'dark' || (this.mode() === 'system' && systemDark());
-      this.#doc.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    });
+    this.#systemDark.set(dark?.matches ?? true);
+    dark?.addEventListener('change', (e) => this.#systemDark.set(e.matches));
+    effect(() => this.#doc.documentElement.setAttribute('data-theme', this.dark() ? 'dark' : 'light'));
   }
 
   set(mode: Mode): void {

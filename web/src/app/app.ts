@@ -46,7 +46,7 @@ const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideM
   template: `
     <button type="button" class="flex items-center gap-2 rounded-md p-1 hover:bg-muted" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
       <hlm-avatar>
-        <span hlmAvatarFallback class="bg-brand text-xs font-semibold text-white">{{ initials() }}</span>
+        <span hlmAvatarFallback>{{ initials() }}</span>
       </hlm-avatar>
       @if (showName()) {
         <span class="truncate text-sm">{{ user().username }}</span>
@@ -89,7 +89,7 @@ export class UserMenu {
   imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
   viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText, lucideUsers })],
   template: `
-    <hlm-toaster />
+    <hlm-toaster [theme]="theme.dark() ? 'dark' : 'light'" />
     @switch (session.user()) {
       @case (undefined) {}
       @case (null) {
@@ -154,6 +154,7 @@ export class UserMenu {
 })
 export class App {
   protected readonly session = inject(Session);
+  protected readonly theme = inject(Theme); // applies the remembered mode before the first page shows
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
   protected readonly visible = computed(() =>
@@ -166,7 +167,6 @@ export class App {
   }
 
   constructor() {
-    inject(Theme); // applies the remembered mode before the first page shows
     const env = inject(Environment);
     const title = inject(Title);
     effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));

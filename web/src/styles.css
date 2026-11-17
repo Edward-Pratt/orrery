@@ -53,7 +53,9 @@
   --radius-xl: var(--radius-xl);
 }
 
-:root {
+/* Every theme scope, not only <html>: the toaster sets its own data-theme. */
+:root,
+[data-theme] {
   --accent: var(--accent-orrery);
   --on-accent: var(--on-accent-orrery);
 }

@@ -20,7 +20,7 @@ export class HlmTableContainer {
 })
 export class HlmTable {
   constructor() {
-    classes(() => 'w-full caption-bottom text-sm');
+    classes(() => 'ar-table caption-bottom');
   }
 }
 
@@ -34,7 +34,7 @@ export class HlmTable {
 })
 export class HlmTHead {
   constructor() {
-    classes(() => '[&_tr]:border-b');
+    classes(() => '');
   }
 }
 
@@ -48,7 +48,7 @@ export class HlmTHead {
 })
 export class HlmTBody {
   constructor() {
-    classes(() => '[&_tr:last-child]:border-0');
+    classes(() => '');
   }
 }
 
@@ -62,7 +62,7 @@ export class HlmTBody {
 })
 export class HlmTFoot {
   constructor() {
-    classes(() => 'bg-muted/50 border-t font-medium [&>tr]:last:border-b-0');
+    classes(() => 'border-t font-medium');
   }
 }
 
@@ -78,7 +78,7 @@ export class HlmTr {
   constructor() {
     classes(
       () =>
-        'hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors has-aria-expanded:bg-muted/50',
+        '',
     );
   }
 }
@@ -95,7 +95,7 @@ export class HlmTh {
   constructor() {
     classes(
       () =>
-        'text-foreground h-10 px-2 text-start align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pe-0',
+        '[&:has([role=checkbox])]:pe-0',
     );
   }
 }
@@ -110,7 +110,7 @@ export class HlmTh {
 })
 export class HlmTd {
   constructor() {
-    classes(() => 'p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pe-0');
+    classes(() => 'whitespace-nowrap [&:has([role=checkbox])]:pe-0');
   }
 }
 
@@ -124,6 +124,6 @@ export class HlmTd {
 })
 export class HlmCaption {
   constructor() {
-    classes(() => 'text-muted-foreground mt-4 text-sm');
+    classes(() => 'ar-t-ui-sm text-muted-foreground mt-4');
   }
 }

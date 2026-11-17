@@ -4,3 +4,8 @@
 .ar-input[data-matches-spartan-invalid='true'] {
   border-color: var(--danger);
 }
+
+/* ar-menu sets no margin; keep the dropdown's own gap from its trigger (its side offset, in spacing steps). */
+.ar-menu[data-slot='dropdown-menu'] {
+  margin-block: calc(var(--spacing) * var(--side-offset, 1));
+}

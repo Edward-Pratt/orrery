@@ -9,7 +9,7 @@ export class HlmAlertDialogFooter {
   constructor() {
     classes(
       () =>
-        'flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:justify-end',
+        'flex flex-wrap justify-end gap-2',
     );
   }
 }

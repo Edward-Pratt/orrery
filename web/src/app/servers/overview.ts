@@ -22,7 +22,7 @@ import ServerPage from './server';
       @if (c.players.length) {
         <ul class="flex flex-wrap gap-2 text-sm">
           @for (p of c.players; track p) {
-            <li class="rounded-full border" data-player-name><button [appPlayer]="p" class="px-3 py-1">{{ p }}</button></li>
+            <li class="rounded-md border border-[var(--line-strong)]" data-player-name><button [appPlayer]="p" class="px-3 py-1">{{ p }}</button></li>
           }
         </ul>
       } @else {

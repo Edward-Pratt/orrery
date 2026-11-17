@@ -51,7 +51,7 @@ export class TimeSeries {
         borderColor: token('--line-strong'),
         textStyle: { color: token('--ink') },
       },
-      xAxis: { type: 'time', axisLabel: { color: text }, axisLine: { lineStyle: { color: line } } },
+      xAxis: { type: 'time', axisLabel: { color: text, hideOverlap: true }, axisLine: { lineStyle: { color: line } } },
       yAxis: { type: 'value', min: 0, max: this.max(), axisLabel: { color: text, formatter: format }, splitLine: { lineStyle: { color: line } } },
       // Colours are the tokens as given, so nothing derives shades from them.
       series: series.map((s, i) => ({

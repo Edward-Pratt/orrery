@@ -45,30 +45,30 @@ import { ServerRow } from './row';
         <span>Installing {{ f.name }} failed: {{ f.why }}</span>
       </div>
     }
-    <div class="flex flex-col gap-2">
+    <div class="ar-tiles server-tiles">
       @if (cards(); as list) {
         @for (c of list; track c.id) {
           <app-server-row [card]="c" (changed)="refetch.next()" />
         } @empty {
           @if (!pending()?.pending?.length) {
-            <p class="text-muted-foreground">No servers yet: add one under "servers" in the hub's config.json.</p>
+            <p class="col-span-full text-muted-foreground">No servers yet: add one under "servers" in the hub's config.json.</p>
           }
         }
         @for (p of pending()?.pending ?? []; track p.id) {
           <a
             [routerLink]="['/servers', 'waiting', p.id]"
-            class="flex flex-wrap items-center gap-3 rounded-lg border border-dashed p-3 hover:bg-muted/50"
+            class="ar-tile"
             [attr.data-pending]="p.id"
           >
-            <span class="font-medium">{{ p.name }}</span>
-            <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn">Waiting for setup</span>
-            <span class="text-sm text-muted-foreground">port {{ p.gamePort }}: run the setup command →</span>
+            <span class="ar-t-ui-strong">{{ p.name }}</span>
+            <span hlmBadge variant="outline" class="ar-tag--warn">Waiting for setup</span>
+            <span class="ar-tile__line">port {{ p.gamePort }}: run the setup command →</span>
           </a>
         }
       } @else {
-        <div class="flex flex-col gap-2" data-skeleton>
+        <div class="contents" data-skeleton>
           @for (i of [1, 2, 3]; track i) {
-            <hlm-skeleton class="h-14 w-full" />
+            <hlm-skeleton class="h-36 w-full" />
           }
         </div>
       }
@@ -80,6 +80,12 @@ import { ServerRow } from './row';
         <!-- a deploy replaced the build under this open page, so the sheet's chunk is gone -->
         <p class="text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to add a server.</p>
       }
+    }
+  `,
+  // Server tiles hold up to three readouts and the actions, so they start wider than Armil's 200px tiles.
+  styles: `
+    .server-tiles {
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
     }
   `,
 })

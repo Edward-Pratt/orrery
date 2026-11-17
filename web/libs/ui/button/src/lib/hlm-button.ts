@@ -5,34 +5,30 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import type { ClassValue } from 'clsx';
 import { injectBrnButtonConfig } from './hlm-button.token';
 
+// Armil's Button: default is the primary (the accent), outline the quiet button, ghost for Cancel and toolbars,
+// destructive outlined in danger (never filled), link an inline link. The focus ring, hover and the 44px height
+// below 768px come from the `ar-btn` classes in armil.css.
 export const buttonVariants = cva(
-  "focus-visible:border-ring focus-visible:ring-ring/50 data-[matches-spartan-invalid=true]:ring-destructive/20 dark:data-[matches-spartan-invalid=true]:ring-destructive/40 data-[matches-spartan-invalid=true]:border-destructive dark:data-[matches-spartan-invalid=true]:border-destructive/50 rounded-md border border-transparent bg-clip-padding text-sm font-medium focus-visible:ring-3 active:not-aria-[haspopup]:translate-y-px data-[matches-spartan-invalid=true]:ring-3 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-all outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
+  "group/button shrink-0 data-disabled:pointer-events-none data-disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/80',
-        outline:
-          'border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground shadow-xs',
-        secondary:
-          'bg-secondary text-secondary-foreground aria-expanded:bg-secondary aria-expanded:text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]',
-        ghost:
-          'hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 aria-expanded:bg-muted aria-expanded:text-foreground',
-        destructive:
-          'bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30',
-        link: 'text-primary underline-offset-4 hover:underline',
+        default: 'ar-btn ar-btn--primary',
+        outline: 'ar-btn',
+        secondary: 'ar-btn',
+        ghost: 'ar-btn ar-btn--ghost',
+        destructive: 'ar-btn ar-btn--danger',
+        link: 'ar-link inline-flex cursor-pointer items-center gap-1.5',
       },
       size: {
-        default:
-          'h-9 gap-1.5 px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),8px)] px-2 text-xs in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(3)]",
-        sm: 'h-8 gap-1 rounded-[min(var(--radius-md),10px)] px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5',
-        lg: 'h-10 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        icon: 'size-9',
-        'icon-xs':
-          "size-6 rounded-[min(var(--radius-md),8px)] in-data-[slot=button-group]:rounded-md [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(3)]",
-        'icon-sm':
-          'size-8 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-md',
-        'icon-lg': 'size-10',
+        default: '',
+        xs: 'ar-btn--sm',
+        sm: 'ar-btn--sm',
+        lg: '',
+        icon: 'ar-btn--icon',
+        'icon-xs': 'ar-btn--icon ar-btn--sm',
+        'icon-sm': 'ar-btn--icon ar-btn--sm',
+        'icon-lg': 'ar-btn--icon',
       },
     },
     defaultVariants: {
@@ -61,7 +57,8 @@ export class HlmButton {
 
   constructor() {
     classes(() => [
-      buttonVariants({ variant: this.variant(), size: this.size() }),
+      // a link has no button size
+      buttonVariants({ variant: this.variant(), size: this.variant() === 'link' ? null : this.size() }),
       this._additionalClasses(),
     ]);
   }

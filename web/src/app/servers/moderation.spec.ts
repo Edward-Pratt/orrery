@@ -85,7 +85,7 @@ describe('Moderation', () => {
     q('[data-online="Bob"] [data-ban]').click();
     await render();
     expect(text(q('[data-form] b'))).toBe('Ban Bob?');
-    expect(q('[data-form-go]').getAttribute('data-variant') ?? q('[data-form-go]').className).toContain('destructive');
+    expect(q('[data-form-go]').getAttribute('data-variant') ?? q('[data-form-go]').className).toContain('ar-btn--danger');
     await type('[data-reason]', 'stealing iron');
     expect(text(q('[data-reason-count]'))).toBe('13/200');
     q('[data-form-go]').click();

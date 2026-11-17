@@ -9,6 +9,8 @@ import { classes } from '@spartan-ng/helm/utils';
 })
 export class HlmSkeleton {
   constructor() {
-    classes(() => 'bg-muted rounded-md block motion-safe:animate-pulse');
+    // Armil's skeleton (a still `raised` block, breathing with its `ar-wait`), at the size the caller gives it:
+    // `ar-skeleton` itself is one 12px line.
+    classes(() => 'bg-muted rounded-xs block motion-safe:animate-[ar-wait_1.6s_ease-in-out_infinite]');
   }
 }

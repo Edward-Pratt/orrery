@@ -1,0 +1,38 @@
+/* The shell's parts Armil's Shell doesn't have. Tokens only. */
+
+/* An attention count on a page's nav entry is itself the alarm. */
+.ar-nav__count[data-badge],
+.ar-nav a[aria-current] .ar-nav__count[data-badge] {
+  color: var(--warn);
+}
+
+/* The phone tab bar (Armil's Shell has only a top bar): glass, as it floats over the page. */
+.tabbar {
+  border-top: var(--border-hairline) solid var(--line-strong);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  backdrop-filter: blur(var(--blur-glass));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tabbar a {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-touch);
+  padding: var(--space-2) 0;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.tabbar a .ar-icon {
+  color: var(--verdigris);
+}
+.tabbar a[aria-current] {
+  color: var(--verdigris-hi);
+}
+.tabbar__count {
+  position: absolute;
+  top: calc(var(--space-1) * -1);
+  left: 100%;
+}

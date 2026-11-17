@@ -30,7 +30,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
       <section class="flex max-w-5xl flex-col gap-4">
         @if (list.length) {
           <div class="grid gap-4 lg:grid-cols-[16rem_1fr]">
-            <ul class="flex max-h-48 flex-col overflow-y-auto rounded-xl border p-1 text-sm lg:max-h-[calc(100dvh-18rem)]" data-files>
+            <ul class="ar-panel flex max-h-48 flex-col overflow-y-auto p-1 text-sm lg:max-h-[calc(100dvh-18rem)]" data-files>
               @for (f of list; track f.name) {
                 <li>
                   <button
@@ -75,7 +75,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
             </div>
           </div>
         } @else {
-          <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
+          <div class="ar-empty" data-empty>
             <p class="font-medium">No logs yet</p>
             <p class="text-sm text-muted-foreground">The server's logs/ files and crash reports are listed here once it has written some.</p>
           </div>
@@ -83,7 +83,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
         @if (journalShown() && server.service(); as s) {
           <section class="flex flex-col gap-2" data-journal>
             <div class="flex items-center gap-3">
-              <h2 class="flex-1 text-sm font-medium">{{ s.unit }} journal</h2>
+              <h2 class="ar-t-ui-strong flex-1">{{ s.unit }} journal</h2>
               <button hlmBtn variant="outline" size="sm" data-journal-refresh [disabled]="loadingJournal()" (click)="fetchJournal()">
                 @if (loadingJournal()) {
                   <hlm-spinner />

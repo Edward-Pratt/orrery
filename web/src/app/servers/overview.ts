@@ -18,7 +18,7 @@ import ServerPage from './server';
   template: `
     @let c = server.card()!;
     <section class="mb-6" data-players>
-      <h2 class="mb-2 text-sm font-semibold">Online now ({{ c.players.length }})</h2>
+      <h2 class="ar-label mb-2">Online now ({{ c.players.length }})</h2>
       @if (c.players.length) {
         <ul class="flex flex-wrap gap-2 text-sm">
           @for (p of c.players; track p) {
@@ -37,8 +37,8 @@ import ServerPage from './server';
     <a routerLink="../history" class="block max-w-3xl" data-sparklines>
       <div class="grid gap-4 sm:grid-cols-2">
         @for (g of graphs(); track g.title) {
-          <section class="rounded-lg border p-3" [attr.data-chart]="g.title">
-            <h2 class="text-sm font-semibold">
+          <section class="ar-panel p-3" [attr.data-chart]="g.title">
+            <h2 class="ar-label">
               {{ g.title }} <span class="font-normal text-muted-foreground">24 h</span>
               @if (g.paused) {
                 <span class="font-normal text-muted-foreground" data-paused> · Paused</span>

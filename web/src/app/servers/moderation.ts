@@ -41,9 +41,9 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
   selector: 'app-moderation',
   imports: [HlmButton, HlmInput],
   template: `
-    <section class="mb-6 max-w-4xl rounded-xl border p-4 text-sm" data-moderation>
+    <section class="ar-panel mb-6 max-w-4xl p-4 text-sm" data-moderation>
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 class="font-semibold">Moderation</h2>
+        <h2 class="ar-t-heading-sm">Moderation</h2>
         <span class="flex gap-2">
           <button hlmBtn variant="outline" size="sm" [disabled]="!!blocked() || busy()" (click)="ask('ban', null)" data-ban-any>Ban a player…</button>
           <button hlmBtn variant="ghost" size="sm" (click)="reload.next()" data-refresh>Refresh</button>
@@ -62,7 +62,7 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
           <p class="mb-2 text-status-warn" data-problem>{{ p }}</p>
         }
         @if (form(); as f) {
-          <form class="mb-3 flex flex-col gap-2 rounded-lg border bg-muted/30 p-3" (submit)="$event.preventDefault(); submit()" data-form>
+          <form class="ar-panel mb-3 flex flex-col gap-2 bg-muted/30 p-3" (submit)="$event.preventDefault(); submit()" data-form>
             <b>{{ f.action === 'ban' ? 'Ban' : 'Kick' }} {{ f.player ?? 'a player' }}?</b>
             <p class="text-muted-foreground">
               {{ f.action === 'ban' ? "They are disconnected if they are online, and can't join again until unbanned. Factorio shows them the reason." : 'They are disconnected and can join again at once.' }}
@@ -87,8 +87,8 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
             </span>
           </form>
         }
-        <h3 class="mb-1 font-medium">Online now ({{ s.online.length }})</h3>
-        <ul class="mb-4 divide-y rounded-lg border">
+        <h3 class="ar-t-ui-strong mb-1">Online now ({{ s.online.length }})</h3>
+        <ul class="ar-panel mb-4 divide-y">
           @for (p of s.online; track p) {
             <li class="flex flex-wrap items-center gap-2 px-3 py-1.5" [attr.data-online]="p">
               <span class="flex-1 font-medium">{{ p }} @if (isAdmin(p)) {<span class="ml-1 rounded bg-muted px-1.5 text-xs" data-admin-badge>Admin</span>}</span>
@@ -109,11 +109,11 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
         @if (s.lists; as l) {
           <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <h3 class="mb-1 font-medium">Bans ({{ l.bansTotal }})</h3>
+              <h3 class="ar-t-ui-strong mb-1">Bans ({{ l.bansTotal }})</h3>
               @if (l.bans.length > filterPast) {
                 <input hlmInput class="mb-2 w-full" placeholder="Filter" aria-label="Filter the bans" [value]="filter()" (input)="filter.set($any($event.target).value)" data-filter />
               }
-              <ul class="divide-y rounded-lg border">
+              <ul class="ar-panel divide-y">
                 @for (b of shownBans(); track b.name) {
                   <li class="flex items-center gap-2 px-3 py-1.5" [attr.data-banned]="b.name">
                     <span class="font-mono">{{ b.name }}</span>
@@ -132,7 +132,7 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
               }
             </div>
             <div>
-              <h3 class="mb-1 font-medium">Admins ({{ l.admins.length }})</h3>
+              <h3 class="ar-t-ui-strong mb-1">Admins ({{ l.admins.length }})</h3>
               <ul class="mb-2 flex flex-wrap gap-1.5">
                 @for (a of l.admins; track a) {
                   <li class="flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs" [attr.data-admin]="a">

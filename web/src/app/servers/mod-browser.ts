@@ -129,7 +129,7 @@ type Load = { page: number; wait: number };
                     />
                   }
                   <div class="min-w-0 flex-1">
-                    <h3 class="line-clamp-2 font-medium leading-snug" data-title>{{ m.title }}</h3>
+                    <h3 class="ar-t-ui-strong line-clamp-2" data-title>{{ m.title }}</h3>
                     <p class="text-xs text-muted-foreground" data-meta>
                       @if (m.owner) {
                         by {{ m.owner }} ·

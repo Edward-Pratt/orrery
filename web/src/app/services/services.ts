@@ -35,11 +35,11 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
   imports: [NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmSheetImports, HlmSkeleton, HlmSpinner, Status, ServerActions],
   viewProviders: [provideIcons({ lucideEllipsis })],
   template: `
-    <h1 class="mb-4 text-lg font-semibold">{{ title() }}</h1>
+    <h1 class="ar-t-heading-md mb-4">{{ title() }}</h1>
     @if (ready()) {
       <div class="flex flex-col gap-2">
         @for (s of services(); track s.id) {
-          <div class="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:gap-4" [id]="s.id" [attr.data-service]="s.id">
+          <div class="ar-panel flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:gap-4" [id]="s.id" [attr.data-service]="s.id">
             <div class="min-w-0 sm:w-64">
               <span class="font-medium">{{ s.id }}</span>
               <span class="ml-2 text-sm text-muted-foreground">{{ s.unit }}</span>
@@ -91,10 +91,10 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
         }
         @if (standalone().length) {
           @if (services().length) {
-            <h2 class="mt-4 text-sm font-medium text-muted-foreground">Standalone checks</h2>
+            <h2 class="ar-label mt-4">Standalone checks</h2>
           }
           @for (c of standalone(); track c.id) {
-            <div class="flex items-center gap-3 rounded-lg border p-3" [attr.data-standalone]="c.id">
+            <div class="ar-panel flex items-center gap-3 p-3" [attr.data-standalone]="c.id">
               <span class="font-medium">{{ c.id }}</span>
               <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">{{ c.url }}</span>
               <ng-container [ngTemplateOutlet]="chip" [ngTemplateOutletContext]="{ $implicit: c }" />
@@ -113,7 +113,7 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
     }
 
     <ng-template #chip let-c>
-      <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs" [attr.data-check]="c.id" [attr.title]="c.url">
+      <span class="ar-tag inline-flex items-center gap-1" [attr.data-check]="c.id" [attr.title]="c.url">
         {{ c.id }}
         @if (c.up === null) {
           <span class="text-muted-foreground">not checked yet</span>

@@ -89,8 +89,8 @@ type Preview = {
     }
     <div aria-live="polite">
       @if (preview(); as p) {
-        <section class="flex flex-col gap-3 rounded-lg border p-3" data-import-preview>
-          <h3 class="font-medium" data-import-count>{{ p.add.length ? mods(p.add.length) + ' to add' : 'Nothing to add' }}{{ from() ? ' from ' + from() : '' }}</h3>
+        <section class="ar-panel flex flex-col gap-3 p-3" data-import-preview>
+          <h3 class="ar-t-ui-strong" data-import-count>{{ p.add.length ? mods(p.add.length) + ' to add' : 'Nothing to add' }}{{ from() ? ' from ' + from() : '' }}</h3>
           @if (hasVersions()) {
             <label class="flex items-start gap-2">
               <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />

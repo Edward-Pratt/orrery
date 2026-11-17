@@ -33,7 +33,7 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
   selector: 'app-host',
   imports: [DatePipe, HlmSkeleton, HlmToggleGroupImports, PeriodPicker, Releases, TimeSeries],
   template: `
-    <h1 class="mb-4 text-lg font-semibold">Host {{ id() }}</h1>
+    <h1 class="ar-t-heading-md mb-4">Host {{ id() }}</h1>
     @if (hosts().length > 1) {
       <hlm-toggle-group class="mb-4" type="single" variant="outline" [value]="id()" (valueChange)="choose($any($event) || id())" aria-label="Host" data-hosts>
         @for (h of hosts(); track h.id) {
@@ -44,8 +44,8 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
     @if (tiles(); as list) {
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-tiles>
         @for (t of list; track t.key) {
-          <section class="rounded-xl border bg-card p-4" [attr.data-tile]="t.key" [attr.data-state]="t.health">
-            <h2 class="text-xs font-medium text-muted-foreground">{{ t.label }}</h2>
+          <section class="ar-panel p-4" [attr.data-tile]="t.key" [attr.data-state]="t.health">
+            <h2 class="ar-label">{{ t.label }}</h2>
             <p class="mt-1 text-2xl font-semibold" [attr.data-value]="t.key">{{ t.value }}</p>
             <p class="text-xs text-muted-foreground" [attr.data-detail]="t.key">{{ t.detail }}</p>
             @if (t.share !== null) {
@@ -71,8 +71,8 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
     <app-period class="mt-6 mb-4 block" [(hours)]="hours" />
     <div class="grid gap-4 lg:grid-cols-2">
       @for (c of charts(); track c.title) {
-        <section class="rounded-lg border p-3" [attr.data-chart]="c.title">
-          <h2 class="text-sm font-semibold">{{ c.title }}</h2>
+        <section class="ar-panel p-3" [attr.data-chart]="c.title">
+          <h2 class="ar-label">{{ c.title }}</h2>
           <app-time-series [series]="c.series" [format]="c.format" [max]="c.max" />
         </section>
       }

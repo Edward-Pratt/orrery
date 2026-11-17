@@ -47,7 +47,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
         @if (running(); as r) {
           <app-update-steps [title]="'Updating ' + r.from + ' → ' + r.to" [update]="r" [labels]="steps" [busy]="busy()" (cancel)="cancel()" />
         } @else {
-          <section class="rounded-xl border bg-card p-5" data-summary>
+          <section class="ar-panel p-5" data-summary>
             @if (done(); as d) {
               <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="lucideCheck" /> Done: {{ d }} is running.</p>
             }
@@ -55,7 +55,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               <div class="min-w-0">
                 <p class="flex items-center gap-2 text-xs font-medium text-muted-foreground">Installed <app-mod-updates-badge /></p>
                 @if (g.installed; as i) {
-                  <h2 class="text-xl font-semibold" data-installed>Factorio {{ i.factorio }}</h2>
+                  <h2 class="ar-t-heading-md" data-installed>Factorio {{ i.factorio }}</h2>
                   <ul class="mt-2 flex flex-wrap gap-1.5" aria-label="Mods">
                     @for (m of i.mods; track m.name) {
                       <li
@@ -89,7 +89,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               </div>
             </div>
             @if (failedPrep(); as f) {
-              <div class="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm" data-failed-prep>
+              <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)] mt-4 text-sm" data-failed-prep>
                 <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
               </div>
             }
@@ -168,8 +168,8 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               </select>
             </label>
             <div>
-              <h3 class="mb-1 font-medium">Mods</h3>
-              <ul class="divide-y rounded-lg border">
+              <h3 class="ar-t-ui-strong mb-1">Mods</h3>
+              <ul class="ar-panel divide-y">
                 @for (p of picks(); track p.name) {
                   <li class="flex items-center gap-2 px-3 py-2" [attr.data-pick]="p.name">
                     <div class="min-w-0 flex-1">
@@ -234,7 +234,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             }
             @if (current(); as c) {
               @if (c.unresolved.length) {
-                <div class="rounded-lg bg-destructive/10 px-3 py-2" data-unresolved>
+                <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)]" data-unresolved>
                   <b class="text-destructive">{{ c.unresolved.length === 1 ? 'A dependency' : c.unresolved.length + ' dependencies' }} can't be met.</b> The update can't start until
                   they are fixed: pick other versions, add the mod that's needed, or remove the one that needs it.
                   <ul class="mt-1 list-inside list-disc">
@@ -247,7 +247,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 </div>
               }
               <div data-changes>
-                <h3 class="mb-1 font-medium">What changes</h3>
+                <h3 class="ar-t-ui-strong mb-1">What changes</h3>
                 @if (c.changes.length) {
                   <ul class="list-inside list-disc text-muted-foreground">
                     @for (line of c.changes; track line) {

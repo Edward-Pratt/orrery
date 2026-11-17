@@ -51,8 +51,8 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
     } @else {
       <div class="mt-4 grid gap-4 sm:mt-6 sm:grid-cols-3">
         @for (p of periods; track p.period) {
-          <section class="rounded-xl border p-3" [class]="p.period === period() ? '' : 'max-sm:hidden'" [attr.data-list]="p.period">
-            <h2 class="mb-2 text-sm font-semibold">{{ p.label }}</h2>
+          <section class="ar-panel p-3" [class]="p.period === period() ? '' : 'max-sm:hidden'" [attr.data-list]="p.period">
+            <h2 class="ar-label mb-2">{{ p.label }}</h2>
             <table class="w-full text-sm" [attr.data-top]="p.period">
               <tbody>
                 @for (row of top()[p.period]; track row.player) {

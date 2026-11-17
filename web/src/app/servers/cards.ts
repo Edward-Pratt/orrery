@@ -23,7 +23,7 @@ import { ServerRow } from './row';
   viewProviders: [provideIcons({ lucideCircleAlert, lucidePlus })],
   template: `
     <div class="mb-4 flex items-center gap-3">
-      <h1 class="text-lg font-semibold">Servers</h1>
+      <h1 class="ar-t-heading-md">Servers</h1>
       @if (newServer()) {
         <button hlmBtn size="sm" class="ml-auto" [disabled]="!!pending()?.installing" (click)="sheet.set(true)" data-new-server>
           <ng-icon name="lucidePlus" /> New server
@@ -31,7 +31,7 @@ import { ServerRow } from './row';
       }
     </div>
     @if (pending()?.installing; as i) {
-      <div class="mb-2 flex items-center gap-3 rounded-xl border p-4 text-sm" data-installing>
+      <div class="ar-panel mb-2 flex items-center gap-3 p-4 text-sm" data-installing>
         <hlm-spinner />
         <span class="min-w-0 flex-1">
           Installing <b>{{ i.name }}</b><span class="text-muted-foreground"> (by {{ i.by }})</span>
@@ -40,7 +40,7 @@ import { ServerRow } from './row';
       </div>
     }
     @if (failed(); as f) {
-      <div class="mb-2 flex items-center gap-3 rounded-xl border border-status-down/40 bg-status-down/10 p-3 text-sm" data-install-failed>
+      <div class="ar-callout ar-callout--danger mb-2 flex items-center gap-3 text-sm" data-install-failed>
         <ng-icon name="lucideCircleAlert" class="text-status-down" />
         <span>Installing {{ f.name }} failed: {{ f.why }}</span>
       </div>

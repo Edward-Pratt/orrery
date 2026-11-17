@@ -24,7 +24,7 @@ type Entry = AuditLog['entries'][number];
   selector: 'app-audit',
   imports: [DatePipe, HlmButton, HlmInput, HlmSkeleton, HlmSpinner],
   template: `
-    <h1 class="mb-4 text-lg font-semibold">Audit log</h1>
+    <h1 class="ar-t-heading-md mb-4">Audit log</h1>
     <div class="mb-4 flex flex-wrap items-end gap-4 text-sm">
       <label class="flex flex-col gap-1">
         Server
@@ -61,7 +61,7 @@ type Entry = AuditLog['entries'][number];
         }
       </div>
     } @else if (!entries().length) {
-      <p class="rounded-lg border border-dashed p-6 text-center text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
+      <p class="ar-empty text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
     } @else {
       <table class="hidden w-full text-left text-sm md:table">
         <thead class="text-muted-foreground">
@@ -81,7 +81,7 @@ type Entry = AuditLog['entries'][number];
       </table>
       <ul class="flex flex-col gap-2 md:hidden">
         @for (e of entries(); track e.id) {
-          <li class="rounded-lg border p-3 text-sm" data-card>
+          <li class="ar-panel p-3 text-sm" data-card>
             <div class="flex justify-between gap-2"><b>{{ e.action }} · {{ e.target }}</b><span class="text-muted-foreground">{{ e.ts | date: 'MM-dd HH:mm' }}</span></div>
             <div class="break-all text-muted-foreground">{{ e.actor }}{{ e.details ? ' — ' + e.details : '' }}</div>
           </li>

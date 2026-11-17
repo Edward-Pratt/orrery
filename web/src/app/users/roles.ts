@@ -35,7 +35,7 @@ import { RoleSheet } from './role-sheet';
     @if (roles(); as list) {
       <div class="flex flex-col gap-2">
         @for (r of list; track r.id) {
-          <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3" [attr.data-role]="r.name">
+          <div class="ar-panel flex flex-wrap items-center gap-3 p-3" [attr.data-role]="r.name">
             <div class="min-w-0 flex-1">
               <span class="font-medium">{{ r.name }}</span>
               @if (r.note) {

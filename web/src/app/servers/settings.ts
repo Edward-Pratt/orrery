@@ -106,17 +106,17 @@ export function generatePassword(): string {
     } @else if (state(); as s) {
       <div class="flex max-w-3xl flex-col gap-4 pb-28 text-sm">
         @if (s.rolledBack; as r) {
-          <div class="rounded-lg bg-destructive/10 px-3 py-2" role="alert" data-rolled-back>
+          <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)]" role="alert" data-rolled-back>
             <b class="text-destructive">The server didn't start with the settings saved last,</b> so the Agent put back the ones it last started with: {{ r }}
           </div>
         }
         @if (old()) {
-          <p class="rounded-lg border px-3 py-2" data-old-agent>{{ s.blocked }}</p>
+          <p class="ar-panel px-3 py-2" data-old-agent>{{ s.blocked }}</p>
         } @else if (readOnly()) {
-          <p class="rounded-lg border px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
+          <p class="ar-panel px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
         }
         @if (s.pending.length) {
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-status-warn/40 bg-status-warn/10 px-3 py-2" data-pending>
+          <div class="ar-callout ar-callout--warn flex flex-wrap items-center justify-between gap-2" data-pending>
             <span>Waiting for a restart: {{ labels(s.pending) }}.</span>
             @if (online()) {
               <button hlmBtn variant="outline" size="sm" [disabled]="restarting()" (click)="restart()" data-restart>
@@ -129,14 +129,14 @@ export function generatePassword(): string {
           </div>
         }
         @if (stopped()) {
-          <p class="rounded-lg bg-muted px-3 py-2 text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
+          <p class="bg-card border-[var(--line-strong)] border rounded-lg px-3 py-2 text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
         }
         @if (s.problem; as p) {
-          <p class="rounded-lg bg-status-warn/10 px-3 py-2" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
+          <p class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)]" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
         }
 
         @if (!unreported()) {
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="server">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="server">
           <legend class="px-1 font-semibold">Server</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Name @if (changed('name')) { <span [title]="was('name')" data-changed="name">● <span class="sr-only">changed</span></span> }</span>
@@ -200,7 +200,7 @@ export function generatePassword(): string {
           </div>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="joining">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="joining">
           <legend class="px-1 font-semibold">Joining</legend>
           <div class="flex items-center gap-3">
             <button
@@ -219,7 +219,7 @@ export function generatePassword(): string {
           </div>
           <div aria-live="polite" data-warning-region>
             @if (!form().require_user_verification) {
-              <div class="rounded-lg border border-status-warn/50 bg-status-warn/10 px-3 py-2" data-warning>
+              <div class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)]" data-warning>
                 <b>Names are not checked.</b> Without this, players join with no factorio.com account check: anyone who has the game password can join under any name, an admin's included. As an admin they can run Lua commands,
                 when commands are on for admins, and through those take over the game, post to Discord as anyone, and pass for a linked player. Bans by name stop no one. Turn it off only for players without a factorio.com account
                 (such as a family-shared copy). Keep the game password secret, and change it here if it leaks.
@@ -236,7 +236,7 @@ export function generatePassword(): string {
           </label>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="pausing">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="pausing">
           <legend class="px-1 font-semibold">Pausing</legend>
           @for (k of pauseKeys; track k) {
             <label class="flex items-center gap-2">
@@ -252,7 +252,7 @@ export function generatePassword(): string {
           }
         </fieldset>
 
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="saving">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="saving">
           <legend class="px-1 font-semibold">Saving</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Autosave every (minutes) @if (changed('autosave_interval')) { <span [title]="was('autosave_interval')" data-changed="autosave_interval">● <span class="sr-only">changed</span></span> }</span>
@@ -275,7 +275,7 @@ export function generatePassword(): string {
           <p class="text-xs text-muted-foreground">orrery's own saves (every 6 h after play, and before updates) are separate from Factorio's autosaves.</p>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="commands">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="commands">
           <legend class="px-1 font-semibold">Lua commands</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Who may run them @if (changed('allow_commands')) { <span [title]="was('allow_commands')" data-changed="allow_commands">● <span class="sr-only">changed</span></span> }</span>
@@ -293,7 +293,7 @@ export function generatePassword(): string {
           <p id="hint-commands" class="text-xs text-muted-foreground">Commands can change anything in the game, and using one disables achievements for that save for good.</p>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="admins">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="admins">
           <legend class="px-1 font-semibold">Admins @if (changed('admins')) { <span [title]="was('admins')" data-changed="admins">● <span class="sr-only">changed</span></span> }</legend>
           @if (form().admins.length) {
             <ul class="flex flex-wrap gap-1.5" aria-label="Admins">

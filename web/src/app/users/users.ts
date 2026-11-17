@@ -38,7 +38,7 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
       <button hlmBtn size="sm" class="ml-auto" (click)="editing.set('new')" data-invite><ng-icon name="lucidePlus" /> Invite…</button>
     </div>
     @if (link(); as l) {
-      <div class="mb-4 flex flex-col gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-link>
+      <div class="ar-callout ar-callout--warn mb-4 flex flex-col gap-2 text-sm" data-link>
         <p>The link for <b>{{ l.username }}</b> works once, for 24 hours, and isn't shown again: send it to them.</p>
         <div class="flex items-start gap-2 rounded-md border bg-background p-2">
           <code class="min-w-0 flex-1 font-mono text-xs break-all" data-link-url>{{ l.invite }}</code>
@@ -50,7 +50,7 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
     @if (users(); as list) {
       <div class="flex flex-col gap-2">
         @for (u of list; track u.id) {
-          <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3" [attr.data-user]="u.username">
+          <div class="ar-panel flex flex-wrap items-center gap-3 p-3" [attr.data-user]="u.username">
             <div class="min-w-0 flex-1">
               <span class="font-medium">{{ u.username }}</span>
               @if (u.id === me()?.id) {

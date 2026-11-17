@@ -39,10 +39,10 @@ export function fromFileName(file: string): { name: string; version: string } {
   imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSkeleton, HlmSpinner, HlmToggleGroupImports],
   viewProviders: [provideIcons({ lucideCircleAlert, lucideCoffee, lucidePackage, lucidePlus })],
   template: `
-    <h1 class="mb-4 text-lg font-semibold">Library</h1>
+    <h1 class="ar-t-heading-md mb-4">Library</h1>
     <div class="mb-4 flex max-w-4xl flex-col gap-4 empty:hidden">
       @if (running(); as r) {
-        <div class="flex flex-wrap items-center gap-3 rounded-xl border p-4 text-sm" data-running>
+        <div class="ar-panel flex flex-wrap items-center gap-3 p-4 text-sm" data-running>
           <hlm-spinner />
           <span class="min-w-0 flex-1">
             Adding <b>{{ r.name }} {{ r.version }}</b><span class="text-muted-foreground"> (by {{ r.by }})</span>
@@ -53,7 +53,7 @@ export function fromFileName(file: string): { name: string; version: string } {
       }
       @if (ended(); as e) {
         <div
-          class="flex items-center gap-3 rounded-xl border p-3 text-sm"
+          class="ar-panel flex items-center gap-3 p-3 text-sm"
           [class]="e.outcome === 'failed' ? 'border-status-down/40 bg-status-down/10' : 'bg-muted'"
           [attr.data-ended]="e.outcome"
         >
@@ -68,14 +68,14 @@ export function fromFileName(file: string): { name: string; version: string } {
     </div>
     <section class="flex max-w-4xl flex-col gap-4" data-packs>
       <div class="flex items-center gap-3">
-        <h2 class="text-base font-semibold">Packs</h2>
+        <h2 class="ar-t-heading-sm">Packs</h2>
         <button hlmBtn size="sm" class="ml-auto" [disabled]="!!running()" (click)="openSheet()" data-add>
           <ng-icon name="lucidePlus" /> Add pack
         </button>
       </div>
       @if (state(); as s) {
         @if (s.packs.length) {
-          <ul class="divide-y rounded-lg border">
+          <ul class="ar-panel divide-y">
             @for (p of s.packs; track p.id) {
               <li class="flex flex-wrap items-start gap-x-4 gap-y-1 p-3 text-sm" [attr.data-pack]="p.id">
                 <div class="min-w-0 flex-1">
@@ -92,7 +92,7 @@ export function fromFileName(file: string): { name: string; version: string } {
             }
           </ul>
         } @else {
-          <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
+          <div class="ar-empty" data-empty>
             <ng-icon name="lucidePackage" class="text-3xl text-muted-foreground" />
             <p class="mt-2 font-medium">No packs yet</p>
             <p class="text-sm text-muted-foreground">Add a pack version from a link or an upload: servers install and update from here.</p>
@@ -109,7 +109,7 @@ export function fromFileName(file: string): { name: string; version: string } {
       <section class="mt-8 flex max-w-4xl flex-col gap-4" data-runtimes>
         <div class="flex items-center gap-3">
           <div>
-            <h2 class="text-base font-semibold">Java runtimes</h2>
+            <h2 class="ar-t-heading-sm">Java runtimes</h2>
             <p class="text-sm text-muted-foreground">Temurin JDKs from Adoptium. Each server runs on the one set on its Pack tab, or on the host's own java.</p>
           </div>
           <button hlmBtn size="sm" class="ml-auto shrink-0" [disabled]="!!running()" (click)="openRuntimeSheet()" data-add-runtime>
@@ -117,7 +117,7 @@ export function fromFileName(file: string): { name: string; version: string } {
           </button>
         </div>
         @if (s.runtimes.length) {
-          <ul class="divide-y rounded-lg border">
+          <ul class="ar-panel divide-y">
             @for (r of s.runtimes; track r.name) {
               <li class="flex flex-wrap items-start gap-x-4 gap-y-1 p-3 text-sm" [attr.data-runtime]="r.name">
                 <div class="min-w-0 flex-1">
@@ -131,7 +131,7 @@ export function fromFileName(file: string): { name: string; version: string } {
             }
           </ul>
         } @else {
-          <div class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground" data-runtimes-empty>
+          <div class="ar-empty text-sm text-muted-foreground" data-runtimes-empty>
             <ng-icon name="lucideCoffee" class="text-2xl" />
             <p>No runtimes yet: every server runs on the host's own java.</p>
           </div>

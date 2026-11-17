@@ -13,8 +13,8 @@ import ServerPage from './server';
   imports: [DatePipe],
   template: `
     @let p = player();
-    <section class="rounded-xl border bg-card p-4" data-player>
-      <h3 class="mb-2 font-medium">{{ p.player }}</h3>
+    <section class="ar-panel p-4" data-player>
+      <h3 class="ar-t-ui-strong mb-2">{{ p.player }}</h3>
       <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
         <dt class="text-muted-foreground">Total</dt>
         <dd>{{ duration(p.totalMs) }}</dd>

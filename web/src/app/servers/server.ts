@@ -40,7 +40,7 @@ const SECTIONS: { path: string; label: string; factorio?: string; has: (d: Serve
     } @else if (card(); as c) {
       <header class="mt-2 mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 class="flex items-center gap-3 text-lg font-semibold">
+          <h1 class="ar-t-heading-md flex items-center gap-3">
             {{ c.name }}
             <app-status data-state [health]="state().health" [label]="state().label" class="text-sm font-normal" />
           </h1>

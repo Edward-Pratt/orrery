@@ -53,7 +53,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
       <div class="flex max-w-4xl flex-col gap-8">
         @if (!p.installed) {
           @if (!report()) {
-            <div class="rounded-xl border border-dashed p-8 text-center" data-adopt>
+            <div class="ar-empty" data-adopt>
               <ng-icon name="lucidePackage" class="text-3xl text-muted-foreground" />
               <p class="mt-2 font-medium">orrery doesn't know this server's pack yet</p>
               <p class="mx-auto mb-4 max-w-md text-sm text-muted-foreground">
@@ -71,14 +71,14 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
             </div>
           } @else {
             <section data-report>
-              <h2 class="text-base font-semibold">Adopt {{ report()!.name }} {{ report()!.version }}</h2>
+              <h2 class="ar-t-heading-sm">Adopt {{ report()!.name }} {{ report()!.version }}</h2>
               <p class="mb-4 text-sm text-muted-foreground" data-matching>
                 {{ report()!.matching.toLocaleString('en') }} files match the pack. These don't. Ticked files are kept as Extras and put back on every
                 update; unticked ones are left alone now and dropped by the next update.
               </p>
-              <h3 class="mt-4 mb-1 text-sm font-medium">Recognised</h3>
+              <h3 class="ar-t-ui-strong mt-4 mb-1">Recognised</h3>
               <p class="mb-2 text-xs text-muted-foreground">The orrery Mod: put back on every update, never an Extra.</p>
-              <ul class="divide-y rounded-lg border">
+              <ul class="ar-panel divide-y">
                 @for (m of report()!.mod; track m) {
                   <li class="flex items-center gap-3 px-3 py-2 text-sm" data-report-mod>
                     <ng-icon name="lucideLock" class="text-muted-foreground" />
@@ -90,9 +90,9 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 }
               </ul>
               @for (g of groups; track g.key) {
-                <h3 class="mt-4 mb-1 text-sm font-medium">{{ g.title }}</h3>
+                <h3 class="ar-t-ui-strong mt-4 mb-1">{{ g.title }}</h3>
                 <p class="mb-2 text-xs text-muted-foreground">{{ g.hint }}</p>
-                <ul class="divide-y rounded-lg border" [attr.data-group]="g.key">
+                <ul class="ar-panel divide-y" [attr.data-group]="g.key">
                   @for (f of report()![g.key]; track f.path) {
                     <li class="flex items-center gap-3 px-3 py-2 text-sm">
                       <input type="checkbox" class="size-4 accent-[var(--brand)]" [checked]="keep().has(f.path)" (change)="toggle(f.path)" [attr.aria-label]="'Keep ' + f.path" />
@@ -112,7 +112,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           }
         } @else {
           @if (p.rolledBack; as rb) {
-            <div class="-mx-4 flex flex-wrap items-center gap-3 border-y border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm md:mx-0 md:rounded-lg md:border" data-rolled-back>
+            <div class="ar-callout ar-callout--warn -mx-4 flex flex-wrap items-center gap-3 border-y text-sm md:mx-0 md:rounded-lg md:border" data-rolled-back>
               <ng-icon name="lucideCircleAlert" class="text-status-warn" />
               <span class="flex-1">
                 Pack update to {{ rb.to }} <b>rolled back</b>: no hello in time. {{ p.installed.version }} is running again, but the world may have been changed
@@ -127,14 +127,14 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           @if (running(); as r) {
             <app-update-steps [title]="'Updating to ' + r.name + ' ' + r.version" [update]="r" [busy]="busy()" (cancel)="cancel()" />
           } @else {
-            <section class="rounded-xl border bg-card p-5" data-summary>
+            <section class="ar-panel p-5" data-summary>
               @if (done(); as d) {
                 <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="lucideCheck" /> Done: {{ d }} is running.</p>
               }
               <div class="flex flex-wrap items-start justify-between gap-4">
                 <div class="min-w-0">
                   <p class="text-xs font-medium text-muted-foreground">Installed pack</p>
-                  <h2 class="text-xl font-semibold" data-installed>{{ p.installed.name }} {{ p.installed.version }}</h2>
+                  <h2 class="ar-t-heading-md" data-installed>{{ p.installed.name }} {{ p.installed.version }}</h2>
                   <p class="text-sm break-all text-muted-foreground" data-installed-by>
                     {{ p.installed.how }} by {{ p.installed.by }}, {{ p.installed.at | date: 'd MMM y' }} ·
                     @if (isUrl(p.installed.source)) {
@@ -160,7 +160,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 </div>
               </div>
               @if (p.pending.length) {
-                <div class="mt-4 rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-pending>
+                <div class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)] mt-4 text-sm" data-pending>
                   <b class="text-status-warn">{{ p.pending.length }} change{{ p.pending.length === 1 ? '' : 's' }} pending</b>, not on the server until applied (a
                   restart, with a backup first):
                   <ul class="mt-1 list-inside list-disc text-muted-foreground">
@@ -194,13 +194,13 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                       }
                     </select>
                     @if (p.runtime.pending) {
-                      <span class="rounded-full bg-amber-500/15 px-2 text-xs text-status-warn" data-runtime-pending>pending restart</span>
+                      <span class="ar-tag ar-tag--warn" data-runtime-pending>pending restart</span>
                     }
                   </div>
                 }
               </div>
               @if (failedPrep(); as f) {
-                <div class="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm" data-failed-prep>
+                <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)] mt-4 text-sm" data-failed-prep>
                   <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
                 </div>
               }
@@ -210,18 +210,18 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           <section data-extras>
             <div class="mb-2 flex items-center justify-between gap-3">
               <div>
-                <h2 class="text-base font-semibold">Extras</h2>
+                <h2 class="ar-t-heading-sm">Extras</h2>
                 <p class="text-sm text-muted-foreground">Files put on top of the pack on every update: new ones, or replacing the pack's.</p>
               </div>
               <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'extra' })" data-add-extra><ng-icon name="lucidePlus" /> Add extra</button>
             </div>
-            <ul class="divide-y rounded-lg border">
+            <ul class="ar-panel divide-y">
               @for (e of p.extras; track e.id) {
                 <li class="flex items-start gap-3 px-3 py-2.5 text-sm" [class.opacity-60]="e.removed" [attr.data-extra]="e.target">
                   <div class="min-w-0 flex-1">
                     <p class="truncate font-mono text-xs" [class.line-through]="e.removed">{{ e.target }}</p>
                     <p class="text-xs text-muted-foreground">
-                      <span class="mr-1 rounded-full border px-1.5" data-where>{{ e.replaces ? "replaces the pack's file" : 'new path' }}</span>
+                      <span class="ar-tag mr-1" data-where>{{ e.replaces ? "replaces the pack's file" : 'new path' }}</span>
                       @if (e.label) {
                         {{ e.label }} ·
                       }
@@ -232,7 +232,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                     </p>
                   </div>
                   @if (e.change) {
-                    <span class="rounded-full bg-amber-500/15 px-2 text-xs text-status-warn" data-change>{{ e.change }}</span>
+                    <span class="ar-tag ar-tag--warn" data-change>{{ e.change }}</span>
                   }
                   @if (!e.removed) {
                     <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more><ng-icon name="lucideEllipsis" /></button>
@@ -259,12 +259,12 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           <section data-edits>
             <div class="mb-2 flex items-center justify-between gap-3">
               <div>
-                <h2 class="text-base font-semibold">Config edits</h2>
+                <h2 class="ar-t-heading-sm">Config edits</h2>
                 <p class="text-sm text-muted-foreground">Find-and-replace in the pack's files, applied last. One that matches nothing stops the update before the server is touched.</p>
               </div>
               <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'edit' })" data-add-edit><ng-icon name="lucidePlus" /> Add edit</button>
             </div>
-            <ul class="divide-y rounded-lg border">
+            <ul class="ar-panel divide-y">
               @for (c of p.edits; track c.id) {
                 <li class="flex items-start gap-3 px-3 py-2.5 text-sm" [attr.data-edit]="c.id">
                   <div class="min-w-0 flex-1">
@@ -299,7 +299,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
         }
 
         <section data-kept>
-          <h2 class="text-base font-semibold">Kept paths</h2>
+          <h2 class="ar-t-heading-sm">Kept paths</h2>
           <p class="mb-2 text-sm text-muted-foreground">
             Never deleted or overwritten by an update. This server's own are set in <span class="font-mono text-xs">config.json</span> (<span
               class="font-mono text-xs"

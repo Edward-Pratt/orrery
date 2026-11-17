@@ -69,8 +69,8 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
       <section class="max-w-4xl">
         <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4" data-backup-summary>
           @for (t of tiles(); track t.key) {
-            <section class="rounded-xl border bg-card p-4" [attr.data-tile]="t.key" [attr.data-state]="t.warn ? 'warn' : 'ok'">
-              <h2 class="text-xs font-medium text-muted-foreground">{{ t.label }}</h2>
+            <section class="ar-panel p-4" [attr.data-tile]="t.key" [attr.data-state]="t.warn ? 'warn' : 'ok'">
+              <h2 class="ar-label">{{ t.label }}</h2>
               <p class="mt-1 text-2xl font-semibold" [class.text-status-warn]="t.warn" data-value>{{ t.value }}</p>
               @if (t.detail) {
                 <p class="text-xs" [class]="t.warn ? 'text-status-warn' : 'text-muted-foreground'" data-detail>{{ t.detail }}</p>
@@ -99,7 +99,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           }
         </div>
         @if (may('servers.restore') && preselected(); as name) {
-          <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-preselected>
+          <div class="ar-callout ar-callout--warn mb-4 flex flex-wrap items-center gap-3 text-sm" data-preselected>
             <span class="flex-1">Restore <span class="font-mono">{{ name }}</span>, the backup from before the pack update?</span>
             <button hlmBtn size="sm" variant="outline" [disabled]="!!restoreWhy() || !!progress()" (click)="restore(name)" data-restore-preselected>Restore…</button>
             @if (restoreWhy(); as why) {
@@ -146,7 +146,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
             </tbody>
           </table>
         } @else {
-          <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
+          <div class="ar-empty" data-empty>
             <p class="font-medium">{{ words().empty }}</p>
             <p class="mb-3 text-sm text-muted-foreground">{{ words().emptyDetail }}</p>
             @if (may('servers.control')) {

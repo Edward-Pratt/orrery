@@ -27,7 +27,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
     @if (server(); as p) {
       <div class="flex max-w-3xl flex-col gap-4">
         <div class="flex flex-wrap items-center gap-3">
-          <h1 class="text-lg font-semibold">{{ p.name }}</h1>
+          <h1 class="ar-t-heading-md">{{ p.name }}</h1>
           <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn" data-badge>Waiting for setup</span>
           @if (mayDiscard) {
             <button hlmBtn variant="ghost" size="sm" class="ml-auto text-status-down" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
@@ -44,7 +44,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
         @for (step of steps(); track step.command) {
           <div class="flex flex-col gap-1" [attr.data-step]="step.what">
             <p class="text-sm font-medium">{{ step.label }}</p>
-            <div class="flex items-start gap-2 rounded-lg border bg-muted p-3">
+            <div class="ar-panel flex items-start gap-2 bg-muted p-3">
               <code class="min-w-0 flex-1 break-all font-mono text-xs" data-command>{{ step.command }}</code>
               <button hlmBtn variant="ghost" size="sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="lucideCopy" /></button>
             </div>

@@ -34,8 +34,8 @@ export function failedPrep(history: PackUpdateRow[]): { to: string; why: string 
   viewProviders: [provideIcons({ lucideCheck, lucideLoaderCircle, lucideX })],
   template: `
     @let r = update();
-    <section class="rounded-xl border bg-card p-5" data-updating>
-      <h2 class="font-semibold">{{ title() }}</h2>
+    <section class="ar-panel p-5" data-updating>
+      <h2 class="ar-t-heading-sm">{{ title() }}</h2>
       <p class="mb-4 text-sm text-muted-foreground">Started by {{ r.by }} at {{ r.started | date: 'HH:mm' }}. You can leave this page.</p>
       <ol class="flex flex-col gap-3">
         @for (s of r.steps; track s.step; let i = $index) {
@@ -89,7 +89,7 @@ export class UpdateSteps {
   imports: [DatePipe],
   template: `
     <section data-history>
-      <h2 class="mb-2 text-base font-semibold">History</h2>
+      <h2 class="ar-t-heading-sm mb-2">History</h2>
       @if (rows().length) {
         <table class="w-full text-left text-sm">
           <thead class="text-muted-foreground">

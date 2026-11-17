@@ -31,7 +31,7 @@ const OUTCOME: Record<DeployOutcome, string> = {
   template: `
     <section id="releases" class="mt-8" data-releases>
       <div class="mb-3 flex flex-wrap items-center gap-3">
-        <h2 class="text-base font-semibold">Releases</h2>
+        <h2 class="ar-t-heading-sm">Releases</h2>
         @if (answer(); as a) {
           <span class="text-xs text-muted-foreground" data-checked>
             @if (a.checkedAt) {
@@ -49,7 +49,7 @@ const OUTCOME: Record<DeployOutcome, string> = {
           Check now
         </button>
       </div>
-      <ul class="divide-y rounded-lg border">
+      <ul class="ar-panel divide-y">
         @for (r of rows(); track r.key) {
           <li class="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm" [attr.data-row]="r.key">
             <span class="w-36 font-medium">{{ r.label }}</span>
@@ -57,7 +57,7 @@ const OUTCOME: Record<DeployOutcome, string> = {
               <span data-running>{{ r.running ?? 'unknown' }}</span>
               <span class="text-muted-foreground"> · latest <span data-latest>{{ r.latest ?? 'none' }}</span></span>
               @if (r.newer) {
-                <span class="ml-2 rounded-full bg-amber-500/20 px-2 text-xs text-amber-700 dark:text-amber-300" data-newer>newer available</span>
+                <span class="ar-tag ar-tag--warn ml-2" data-newer>newer available</span>
               }
             </span>
             @if (r.deploying) {
@@ -82,12 +82,12 @@ const OUTCOME: Record<DeployOutcome, string> = {
         }
       </ul>
       @if (answer()?.history?.length) {
-        <h3 class="mt-6 mb-2 text-sm font-semibold">History</h3>
-        <ul class="divide-y rounded-lg border text-sm" data-history>
+        <h3 class="ar-label mt-6 mb-2">History</h3>
+        <ul class="ar-panel divide-y text-sm" data-history>
           @for (h of answer()!.history; track h.id) {
             <li class="p-3" [attr.data-deploy-row]="h.id">
               <div class="flex flex-wrap items-center gap-x-3">
-                <span class="rounded-full px-2 text-xs" [class]="outcome[h.outcome]" data-outcome>{{ h.outcome }}</span>
+                <span class="ar-tag" [class]="outcome[h.outcome]" data-outcome>{{ h.outcome }}</span>
                 <span>{{ what(h) }}: {{ h.from ?? 'unknown' }} → {{ h.to }}</span>
                 <span class="text-muted-foreground">{{ h.by }}, {{ h.started | date: 'd MMM HH:mm' }}</span>
               </div>

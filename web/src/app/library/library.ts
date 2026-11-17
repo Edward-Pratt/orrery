@@ -4,7 +4,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { LibraryAdd, LibraryAddAnswer, LibraryAddRequest, LibraryPack, LibraryRuntime, LibraryState, RuntimeAddRequest } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCircleAlert, lucideCoffee, lucidePackage, lucidePlus } from '@ng-icons/lucide';
+import { arCircleAlert, arCoffee, arPackage, arPlus } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -37,7 +37,7 @@ export function fromFileName(file: string): { name: string; version: string } {
 @Component({
   selector: 'app-library',
   imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSkeleton, HlmSpinner, HlmToggleGroupImports],
-  viewProviders: [provideIcons({ lucideCircleAlert, lucideCoffee, lucidePackage, lucidePlus })],
+  viewProviders: [provideIcons({ arCircleAlert, arCoffee, arPackage, arPlus })],
   template: `
     <h1 class="ar-t-heading-md mb-4">Library</h1>
     <div class="mb-4 flex max-w-4xl flex-col gap-4 empty:hidden">
@@ -58,7 +58,7 @@ export function fromFileName(file: string): { name: string; version: string } {
           [attr.data-ended]="e.outcome"
         >
           @if (e.outcome === 'failed') {
-            <ng-icon name="lucideCircleAlert" class="text-status-down" />
+            <ng-icon name="arCircleAlert" class="text-status-down" />
             <span>Adding {{ e.name }} {{ e.version }} failed: {{ e.reason }}</span>
           } @else {
             <span>{{ e.reason }}</span>
@@ -70,7 +70,7 @@ export function fromFileName(file: string): { name: string; version: string } {
       <div class="flex items-center gap-3">
         <h2 class="ar-t-heading-sm">Packs</h2>
         <button hlmBtn size="sm" class="ml-auto" [disabled]="!!running()" (click)="openSheet()" data-add>
-          <ng-icon name="lucidePlus" /> Add pack
+          <ng-icon name="arPlus" /> Add pack
         </button>
       </div>
       @if (state(); as s) {
@@ -93,7 +93,7 @@ export function fromFileName(file: string): { name: string; version: string } {
           </ul>
         } @else {
           <div class="ar-empty" data-empty>
-            <ng-icon name="lucidePackage" class="text-3xl text-muted-foreground" />
+            <ng-icon name="arPackage" class="text-2xl text-muted-foreground" />
             <p class="mt-2 font-medium">No packs yet</p>
             <p class="text-sm text-muted-foreground">Add a pack version from a link or an upload: servers install and update from here.</p>
           </div>
@@ -113,7 +113,7 @@ export function fromFileName(file: string): { name: string; version: string } {
             <p class="text-sm text-muted-foreground">Temurin JDKs from Adoptium. Each server runs on the one set on its Pack tab, or on the host's own java.</p>
           </div>
           <button hlmBtn size="sm" class="ml-auto shrink-0" [disabled]="!!running()" (click)="openRuntimeSheet()" data-add-runtime>
-            <ng-icon name="lucidePlus" /> Add runtime
+            <ng-icon name="arPlus" /> Add runtime
           </button>
         </div>
         @if (s.runtimes.length) {
@@ -132,7 +132,7 @@ export function fromFileName(file: string): { name: string; version: string } {
           </ul>
         } @else {
           <div class="ar-empty text-sm text-muted-foreground" data-runtimes-empty>
-            <ng-icon name="lucideCoffee" class="text-2xl" />
+            <ng-icon name="arCoffee" class="text-2xl" />
             <p>No runtimes yet: every server runs on the host's own java.</p>
           </div>
         }

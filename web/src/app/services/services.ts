@@ -5,7 +5,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import type { CheckStatus, Integrations as IntegrationsOn, ServerCard, ServiceLogs, ServiceStatus, ServiceVerb } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideEllipsis } from '@ng-icons/lucide';
+import { arMore } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -33,7 +33,7 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
 @Component({
   selector: 'app-services',
   imports: [NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmSheetImports, HlmSkeleton, HlmSpinner, Status, ServerActions],
-  viewProviders: [provideIcons({ lucideEllipsis })],
+  viewProviders: [provideIcons({ arMore })],
   template: `
     <h1 class="ar-t-heading-md mb-4">{{ title() }}</h1>
     @if (ready()) {
@@ -72,7 +72,7 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
                 }
                 @if (session.can('services.control') || session.can('services.logs')) {
                   <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
-                    <ng-icon name="lucideEllipsis" />
+                    <ng-icon name="arMore" />
                   </button>
                 }
               </div>

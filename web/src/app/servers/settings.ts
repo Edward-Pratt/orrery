@@ -3,7 +3,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { AllowCommands, GameSettingsAnswer, GameSettingsFields, GameSettingsRequest, GameSettingsState, LiveEvent, RestartRequest } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideX } from '@ng-icons/lucide';
+import { arClose } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
@@ -99,7 +99,7 @@ export function generatePassword(): string {
 @Component({
   selector: 'app-server-settings',
   imports: [NgIcon, HlmButton, HlmInput, HlmSpinner],
-  viewProviders: [provideIcons({ lucideX })],
+  viewProviders: [provideIcons({ arClose })],
   template: `
     @if (missing(); as why) {
       <p class="text-muted-foreground" data-missing>{{ why }}</p>
@@ -304,7 +304,7 @@ export function generatePassword(): string {
                     <span class="font-sans text-muted-foreground">(name not checked)</span>
                   }
                   <button hlmBtn variant="ghost" size="sm" type="button" class="size-6 p-0" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
-                    <ng-icon name="lucideX" />
+                    <ng-icon name="arClose" />
                   </button>
                 </li>
               }

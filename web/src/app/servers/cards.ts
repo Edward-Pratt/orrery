@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import type { PendingServers, ServerCard } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCircleAlert, lucidePlus } from '@ng-icons/lucide';
+import { arCircleAlert, arPlus } from '@armil/icons';
 import { catchError, debounceTime, EMPTY, filter, of, startWith, Subject, switchMap } from 'rxjs';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
@@ -20,13 +20,13 @@ import { ServerRow } from './row';
 @Component({
   selector: 'app-cards',
   imports: [RouterLink, NgIcon, HlmBadge, HlmButton, HlmSkeleton, HlmSpinner, NewServer, ServerRow],
-  viewProviders: [provideIcons({ lucideCircleAlert, lucidePlus })],
+  viewProviders: [provideIcons({ arCircleAlert, arPlus })],
   template: `
     <div class="mb-4 flex items-center gap-3">
       <h1 class="ar-t-heading-md">Servers</h1>
       @if (newServer()) {
         <button hlmBtn size="sm" class="ml-auto" [disabled]="!!pending()?.installing" (click)="sheet.set(true)" data-new-server>
-          <ng-icon name="lucidePlus" /> New server
+          <ng-icon name="arPlus" /> New server
         </button>
       }
     </div>
@@ -41,7 +41,7 @@ import { ServerRow } from './row';
     }
     @if (failed(); as f) {
       <div class="ar-callout ar-callout--danger mb-2 flex items-center gap-3 text-sm" data-install-failed>
-        <ng-icon name="lucideCircleAlert" class="text-status-down" />
+        <ng-icon name="arCircleAlert" class="text-status-down" />
         <span>Installing {{ f.name }} failed: {{ f.why }}</span>
       </div>
     }

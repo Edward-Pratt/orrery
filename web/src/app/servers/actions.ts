@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, inject, input, output, signal } from '
 import { Router, RouterLink } from '@angular/router';
 import type { RestartRequest, ServerCard } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideEllipsis, lucideTerminal } from '@ng-icons/lucide';
+import { arMore, arTerminal } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
@@ -29,7 +29,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
 @Component({
   selector: 'app-server-actions',
   imports: [DatePipe, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmSpinner],
-  viewProviders: [provideIcons({ lucideEllipsis, lucideTerminal })],
+  viewProviders: [provideIcons({ arMore, arTerminal })],
   template: `
     @let c = card();
     <div class="relative flex items-center gap-2" data-actions>
@@ -54,7 +54,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
         @if (c.features.console && may().console) {
           <a hlmBtn variant="outline" size="sm" [routerLink]="['/servers', c.id, 'console']" data-action="console" aria-label="Console">
-            <ng-icon name="lucideTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
+            <ng-icon name="arTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
           </a>
         }
       } @else if (c.service && may().service) {
@@ -71,7 +71,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
       }
       @if (menu().any) {
         <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
-          <ng-icon name="lucideEllipsis" />
+          <ng-icon name="arMore" />
         </button>
       }
       @if (asking()) {

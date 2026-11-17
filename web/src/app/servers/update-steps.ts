@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, input, output } from '@angular/core';
 import type { PackFinished, PackStep, PackStepState, PackUpdateRow } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideLoaderCircle, lucideX } from '@ng-icons/lucide';
+import { arCheck, arClose } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { formatDuration } from '../units';
 
@@ -31,7 +31,7 @@ export function failedPrep(history: PackUpdateRow[]): { to: string; why: string 
 @Component({
   selector: 'app-update-steps',
   imports: [DatePipe, NgIcon, HlmButton],
-  viewProviders: [provideIcons({ lucideCheck, lucideLoaderCircle, lucideX })],
+  viewProviders: [provideIcons({ arCheck, arClose })],
   template: `
     @let r = update();
     <section class="ar-panel p-5" data-updating>
@@ -46,13 +46,13 @@ export function failedPrep(history: PackUpdateRow[]): { to: string; why: string 
             >
               @switch (s.state) {
                 @case ('done') {
-                  <ng-icon name="lucideCheck" />
+                  <ng-icon name="arCheck" />
                 }
                 @case ('failed') {
-                  <ng-icon name="lucideX" />
+                  <ng-icon name="arClose" />
                 }
                 @case ('running') {
-                  <ng-icon name="lucideLoaderCircle" class="animate-spin" />
+                  <span class="ar-spinner"></span>
                 }
                 @default {
                   {{ i + 1 }}

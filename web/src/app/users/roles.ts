@@ -7,7 +7,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import type { PermissionInfo, RoleView } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucidePlus } from '@ng-icons/lucide';
+import { arPlus } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { catchError, firstValueFrom, of } from 'rxjs';
@@ -18,7 +18,7 @@ import { RoleSheet } from './role-sheet';
 @Component({
   selector: 'app-roles',
   imports: [NgIcon, HlmButton, HlmSkeleton, RoleSheet],
-  viewProviders: [provideIcons({ lucidePlus })],
+  viewProviders: [provideIcons({ arPlus })],
   template: `
     <div class="mb-4 flex items-center gap-3">
       <p class="text-sm text-muted-foreground">
@@ -29,7 +29,7 @@ import { RoleSheet } from './role-sheet';
         }
       </p>
       @if (owner()) {
-        <button hlmBtn size="sm" class="ml-auto" (click)="editing.set('new')" data-new-role><ng-icon name="lucidePlus" /> New role…</button>
+        <button hlmBtn size="sm" class="ml-auto" (click)="editing.set('new')" data-new-role><ng-icon name="arPlus" /> New role…</button>
       }
     </div>
     @if (roles(); as list) {

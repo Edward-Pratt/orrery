@@ -4,7 +4,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { PendingServers } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCopy } from '@ng-icons/lucide';
+import { arCopy } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
@@ -22,7 +22,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 @Component({
   selector: 'app-waiting',
   imports: [DatePipe, RouterLink, NgIcon, HlmBadge, HlmButton, HlmSkeleton],
-  viewProviders: [provideIcons({ lucideCopy })],
+  viewProviders: [provideIcons({ arCopy })],
   template: `
     @if (server(); as p) {
       <div class="flex max-w-3xl flex-col gap-4">
@@ -46,7 +46,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
             <p class="text-sm font-medium">{{ step.label }}</p>
             <div class="ar-panel flex items-start gap-2 bg-muted p-3">
               <code class="min-w-0 flex-1 break-all font-mono text-xs" data-command>{{ step.command }}</code>
-              <button hlmBtn variant="ghost" size="sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="lucideCopy" /></button>
+              <button hlmBtn variant="ghost" size="sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
             </div>
           </div>
         }

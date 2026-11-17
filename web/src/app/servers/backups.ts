@@ -5,7 +5,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import type { Backup, CommandOutput, Game, Permission, RestoreRequest, SaveKind } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideEllipsis } from '@ng-icons/lucide';
+import { arMore } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
@@ -63,7 +63,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
 @Component({
   selector: 'app-server-backups',
   imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSpinner, SaveUpload],
-  viewProviders: [provideIcons({ lucideEllipsis })],
+  viewProviders: [provideIcons({ arMore })],
   template: `
     @if (backups(); as b) {
       <section class="max-w-4xl">
@@ -129,7 +129,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                   <td class="py-1 text-right">
                     @if (may('servers.restore')) {
                       <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
-                        <ng-icon name="lucideEllipsis" />
+                        <ng-icon name="arMore" />
                       </button>
                     }
                     <ng-template #menu>

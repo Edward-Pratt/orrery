@@ -3,7 +3,7 @@ import { afterNextRender, Component, computed, inject, Injector, signal } from '
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
+import { arArrowLeft, arCheck, arClose, arFileUp, arLock, arPlus, arSearch } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -40,7 +40,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
   selector: 'app-server-game',
   imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, ModUpdatesBadge, ModUpdatesNotes, UpdateHistory, UpdateSteps],
   providers: [PortalUpdates],
-  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX })],
+  viewProviders: [provideIcons({ arArrowLeft, arCheck, arFileUp, arLock, arPlus, arSearch, arClose })],
   template: `
     @if (state(); as g) {
       <div class="flex max-w-4xl flex-col gap-8">
@@ -49,7 +49,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
         } @else {
           <section class="ar-panel p-5" data-summary>
             @if (done(); as d) {
-              <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="lucideCheck" /> Done: {{ d }} is running.</p>
+              <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="arCheck" /> Done: {{ d }} is running.</p>
             }
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="min-w-0">
@@ -108,14 +108,14 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             @if (browsing()) {
               <div class="flex items-center gap-1">
                 <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeBrowse()" data-browse-back>
-                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                  <ng-icon name="arArrowLeft" aria-hidden="true" />
                 </button>
                 <h2 hlmSheetTitle>Browse mods</h2>
               </div>
             } @else if (importing()) {
               <div class="flex items-center gap-1">
                 <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeImport()" data-import-back>
-                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                  <ng-icon name="arArrowLeft" aria-hidden="true" />
                 </button>
                 <h2 hlmSheetTitle>Import mod list</h2>
               </div>
@@ -189,10 +189,10 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                     </select>
                     @if (p.name === orrery) {
                       <span class="flex size-8 items-center justify-center text-muted-foreground" title="Its Agent needs it: not removable" data-locked>
-                        <ng-icon name="lucideLock" aria-hidden="true" /><span class="sr-only">Not removable: its Agent needs it</span>
+                        <ng-icon name="arLock" aria-hidden="true" /><span class="sr-only">Not removable: its Agent needs it</span>
                       </span>
                     } @else {
-                      <button hlmBtn variant="ghost" size="sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="lucideX" /></button>
+                      <button hlmBtn variant="ghost" size="sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="arClose" /></button>
                     }
                   </li>
                 }
@@ -219,15 +219,15 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                   (input)="adding.set($any($event.target).value); addError.set(null)"
                   data-add-name
                 />
-                <button hlmBtn variant="outline" type="submit" [disabled]="!adding().trim()" data-add><ng-icon name="lucidePlus" /> Add</button>
+                <button hlmBtn variant="outline" type="submit" [disabled]="!adding().trim()" data-add><ng-icon name="arPlus" /> Add</button>
               </span>
               @if (addError(); as e) {
                 <span class="text-xs text-muted-foreground" data-add-error>{{ e }}</span>
               }
             </form>
             <span class="-mt-2 flex flex-wrap gap-1">
-              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
-              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="lucideFileUp" aria-hidden="true" /> Import mod list</button>
+              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="arSearch" aria-hidden="true" /> Browse the mod portal</button>
+              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="arFileUp" aria-hidden="true" /> Import mod list</button>
             </span>
             @if (catalogError(); as e) {
               <p class="text-destructive" data-catalog-error>{{ e }}</p>

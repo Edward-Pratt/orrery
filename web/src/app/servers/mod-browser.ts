@@ -3,7 +3,7 @@ import { afterNextRender, Component, computed, ElementRef, inject, input, type O
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { ModBrowse, PortalCategory, PortalListing, PortalSort } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideExternalLink, lucidePackage, lucidePlus } from '@ng-icons/lucide';
+import { arCheck, arExternal, arPackage, arPlus } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
@@ -40,7 +40,7 @@ type Load = { page: number; wait: number };
 @Component({
   selector: 'app-mod-browser',
   imports: [NgIcon, HlmBadge, HlmButton, HlmInput, HlmSkeleton, HlmSpinner],
-  viewProviders: [provideIcons({ lucideCheck, lucideExternalLink, lucidePackage, lucidePlus })],
+  viewProviders: [provideIcons({ arCheck, arExternal, arPackage, arPlus })],
   host: { class: 'flex grow flex-col gap-4' },
   template: `
     <div class="flex flex-col gap-2 px-4">
@@ -113,7 +113,7 @@ type Load = { page: number; wait: number };
                 <li class="flex gap-3 py-3 first:pt-0" [attr.data-listing]="m.name">
                   @if (noThumb().has(m.name)) {
                     <span class="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted text-xl text-muted-foreground" data-no-thumb>
-                      <ng-icon name="lucidePackage" aria-hidden="true" />
+                      <ng-icon name="arPackage" aria-hidden="true" />
                     </span>
                   } @else {
                     <img
@@ -163,9 +163,9 @@ type Load = { page: number; wait: number };
                         data-add-mod
                       >
                         @if (addable(s)) {
-                          <ng-icon name="lucidePlus" aria-hidden="true" />
+                          <ng-icon name="arPlus" aria-hidden="true" />
                         } @else if (s.kind !== 'required') {
-                          <ng-icon name="lucideCheck" aria-hidden="true" />
+                          <ng-icon name="arCheck" aria-hidden="true" />
                         }
                         {{ label(s) }}
                       </button>
@@ -180,7 +180,7 @@ type Load = { page: number; wait: number };
                         [attr.title]="m.title + ' on the mod portal'"
                         data-portal
                       >
-                        <ng-icon name="lucideExternalLink" aria-hidden="true" />
+                        <ng-icon name="arExternal" aria-hidden="true" />
                       </a>
                     </div>
                   </div>

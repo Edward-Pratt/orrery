@@ -17,7 +17,7 @@ import type {
   RunningPackUpdate,
 } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLock, lucidePackage, lucidePlus } from '@ng-icons/lucide';
+import { arCheck, arCircleAlert, arLock, arMore, arPackage, arPlus } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmInput } from '@spartan-ng/helm/input';
@@ -47,14 +47,14 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
 @Component({
   selector: 'app-server-pack',
   imports: [DatePipe, DecimalPipe, NgTemplateOutlet, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmInput, HlmSheetImports, HlmSpinner, UpdateHistory, UpdateSteps],
-  viewProviders: [provideIcons({ lucideCheck, lucideCircleAlert, lucideEllipsis, lucideLock, lucidePackage, lucidePlus })],
+  viewProviders: [provideIcons({ arCheck, arCircleAlert, arMore, arLock, arPackage, arPlus })],
   template: `
     @if (state(); as p) {
       <div class="flex max-w-4xl flex-col gap-8">
         @if (!p.installed) {
           @if (!report()) {
             <div class="ar-empty" data-adopt>
-              <ng-icon name="lucidePackage" class="text-3xl text-muted-foreground" />
+              <ng-icon name="arPackage" class="text-2xl text-muted-foreground" />
               <p class="mt-2 font-medium">orrery doesn't know this server's pack yet</p>
               <p class="mx-auto mb-4 max-w-md text-sm text-muted-foreground">
                 Pick the pack version the server runs now from the library. It compares the two: nothing on the server changes.
@@ -81,7 +81,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
               <ul class="ar-panel divide-y">
                 @for (m of report()!.mod; track m) {
                   <li class="flex items-center gap-3 px-3 py-2 text-sm" data-report-mod>
-                    <ng-icon name="lucideLock" class="text-muted-foreground" />
+                    <ng-icon name="arLock" class="text-muted-foreground" />
                     <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ m }}</span>
                     <span class="text-xs text-muted-foreground">the orrery Mod</span>
                   </li>
@@ -113,7 +113,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
         } @else {
           @if (p.rolledBack; as rb) {
             <div class="ar-callout ar-callout--warn -mx-4 flex flex-wrap items-center gap-3 border-y text-sm md:mx-0 md:rounded-lg md:border" data-rolled-back>
-              <ng-icon name="lucideCircleAlert" class="text-status-warn" />
+              <ng-icon name="arCircleAlert" class="text-status-warn" />
               <span class="flex-1">
                 Pack update to {{ rb.to }} <b>rolled back</b>: no hello in time. {{ p.installed.version }} is running again, but the world may have been changed
                 on load.
@@ -129,7 +129,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
           } @else {
             <section class="ar-panel p-5" data-summary>
               @if (done(); as d) {
-                <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="lucideCheck" /> Done: {{ d }} is running.</p>
+                <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="arCheck" /> Done: {{ d }} is running.</p>
               }
               <div class="flex flex-wrap items-start justify-between gap-4">
                 <div class="min-w-0">
@@ -213,7 +213,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <h2 class="ar-t-heading-sm">Extras</h2>
                 <p class="text-sm text-muted-foreground">Files put on top of the pack on every update: new ones, or replacing the pack's.</p>
               </div>
-              <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'extra' })" data-add-extra><ng-icon name="lucidePlus" /> Add extra</button>
+              <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'extra' })" data-add-extra><ng-icon name="arPlus" /> Add extra</button>
             </div>
             <ul class="ar-panel divide-y">
               @for (e of p.extras; track e.id) {
@@ -235,7 +235,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                     <span class="ar-tag ar-tag--warn" data-change>{{ e.change }}</span>
                   }
                   @if (!e.removed) {
-                    <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more><ng-icon name="lucideEllipsis" /></button>
+                    <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more><ng-icon name="arMore" /></button>
                     <ng-template #menu>
                       <div hlmDropdownMenu class="w-48">
                         <button hlmDropdownMenuItem (click)="openSheet({ kind: 'extra', extra: e, replace: true })" data-replace>Replace file…</button>
@@ -247,7 +247,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 </li>
               }
               <li class="flex items-center gap-3 bg-muted/40 px-3 py-2.5 text-sm" data-mod-row>
-                <ng-icon name="lucideLock" class="text-muted-foreground" />
+                <ng-icon name="arLock" class="text-muted-foreground" />
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-mono text-xs">{{ p.mod ?? 'mods/orrery-*.jar' }}</p>
                   <p class="text-xs text-muted-foreground">The orrery Mod: put back on every update. Deployed from Host.</p>
@@ -262,7 +262,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <h2 class="ar-t-heading-sm">Config edits</h2>
                 <p class="text-sm text-muted-foreground">Find-and-replace in the pack's files, applied last. One that matches nothing stops the update before the server is touched.</p>
               </div>
-              <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'edit' })" data-add-edit><ng-icon name="lucidePlus" /> Add edit</button>
+              <button hlmBtn size="sm" variant="outline" (click)="openSheet({ kind: 'edit' })" data-add-edit><ng-icon name="arPlus" /> Add edit</button>
             </div>
             <ul class="ar-panel divide-y">
               @for (c of p.edits; track c.id) {
@@ -279,11 +279,11 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                     </p>
                     @if (c.failedOn) {
                       <p class="mt-1 flex items-center gap-1 text-xs text-destructive" data-unmatched>
-                        <ng-icon name="lucideCircleAlert" /> Matched nothing in {{ c.failedOn }} (the last update tried).
+                        <ng-icon name="arCircleAlert" /> Matched nothing in {{ c.failedOn }} (the last update tried).
                       </p>
                     }
                   </div>
-                  <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="emenu" data-more><ng-icon name="lucideEllipsis" /></button>
+                  <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="emenu" data-more><ng-icon name="arMore" /></button>
                   <ng-template #emenu>
                     <div hlmDropdownMenu class="w-44">
                       <button hlmDropdownMenuItem (click)="openSheet({ kind: 'edit', edit: c })" data-change-edit>Edit…</button>

@@ -47,10 +47,10 @@ function load(key: string): Remembered | null {
   template: `
     @if (server.card()!.features.console) {
       <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
-        <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-console>
+        <ol appStickBottom class="ar-console flex-1" data-console>
           @for (e of entries(); track $index) {
             <li class="mb-2">
-              <div><b>&gt; {{ e.command }}{{ e.late ? ' (later)' : '' }}</b><span class="ml-2 text-xs text-muted-foreground" data-by>{{ e.by }}</span></div>
+              <div><b class="text-foreground">&gt; {{ e.command }}{{ e.late ? ' (later)' : '' }}</b><span class="ml-2 text-xs text-muted-foreground" data-by>{{ e.by }}</span></div>
               @for (line of e.output; track $index) {
                 <div class="break-all whitespace-pre-wrap" data-line>{{ line }}</div>
               }

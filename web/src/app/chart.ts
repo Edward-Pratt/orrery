@@ -3,7 +3,6 @@
 // `PeriodPicker`: the period buttons (`PERIODS`) of every graph page.
 
 import { Component, computed, input, model } from '@angular/core';
-import { HlmButton } from '@spartan-ng/helm/button';
 import type { EChartsCoreOption } from 'echarts/core';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 
@@ -11,8 +10,9 @@ import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 export type Series = { name: string; points: [number, number][] };
 
 /**
- * A time-series line chart (ngx-echarts), in the dashboard's colours: its `--chart-*`, text and border tokens,
- * read each time the series change, so it follows the light/dark theme.
+ * A time-series line chart (ngx-echarts), drawn as Armil's Chart: `--chart-1` to `--chart-6` in order, 2px lines,
+ * a faint fill under the first series only, a `line` grid and mono axis labels in `ink-faint`, a raised tooltip.
+ * The tokens are read each time the series change, so it follows the theme.
  */
 @Component({
   selector: 'app-time-series',
@@ -32,28 +32,32 @@ export class TimeSeries {
   protected readonly options = computed((): EChartsCoreOption => {
     const css = getComputedStyle(document.documentElement);
     const token = (name: string) => css.getPropertyValue(name).trim() || undefined;
-    const text = token('--muted-foreground');
-    const line = token('--border');
-    const palette = [1, 2, 3, 4, 5].flatMap((i) => token(`--chart-${i}`) ?? []);
+    const text = token('--ink-faint');
+    const line = token('--line');
+    const palette = [1, 2, 3, 4, 5, 6].flatMap((i) => token(`--chart-${i}`) ?? []);
     const format = this.format();
     const series = this.series();
     const step = this.step() && 'end';
     return {
       ...(palette.length && { color: palette }),
       animation: false,
+      textStyle: { fontFamily: token('--font-mono') },
       grid: { left: 56, right: 8, top: series.length > 1 ? 32 : 12, bottom: 24 },
-      legend: { show: series.length > 1, textStyle: { color: text } },
+      legend: { show: series.length > 1, right: 0, textStyle: { color: token('--ink-soft') } },
       tooltip: {
         trigger: 'axis',
         valueFormatter: (v: unknown) => format(Number(v)),
-        backgroundColor: token('--popover'),
-        borderColor: line,
-        textStyle: { color: token('--popover-foreground') },
+        backgroundColor: token('--raised'),
+        borderColor: token('--line-strong'),
+        textStyle: { color: token('--ink') },
       },
       xAxis: { type: 'time', axisLabel: { color: text }, axisLine: { lineStyle: { color: line } } },
       yAxis: { type: 'value', min: 0, max: this.max(), axisLabel: { color: text, formatter: format }, splitLine: { lineStyle: { color: line } } },
-      // Colours are the tokens as given (oklch), so nothing derives shades from them.
-      series: series.map((s) => ({ type: 'line', name: s.name, data: s.points, step, showSymbol: false, emphasis: { disabled: true } })),
+      // Colours are the tokens as given, so nothing derives shades from them.
+      series: series.map((s, i) => ({
+        type: 'line', name: s.name, data: s.points, step, showSymbol: false, emphasis: { disabled: true }, lineStyle: { width: 2 },
+        ...(i === 0 && { areaStyle: { opacity: 0.14 } }),
+      })),
     };
   });
 }
@@ -66,14 +70,13 @@ export const PERIODS = [
   { label: '90 d', hours: 90 * 24 },
 ];
 
-/** Buttons choosing a graphed period, in hours. */
+/** Buttons choosing a graphed period, in hours: Armil's Segmented, the chosen one pressed. */
 @Component({
   selector: 'app-period',
-  imports: [HlmButton],
   template: `
-    <div class="flex gap-2" role="group" aria-label="Period">
+    <div class="ar-seg" role="group" aria-label="Period">
       @for (p of periods; track p.hours) {
-        <button hlmBtn size="sm" [variant]="hours() === p.hours ? 'default' : 'outline'" [attr.aria-pressed]="hours() === p.hours" (click)="hours.set(p.hours)" data-period>{{ p.label }}</button>
+        <button type="button" [attr.aria-pressed]="hours() === p.hours" (click)="hours.set(p.hours)" data-period>{{ p.label }}</button>
       }
     </div>
   `,

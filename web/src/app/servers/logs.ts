@@ -35,9 +35,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
                 <li>
                   <button
                     type="button"
-                    class="w-full rounded-md px-2 py-1.5 text-left hover:bg-muted"
-                    [class.bg-muted]="f.name === chosen()"
-                    [class.font-semibold]="f.name === chosen()"
+                    class="w-full rounded-md px-2 py-1.5 text-left hover:bg-muted aria-[current=true]:bg-[var(--verdigris-wash)] aria-[current=true]:font-semibold aria-[current=true]:text-[var(--verdigris-hi)] aria-[current=true]:[&_*]:text-[var(--verdigris-hi)]"
                     [attr.aria-current]="f.name === chosen() ? 'true' : null"
                     [attr.data-file]="f.name"
                     (click)="choose(f.name)"
@@ -62,7 +60,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
                 <p class="text-sm text-destructive" role="alert" data-log-error>{{ e }}</p>
               }
               @if (lines(); as ls) {
-                <div appStickBottom class="h-[calc(100dvh-20rem)] min-h-72 rounded-md bg-muted p-3 font-mono text-xs" data-log>
+                <div appStickBottom class="ar-console h-[calc(100dvh-20rem)] min-h-72" data-log>
                   @for (line of ls; track $index) {
                     <div class="break-all whitespace-pre-wrap" data-line>{{ line }}</div>
                   } @empty {
@@ -95,7 +93,7 @@ const why = (err: HttpErrorResponse) => `HTTP ${err.status}${typeof err.error ==
               <p class="text-sm text-destructive" role="alert" data-journal-error>{{ e }}</p>
             }
             @if (journal(); as ls) {
-              <pre class="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs" data-journal-lines>{{ ls.join('\\n') || 'No log lines.' }}</pre>
+              <pre class="ar-console max-h-96" data-journal-lines>{{ ls.join('\\n') || 'No log lines.' }}</pre>
             }
           </section>
         }

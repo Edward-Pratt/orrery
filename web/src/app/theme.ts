@@ -1,4 +1,5 @@
-// `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as `dark` on `<html>`.
+// `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as Armil's `data-theme`
+// (`dark` or `light`, Paper) on `<html>`; dark when the system can't say.
 
 import { DOCUMENT } from '@angular/common';
 import { effect, inject, Injectable, signal } from '@angular/core';
@@ -7,7 +8,7 @@ export type Mode = 'light' | 'system' | 'dark';
 export const MODES: Mode[] = ['light', 'system', 'dark'];
 const KEY = 'theme';
 
-/** Light, system (the default) or dark, remembered per browser; applied as the `dark` class on <html>. */
+/** Light, system (the default) or dark, remembered per browser; applied as `data-theme` on <html>. */
 @Injectable({ providedIn: 'root' })
 export class Theme {
   readonly #doc = inject(DOCUMENT);
@@ -15,9 +16,12 @@ export class Theme {
 
   constructor() {
     const dark = this.#doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)');
-    const systemDark = signal(dark?.matches ?? false);
+    const systemDark = signal(dark?.matches ?? true);
     dark?.addEventListener('change', (e) => systemDark.set(e.matches));
-    effect(() => this.#doc.documentElement.classList.toggle('dark', this.mode() === 'dark' || (this.mode() === 'system' && systemDark())));
+    effect(() => {
+      const isDark = this.mode() === 'dark' || (this.mode() === 'system' && systemDark());
+      this.#doc.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    });
   }
 
   set(mode: Mode): void {

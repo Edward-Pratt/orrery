@@ -37,7 +37,7 @@ async function open(me: Me | null, on: Integrations = ALL, url = '/', env: Envir
 const labels = (el: HTMLElement) => [...el.querySelectorAll('aside nav a')].map((a) => a.textContent!.trim());
 
 describe('the shell', () => {
-  afterEach(() => (document.documentElement.classList.remove('dark'), localStorage.clear(), (document.title = '')));
+  afterEach(() => (document.documentElement.removeAttribute('data-theme'), localStorage.clear(), (document.title = '')));
 
   const badges = (el: HTMLElement) => [...el.querySelectorAll('[data-staging]')].map((b) => b.closest('aside, header, .rounded-xl')!.tagName);
 
@@ -116,7 +116,7 @@ describe('the shell', () => {
     (await openMenu(r)).find((i) => i.textContent!.includes('dark'))!.click();
     r.fixture.detectChanges();
     TestBed.tick();
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(localStorage.getItem('theme')).toBe('dark');
   });
 
@@ -149,13 +149,13 @@ describe('the shell', () => {
 
 describe('Theme', () => {
   beforeEach(() => localStorage.clear());
-  afterEach(() => (vi.restoreAllMocks(), document.documentElement.classList.remove('dark')));
+  afterEach(() => (vi.restoreAllMocks(), document.documentElement.removeAttribute('data-theme')));
 
   it('follows the system by default, stores a choice and restores it', () => {
     expect(TestBed.inject(Theme).mode()).toBe('system');
     TestBed.inject(Theme).set('dark');
     TestBed.tick();
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(localStorage.getItem('theme')).toBe('dark');
     TestBed.resetTestingModule();
     expect(TestBed.inject(Theme).mode()).toBe('dark');

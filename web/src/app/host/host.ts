@@ -49,8 +49,8 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
             <p class="mt-1 text-2xl font-semibold" [attr.data-value]="t.key">{{ t.value }}</p>
             <p class="text-xs text-muted-foreground" [attr.data-detail]="t.key">{{ t.detail }}</p>
             @if (t.share !== null) {
-              <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                <div class="h-full rounded-full" [class]="bars[t.health]" [style.width.%]="t.share * 100"></div>
+              <div class="mt-3 h-1.5 overflow-hidden rounded-xs bg-muted" aria-hidden="true">
+                <div class="h-full rounded-xs" [class]="bars[t.health]" [style.width.%]="t.share * 100"></div>
               </div>
             }
           </section>

@@ -66,7 +66,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                       >
                         {{ m.name }} {{ m.version }}
                         @if (updates.to().get(m.name); as to) {
-                          <span class="text-brand" [attr.title]="to + ' is on the mod portal for Factorio ' + line(i.factorio)" data-update-to
+                          <span class="text-brand-foreground" [attr.title]="to + ' is on the mod portal for Factorio ' + line(i.factorio)" data-update-to
                             >→ {{ to }}<span class="sr-only">, update available: {{ to }}</span></span
                           >
                         }
@@ -161,7 +161,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
           <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing() || importing()" data-update-view>
             <label
               >Factorio version
-              <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="setFactorio($any($event.target).value)" data-factorio>
+              <select class="ar-input mt-1 w-full" (change)="setFactorio($any($event.target).value)" data-factorio>
                 @for (v of versions(); track v.version) {
                   <option [value]="v.version" [selected]="v.version === factorio()">{{ v.label }}</option>
                 }
@@ -177,7 +177,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                       <p class="truncate font-mono text-xs text-muted-foreground">{{ p.name }}</p>
                     </div>
                     <select
-                      class="h-8 max-w-40 rounded-md border bg-background px-2 text-sm"
+                      class="ar-input max-w-40"
                       [attr.aria-label]="'Version of ' + p.name"
                       (change)="setVersion(p.name, $any($event.target).value || null)"
                       data-version

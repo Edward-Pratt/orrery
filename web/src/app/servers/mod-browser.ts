@@ -57,13 +57,13 @@ type Load = { page: number; wait: number };
         data-browse-search
       />
       <div class="grid grid-cols-2 gap-2">
-        <select class="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" aria-label="Category" (change)="setCategory($any($event.target).value)" data-browse-category>
+        <select class="ar-input min-w-0" aria-label="Category" (change)="setCategory($any($event.target).value)" data-browse-category>
           <option value="" [selected]="category() === ''">All categories</option>
           @for (c of categories(); track c.id) {
             <option [value]="c.id" [selected]="c.id === category()">{{ c.title }}</option>
           }
         </select>
-        <select class="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" aria-label="Sort by" (change)="setSort($any($event.target).value)" data-browse-sort>
+        <select class="ar-input min-w-0" aria-label="Sort by" (change)="setSort($any($event.target).value)" data-browse-sort>
           @for (s of sorts; track s.id) {
             <option [value]="s.id" [selected]="s.id === sort()">{{ s.label }}</option>
           }

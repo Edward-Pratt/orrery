@@ -28,7 +28,7 @@ type Entry = AuditLog['entries'][number];
     <div class="mb-4 flex flex-wrap items-end gap-4 text-sm">
       <label class="flex flex-col gap-1">
         Server
-        <select class="h-9 rounded-md border bg-background px-2" (change)="filter({ server: $any($event.target).value })" data-server-filter>
+        <select class="ar-input" (change)="filter({ server: $any($event.target).value })" data-server-filter>
           <option value="">All</option>
           @for (s of servers(); track s.id) {
             <option [value]="s.id" [selected]="s.id === server()">{{ s.name }}</option>

@@ -30,7 +30,7 @@ import ServerPage from './server';
       }
     </section>
     @if (c.restart) {
-      <section class="mb-6 rounded-lg border border-amber-500/50 p-3" data-restart-pending-section>
+      <section class="ar-callout ar-callout--warn mb-6" data-restart-pending-section>
         <app-server-actions [card]="c" (changed)="server.refresh()" />
       </section>
     }

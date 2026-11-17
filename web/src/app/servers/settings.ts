@@ -279,7 +279,7 @@ export function generatePassword(): string {
           <legend class="px-1 font-semibold">Lua commands</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Who may run them @if (changed('allow_commands')) { <span [title]="was('allow_commands')" data-changed="allow_commands">● <span class="sr-only">changed</span></span> }</span>
-            <select class="h-9 w-48 rounded-md border bg-background px-2" (change)="set('allow_commands', $any($event.target).value)" aria-describedby="hint-commands" data-field="allow_commands">
+            <select class="ar-input max-w-48" (change)="set('allow_commands', $any($event.target).value)" aria-describedby="hint-commands" data-field="allow_commands">
               @for (o of commands; track o.value) {
                 <option [value]="o.value" [selected]="o.value === form().allow_commands">{{ o.label }}</option>
               }

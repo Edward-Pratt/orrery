@@ -32,7 +32,7 @@ const NOTE_MAX = 200;
             <legend class="mb-1 font-medium">Permissions</legend>
             @for (p of permissions(); track p.name) {
               <label class="flex items-start gap-2" [attr.data-permission]="p.name">
-                <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="picked().has(p.name)" (change)="toggle(p.name)" />
+                <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="picked().has(p.name)" (change)="toggle(p.name)" />
                 <span>
                   <b>{{ p.label }}</b>
                   @if (p.scoped) {

@@ -49,7 +49,7 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
             @if (lib.packs.length) {
               <label
                 >Pack version
-                <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" [value]="pack() ?? ''" (change)="pickPack(+$any($event.target).value || null)" data-pick>
+                <select class="ar-input mt-1 w-full" [value]="pack() ?? ''" (change)="pickPack(+$any($event.target).value || null)" data-pick>
                   <option value="">Choose a version…</option>
                   @for (e of lib.packs; track e.id) {
                     <option [value]="e.id">{{ e.name }} {{ e.version }} · Minecraft {{ e.mc }}</option>
@@ -63,7 +63,7 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
             @if (scripts(); as list) {
               <label
                 >Start script
-                <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="pickScript($any($event.target).value)" data-script>
+                <select class="ar-input mt-1 w-full" (change)="pickScript($any($event.target).value)" data-script>
                   @for (s of list; track s.name) {
                     <option [value]="s.name" [selected]="s.name === script()">{{ s.name }}</option>
                   }
@@ -77,14 +77,14 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
               }
               @if (loops()) {
                 <label class="flex items-start gap-2">
-                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="removeLoop()" (change)="removeLoop.set(!removeLoop())" data-loop />
+                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="removeLoop()" (change)="removeLoop.set(!removeLoop())" data-loop />
                   <span>Remove its <code>while true</code> restart loop (a Config edit): systemd restarts the server, and the loop would make a stop hang.</span>
                 </label>
               }
             }
             <label
               >Java runtime
-              <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="runtime.set($any($event.target).value)" data-runtime>
+              <select class="ar-input mt-1 w-full" (change)="runtime.set($any($event.target).value)" data-runtime>
                 @for (r of lib.runtimes; track r.name) {
                   <option [value]="r.name" [selected]="r.name === runtime()">{{ r.label }}</option>
                 }
@@ -93,7 +93,7 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
             </label>
           }
           <label class="flex items-start gap-2">
-            <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="eula()" (change)="eula.set(!eula())" data-eula />
+            <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="eula()" (change)="eula.set(!eula())" data-eula />
             <span>I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener" class="underline">Minecraft EULA</a></span>
           </label>
           <button hlmBtn [disabled]="busy() || !ready()" (click)="create()" data-go>

@@ -14,10 +14,10 @@ import { releaseRows, short, type ReleaseRow } from './release-rows';
 const packNotice = (e: LiveEvent) => 'serverId' in e && e.type === 'notice' && (e.kind === 'packUpdateStarted' || e.kind === 'packUpdateFinished');
 
 const OUTCOME: Record<DeployOutcome, string> = {
-  running: 'bg-muted text-muted-foreground',
-  ok: 'bg-status-ok/15 text-status-ok',
-  failed: 'bg-status-down/15 text-status-down',
-  'rolled back': 'bg-status-down/15 text-status-down',
+  running: 'ar-tag--info',
+  ok: 'ar-tag--ok',
+  failed: 'ar-tag--danger',
+  'rolled back': 'ar-tag--danger',
 };
 
 /**
@@ -64,7 +64,7 @@ const OUTCOME: Record<DeployOutcome, string> = {
               <span class="flex items-center gap-2 text-muted-foreground" data-deploying><hlm-spinner /> deploying {{ r.deploying.to }}</span>
             } @else if (picking() === r.key) {
               <span class="flex items-center gap-2">
-                <select class="h-8 rounded-md border bg-background px-2 text-sm" data-pick [value]="choice()" (change)="choice.set($any($event.target).value)">
+                <select class="ar-input" data-pick [value]="choice()" (change)="choice.set($any($event.target).value)">
                   @for (rel of r.releases; track rel.tag) {
                     <option [value]="rel.tag" [selected]="rel.tag === choice()">{{ rel.tag }}{{ older(r, rel.tag) ? ' (older)' : '' }}{{ rel.tag === r.running ? ' (running)' : '' }}</option>
                   }

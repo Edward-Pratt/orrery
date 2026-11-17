@@ -42,7 +42,7 @@ export function failedPrep(history: PackUpdateRow[]): { to: string; why: string 
           <li class="flex gap-3" [attr.data-step]="s.step" [attr.data-state]="s.state">
             <span
               class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-xs"
-              [class]="s.state === 'done' ? 'bg-status-ok text-white' : s.state === 'failed' ? 'bg-status-down text-white' : s.state === 'running' ? 'text-brand' : 'border text-muted-foreground'"
+              [class]="s.state === 'done' ? 'bg-status-ok text-background' : s.state === 'failed' ? 'bg-status-down text-background' : s.state === 'running' ? 'text-brand-foreground' : 'border border-[var(--line-strong)] text-muted-foreground'"
             >
               @switch (s.state) {
                 @case ('done') {

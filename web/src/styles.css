@@ -38,7 +38,8 @@
   --color-sidebar-accent: var(--raised);
   --color-sidebar-border: var(--line);
   --color-brand: var(--accent);
-  --color-brand-foreground: var(--accent);
+  /* teal text: accent-orrery is 3.1:1 on Paper, so text takes verdigris (accent is for fills and marks) */
+  --color-brand-foreground: var(--verdigris);
   --color-status-ok: var(--ok);
   --color-status-warn: var(--warn);
   --color-status-down: var(--danger);

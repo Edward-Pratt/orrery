@@ -29,7 +29,7 @@ const MAX = 1024 ** 3;
     @if (state(); as u) {
       <div
         class="mt-3 flex w-full flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm"
-        [class]="u.state === 'failed' ? 'bg-destructive/10' : u.state === 'done' ? 'bg-emerald-500/10' : 'bg-muted'"
+        [class]="u.state === 'failed' ? 'bg-[var(--danger-wash)]' : u.state === 'done' ? 'bg-[var(--ok-wash)]' : 'bg-muted'"
         role="status"
         aria-live="polite"
         data-upload-state

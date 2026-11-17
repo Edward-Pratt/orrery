@@ -206,7 +206,7 @@ export class Attention {
   imports: [DatePipe, HlmButton],
   template: `
     @if (attention.items().length) {
-      <ul class="border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm md:px-10" data-attention>
+      <ul class="border-b bg-[var(--warn-wash)] px-4 py-2 text-sm md:px-5" data-attention>
         @for (i of attention.items(); track i.key) {
           <li class="flex items-center gap-3 py-0.5" [attr.data-item]="i.key">
             <span class="min-w-0 flex-1 truncate">

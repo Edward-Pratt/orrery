@@ -95,7 +95,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <ul class="ar-panel divide-y" [attr.data-group]="g.key">
                   @for (f of report()![g.key]; track f.path) {
                     <li class="flex items-center gap-3 px-3 py-2 text-sm">
-                      <input type="checkbox" class="size-4 accent-[var(--brand)]" [checked]="keep().has(f.path)" (change)="toggle(f.path)" [attr.aria-label]="'Keep ' + f.path" />
+                      <input type="checkbox" class="size-4 accent-[var(--accent)]" [checked]="keep().has(f.path)" (change)="toggle(f.path)" [attr.aria-label]="'Keep ' + f.path" />
                       <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ f.path }}</span>
                       <span class="text-xs text-muted-foreground">{{ bytes(f.size) }}</span>
                     </li>
@@ -181,7 +181,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 } @else {
                   <div class="flex flex-wrap items-center gap-2">
                     <select
-                      class="h-8 rounded-md border bg-background px-2 text-sm"
+                      class="ar-input"
                       [disabled]="busy() || !library()"
                       [value]="p.runtime.name ?? ''"
                       (change)="setRuntime($any($event.target).value || null)"
@@ -332,7 +332,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
         @if (packs.length) {
           <label
             >Pack version
-            <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" [value]="pick() ?? ''" (change)="pick.set(+$any($event.target).value || null)" data-pick>
+            <select class="ar-input mt-1 w-full" [value]="pick() ?? ''" (change)="pick.set(+$any($event.target).value || null)" data-pick>
               <option value="">Choose a version…</option>
               @for (e of packs; track e.id) {
                 <option [value]="e.id">{{ e.name }} {{ e.version }} · Minecraft {{ e.mc }}</option>

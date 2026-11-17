@@ -48,7 +48,7 @@ type Scope = string[] | null;
             @for (r of offered(); track r.id) {
               <div class="flex flex-col gap-1.5 rounded-md border p-2" [attr.data-role]="r.name">
                 <label class="flex items-start gap-2">
-                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="scopes().has(r.id)" (change)="toggle(r.id)" data-grant />
+                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="scopes().has(r.id)" (change)="toggle(r.id)" data-grant />
                   <span><b>{{ r.name }}</b> <span class="text-muted-foreground">{{ r.note }}</span></span>
                 </label>
                 @if (scopes().has(r.id) && r.id !== 'owner') {
@@ -60,7 +60,7 @@ type Scope = string[] | null;
                       <div class="ms-6 flex flex-col gap-1">
                         @for (s of servers(); track s.id) {
                           <label class="flex items-center gap-2">
-                            <input type="checkbox" class="size-4 accent-[var(--brand)]" [checked]="scope.includes(s.id)" (change)="pick(r.id, s.id)" [attr.data-server]="s.id" /> {{ s.name }}
+                            <input type="checkbox" class="size-4 accent-[var(--accent)]" [checked]="scope.includes(s.id)" (change)="pick(r.id, s.id)" [attr.data-server]="s.id" /> {{ s.name }}
                           </label>
                         }
                         <p class="text-xs text-muted-foreground">Only the role's server permissions, on these servers.</p>

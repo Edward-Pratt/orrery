@@ -114,7 +114,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
-                <tr class="border-t" [class.bg-amber-500/10]="backup.name === preselected()" data-backup>
+                <tr class="border-t" [style.background-color]="backup.name === preselected() ? 'var(--verdigris-wash)' : null" data-backup>
                   <td class="py-1 pr-4">
                     <span class="font-mono">{{ backup.name }}</span>
                     @if (backup.kind; as kind) {

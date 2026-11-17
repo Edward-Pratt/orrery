@@ -68,7 +68,7 @@ type Preview = {
       <textarea
         id="mod-list-text"
         rows="4"
-        class="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
+        class="ar-input ar-input--mono w-full"
         placeholder="flib&#10;helmod&#10;Squeak Through"
         aria-describedby="mod-list-how"
         [value]="text()"
@@ -93,7 +93,7 @@ type Preview = {
           <h3 class="ar-t-ui-strong" data-import-count>{{ p.add.length ? mods(p.add.length) + ' to add' : 'Nothing to add' }}{{ from() ? ' from ' + from() : '' }}</h3>
           @if (hasVersions()) {
             <label class="flex items-start gap-2">
-              <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />
+              <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />
               <span>
                 Keep the versions in the file
                 <span class="block text-xs text-muted-foreground">

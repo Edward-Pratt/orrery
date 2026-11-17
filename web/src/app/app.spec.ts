@@ -39,7 +39,7 @@ const labels = (el: HTMLElement) => [...el.querySelectorAll('aside nav a')].map(
 describe('the shell', () => {
   afterEach(() => (document.documentElement.removeAttribute('data-theme'), localStorage.clear(), (document.title = '')));
 
-  const badges = (el: HTMLElement) => [...el.querySelectorAll('[data-staging]')].map((b) => b.closest('aside, header, .rounded-xl')!.tagName);
+  const badges = (el: HTMLElement) => [...el.querySelectorAll('[data-staging]')].map((b) => b.closest('aside, header, .ar-panel')!.tagName);
 
   it('marks Staging with a badge in the sidebar, the phone header and the login card, and in the tab title', async () => {
     const staging = await open(ALEX, ALL, '/', 'staging');

@@ -63,17 +63,17 @@ type Entry = AuditLog['entries'][number];
     } @else if (!entries().length) {
       <p class="ar-empty text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
     } @else {
-      <table class="hidden w-full text-left text-sm md:table">
-        <thead class="text-muted-foreground">
-          <tr><th class="py-1 pr-4 font-normal">When</th><th class="pr-4 font-normal">Who</th><th class="pr-4 font-normal">What</th><th class="pr-4 font-normal">Which</th><th class="font-normal">Details</th></tr>
+      <table class="ar-table hidden md:table">
+        <thead>
+          <tr><th>When</th><th>Who</th><th>What</th><th>Which</th><th>Details</th></tr>
         </thead>
         <tbody>
           @for (e of entries(); track e.id) {
-            <tr class="border-t" data-entry>
-              <td class="py-1 pr-4 whitespace-nowrap">{{ e.ts | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
-              <td class="pr-4">{{ e.actor }}</td>
-              <td class="pr-4">{{ e.action }}</td>
-              <td class="pr-4">{{ e.target }}</td>
+            <tr data-entry>
+              <td class="whitespace-nowrap">{{ e.ts | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
+              <td>{{ e.actor }}</td>
+              <td>{{ e.action }}</td>
+              <td>{{ e.target }}</td>
               <td class="break-all">{{ e.details }}</td>
             </tr>
           }

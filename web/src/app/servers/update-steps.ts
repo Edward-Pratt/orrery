@@ -91,32 +91,32 @@ export class UpdateSteps {
     <section data-history>
       <h2 class="ar-t-heading-sm mb-2">History</h2>
       @if (rows().length) {
-        <table class="w-full text-left text-sm">
-          <thead class="text-muted-foreground">
+        <table class="ar-table">
+          <thead>
             <tr>
-              <th class="py-1 pr-4 font-normal">When</th>
-              <th class="pr-4 font-normal">Version</th>
-              <th class="pr-4 font-normal">Result</th>
-              <th class="hidden pr-4 font-normal sm:table-cell" data-by-column>By</th>
+              <th>When</th>
+              <th>Version</th>
+              <th>Result</th>
+              <th class="hidden sm:table-cell" data-by-column>By</th>
             </tr>
           </thead>
           <tbody>
             @for (h of rows(); track h.id) {
-              <tr class="border-t align-top" [attr.data-update-row]="h.id">
-                <td class="py-1.5 pr-4 whitespace-nowrap">{{ h.started | date: 'd MMM, HH:mm' }}</td>
-                <td class="pr-4">
+              <tr class="align-top" [attr.data-update-row]="h.id">
+                <td class="whitespace-nowrap">{{ h.started | date: 'd MMM, HH:mm' }}</td>
+                <td>
                   {{ h.from === h.to ? h.to : h.from + ' → ' + h.to }}
                   @if (h.changes?.length) {
                     <span class="block text-xs text-muted-foreground">{{ changesPrefix() }}{{ h.changes!.join(', ') }}</span>
                   }
                 </td>
-                <td class="pr-4" [class]="result[h.outcome]">
+                <td [class]="result[h.outcome]">
                   {{ h.outcome }}
                   @if (h.finished) {
                     <span class="text-xs text-muted-foreground">{{ took(h.finished - h.started) }}</span>
                   }
                 </td>
-                <td class="hidden pr-4 sm:table-cell">{{ h.by }}</td>
+                <td class="hidden sm:table-cell">{{ h.by }}</td>
               </tr>
             }
           </tbody>

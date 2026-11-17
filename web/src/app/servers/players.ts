@@ -53,13 +53,13 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
         @for (p of periods; track p.period) {
           <section class="ar-panel p-3" [class]="p.period === period() ? '' : 'max-sm:hidden'" [attr.data-list]="p.period">
             <h2 class="ar-label mb-2">{{ p.label }}</h2>
-            <table class="w-full text-sm" [attr.data-top]="p.period">
+            <table class="ar-table" [attr.data-top]="p.period">
               <tbody>
                 @for (row of top()[p.period]; track row.player) {
                   <tr>
-                    <td class="w-6 py-0.5 text-muted-foreground">{{ $index + 1 }}</td>
+                    <td class="w-6 text-muted-foreground">{{ $index + 1 }}</td>
                     <td><button class="font-medium hover:underline" (click)="look(row.player)">{{ row.player }}</button></td>
-                    <td class="text-right tabular-nums text-muted-foreground">{{ duration(row.ms) }}</td>
+                    <td class="ar-table__num">{{ duration(row.ms) }}</td>
                   </tr>
                 } @empty {
                   <tr><td class="text-muted-foreground">No playtime recorded.</td></tr>

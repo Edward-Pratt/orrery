@@ -46,7 +46,7 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
         @for (t of list; track t.key) {
           <section class="ar-panel p-4" [attr.data-tile]="t.key" [attr.data-state]="t.health">
             <h2 class="ar-label">{{ t.label }}</h2>
-            <p class="mt-1 text-2xl font-semibold" [attr.data-value]="t.key">{{ t.value }}</p>
+            <p class="ar-t-readout mt-1" [attr.data-value]="t.key">{{ t.value }}</p>
             <p class="text-xs text-muted-foreground" [attr.data-detail]="t.key">{{ t.detail }}</p>
             @if (t.share !== null) {
               <div class="mt-3 h-1.5 overflow-hidden rounded-xs bg-muted" aria-hidden="true">

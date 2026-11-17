@@ -71,7 +71,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           @for (t of tiles(); track t.key) {
             <section class="ar-panel p-4" [attr.data-tile]="t.key" [attr.data-state]="t.warn ? 'warn' : 'ok'">
               <h2 class="ar-label">{{ t.label }}</h2>
-              <p class="mt-1 text-2xl font-semibold" [class.text-status-warn]="t.warn" data-value>{{ t.value }}</p>
+              <p class="ar-t-readout mt-1" [class.text-status-warn]="t.warn" data-value>{{ t.value }}</p>
               @if (t.detail) {
                 <p class="text-xs" [class]="t.warn ? 'text-status-warn' : 'text-muted-foreground'" data-detail>{{ t.detail }}</p>
               }
@@ -108,14 +108,14 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           </div>
         }
         @if (b.backups.length) {
-          <table class="w-full text-left text-sm">
-            <thead class="text-muted-foreground">
-              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">{{ words().finished }}</th><th class="pr-4 font-normal">Size</th><th class="sr-only">Actions</th></tr>
+          <table class="ar-table">
+            <thead>
+              <tr><th>Name</th><th>{{ words().finished }}</th><th>Size</th><th class="sr-only">Actions</th></tr>
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
-                <tr class="border-t" [style.background-color]="backup.name === preselected() ? 'var(--verdigris-wash)' : null" data-backup>
-                  <td class="py-1 pr-4">
+                <tr [style.background-color]="backup.name === preselected() ? 'var(--verdigris-wash)' : null" data-backup>
+                  <td>
                     <span class="font-mono">{{ backup.name }}</span>
                     @if (backup.kind; as kind) {
                       <span hlmBadge variant="outline" class="ms-2" [title]="kinds[kind].title" data-kind>{{ kinds[kind].label }}</span>
@@ -124,9 +124,9 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                       <span hlmBadge variant="secondary" class="ms-1" title="The world Factorio last loaded: it saves into it on every stop" data-current>Current world</span>
                     }
                   </td>
-                  <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
-                  <td class="pr-4">{{ bytes(backup.size) }}</td>
-                  <td class="py-1 text-right">
+                  <td>{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
+                  <td>{{ bytes(backup.size) }}</td>
+                  <td class="text-right">
                     @if (may('servers.restore')) {
                       <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
                         <ng-icon name="arMore" />

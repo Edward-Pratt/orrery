@@ -45,6 +45,9 @@ export async function setup(more: Partial<Inputs> = {}) {
   fixture.componentInstance.back.subscribe(() => backs++);
   document.body.appendChild(fixture.nativeElement);
   const render = async (ms = 10) => (await new Promise((r) => setTimeout(r, ms)), fixture.detectChanges(), await fixture.whenStable());
+  // ngOnInit asks for page 1 through timer(0). Run it now, so that timer is set before render's wait starts and
+  // must fire first; left to Angular's own tick, the wait could end before the read was in flight.
+  fixture.detectChanges();
   await render();
   const backend = TestBed.inject(HttpTestingController);
   const el = fixture.nativeElement as HTMLElement;

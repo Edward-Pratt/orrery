@@ -78,7 +78,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                   <p class="text-sm text-muted-foreground" data-not-reported>Its Agent hasn't said yet what the server runs: it does once it is connected.</p>
                 }
               </div>
-              <div class="flex flex-col items-end gap-1">
+              <div class="flex flex-col items-start gap-2">
                 <button hlmBtn [disabled]="!g.installed || !!g.blocked || busy()" (click)="open()" data-update>Update game</button>
                 @if (updates.state()?.updates?.length; as n) {
                   <button hlmBtn variant="outline" [disabled]="!g.installed || !!g.blocked || busy()" (click)="open(true)" data-update-all>Update {{ n }} {{ n === 1 ? 'mod' : 'mods' }}…</button>

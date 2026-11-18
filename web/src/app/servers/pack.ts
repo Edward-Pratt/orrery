@@ -145,7 +145,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                     · sha256 <span class="font-mono text-xs" [title]="p.installed.sha256">{{ p.installed.sha256.slice(0, 12) }}…</span>
                   </p>
                 </div>
-                <div class="flex flex-col items-end gap-1">
+                <div class="flex flex-col items-start gap-1">
                   <div class="flex gap-2">
                     <button hlmBtn [variant]="p.pending.length ? 'outline' : 'default'" [disabled]="!!blocked() || busy()" (click)="openSheet({ kind: 'update' })" data-update>
                       Update pack

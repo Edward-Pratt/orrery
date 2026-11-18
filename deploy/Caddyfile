@@ -54,3 +54,7 @@ staging.orrery.run {
 grafana.orrery.run {
 	reverse_proxy 127.0.0.1:3000
 }
+
+# Sites other projects install into /etc/caddy/sites (wt-pitch's climb.orrery.run, its server/climb.caddy).
+# A broken snippet fails the reload for every site here: caddy validate --config /etc/caddy/Caddyfile first.
+import /etc/caddy/sites/*.caddy

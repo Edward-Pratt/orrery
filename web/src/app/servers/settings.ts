@@ -3,7 +3,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { AllowCommands, GameSettingsAnswer, GameSettingsFields, GameSettingsRequest, GameSettingsState, LiveEvent, RestartRequest } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideX } from '@ng-icons/lucide';
+import { arClose } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
@@ -99,24 +99,24 @@ export function generatePassword(): string {
 @Component({
   selector: 'app-server-settings',
   imports: [NgIcon, HlmButton, HlmInput, HlmSpinner],
-  viewProviders: [provideIcons({ lucideX })],
+  viewProviders: [provideIcons({ arClose })],
   template: `
     @if (missing(); as why) {
       <p class="text-muted-foreground" data-missing>{{ why }}</p>
     } @else if (state(); as s) {
       <div class="flex max-w-3xl flex-col gap-4 pb-28 text-sm">
         @if (s.rolledBack; as r) {
-          <div class="rounded-lg bg-destructive/10 px-3 py-2" role="alert" data-rolled-back>
+          <div class="ar-callout ar-callout--danger block" role="alert" data-rolled-back>
             <b class="text-destructive">The server didn't start with the settings saved last,</b> so the Agent put back the ones it last started with: {{ r }}
           </div>
         }
         @if (old()) {
-          <p class="rounded-lg border px-3 py-2" data-old-agent>{{ s.blocked }}</p>
+          <p class="ar-panel px-3 py-2" data-old-agent>{{ s.blocked }}</p>
         } @else if (readOnly()) {
-          <p class="rounded-lg border px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
+          <p class="ar-panel px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
         }
         @if (s.pending.length) {
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-status-warn/40 bg-status-warn/10 px-3 py-2" data-pending>
+          <div class="ar-callout ar-callout--warn flex flex-wrap items-center justify-between gap-2" data-pending>
             <span>Waiting for a restart: {{ labels(s.pending) }}.</span>
             @if (online()) {
               <button hlmBtn variant="outline" size="sm" [disabled]="restarting()" (click)="restart()" data-restart>
@@ -129,14 +129,14 @@ export function generatePassword(): string {
           </div>
         }
         @if (stopped()) {
-          <p class="rounded-lg bg-muted px-3 py-2 text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
+          <p class="ar-callout block text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
         }
         @if (s.problem; as p) {
-          <p class="rounded-lg bg-status-warn/10 px-3 py-2" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
+          <p class="ar-callout ar-callout--warn block" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
         }
 
         @if (!unreported()) {
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="server">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="server">
           <legend class="px-1 font-semibold">Server</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Name @if (changed('name')) { <span [title]="was('name')" data-changed="name">● <span class="sr-only">changed</span></span> }</span>
@@ -154,7 +154,7 @@ export function generatePassword(): string {
           </label>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Max players @if (changed('max_players')) { <span [title]="was('max_players')" data-changed="max_players">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1000" step="1" class="w-32" [value]="form().max_players" (input)="setNumber('max_players', $any($event.target).value)" aria-describedby="hint-max-players" data-field="max_players" />
+            <input hlmInput type="number" min="0" max="1000" step="1" class="max-w-32" [value]="form().max_players" (input)="setNumber('max_players', $any($event.target).value)" aria-describedby="hint-max-players" data-field="max_players" />
             <span id="hint-max-players" class="text-xs text-muted-foreground">0: no limit</span>
             @if (errors()['max_players']; as e) {
               <span class="text-xs text-destructive" data-error="max_players">{{ e }}</span>
@@ -176,7 +176,7 @@ export function generatePassword(): string {
               <span class="flex flex-wrap items-center gap-2">
                 <input
                   hlmInput
-                  class="min-w-0 flex-1 font-mono"
+                  class="min-w-0 flex-1 ar-input--mono"
                   [type]="reveal() ? 'text' : 'password'"
                   autocomplete="new-password"
                   aria-labelledby="label-password"
@@ -200,7 +200,7 @@ export function generatePassword(): string {
           </div>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="joining">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="joining">
           <legend class="px-1 font-semibold">Joining</legend>
           <div class="flex items-center gap-3">
             <button
@@ -208,18 +208,15 @@ export function generatePassword(): string {
               role="switch"
               [attr.aria-checked]="form().require_user_verification"
               aria-labelledby="label-verification"
-              class="relative h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-50"
-              [class]="form().require_user_verification ? 'bg-primary' : 'bg-muted'"
+              class="ar-switch disabled:opacity-45"
               (click)="setVerification(!form().require_user_verification)"
               data-field="require_user_verification"
-            >
-              <span class="absolute top-0.5 size-4.5 rounded-full bg-background shadow transition-all" [class]="form().require_user_verification ? 'left-5.5' : 'left-0.5'"></span>
-            </button>
+            ></button>
             <span id="label-verification" class="flex items-center gap-2">{{ labelOf('require_user_verification') }}: {{ form().require_user_verification ? 'on' : 'off' }} @if (changed('require_user_verification')) { <span [title]="was('require_user_verification')" data-changed="require_user_verification">● <span class="sr-only">changed</span></span> }</span>
           </div>
           <div aria-live="polite" data-warning-region>
             @if (!form().require_user_verification) {
-              <div class="rounded-lg border border-status-warn/50 bg-status-warn/10 px-3 py-2" data-warning>
+              <div class="ar-callout ar-callout--warn block" data-warning>
                 <b>Names are not checked.</b> Without this, players join with no factorio.com account check: anyone who has the game password can join under any name, an admin's included. As an admin they can run Lua commands,
                 when commands are on for admins, and through those take over the game, post to Discord as anyone, and pass for a linked player. Bans by name stop no one. Turn it off only for players without a factorio.com account
                 (such as a family-shared copy). Keep the game password secret, and change it here if it leaks.
@@ -228,7 +225,7 @@ export function generatePassword(): string {
           </div>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Kick idle players after (minutes) @if (changed('afk_autokick_interval')) { <span [title]="was('afk_autokick_interval')" data-changed="afk_autokick_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="w-32" [value]="form().afk_autokick_interval" (input)="setNumber('afk_autokick_interval', $any($event.target).value)" aria-describedby="hint-afk" data-field="afk_autokick_interval" />
+            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().afk_autokick_interval" (input)="setNumber('afk_autokick_interval', $any($event.target).value)" aria-describedby="hint-afk" data-field="afk_autokick_interval" />
             <span id="hint-afk" class="text-xs text-muted-foreground">0: never</span>
             @if (errors()['afk_autokick_interval']; as e) {
               <span class="text-xs text-destructive" data-error="afk_autokick_interval">{{ e }}</span>
@@ -236,11 +233,11 @@ export function generatePassword(): string {
           </label>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="pausing">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="pausing">
           <legend class="px-1 font-semibold">Pausing</legend>
           @for (k of pauseKeys; track k) {
-            <label class="flex items-center gap-2">
-              <input type="checkbox" class="size-4" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
+            <label class="ar-check flex items-center gap-2">
+              <input type="checkbox" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
               {{ labelOf(k) }}
               @if (atRestart(k)) {
                 <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
@@ -252,11 +249,11 @@ export function generatePassword(): string {
           }
         </fieldset>
 
-        <fieldset class="flex flex-col gap-3 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="saving">
+        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="saving">
           <legend class="px-1 font-semibold">Saving</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Autosave every (minutes) @if (changed('autosave_interval')) { <span [title]="was('autosave_interval')" data-changed="autosave_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="w-32" [value]="form().autosave_interval" (input)="setNumber('autosave_interval', $any($event.target).value)" aria-describedby="hint-autosave" data-field="autosave_interval" />
+            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().autosave_interval" (input)="setNumber('autosave_interval', $any($event.target).value)" aria-describedby="hint-autosave" data-field="autosave_interval" />
             <span id="hint-autosave" class="text-xs text-muted-foreground">0: off</span>
             @if (errors()['autosave_interval']; as e) {
               <span class="text-xs text-destructive" data-error="autosave_interval">{{ e }}</span>
@@ -267,7 +264,7 @@ export function generatePassword(): string {
               >Autosave slots <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
               @if (changed('autosave_slots')) { <span [title]="was('autosave_slots')" data-changed="autosave_slots">● <span class="sr-only">changed</span></span> }</span
             >
-            <input hlmInput type="number" min="1" max="100" step="1" class="w-32" [value]="form().autosave_slots" (input)="setNumber('autosave_slots', $any($event.target).value)" data-field="autosave_slots" />
+            <input hlmInput type="number" min="1" max="100" step="1" class="max-w-32" [value]="form().autosave_slots" (input)="setNumber('autosave_slots', $any($event.target).value)" data-field="autosave_slots" />
             @if (errors()['autosave_slots']; as e) {
               <span class="text-xs text-destructive" data-error="autosave_slots">{{ e }}</span>
             }
@@ -275,11 +272,11 @@ export function generatePassword(): string {
           <p class="text-xs text-muted-foreground">orrery's own saves (every 6 h after play, and before updates) are separate from Factorio's autosaves.</p>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="commands">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="commands">
           <legend class="px-1 font-semibold">Lua commands</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Who may run them @if (changed('allow_commands')) { <span [title]="was('allow_commands')" data-changed="allow_commands">● <span class="sr-only">changed</span></span> }</span>
-            <select class="h-9 w-48 rounded-md border bg-background px-2" (change)="set('allow_commands', $any($event.target).value)" aria-describedby="hint-commands" data-field="allow_commands">
+            <select class="ar-input max-w-48" (change)="set('allow_commands', $any($event.target).value)" aria-describedby="hint-commands" data-field="allow_commands">
               @for (o of commands; track o.value) {
                 <option [value]="o.value" [selected]="o.value === form().allow_commands">{{ o.label }}</option>
               }
@@ -293,7 +290,7 @@ export function generatePassword(): string {
           <p id="hint-commands" class="text-xs text-muted-foreground">Commands can change anything in the game, and using one disables achievements for that save for good.</p>
         </fieldset>
 
-        <fieldset class="flex flex-col gap-2 rounded-xl border bg-card p-5" [disabled]="readOnly()" data-card="admins">
+        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="admins">
           <legend class="px-1 font-semibold">Admins @if (changed('admins')) { <span [title]="was('admins')" data-changed="admins">● <span class="sr-only">changed</span></span> }</legend>
           @if (form().admins.length) {
             <ul class="flex flex-wrap gap-1.5" aria-label="Admins">
@@ -303,8 +300,8 @@ export function generatePassword(): string {
                   @if (!form().require_user_verification) {
                     <span class="font-sans text-muted-foreground">(name not checked)</span>
                   }
-                  <button hlmBtn variant="ghost" size="sm" type="button" class="size-6 p-0" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
-                    <ng-icon name="lucideX" />
+                  <button hlmBtn variant="ghost" size="icon-sm" type="button" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
+                    <ng-icon name="arClose" />
                   </button>
                 </li>
               }
@@ -316,7 +313,7 @@ export function generatePassword(): string {
             <span class="flex gap-2">
               <input
                 hlmInput
-                class="min-w-0 flex-1 font-mono"
+                class="min-w-0 flex-1 ar-input--mono"
                 aria-label="A player name to make an admin"
                 [attr.aria-describedby]="adminError() ? 'err-admin' : null"
                 [value]="adding()"
@@ -334,7 +331,7 @@ export function generatePassword(): string {
       </div>
 
       @if (!old() && !unreported()) {
-        <footer class="sticky bottom-0 -mx-4 flex max-w-3xl flex-col gap-2 border-t bg-background/95 px-4 py-3 text-sm backdrop-blur md:mx-0 md:px-0" data-footer>
+        <footer class="sticky bottom-0 -mx-4 flex max-w-3xl flex-col gap-2 border-t bg-[var(--glass)] px-4 py-3 text-sm backdrop-blur-[var(--blur-glass)] md:mx-0 md:px-0" data-footer>
           @if (dirty()) {
             <p data-applies>{{ applies() }}</p>
           }

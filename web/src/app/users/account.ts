@@ -20,12 +20,12 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
   selector: 'app-account',
   imports: [HlmButton, HlmInput, HlmSpinner],
   template: `
-    <h1 class="mb-1 text-lg font-semibold">Account</h1>
+    <h1 class="ar-t-heading-md mb-1">Account</h1>
     <p class="mb-6 text-sm text-muted-foreground" data-who>
       Logged in as <b>{{ session.user()?.username }}</b>{{ session.owner() ? ', an owner' : '' }}.
     </p>
     <section class="mb-8 flex max-w-sm flex-col gap-3 text-sm" data-password-section>
-      <h2 class="font-medium">Change password</h2>
+      <h2 class="ar-t-ui-strong">Change password</h2>
       <form class="flex flex-col gap-3" (submit)="$event.preventDefault(); change(current.value, next.value, again.value, $any($event.target))" data-password-form>
         <label>Current password <input #current hlmInput type="password" autocomplete="current-password" class="mt-1 w-full" data-current /></label>
         <label>New password <input #next hlmInput type="password" autocomplete="new-password" class="mt-1 w-full" data-next /></label>
@@ -43,7 +43,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
       }
     </section>
     <section class="flex max-w-sm flex-col gap-2 text-sm">
-      <h2 class="font-medium">Log out everywhere</h2>
+      <h2 class="ar-t-ui-strong">Log out everywhere</h2>
       <p class="text-muted-foreground">Ends every session of yours, this one too: a lost phone, a shared computer.</p>
       <button hlmBtn variant="outline" class="self-start" (click)="logoutAll()" data-logout-all>Log out everywhere</button>
     </section>

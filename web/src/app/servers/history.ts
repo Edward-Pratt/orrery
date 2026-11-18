@@ -37,8 +37,8 @@ const tpsOf = (tps: number) => tps.toFixed(1);
     @if (history()) {
       <div class="grid gap-4 lg:grid-cols-2">
         @for (c of charts(); track c.title) {
-          <section class="rounded-xl border p-3" [attr.data-chart]="c.title">
-            <h2 class="text-sm font-semibold">
+          <section class="ar-panel p-3" [attr.data-chart]="c.title">
+            <h2 class="ar-label">
               {{ c.title }}
               @if (c.paused) {
                 <span class="font-normal text-muted-foreground" data-paused>Paused</span>
@@ -53,7 +53,7 @@ const tpsOf = (tps: number) => tps.toFixed(1);
     } @else {
       <div class="grid gap-4 lg:grid-cols-2" data-skeleton>
         @for (i of [1, 2, 3]; track i) {
-          <hlm-skeleton class="h-48 rounded-xl" />
+          <hlm-skeleton class="ar-skeleton--block h-48" />
         }
       </div>
     }

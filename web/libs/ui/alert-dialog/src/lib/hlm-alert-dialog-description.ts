@@ -11,7 +11,7 @@ export class HlmAlertDialogDescription {
   constructor() {
     classes(
       () =>
-        'text-muted-foreground *:[a]:hover:text-foreground text-sm text-balance md:text-pretty *:[a]:underline *:[a]:underline-offset-3',
+        'ar-dialog__text',
     );
   }
 }

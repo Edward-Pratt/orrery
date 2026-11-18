@@ -13,8 +13,8 @@ import ServerPage from './server';
   imports: [DatePipe],
   template: `
     @let p = player();
-    <section class="rounded-xl border bg-card p-4" data-player>
-      <h3 class="mb-2 font-medium">{{ p.player }}</h3>
+    <section class="ar-panel p-4" data-player>
+      <h3 class="ar-t-ui-strong mb-2">{{ p.player }}</h3>
       <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
         <dt class="text-muted-foreground">Total</dt>
         <dd>{{ duration(p.totalMs) }}</dd>
@@ -51,7 +51,7 @@ export const lookupError = (name: string, err: HttpErrorResponse) =>
         } @else if (error(); as e) {
           <p class="text-sm text-muted-foreground" data-never>{{ e }}</p>
         } @else {
-          <hlm-skeleton class="h-24 rounded-xl" data-skeleton />
+          <hlm-skeleton class="ar-skeleton--block h-24" data-skeleton />
         }
         <hlm-alert-dialog-footer>
           <button hlmAlertDialogCancel data-confirm-cancel>Close</button>

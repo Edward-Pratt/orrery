@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import type { PendingServers, ServerCard } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCircleAlert, lucidePlus } from '@ng-icons/lucide';
+import { arCircleAlert, arPlus } from '@armil/icons';
 import { catchError, debounceTime, EMPTY, filter, of, startWith, Subject, switchMap } from 'rxjs';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
@@ -20,18 +20,18 @@ import { ServerRow } from './row';
 @Component({
   selector: 'app-cards',
   imports: [RouterLink, NgIcon, HlmBadge, HlmButton, HlmSkeleton, HlmSpinner, NewServer, ServerRow],
-  viewProviders: [provideIcons({ lucideCircleAlert, lucidePlus })],
+  viewProviders: [provideIcons({ arCircleAlert, arPlus })],
   template: `
     <div class="mb-4 flex items-center gap-3">
-      <h1 class="text-lg font-semibold">Servers</h1>
+      <h1 class="ar-t-heading-md">Servers</h1>
       @if (newServer()) {
         <button hlmBtn size="sm" class="ml-auto" [disabled]="!!pending()?.installing" (click)="sheet.set(true)" data-new-server>
-          <ng-icon name="lucidePlus" /> New server
+          <ng-icon name="arPlus" /> New server
         </button>
       }
     </div>
     @if (pending()?.installing; as i) {
-      <div class="mb-2 flex items-center gap-3 rounded-xl border p-4 text-sm" data-installing>
+      <div class="ar-panel mb-2 flex items-center gap-3 p-4 text-sm" data-installing>
         <hlm-spinner />
         <span class="min-w-0 flex-1">
           Installing <b>{{ i.name }}</b><span class="text-muted-foreground"> (by {{ i.by }})</span>
@@ -40,35 +40,35 @@ import { ServerRow } from './row';
       </div>
     }
     @if (failed(); as f) {
-      <div class="mb-2 flex items-center gap-3 rounded-xl border border-status-down/40 bg-status-down/10 p-3 text-sm" data-install-failed>
-        <ng-icon name="lucideCircleAlert" class="text-status-down" />
+      <div class="ar-callout ar-callout--danger mb-2 flex items-center gap-3 text-sm" data-install-failed>
+        <ng-icon name="arCircleAlert" class="text-status-down" />
         <span>Installing {{ f.name }} failed: {{ f.why }}</span>
       </div>
     }
-    <div class="flex flex-col gap-2">
+    <div class="ar-tiles server-tiles">
       @if (cards(); as list) {
         @for (c of list; track c.id) {
           <app-server-row [card]="c" (changed)="refetch.next()" />
         } @empty {
           @if (!pending()?.pending?.length) {
-            <p class="text-muted-foreground">No servers yet: add one under "servers" in the hub's config.json.</p>
+            <p class="col-span-full text-muted-foreground">No servers yet: add one under "servers" in the hub's config.json.</p>
           }
         }
         @for (p of pending()?.pending ?? []; track p.id) {
           <a
             [routerLink]="['/servers', 'waiting', p.id]"
-            class="flex flex-wrap items-center gap-3 rounded-lg border border-dashed p-3 hover:bg-muted/50"
+            class="ar-tile"
             [attr.data-pending]="p.id"
           >
-            <span class="font-medium">{{ p.name }}</span>
-            <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn">Waiting for setup</span>
-            <span class="text-sm text-muted-foreground">port {{ p.gamePort }}: run the setup command →</span>
+            <span class="ar-t-ui-strong">{{ p.name }}</span>
+            <span hlmBadge variant="outline" class="ar-tag--warn">Waiting for setup</span>
+            <span class="ar-tile__line">port {{ p.gamePort }}: run the setup command →</span>
           </a>
         }
       } @else {
-        <div class="flex flex-col gap-2" data-skeleton>
+        <div class="contents" data-skeleton>
           @for (i of [1, 2, 3]; track i) {
-            <hlm-skeleton class="h-14 w-full" />
+            <hlm-skeleton class="h-36 w-full" />
           }
         </div>
       }
@@ -80,6 +80,12 @@ import { ServerRow } from './row';
         <!-- a deploy replaced the build under this open page, so the sheet's chunk is gone -->
         <p class="text-sm text-muted-foreground" data-stale>A new dashboard was deployed: <a href="" class="underline">reload</a> to add a server.</p>
       }
+    }
+  `,
+  // Server tiles hold up to three readouts and the actions, so they start wider than Armil's 200px tiles.
+  styles: `
+    .server-tiles {
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
     }
   `,
 })

@@ -30,7 +30,7 @@ async function open() {
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, ' ').trim();
 
 describe('the Status page', () => {
-  afterEach(() => (vi.useRealTimers(), document.documentElement.classList.remove('dark')));
+  afterEach(() => (vi.useRealTimers(), document.documentElement.removeAttribute('data-theme')));
 
   it('asks the hub for /api/public/status and nothing else, then shows each server', async () => {
     const { backend, render } = await open();

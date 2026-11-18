@@ -1,6 +1,7 @@
 // The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages
 // (`PAGES`; Audit log, Library and Users only for a user with that permission), `UserMenu` (initials → Account,
-// Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
+// Log out) and the `ThemeSwitch` in the sidebar's foot (in the header on a phone); the attention strip above
+// `<router-outlet>` and count badges
 // on Servers, Services (down checks count there too) and Host (overdue releases). An invite link opened while logged in
 // leaves the address at once, with a notice to log out first. With `checks` on and `systemd` off
 // the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
@@ -10,8 +11,6 @@ import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { Integrations as IntegrationsOn, Me, Permission } from '@hub/api';
-import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideCpu, lucideLayers, lucideLibrary, lucideMonitor, lucideMoon, lucideScrollText, lucideServer, lucideSun, lucideUsers } from '@ng-icons/lucide';
 import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
@@ -23,30 +22,29 @@ import { Feedback } from './feedback';
 import { Login, takeInvite } from './login';
 import { Logo } from './logo';
 import { reguardOnChange, Session } from './session';
-import { MODES, Theme } from './theme';
+import { Theme } from './theme';
+import { ThemeSwitch } from './theme-switch';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
 const PAGES: { path: string; label: string; icon: string; on?: keyof IntegrationsOn; unless?: keyof IntegrationsOn; needs?: Permission }[] = [
-  { path: 'servers', label: 'Servers', icon: 'lucideServer', }, // every hub has servers
-  { path: 'services', label: 'Services', icon: 'lucideLayers', on: 'systemd' },
+  { path: 'servers', label: 'Servers', icon: 'server', }, // every hub has servers
+  { path: 'services', label: 'Services', icon: 'layers', on: 'systemd' },
   // The services page holds the checks; without systemd it is "Checks" and holds only those.
-  { path: 'services', label: 'Checks', icon: 'lucideCheck', on: 'checks', unless: 'systemd' },
-  { path: 'host', label: 'Host', icon: 'lucideCpu', on: 'host' },
-  { path: 'library', label: 'Library', icon: 'lucideLibrary', on: 'library', needs: 'library' },
-  { path: 'audit', label: 'Audit log', icon: 'lucideScrollText', on: 'web', needs: 'audit' },
-  { path: 'users', label: 'Users', icon: 'lucideUsers', on: 'web', needs: 'users' },
+  { path: 'services', label: 'Checks', icon: 'check', on: 'checks', unless: 'systemd' },
+  { path: 'host', label: 'Host', icon: 'cpu', on: 'host' },
+  { path: 'library', label: 'Library', icon: 'library', on: 'library', needs: 'library' },
+  { path: 'audit', label: 'Audit log', icon: 'logs', on: 'web', needs: 'audit' },
+  { path: 'users', label: 'Users', icon: 'users', on: 'web', needs: 'users' },
 ];
-const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideMoon' };
 
-/** The user's initials; opens a menu with Account, Theme and Log out. */
+/** The user's initials; opens a menu with Account and Log out. */
 @Component({
   selector: 'app-user-menu',
-  imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports, NgIcon],
-  viewProviders: [provideIcons({ lucideSun, lucideMonitor, lucideMoon })],
+  imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports],
   template: `
-    <button type="button" class="flex items-center gap-2 rounded-md p-1 hover:bg-muted" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
+    <button type="button" class="flex max-w-full items-center gap-2 rounded-md p-1 text-[var(--ink-soft)] hover:bg-muted hover:text-foreground max-md:min-h-[var(--control-touch)] max-md:min-w-[var(--control-touch)] max-md:justify-center" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
       <hlm-avatar>
-        <span hlmAvatarFallback class="bg-brand text-xs font-semibold text-white">{{ initials() }}</span>
+        <span hlmAvatarFallback>{{ initials() }}</span>
       </hlm-avatar>
       @if (showName()) {
         <span class="truncate text-sm">{{ user().username }}</span>
@@ -55,18 +53,6 @@ const MODE_ICONS = { light: 'lucideSun', system: 'lucideMonitor', dark: 'lucideM
     <ng-template #menu>
       <div hlmDropdownMenu class="w-44">
         <a hlmDropdownMenuItem routerLink="/account" data-account>Account</a>
-        <div hlmDropdownMenuSeparator></div>
-        <div hlmDropdownMenuLabel>Theme</div>
-        <div hlmDropdownMenuGroup>
-          @for (m of modes; track m) {
-            <button hlmDropdownMenuItem type="button" (click)="theme.set(m)" [attr.aria-current]="theme.mode() === m">
-              <ng-icon [name]="icons[m]" /> <span class="capitalize">{{ m }}</span>
-              @if (theme.mode() === m) {
-                <span class="ml-auto text-xs text-muted-foreground">on</span>
-              }
-            </button>
-          }
-        </div>
         <div hlmDropdownMenuSeparator></div>
         <button hlmDropdownMenuItem type="button" (click)="session.logout()">Log out</button>
       </div>
@@ -77,70 +63,55 @@ export class UserMenu {
   readonly user = input.required<Me>();
   readonly showName = input(false);
   protected readonly session = inject(Session);
-  protected readonly theme = inject(Theme);
-  protected readonly modes = MODES;
-  protected readonly icons = MODE_ICONS;
   protected readonly initials = computed(() => this.user().username.slice(0, 2).toUpperCase());
 }
 
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NgIcon, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
-  viewProviders: [provideIcons({ lucideServer, lucideLayers, lucideCheck, lucideCpu, lucideLibrary, lucideScrollText, lucideUsers })],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, UserMenu, ThemeSwitch, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
   template: `
-    <hlm-toaster />
+    <hlm-toaster [theme]="theme.dark() ? 'dark' : 'light'" />
     @switch (session.user()) {
       @case (undefined) {}
       @case (null) {
         <app-login />
       }
       @default {
-        <div class="min-h-dvh md:flex">
-          <aside class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r bg-sidebar px-3 py-5 md:flex">
-            <span class="flex items-center gap-2 px-3 text-lg font-bold tracking-tight">
-              <app-logo class="size-7" /> orrery <app-staging-badge />
-            </span>
-            <nav class="mt-8 flex flex-col gap-0.5" aria-label="Pages">
+        <div class="ar-shell">
+          <aside class="ar-sidebar">
+            <span class="ar-sidebar__brand"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
+            <nav class="ar-nav" aria-label="Pages">
               @for (p of visible(); track p.path) {
-                <a
-                  [routerLink]="p.path"
-                  routerLinkActive="bg-brand/10 text-brand-foreground"
-                  class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-                >
-                  <ng-icon [name]="p.icon" class="text-lg" /> {{ p.label }}
+                <a [routerLink]="p.path" routerLinkActive ariaCurrentWhenActive="page">
+                  <i class="ar-icon" [class]="'ar-icon--' + p.icon"></i><span class="ar-nav__label">{{ p.label }}</span>
                   @if (badge(p.path); as n) {
-                    <span class="ml-auto rounded-full bg-amber-500 px-2 text-xs font-semibold text-black" data-badge>{{ n }}</span>
+                    <span class="ar-nav__count" data-badge> {{ n }}</span>
                   }
                 </a>
               }
             </nav>
-            <div class="mt-auto px-1"><app-user-menu [user]="session.user()!" [showName]="true" /></div>
+            <div class="ar-sidebar__foot flex items-center justify-between gap-2">
+              <app-user-menu class="min-w-0" [user]="session.user()!" [showName]="true" /><app-theme-switch class="shrink-0" />
+            </div>
           </aside>
-          <header class="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-2 backdrop-blur md:hidden">
-            <span class="flex items-center gap-2 font-bold"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
-            <app-user-menu [user]="session.user()!" [showName]="false" />
-          </header>
-          <div class="min-w-0 flex-1">
+          <div class="ar-shell__main">
+            <header class="ar-topbar">
+              <span class="flex flex-1 items-center gap-2"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
+              <app-user-menu [user]="session.user()!" [showName]="false" /><app-theme-switch class="ar-t-ui" />
+            </header>
             <app-attention-strip />
-            <main class="mx-auto w-full max-w-5xl px-4 pt-6 pb-28 md:px-10 md:pt-10 md:pb-10">
+            <main class="mx-auto w-full max-w-[var(--content)] px-4 pt-4 pb-28 md:px-5 md:pt-5 md:pb-10">
               <router-outlet />
             </main>
           </div>
-          <nav
-            class="fixed inset-x-0 bottom-0 z-10 flex border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
-            aria-label="Pages"
-          >
+          <nav class="ar-tabbar fixed" aria-label="Pages">
             @for (p of visible(); track p.path) {
-              <a
-                [routerLink]="p.path"
-                routerLinkActive="text-brand-foreground"
-                class="flex flex-1 flex-col items-center gap-1 py-2 text-[11px] text-muted-foreground"
-              >
+              <a [routerLink]="p.path" routerLinkActive ariaCurrentWhenActive="page">
                 <span class="relative">
-                  <ng-icon [name]="p.icon" class="text-xl" />
+                  <i class="ar-icon ar-icon--lg" [class]="'ar-icon--' + p.icon"></i>
                   @if (badge(p.path); as n) {
-                    <span class="absolute -top-1 -right-2 rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-black" data-badge>{{ n }}</span>
+                    <span class="ar-nav__count tabbar__count" data-badge>{{ n }}</span>
                   }
                 </span>
                 {{ p.label }}
@@ -154,6 +125,7 @@ export class UserMenu {
 })
 export class App {
   protected readonly session = inject(Session);
+  protected readonly theme = inject(Theme); // applies the remembered theme before the first page shows
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
   protected readonly visible = computed(() =>
@@ -166,7 +138,6 @@ export class App {
   }
 
   constructor() {
-    inject(Theme); // applies the remembered mode before the first page shows
     const env = inject(Environment);
     const title = inject(Title);
     effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));

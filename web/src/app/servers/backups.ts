@@ -5,7 +5,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import type { Backup, CommandOutput, Game, Permission, RestoreRequest, SaveKind } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideEllipsis } from '@ng-icons/lucide';
+import { arMore } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
@@ -63,15 +63,15 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
 @Component({
   selector: 'app-server-backups',
   imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSpinner, SaveUpload],
-  viewProviders: [provideIcons({ lucideEllipsis })],
+  viewProviders: [provideIcons({ arMore })],
   template: `
     @if (backups(); as b) {
       <section class="max-w-4xl">
         <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4" data-backup-summary>
           @for (t of tiles(); track t.key) {
-            <section class="rounded-xl border bg-card p-4" [attr.data-tile]="t.key" [attr.data-state]="t.warn ? 'warn' : 'ok'">
-              <h2 class="text-xs font-medium text-muted-foreground">{{ t.label }}</h2>
-              <p class="mt-1 text-2xl font-semibold" [class.text-status-warn]="t.warn" data-value>{{ t.value }}</p>
+            <section class="ar-panel p-4" [attr.data-tile]="t.key" [attr.data-state]="t.warn ? 'warn' : 'ok'">
+              <h2 class="ar-label">{{ t.label }}</h2>
+              <p class="ar-t-readout mt-1" [class.text-status-warn]="t.warn" data-value>{{ t.value }}</p>
               @if (t.detail) {
                 <p class="text-xs" [class]="t.warn ? 'text-status-warn' : 'text-muted-foreground'" data-detail>{{ t.detail }}</p>
               }
@@ -99,7 +99,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           }
         </div>
         @if (may('servers.restore') && preselected(); as name) {
-          <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm" data-preselected>
+          <div class="ar-callout ar-callout--warn mb-4 flex flex-wrap items-center gap-3 text-sm" data-preselected>
             <span class="flex-1">Restore <span class="font-mono">{{ name }}</span>, the backup from before the pack update?</span>
             <button hlmBtn size="sm" variant="outline" [disabled]="!!restoreWhy() || !!progress()" (click)="restore(name)" data-restore-preselected>Restore…</button>
             @if (restoreWhy(); as why) {
@@ -108,14 +108,14 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           </div>
         }
         @if (b.backups.length) {
-          <table class="w-full text-left text-sm">
-            <thead class="text-muted-foreground">
-              <tr><th class="py-1 pr-4 font-normal">Name</th><th class="pr-4 font-normal">{{ words().finished }}</th><th class="pr-4 font-normal">Size</th><th class="sr-only">Actions</th></tr>
+          <div class="ar-panel"><table class="ar-table">
+            <thead>
+              <tr><th>Name</th><th>{{ words().finished }}</th><th>Size</th><th class="sr-only">Actions</th></tr>
             </thead>
             <tbody>
               @for (backup of b.backups; track backup.name) {
-                <tr class="border-t" [class.bg-amber-500/10]="backup.name === preselected()" data-backup>
-                  <td class="py-1 pr-4">
+                <tr [style.background-color]="backup.name === preselected() ? 'var(--verdigris-wash)' : null" data-backup>
+                  <td>
                     <span class="font-mono">{{ backup.name }}</span>
                     @if (backup.kind; as kind) {
                       <span hlmBadge variant="outline" class="ms-2" [title]="kinds[kind].title" data-kind>{{ kinds[kind].label }}</span>
@@ -124,12 +124,12 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                       <span hlmBadge variant="secondary" class="ms-1" title="The world Factorio last loaded: it saves into it on every stop" data-current>Current world</span>
                     }
                   </td>
-                  <td class="pr-4">{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
-                  <td class="pr-4">{{ bytes(backup.size) }}</td>
-                  <td class="py-1 text-right">
+                  <td>{{ backup.mtimeMs | date: 'yyyy-MM-dd HH:mm' }}</td>
+                  <td>{{ bytes(backup.size) }}</td>
+                  <td class="text-right">
                     @if (may('servers.restore')) {
-                      <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
-                        <ng-icon name="lucideEllipsis" />
+                      <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
+                        <ng-icon name="arMore" />
                       </button>
                     }
                     <ng-template #menu>
@@ -144,13 +144,13 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                 </tr>
               }
             </tbody>
-          </table>
+          </table></div>
         } @else {
-          <div class="rounded-xl border border-dashed p-8 text-center" data-empty>
+          <div class="ar-empty" data-empty>
             <p class="font-medium">{{ words().empty }}</p>
             <p class="mb-3 text-sm text-muted-foreground">{{ words().emptyDetail }}</p>
             @if (may('servers.control')) {
-              <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
+              <button hlmBtn size="sm" variant="outline" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
             }
           </div>
         }

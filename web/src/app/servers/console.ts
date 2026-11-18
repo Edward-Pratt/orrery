@@ -47,10 +47,10 @@ function load(key: string): Remembered | null {
   template: `
     @if (server.card()!.features.console) {
       <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
-        <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-console>
+        <ol appStickBottom class="ar-console flex-1" data-console>
           @for (e of entries(); track $index) {
             <li class="mb-2">
-              <div><b>&gt; {{ e.command }}{{ e.late ? ' (later)' : '' }}</b><span class="ml-2 text-xs text-muted-foreground" data-by>{{ e.by }}</span></div>
+              <div><b class="text-foreground">&gt; {{ e.command }}{{ e.late ? ' (later)' : '' }}</b><span class="ml-2 text-xs text-muted-foreground" data-by>{{ e.by }}</span></div>
               @for (line of e.output; track $index) {
                 <div class="break-all whitespace-pre-wrap" data-line>{{ line }}</div>
               }
@@ -67,7 +67,7 @@ function load(key: string): Remembered | null {
                   {{ c }}
                 </button>
                 <button type="button" class="px-1.5 py-1 text-muted-foreground hover:text-foreground" (click)="unsave(c)" [attr.aria-label]="'Remove ' + c" data-unsave>
-                  ×
+                  <i class="ar-icon ar-icon--close"></i>
                 </button>
               </li>
             }
@@ -76,7 +76,7 @@ function load(key: string): Remembered | null {
         <form class="flex gap-2" (submit)="$event.preventDefault(); run(command.value, command)" data-console-form>
           <input
             #command
-            class="flex-1 rounded-md border px-3 py-1.5 font-mono text-sm"
+            class="ar-input ar-input--mono flex-1"
             [placeholder]="server.card()!.game === 'factorio' ? 'A console command, e.g. /players' : 'A console command, e.g. list'"
             aria-label="Command"
             (keydown.arrowup)="$event.preventDefault(); step(command, -1)"
@@ -84,7 +84,7 @@ function load(key: string): Remembered | null {
             (input)="unstep()"
           />
           @if (stored()) {
-            <button hlmBtn variant="outline" type="button" (click)="save(command)" title="Save this command" aria-label="Save command" data-save>☆</button>
+            <button hlmBtn variant="outline" size="icon" type="button" (click)="save(command)" title="Save this command" aria-label="Save command" data-save><i class="ar-icon ar-icon--star"></i></button>
           }
           <button hlmBtn type="submit" [disabled]="running()">Run</button>
         </form>

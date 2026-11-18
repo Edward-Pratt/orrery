@@ -1,15 +1,15 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck } from '@ng-icons/lucide';
+import { arCheck } from '@armil/icons';
 import { classes } from '@spartan-ng/helm/utils';
 
 @Component({
   selector: 'hlm-dropdown-menu-radio-indicator',
   imports: [NgIcon],
-  providers: [provideIcons({ lucideCheck })],
+  providers: [provideIcons({ arCheck })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { 'data-slot': 'dropdown-menu-radio-item-indicator' },
-  template: ` <ng-icon name="lucideCheck" /> `,
+  template: ` <ng-icon name="arCheck" /> `,
 })
 export class HlmDropdownMenuRadioIndicator {
   constructor() {

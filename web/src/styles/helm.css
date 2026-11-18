@@ -1,0 +1,6 @@
+/* What the helm components need from Armil that a class on the host can't give. Tokens only. */
+
+/* spartan marks an invalid control with data-matches-spartan-invalid; Armil's Field draws it with aria-invalid. */
+.ar-input[data-matches-spartan-invalid='true'] {
+  border-color: var(--danger);
+}

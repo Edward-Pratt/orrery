@@ -1,0 +1,14 @@
+/* The shell's parts Armil's Shell and TabBar don't have. Tokens only. */
+
+/* An attention count on a page's nav entry is itself the alarm. */
+.ar-nav__count[data-badge],
+.ar-nav a[aria-current] .ar-nav__count[data-badge] {
+  color: var(--warn);
+}
+
+/* The same count on a phone tab bar item, at the top right of its icon. */
+.tabbar__count {
+  position: absolute;
+  top: calc(var(--space-1) * -1);
+  left: 100%;
+}

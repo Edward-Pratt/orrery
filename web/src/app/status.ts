@@ -1,5 +1,5 @@
-// `Status`: the shared state display, a coloured dot plus a word (`--status-ok/warn/down` tokens in `styles.css`;
-// teal `--brand`; Figtree); `serverState` for a server's card and `publicServerState` for the Status page.
+// `Status`: the shared state display, Armil's Status (`ar-status`: a dot in the state's colour plus its word);
+// `serverState` for a server's card and `publicServerState` for the Status page.
 
 import { Component, input } from '@angular/core';
 import type { PublicState, ServerCard } from '@hub/api';
@@ -9,18 +9,12 @@ export type Health = 'ok' | 'warn' | 'down';
 /** The one way a state is shown: a coloured dot plus a word, so colour is never the only signal. */
 @Component({
   selector: 'app-status',
-  template: `
-    <span class="inline-flex items-center gap-1.5">
-      <span class="size-2.5 shrink-0 rounded-full" [class]="dot[health()]" aria-hidden="true"></span>
-      <span [class]="text[health()]">{{ label() }}</span>
-    </span>
-  `,
+  template: `<span class="ar-status" [class]="tone[health()]">{{ label() }}</span>`,
 })
 export class Status {
   readonly health = input.required<Health>();
   readonly label = input.required<string>();
-  protected readonly dot = { ok: 'bg-status-ok', warn: 'bg-status-warn', down: 'bg-status-down' };
-  protected readonly text = { ok: '', warn: 'text-status-warn', down: 'text-status-down' };
+  protected readonly tone = { ok: 'ar-status--ok', warn: 'ar-status--warn', down: 'ar-status--danger' };
 }
 
 /** How a server's card is shown, on its row and its page. */

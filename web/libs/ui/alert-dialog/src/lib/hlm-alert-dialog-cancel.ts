@@ -4,7 +4,7 @@ import { HlmButton, provideBrnButtonConfig } from '@spartan-ng/helm/button';
 
 @Directive({
   selector: 'button[hlmAlertDialogCancel]',
-  providers: [provideBrnButtonConfig({ variant: 'outline' })],
+  providers: [provideBrnButtonConfig({ variant: 'ghost' })],
   hostDirectives: [BrnDialogClose, { directive: HlmButton, inputs: ['variant', 'size'] }],
   host: { 'data-slot': 'alert-dialog-cancel', '[type]': 'type()' },
 })

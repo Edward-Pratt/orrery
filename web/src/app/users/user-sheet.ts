@@ -47,20 +47,20 @@ type Scope = string[] | null;
             <legend class="mb-1 font-medium">Roles</legend>
             @for (r of offered(); track r.id) {
               <div class="flex flex-col gap-1.5 rounded-md border p-2" [attr.data-role]="r.name">
-                <label class="flex items-start gap-2">
-                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--brand)]" [checked]="scopes().has(r.id)" (change)="toggle(r.id)" data-grant />
+                <label class="ar-check flex items-start gap-2">
+                  <input type="checkbox" class="mt-0.5" [checked]="scopes().has(r.id)" (change)="toggle(r.id)" data-grant />
                   <span><b>{{ r.name }}</b> <span class="text-muted-foreground">{{ r.note }}</span></span>
                 </label>
                 @if (scopes().has(r.id) && r.id !== 'owner') {
                   @let scope = scopes().get(r.id)!;
                   <div class="ms-6 flex flex-col gap-1" data-scope>
-                    <label class="flex items-center gap-2"><input type="radio" [name]="'scope-' + r.id" [checked]="scope === null" (change)="setScope(r.id, null)" data-every /> Every server</label>
-                    <label class="flex items-center gap-2"><input type="radio" [name]="'scope-' + r.id" [checked]="scope !== null" (change)="setScope(r.id, [])" data-some /> Only these:</label>
+                    <label class="ar-check flex items-center gap-2"><input type="radio" [name]="'scope-' + r.id" [checked]="scope === null" (change)="setScope(r.id, null)" data-every /> Every server</label>
+                    <label class="ar-check flex items-center gap-2"><input type="radio" [name]="'scope-' + r.id" [checked]="scope !== null" (change)="setScope(r.id, [])" data-some /> Only these:</label>
                     @if (scope !== null) {
                       <div class="ms-6 flex flex-col gap-1">
                         @for (s of servers(); track s.id) {
-                          <label class="flex items-center gap-2">
-                            <input type="checkbox" class="size-4 accent-[var(--brand)]" [checked]="scope.includes(s.id)" (change)="pick(r.id, s.id)" [attr.data-server]="s.id" /> {{ s.name }}
+                          <label class="ar-check flex items-center gap-2">
+                            <input type="checkbox" [checked]="scope.includes(s.id)" (change)="pick(r.id, s.id)" [attr.data-server]="s.id" /> {{ s.name }}
                           </label>
                         }
                         <p class="text-xs text-muted-foreground">Only the role's server permissions, on these servers.</p>
@@ -80,7 +80,7 @@ type Scope = string[] | null;
           @if (owner()) {
             <label
               >Discord id <span class="text-muted-foreground">(optional)</span>
-              <input hlmInput class="mt-1 w-full font-mono" inputmode="numeric" [value]="discordId()" (input)="discordId.set($any($event.target).value.trim())" data-discord
+              <input hlmInput class="mt-1 w-full ar-input--mono" inputmode="numeric" [value]="discordId()" (input)="discordId.set($any($event.target).value.trim())" data-discord
             /></label>
             <p class="-mt-3 text-xs text-muted-foreground">Their dashboard chat goes in game under the name this Discord user linked.</p>
             @if (!discordOk()) {

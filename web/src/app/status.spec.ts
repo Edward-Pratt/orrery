@@ -9,6 +9,6 @@ describe('Status', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.textContent).toContain('Offline');
-    expect(el.querySelector('.bg-status-down')).not.toBeNull();
+    expect(el.querySelector('.ar-status--danger')).not.toBeNull();
   });
 });

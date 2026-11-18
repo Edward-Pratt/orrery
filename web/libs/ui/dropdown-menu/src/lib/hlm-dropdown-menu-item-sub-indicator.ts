@@ -1,15 +1,15 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideChevronRight } from '@ng-icons/lucide';
+import { arChevronRight } from '@armil/icons';
 import { classes } from '@spartan-ng/helm/utils';
 
 @Component({
   selector: 'hlm-dropdown-menu-item-sub-indicator',
   imports: [NgIcon],
-  providers: [provideIcons({ lucideChevronRight })],
+  providers: [provideIcons({ arChevronRight })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ng-icon name="lucideChevronRight" class="text-[length:--spacing(4)] rtl:rotate-180" />
+    <ng-icon name="arChevronRight" class="text-[length:--spacing(4)] rtl:rotate-180" />
   `,
 })
 export class HlmDropdownMenuItemSubIndicator {

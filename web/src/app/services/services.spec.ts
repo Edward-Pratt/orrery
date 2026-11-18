@@ -81,14 +81,16 @@ describe('services page', () => {
     const { text, row } = await setup();
     expect(text(row('grafana').querySelector('[data-state]'))).toBe('active');
     expect(text(row('caddy').querySelector('[data-state]'))).toBe('inactive');
-    expect(text(row('grafana').querySelector('[data-checks]'))).toBe('grafana ✓ 42 ms');
+    expect(text(row('grafana').querySelector('[data-checks]'))).toBe('grafana 42 ms');
+    expect(row('grafana').querySelector('[data-checks] .ar-status--ok')).not.toBeNull();
     expect(row('caddy').querySelector('[data-check]')).toBeNull();
   });
 
   it('lists checks no service shows under Standalone checks', async () => {
     const { el, text } = await setup();
     expect(text(el.querySelector('h2'))).toBe('Standalone checks');
-    expect(text(el.querySelector('[data-standalone=api]'))).toContain('api ✗ timeout');
+    expect(text(el.querySelector('[data-standalone=api]'))).toContain('api timeout');
+    expect(el.querySelector('[data-standalone=api] .ar-status--danger')).not.toBeNull();
     expect(el.querySelector('[data-standalone=grafana]')).toBeNull();
   });
 
@@ -96,7 +98,8 @@ describe('services page', () => {
     const { events, render, text, row } = await setup();
     events.push(1, { target: 'check', id: 'grafana', type: 'checked', status: check('grafana', { up: false, ms: null, error: 'HTTP 503' }) });
     await render();
-    expect(text(row('grafana').querySelector('[data-checks]'))).toBe('grafana ✗ HTTP 503');
+    expect(text(row('grafana').querySelector('[data-checks]'))).toBe('grafana HTTP 503');
+    expect(row('grafana').querySelector('[data-checks] .ar-status--danger')).not.toBeNull();
   });
 
   it('fetches the services again on a service event, without a toast', async () => {

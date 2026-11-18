@@ -4,7 +4,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { PendingServers } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCopy } from '@ng-icons/lucide';
+import { arCopy } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
@@ -22,15 +22,15 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 @Component({
   selector: 'app-waiting',
   imports: [DatePipe, RouterLink, NgIcon, HlmBadge, HlmButton, HlmSkeleton],
-  viewProviders: [provideIcons({ lucideCopy })],
+  viewProviders: [provideIcons({ arCopy })],
   template: `
     @if (server(); as p) {
       <div class="flex max-w-3xl flex-col gap-4">
         <div class="flex flex-wrap items-center gap-3">
-          <h1 class="text-lg font-semibold">{{ p.name }}</h1>
-          <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn" data-badge>Waiting for setup</span>
+          <h1 class="ar-t-heading-md">{{ p.name }}</h1>
+          <span hlmBadge variant="outline" class="ar-tag--warn" data-badge>Waiting for setup</span>
           @if (mayDiscard) {
-            <button hlmBtn variant="ghost" size="sm" class="ml-auto text-status-down" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
+            <button hlmBtn variant="destructive" size="sm" class="ml-auto" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
           }
         </div>
         <p class="text-sm text-muted-foreground" data-meta>
@@ -44,9 +44,9 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
         @for (step of steps(); track step.command) {
           <div class="flex flex-col gap-1" [attr.data-step]="step.what">
             <p class="text-sm font-medium">{{ step.label }}</p>
-            <div class="flex items-start gap-2 rounded-lg border bg-muted p-3">
+            <div class="ar-panel flex items-start gap-2 bg-muted p-3">
               <code class="min-w-0 flex-1 break-all font-mono text-xs" data-command>{{ step.command }}</code>
-              <button hlmBtn variant="ghost" size="sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="lucideCopy" /></button>
+              <button hlmBtn variant="ghost" size="icon-sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
             </div>
           </div>
         }
@@ -56,7 +56,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
         No Pending server {{ id() }}. If its setup ran, it is <a [routerLink]="['/servers', id()]" class="underline">a server now</a>.
       </p>
     } @else {
-      <hlm-skeleton class="h-32 max-w-3xl rounded-lg" data-skeleton />
+      <hlm-skeleton class="ar-skeleton--block h-32 max-w-3xl" data-skeleton />
     }
   `,
 })

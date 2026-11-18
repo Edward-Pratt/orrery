@@ -208,13 +208,10 @@ export function generatePassword(): string {
               role="switch"
               [attr.aria-checked]="form().require_user_verification"
               aria-labelledby="label-verification"
-              class="relative h-6 w-11 shrink-0 rounded-sm border border-[var(--line-strong)] transition-colors duration-[120ms] disabled:opacity-45"
-              [class]="form().require_user_verification ? 'bg-primary' : 'bg-muted'"
+              class="ar-switch disabled:opacity-45"
               (click)="setVerification(!form().require_user_verification)"
               data-field="require_user_verification"
-            >
-              <span class="absolute top-0.5 size-4.5 rounded-xs transition-all duration-[120ms]" [class]="form().require_user_verification ? 'left-5.5 bg-[var(--on-accent)]' : 'left-0.5 bg-[var(--ink-soft)]'"></span>
-            </button>
+            ></button>
             <span id="label-verification" class="flex items-center gap-2">{{ labelOf('require_user_verification') }}: {{ form().require_user_verification ? 'on' : 'off' }} @if (changed('require_user_verification')) { <span [title]="was('require_user_verification')" data-changed="require_user_verification">● <span class="sr-only">changed</span></span> }</span>
           </div>
           <div aria-live="polite" data-warning-region>

@@ -9,13 +9,13 @@ import { formatDuration } from '../units';
 /** What a pack update calls its steps; a game update's Backup is its Save. */
 export const PACK_STEPS: Record<PackStep, string> = { prepare: 'Prepare', backup: 'Backup', stop: 'Stop', swap: 'Swap', gate: 'Health gate', rollback: 'Rollback' };
 const RESULT: Record<PackFinished | 'running', string> = {
-  running: 'text-muted-foreground',
-  ok: 'text-status-ok',
-  'rolled back': 'text-status-down',
-  failed: 'text-status-down',
-  'failed before swap': 'text-status-down',
-  'failed in staging': 'text-muted-foreground',
-  cancelled: 'text-muted-foreground',
+  running: 'ar-status--info',
+  ok: 'ar-status--ok',
+  'rolled back': 'ar-status--danger',
+  failed: 'ar-status--danger',
+  'failed before swap': 'ar-status--danger',
+  'failed in staging': 'ar-status--idle',
+  cancelled: 'ar-status--idle',
 };
 
 /** The latest update, when it failed while preparing: where to, and its cause (the log's last line that isn't a step's), for the red box. */
@@ -110,10 +110,10 @@ export class UpdateSteps {
                     <span class="block text-xs text-muted-foreground">{{ changesPrefix() }}{{ h.changes!.join(', ') }}</span>
                   }
                 </td>
-                <td [class]="result[h.outcome]">
-                  {{ h.outcome }}
+                <td>
+                  <span class="ar-status" [class]="result[h.outcome]">{{ h.outcome }}</span>
                   @if (h.finished) {
-                    <span class="text-xs text-muted-foreground">{{ took(h.finished - h.started) }}</span>
+                    <span class="text-xs text-muted-foreground"> {{ took(h.finished - h.started) }}</span>
                   }
                 </td>
                 <td class="hidden sm:table-cell">{{ h.by }}</td>

@@ -181,7 +181,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 } @else {
                   <div class="flex flex-wrap items-center gap-2">
                     <select
-                      class="ar-input"
+                      class="ar-input w-auto"
                       [disabled]="busy() || !library()"
                       [value]="p.runtime.name ?? ''"
                       (change)="setRuntime($any($event.target).value || null)"

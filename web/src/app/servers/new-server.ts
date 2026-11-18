@@ -76,8 +76,8 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
                 <p class="text-xs text-status-down" data-no-scripts>This pack has no start script (*.sh) at its top.</p>
               }
               @if (loops()) {
-                <label class="flex items-start gap-2">
-                  <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="removeLoop()" (change)="removeLoop.set(!removeLoop())" data-loop />
+                <label class="ar-check flex items-start gap-2">
+                  <input type="checkbox" class="mt-0.5" [checked]="removeLoop()" (change)="removeLoop.set(!removeLoop())" data-loop />
                   <span>Remove its <code>while true</code> restart loop (a Config edit): systemd restarts the server, and the loop would make a stop hang.</span>
                 </label>
               }
@@ -92,8 +92,8 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
               </select>
             </label>
           }
-          <label class="flex items-start gap-2">
-            <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="eula()" (change)="eula.set(!eula())" data-eula />
+          <label class="ar-check flex items-start gap-2">
+            <input type="checkbox" class="mt-0.5" [checked]="eula()" (change)="eula.set(!eula())" data-eula />
             <span>I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener" class="underline">Minecraft EULA</a></span>
           </label>
           <button hlmBtn [disabled]="busy() || !ready()" (click)="create()" data-go>

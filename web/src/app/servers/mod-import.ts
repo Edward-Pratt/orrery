@@ -92,8 +92,8 @@ type Preview = {
         <section class="ar-panel flex flex-col gap-3 p-3" data-import-preview>
           <h3 class="ar-t-ui-strong" data-import-count>{{ p.add.length ? mods(p.add.length) + ' to add' : 'Nothing to add' }}{{ from() ? ' from ' + from() : '' }}</h3>
           @if (hasVersions()) {
-            <label class="flex items-start gap-2">
-              <input type="checkbox" class="mt-0.5 size-4 accent-[var(--accent)]" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />
+            <label class="ar-check flex items-start gap-2">
+              <input type="checkbox" class="mt-0.5" [checked]="keep()" (change)="keep.set(!keep())" data-import-keep />
               <span>
                 Keep the versions in the file
                 <span class="block text-xs text-muted-foreground">

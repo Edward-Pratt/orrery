@@ -236,8 +236,8 @@ export function generatePassword(): string {
         <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="pausing">
           <legend class="px-1 font-semibold">Pausing</legend>
           @for (k of pauseKeys; track k) {
-            <label class="flex items-center gap-2">
-              <input type="checkbox" class="size-4 accent-[var(--accent)]" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
+            <label class="ar-check flex items-center gap-2">
+              <input type="checkbox" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
               {{ labelOf(k) }}
               @if (atRestart(k)) {
                 <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>

@@ -44,7 +44,7 @@ export const isStatusPath = (path: string): boolean => path.replace(/\/$/, '') =
         </div>
       </header>
       @if (unreachable()) {
-        <p role="status" class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)] text-sm" data-unreachable>
+        <p role="status" class="ar-callout ar-callout--danger text-sm" data-unreachable>
           Can't reach orrery right now.
         </p>
       }

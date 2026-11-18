@@ -3,18 +3,20 @@ import { BrnToggle } from '@spartan-ng/brain/toggle';
 import { classes } from '@spartan-ng/helm/utils';
 import { cva, type VariantProps } from 'class-variance-authority';
 
+// The look is Armil's Segmented (`ar-seg` on the group: the pressed item is verdigris-wash); a toggle alone keeps
+// only its layout and disabled state.
 export const toggleVariants = cva(
-  "hover:text-foreground aria-pressed:bg-muted focus-visible:border-ring focus-visible:ring-ring/50 data-[matches-spartan-invalid=true]:ring-destructive/20 dark:data-[matches-spartan-invalid=true]:ring-destructive/40 data-[matches-spartan-invalid=true]:border-destructive dark:data-[matches-spartan-invalid=true]:border-destructive/50 gap-1 rounded-md text-sm font-medium transition-[color,box-shadow] [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] group/toggle hover:bg-muted inline-flex items-center justify-center whitespace-nowrap outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
+  "group/toggle inline-flex items-center justify-center gap-1 whitespace-nowrap disabled:pointer-events-none disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
   {
     variants: {
       variant: {
-        default: 'bg-transparent',
-        outline: 'border-input hover:bg-muted border bg-transparent shadow-xs',
+        default: '',
+        outline: '',
       },
       size: {
-        default: 'h-9 min-w-9 px-2.5',
-        sm: 'h-8 min-w-8 px-2.5',
-        lg: 'h-10 min-w-10 px-2.5',
+        default: '',
+        sm: '',
+        lg: '',
       },
     },
     defaultVariants: {

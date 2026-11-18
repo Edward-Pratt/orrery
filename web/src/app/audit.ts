@@ -24,11 +24,11 @@ type Entry = AuditLog['entries'][number];
   selector: 'app-audit',
   imports: [DatePipe, HlmButton, HlmInput, HlmSkeleton, HlmSpinner],
   template: `
-    <h1 class="mb-4 text-lg font-semibold">Audit log</h1>
+    <h1 class="ar-t-heading-md mb-4">Audit log</h1>
     <div class="mb-4 flex flex-wrap items-end gap-4 text-sm">
       <label class="flex flex-col gap-1">
         Server
-        <select class="h-9 rounded-md border bg-background px-2" (change)="filter({ server: $any($event.target).value })" data-server-filter>
+        <select class="ar-input" (change)="filter({ server: $any($event.target).value })" data-server-filter>
           <option value="">All</option>
           @for (s of servers(); track s.id) {
             <option [value]="s.id" [selected]="s.id === server()">{{ s.name }}</option>
@@ -39,7 +39,7 @@ type Entry = AuditLog['entries'][number];
         Who
         <input
           hlmInput
-          class="w-64"
+          class="max-w-64"
           list="audit-actors"
           placeholder="discord:alice (123)"
           autocomplete="off"
@@ -61,27 +61,27 @@ type Entry = AuditLog['entries'][number];
         }
       </div>
     } @else if (!entries().length) {
-      <p class="rounded-lg border border-dashed p-6 text-center text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
+      <p class="ar-empty text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
     } @else {
-      <table class="hidden w-full text-left text-sm md:table">
-        <thead class="text-muted-foreground">
-          <tr><th class="py-1 pr-4 font-normal">When</th><th class="pr-4 font-normal">Who</th><th class="pr-4 font-normal">What</th><th class="pr-4 font-normal">Which</th><th class="font-normal">Details</th></tr>
+      <div class="ar-panel hidden md:block"><table class="ar-table">
+        <thead>
+          <tr><th>When</th><th>Who</th><th>What</th><th>Which</th><th>Details</th></tr>
         </thead>
         <tbody>
           @for (e of entries(); track e.id) {
-            <tr class="border-t" data-entry>
-              <td class="py-1 pr-4 whitespace-nowrap">{{ e.ts | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
-              <td class="pr-4">{{ e.actor }}</td>
-              <td class="pr-4">{{ e.action }}</td>
-              <td class="pr-4">{{ e.target }}</td>
+            <tr data-entry>
+              <td class="whitespace-nowrap">{{ e.ts | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
+              <td>{{ e.actor }}</td>
+              <td>{{ e.action }}</td>
+              <td>{{ e.target }}</td>
               <td class="break-all">{{ e.details }}</td>
             </tr>
           }
         </tbody>
-      </table>
+      </table></div>
       <ul class="flex flex-col gap-2 md:hidden">
         @for (e of entries(); track e.id) {
-          <li class="rounded-lg border p-3 text-sm" data-card>
+          <li class="ar-panel p-3 text-sm" data-card>
             <div class="flex justify-between gap-2"><b>{{ e.action }} · {{ e.target }}</b><span class="text-muted-foreground">{{ e.ts | date: 'MM-dd HH:mm' }}</span></div>
             <div class="break-all text-muted-foreground">{{ e.actor }}{{ e.details ? ' — ' + e.details : '' }}</div>
           </li>

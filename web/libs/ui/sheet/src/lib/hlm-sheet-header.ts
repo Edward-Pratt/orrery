@@ -7,6 +7,6 @@ import { classes } from '@spartan-ng/helm/utils';
 })
 export class HlmSheetHeader {
   constructor() {
-    classes(() => 'gap-1.5 p-4 flex flex-col');
+    classes(() => 'flex flex-col gap-1 border-b px-4 py-3.5');
   }
 }

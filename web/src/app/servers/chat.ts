@@ -44,10 +44,10 @@ const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDat
   template: `
     @if (server.card()!.features.chat) {
       <section class="flex h-[calc(100dvh-16rem)] min-h-72 max-w-4xl flex-col gap-2">
-        <ol appStickBottom class="flex-1 rounded-xl border p-3 font-mono text-sm" data-chat>
+        <ol appStickBottom class="ar-console flex-1" data-chat>
           @for (line of lines(); track $index) {
             <li>
-              <time class="me-2 text-muted-foreground" [attr.datetime]="iso(line.at)" [title]="line.at | date: 'EEEE d MMMM y, HH:mm:ss'">{{
+              <time class="ar-console__t me-2" [attr.datetime]="iso(line.at)" [title]="line.at | date: 'EEEE d MMMM y, HH:mm:ss'">{{
                 line.at | date: (sameDay(line.at) ? 'HH:mm' : 'd MMM HH:mm')
               }}</time>
               @switch (line.type) {
@@ -67,7 +67,7 @@ const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDat
         </ol>
         @if (server.may('servers.chat')) {
           <form class="flex gap-2" (submit)="$event.preventDefault(); send(message)" data-chat-form>
-            <input #message class="flex-1 rounded-md border px-3 py-1.5 text-sm" maxlength="256" placeholder="Say something in game" aria-label="Message" />
+            <input #message class="ar-input flex-1" maxlength="256" placeholder="Say something in game" aria-label="Message" />
             <button hlmBtn type="submit">Send</button>
           </form>
         }

@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, inject, input, output, signal } from '
 import { Router, RouterLink } from '@angular/router';
 import type { RestartRequest, ServerCard } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideEllipsis, lucideTerminal } from '@ng-icons/lucide';
+import { arMore, arTerminal } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
@@ -29,14 +29,14 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
 @Component({
   selector: 'app-server-actions',
   imports: [DatePipe, RouterLink, NgIcon, HlmButton, HlmDropdownMenuImports, HlmSpinner],
-  viewProviders: [provideIcons({ lucideEllipsis, lucideTerminal })],
+  viewProviders: [provideIcons({ arMore, arTerminal })],
   template: `
     @let c = card();
     <div class="relative flex items-center gap-2" data-actions>
       @if (c.restart; as r) {
         <span class="text-sm" data-restart-pending>{{ r.stop ? 'Stop' : 'Restart' }} at {{ r.at | date: 'HH:mm:ss' }}, <span class="tabular-nums" data-restart-left>{{ left() }}</span></span>
         @if (may().control) {
-          <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
+          <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
             @if (busy() === 'cancel') {
               <hlm-spinner />
             }
@@ -45,7 +45,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
       } @else if (c.online) {
         @if (c.features.chat && may().control) {
-          <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="restart" [disabled]="!!busy()" (click)="restart(RESTART_MINUTES)">
+          <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="restart" [disabled]="!!busy()" (click)="restart(RESTART_MINUTES)">
             @if (busy() === 'restart') {
               <hlm-spinner />
             }
@@ -54,12 +54,12 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
         @if (c.features.console && may().console) {
           <a hlmBtn variant="outline" size="sm" [routerLink]="['/servers', c.id, 'console']" data-action="console" aria-label="Console">
-            <ng-icon name="lucideTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
+            <ng-icon name="arTerminal" class="sm:hidden" /><span class="max-sm:hidden">Console</span>
           </a>
         }
       } @else if (c.service && may().service) {
         @let blocked = startBlocked();
-        <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="start" [disabled]="!!busy() || !!blocked" (click)="start()">
+        <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="start" [disabled]="!!busy() || !!blocked" (click)="start()">
           @if (busy() === 'start') {
             <hlm-spinner />
           }
@@ -70,15 +70,15 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
       }
       @if (menu().any) {
-        <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
-          <ng-icon name="lucideEllipsis" />
+        <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
+          <ng-icon name="arMore" />
         </button>
       }
       @if (asking()) {
-        <form class="absolute top-full right-0 z-10 mt-2 flex items-center gap-2 rounded-md border bg-popover p-3 text-sm shadow-md" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
+        <form class="ar-menu ar-menu--form absolute top-full right-0 z-10 mt-1.5 flex items-center gap-2 text-sm" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
           <label class="flex items-center gap-2">
             Restart in
-            <input #minutes type="number" min="0" max="60" step="1" value="5" class="w-16 rounded-md border px-2 py-1" />
+            <input #minutes type="number" min="0" max="60" step="1" value="5" class="ar-input max-w-16" />
             minutes
           </label>
           <button hlmBtn size="sm" type="submit">Schedule</button>

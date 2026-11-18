@@ -13,27 +13,30 @@ import { ServerActions } from './actions';
  */
 @Component({
   selector: 'app-server-row',
+  host: { class: 'contents' },
   imports: [DecimalPipe, PercentPipe, RouterLink, ServerActions, Status],
+  // Armil's Tile, with a Readout per number; the tile isn't a link itself, as it holds the actions' buttons.
   template: `
     @let c = card();
-    <div
-      class="flex cursor-pointer flex-col gap-2 rounded-lg border p-3 hover:bg-muted/50 sm:flex-row sm:items-center sm:gap-4"
-      [attr.data-server]="c.id"
-      (click)="open($event)"
-    >
-      <div class="flex min-w-0 items-center justify-between gap-3 sm:w-64 sm:justify-start">
-        <a [routerLink]="['/servers', c.id]" class="truncate font-medium hover:underline">{{ c.name }}</a>
-        <app-status data-state [health]="state().health" [label]="state().label" class="text-sm" />
+    <div class="ar-tile server-tile cursor-pointer" [attr.data-server]="c.id" (click)="open($event)">
+      <div class="ar-tile__who justify-between">
+        <a [routerLink]="['/servers', c.id]" class="truncate hover:underline">{{ c.name }}</a>
+        <app-status data-state [health]="state().health" [label]="state().label" class="font-normal" />
       </div>
-      <dl class="flex flex-wrap gap-x-4 text-sm text-muted-foreground sm:flex-1">
+      <dl class="flex flex-wrap gap-x-8 gap-y-3">
         @if (c.features.tps) {
-          <div class="flex gap-1"><dt>{{ c.rate.label }}</dt><dd data-tps class="text-foreground">{{ c.paused ? 'Paused' : c.tps === null ? '–' : (c.tps | number: '1.1-1') }}</dd></div>
+          <div class="ar-readout"><dt class="ar-label">{{ c.rate.label }}</dt><dd data-tps class="ar-readout__value">{{ c.paused ? 'Paused' : c.tps === null ? '–' : (c.tps | number: '1.1-1') }}</dd></div>
         }
-        <div class="flex gap-1"><dt>Players</dt><dd data-players class="text-foreground" [attr.title]="c.players.join(', ')">{{ c.players.length }}</dd></div>
-        <div class="flex gap-1"><dt>Uptime 24 h</dt><dd data-uptime class="text-foreground">{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd></div>
+        <div class="ar-readout"><dt class="ar-label">Players</dt><dd data-players class="ar-readout__value" [attr.title]="c.players.join(', ')">{{ c.players.length }}</dd></div>
+        <div class="ar-readout"><dt class="ar-label">Uptime 24 h</dt><dd data-uptime class="ar-readout__value">{{ c.uptimeDay === null ? 'unknown' : (c.uptimeDay | percent: '1.0-1') }}</dd></div>
       </dl>
       <app-server-actions [card]="c" (changed)="changed.emit()" />
     </div>
+  `,
+  styles: `
+    .server-tile:hover {
+      background: var(--raised);
+    }
   `,
 })
 export class ServerRow {

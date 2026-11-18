@@ -2,8 +2,9 @@
 // `main.ts` with `PUBLIC_CONFIG` when `isStatusPath` holds: no router, no shell, no session, no interceptor, so its one
 // request is `GET /api/public/status`, every `POLL_MS`. Each listed server's name, game, state (`Status`), the players
 // online and uptime; "Updated … ago". When the hub doesn't answer (any error, a 401 from a hub without the Status page
-// too), the last answer stays greyed out under "Can't reach orrery right now"; the next poll tries again. Light or dark
-// from `Theme` (the system's, unless this browser picked one on the dashboard).
+// too), the last answer stays greyed out under "Can't reach orrery right now"; the next poll tries again. Dark, or Paper
+// from `Theme` when this browser chose it on the dashboard at the same address (it has no switch of its own, so on
+// status.orrery.run, another address, it is always dark).
 
 import { formatPercent } from '@angular/common';
 import { HttpClient, provideHttpClient, withFetch } from '@angular/common/http';
@@ -38,22 +39,22 @@ export const isStatusPath = (path: string): boolean => path.replace(/\/$/, '') =
       <header class="flex items-center gap-3">
         <app-logo class="size-10" />
         <div>
-          <h1 class="text-2xl font-bold tracking-tight">orrery</h1>
+          <h1 class="ar-t-heading-lg">orrery</h1>
           <p class="text-sm text-muted-foreground">Server status</p>
         </div>
       </header>
       @if (unreachable()) {
-        <p role="status" class="rounded-lg border border-status-down/40 bg-status-down/10 px-4 py-3 text-sm" data-unreachable>
+        <p role="status" class="ar-callout ar-callout--danger text-sm" data-unreachable>
           Can't reach orrery right now.
         </p>
       }
       @if (cards(); as list) {
         <ul class="flex flex-col gap-3" [class.opacity-50]="unreachable()">
           @for (c of list; track c.name) {
-            <li class="rounded-xl border bg-card p-4 text-card-foreground" data-server>
+            <li class="ar-panel p-4" data-server>
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <h2 class="font-semibold">{{ c.name }}</h2>
+                  <h2 class="ar-t-heading-sm">{{ c.name }}</h2>
                   <p class="text-sm text-muted-foreground">{{ c.game }}</p>
                 </div>
                 <app-status [health]="c.look.health" [label]="c.look.label" />
@@ -93,7 +94,7 @@ export class StatusPage {
   });
 
   constructor() {
-    inject(Theme); // light or dark before the first paint
+    inject(Theme); // dark, or a Paper chosen on the dashboard
     inject(Title).setTitle('orrery status');
     const http = inject(HttpClient);
     timer(0, POLL_MS)

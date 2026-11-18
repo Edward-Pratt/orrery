@@ -25,6 +25,7 @@
               }
             ],
             "styles": [
+              "src/armil/css/armil.css",
               "src/styles.css"
             ]
           },

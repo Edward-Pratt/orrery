@@ -7,6 +7,6 @@ import { classes } from '@spartan-ng/helm/utils';
 })
 export class HlmSheetFooter {
   constructor() {
-    classes(() => 'gap-2 p-4 mt-auto flex flex-col');
+    classes(() => 'ar-sheet__foot mt-auto');
   }
 }

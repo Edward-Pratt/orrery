@@ -11,7 +11,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import type { InviteAnswer, RoleView, ServerCard, UserView } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCopy, lucideEllipsis, lucidePlus } from '@ng-icons/lucide';
+import { arCopy, arMore, arPlus } from '@armil/icons';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
@@ -31,18 +31,18 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
 @Component({
   selector: 'app-users',
   imports: [DatePipe, NgIcon, HlmBadge, HlmButton, HlmDropdownMenuImports, HlmSkeleton, UserSheet],
-  viewProviders: [provideIcons({ lucideCopy, lucideEllipsis, lucidePlus })],
+  viewProviders: [provideIcons({ arCopy, arMore, arPlus })],
   template: `
     <div class="mb-4 flex items-center gap-3">
       <p class="text-sm text-muted-foreground">Who may log in, and what each may do.</p>
-      <button hlmBtn size="sm" class="ml-auto" (click)="editing.set('new')" data-invite><ng-icon name="lucidePlus" /> Invite…</button>
+      <button hlmBtn size="sm" class="ml-auto" (click)="editing.set('new')" data-invite><ng-icon name="arPlus" /> Invite…</button>
     </div>
     @if (link(); as l) {
-      <div class="mb-4 flex flex-col gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-link>
+      <div class="ar-callout ar-callout--warn mb-4 flex flex-col gap-2 text-sm" data-link>
         <p>The link for <b>{{ l.username }}</b> works once, for 24 hours, and isn't shown again: send it to them.</p>
         <div class="flex items-start gap-2 rounded-md border bg-background p-2">
           <code class="min-w-0 flex-1 font-mono text-xs break-all" data-link-url>{{ l.invite }}</code>
-          <button hlmBtn variant="ghost" size="sm" (click)="copy(l.invite)" aria-label="Copy" data-copy><ng-icon name="lucideCopy" /></button>
+          <button hlmBtn variant="ghost" size="icon-sm" (click)="copy(l.invite)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
         </div>
         <button hlmBtn variant="ghost" size="sm" class="self-end" (click)="link.set(null)" data-done>Done</button>
       </div>
@@ -50,7 +50,7 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
     @if (users(); as list) {
       <div class="flex flex-col gap-2">
         @for (u of list; track u.id) {
-          <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3" [attr.data-user]="u.username">
+          <div class="ar-panel flex flex-wrap items-center gap-3 p-3" [attr.data-user]="u.username">
             <div class="min-w-0 flex-1">
               <span class="font-medium">{{ u.username }}</span>
               @if (u.id === me()?.id) {
@@ -72,8 +72,8 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
               }
             </span>
             @if (manageable(u)) {
-              <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more>
-                <ng-icon name="lucideEllipsis" />
+              <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more>
+                <ng-icon name="arMore" />
               </button>
               <ng-template #menu>
                 <div hlmDropdownMenu class="w-48">

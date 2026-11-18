@@ -2,20 +2,20 @@ import { DatePipe } from '@angular/common';
 import { Component, input, output } from '@angular/core';
 import type { PackFinished, PackStep, PackStepState, PackUpdateRow } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCheck, lucideLoaderCircle, lucideX } from '@ng-icons/lucide';
+import { arCheck, arClose } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { formatDuration } from '../units';
 
 /** What a pack update calls its steps; a game update's Backup is its Save. */
 export const PACK_STEPS: Record<PackStep, string> = { prepare: 'Prepare', backup: 'Backup', stop: 'Stop', swap: 'Swap', gate: 'Health gate', rollback: 'Rollback' };
 const RESULT: Record<PackFinished | 'running', string> = {
-  running: 'text-muted-foreground',
-  ok: 'text-status-ok',
-  'rolled back': 'text-status-down',
-  failed: 'text-status-down',
-  'failed before swap': 'text-status-down',
-  'failed in staging': 'text-muted-foreground',
-  cancelled: 'text-muted-foreground',
+  running: 'ar-status--info',
+  ok: 'ar-status--ok',
+  'rolled back': 'ar-status--danger',
+  failed: 'ar-status--danger',
+  'failed before swap': 'ar-status--danger',
+  'failed in staging': 'ar-status--idle',
+  cancelled: 'ar-status--idle',
 };
 
 /** The latest update, when it failed while preparing: where to, and its cause (the log's last line that isn't a step's), for the red box. */
@@ -31,28 +31,28 @@ export function failedPrep(history: PackUpdateRow[]): { to: string; why: string 
 @Component({
   selector: 'app-update-steps',
   imports: [DatePipe, NgIcon, HlmButton],
-  viewProviders: [provideIcons({ lucideCheck, lucideLoaderCircle, lucideX })],
+  viewProviders: [provideIcons({ arCheck, arClose })],
   template: `
     @let r = update();
-    <section class="rounded-xl border bg-card p-5" data-updating>
-      <h2 class="font-semibold">{{ title() }}</h2>
+    <section class="ar-panel p-5" data-updating>
+      <h2 class="ar-t-heading-sm">{{ title() }}</h2>
       <p class="mb-4 text-sm text-muted-foreground">Started by {{ r.by }} at {{ r.started | date: 'HH:mm' }}. You can leave this page.</p>
       <ol class="flex flex-col gap-3">
         @for (s of r.steps; track s.step; let i = $index) {
           <li class="flex gap-3" [attr.data-step]="s.step" [attr.data-state]="s.state">
             <span
               class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-xs"
-              [class]="s.state === 'done' ? 'bg-status-ok text-white' : s.state === 'failed' ? 'bg-status-down text-white' : s.state === 'running' ? 'text-brand' : 'border text-muted-foreground'"
+              [class]="s.state === 'done' ? 'bg-status-ok text-background' : s.state === 'failed' ? 'bg-status-down text-background' : s.state === 'running' ? 'text-brand-foreground' : 'border border-[var(--line-strong)] text-muted-foreground'"
             >
               @switch (s.state) {
                 @case ('done') {
-                  <ng-icon name="lucideCheck" />
+                  <ng-icon name="arCheck" />
                 }
                 @case ('failed') {
-                  <ng-icon name="lucideX" />
+                  <ng-icon name="arClose" />
                 }
                 @case ('running') {
-                  <ng-icon name="lucideLoaderCircle" class="animate-spin" />
+                  <span class="ar-spinner"></span>
                 }
                 @default {
                   {{ i + 1 }}
@@ -89,38 +89,38 @@ export class UpdateSteps {
   imports: [DatePipe],
   template: `
     <section data-history>
-      <h2 class="mb-2 text-base font-semibold">History</h2>
+      <h2 class="ar-t-heading-sm mb-2">History</h2>
       @if (rows().length) {
-        <table class="w-full text-left text-sm">
-          <thead class="text-muted-foreground">
+        <div class="ar-panel"><table class="ar-table">
+          <thead>
             <tr>
-              <th class="py-1 pr-4 font-normal">When</th>
-              <th class="pr-4 font-normal">Version</th>
-              <th class="pr-4 font-normal">Result</th>
-              <th class="hidden pr-4 font-normal sm:table-cell" data-by-column>By</th>
+              <th>When</th>
+              <th>Version</th>
+              <th>Result</th>
+              <th class="hidden sm:table-cell" data-by-column>By</th>
             </tr>
           </thead>
           <tbody>
             @for (h of rows(); track h.id) {
-              <tr class="border-t align-top" [attr.data-update-row]="h.id">
-                <td class="py-1.5 pr-4 whitespace-nowrap">{{ h.started | date: 'd MMM, HH:mm' }}</td>
-                <td class="pr-4">
+              <tr class="align-top" [attr.data-update-row]="h.id">
+                <td class="whitespace-nowrap">{{ h.started | date: 'd MMM, HH:mm' }}</td>
+                <td>
                   {{ h.from === h.to ? h.to : h.from + ' → ' + h.to }}
                   @if (h.changes?.length) {
                     <span class="block text-xs text-muted-foreground">{{ changesPrefix() }}{{ h.changes!.join(', ') }}</span>
                   }
                 </td>
-                <td class="pr-4" [class]="result[h.outcome]">
-                  {{ h.outcome }}
+                <td>
+                  <span class="ar-status" [class]="result[h.outcome]">{{ h.outcome }}</span>
                   @if (h.finished) {
-                    <span class="text-xs text-muted-foreground">{{ took(h.finished - h.started) }}</span>
+                    <span class="text-xs text-muted-foreground"> {{ took(h.finished - h.started) }}</span>
                   }
                 </td>
-                <td class="hidden pr-4 sm:table-cell">{{ h.by }}</td>
+                <td class="hidden sm:table-cell">{{ h.by }}</td>
               </tr>
             }
           </tbody>
-        </table>
+        </table></div>
       } @else {
         <p class="text-sm text-muted-foreground" data-no-history>{{ empty() }}</p>
       }

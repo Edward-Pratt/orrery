@@ -33,7 +33,8 @@ export class HlmToggleGroup {
   constructor() {
     classes(
       () =>
-        'rounded-md data-[spacing=0]:data-[variant=outline]:shadow-xs group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] data-vertical:flex-col data-vertical:items-stretch',
+        // Armil's Segmented: the items sit in one control, the pressed one (`aria-pressed`) chosen in verdigris.
+        'ar-seg group/toggle-group data-vertical:flex-col data-vertical:items-stretch',
     );
   }
 }

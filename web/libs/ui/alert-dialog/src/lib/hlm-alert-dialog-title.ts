@@ -11,7 +11,7 @@ export class HlmAlertDialogTitle {
   constructor() {
     classes(
       () =>
-        'text-lg font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2',
+        'ar-dialog__title sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2',
     );
   }
 }

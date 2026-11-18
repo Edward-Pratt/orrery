@@ -28,7 +28,7 @@ export class Environment {
   imports: [HlmBadge],
   template: `
     @if (env.staging()) {
-      <span hlmBadge class="bg-amber-500 text-black" data-staging>Staging</span>
+      <span hlmBadge variant="outline" class="ar-tag--warn" data-staging>Staging</span>
     }
   `,
 })

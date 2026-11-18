@@ -29,11 +29,11 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
       <app-moderation />
     }
     <form class="flex max-w-md gap-2" (submit)="$event.preventDefault(); look(name.value)" data-lookup>
-      <input #name class="flex-1 rounded-md border px-3 py-1.5 text-sm" placeholder="Player name" aria-label="Player" [value]="asked() ?? ''" />
+      <input #name class="ar-input flex-1" placeholder="Player name" aria-label="Player" [value]="asked() ?? ''" />
       <button hlmBtn type="submit">Look up</button>
     </form>
     @if (looking()) {
-      <hlm-skeleton class="mt-4 block h-24 max-w-md rounded-xl" data-skeleton />
+      <hlm-skeleton class="ar-skeleton--block mt-4 block h-24 max-w-md" data-skeleton />
     } @else if (player(); as p) {
       @if (p.found) {
         <app-player-card class="mt-4 block max-w-md" [player]="p" />
@@ -51,15 +51,15 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
     } @else {
       <div class="mt-4 grid gap-4 sm:mt-6 sm:grid-cols-3">
         @for (p of periods; track p.period) {
-          <section class="rounded-xl border p-3" [class]="p.period === period() ? '' : 'max-sm:hidden'" [attr.data-list]="p.period">
-            <h2 class="mb-2 text-sm font-semibold">{{ p.label }}</h2>
-            <table class="w-full text-sm" [attr.data-top]="p.period">
+          <section class="ar-panel p-3" [class]="p.period === period() ? '' : 'max-sm:hidden'" [attr.data-list]="p.period">
+            <h2 class="ar-label mb-2">{{ p.label }}</h2>
+            <table class="ar-table" [attr.data-top]="p.period">
               <tbody>
                 @for (row of top()[p.period]; track row.player) {
                   <tr>
-                    <td class="w-6 py-0.5 text-muted-foreground">{{ $index + 1 }}</td>
+                    <td class="w-6 text-muted-foreground">{{ $index + 1 }}</td>
                     <td><button class="font-medium hover:underline" (click)="look(row.player)">{{ row.player }}</button></td>
-                    <td class="text-right tabular-nums text-muted-foreground">{{ duration(row.ms) }}</td>
+                    <td class="ar-table__num">{{ duration(row.ms) }}</td>
                   </tr>
                 } @empty {
                   <tr><td class="text-muted-foreground">No playtime recorded.</td></tr>

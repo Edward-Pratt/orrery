@@ -9,6 +9,6 @@ import { classes } from '@spartan-ng/helm/utils';
 })
 export class HlmSheetDescription {
   constructor() {
-    classes(() => 'text-muted-foreground text-sm');
+    classes(() => 'ar-t-ui-sm text-muted-foreground');
   }
 }

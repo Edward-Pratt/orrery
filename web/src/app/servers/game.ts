@@ -3,7 +3,7 @@ import { afterNextRender, Component, computed, inject, Injector, signal } from '
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { FactorioRelease, GameCatalog, GameModPick, GameState, GameUpdateAnswer, GameUpdateRequest, LiveEvent, PackStep, RunningGameUpdate } from '@hub/api';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX } from '@ng-icons/lucide';
+import { arArrowLeft, arCheck, arClose, arFileUp, arLock, arPlus, arSearch } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
@@ -40,22 +40,22 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
   selector: 'app-server-game',
   imports: [NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSpinner, ModBrowser, ModImport, ModUpdatesBadge, ModUpdatesNotes, UpdateHistory, UpdateSteps],
   providers: [PortalUpdates],
-  viewProviders: [provideIcons({ lucideArrowLeft, lucideCheck, lucideFileUp, lucideLock, lucidePlus, lucideSearch, lucideX })],
+  viewProviders: [provideIcons({ arArrowLeft, arCheck, arFileUp, arLock, arPlus, arSearch, arClose })],
   template: `
     @if (state(); as g) {
       <div class="flex max-w-4xl flex-col gap-8">
         @if (running(); as r) {
           <app-update-steps [title]="'Updating ' + r.from + ' → ' + r.to" [update]="r" [labels]="steps" [busy]="busy()" (cancel)="cancel()" />
         } @else {
-          <section class="rounded-xl border bg-card p-5" data-summary>
+          <section class="ar-panel p-5" data-summary>
             @if (done(); as d) {
-              <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="lucideCheck" /> Done: {{ d }} is running.</p>
+              <p class="mb-3 flex items-center gap-1 text-sm font-medium text-status-ok" data-done><ng-icon name="arCheck" /> Done: {{ d }} is running.</p>
             }
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="min-w-0">
                 <p class="flex items-center gap-2 text-xs font-medium text-muted-foreground">Installed <app-mod-updates-badge /></p>
                 @if (g.installed; as i) {
-                  <h2 class="text-xl font-semibold" data-installed>Factorio {{ i.factorio }}</h2>
+                  <h2 class="ar-t-heading-md" data-installed>Factorio {{ i.factorio }}</h2>
                   <ul class="mt-2 flex flex-wrap gap-1.5" aria-label="Mods">
                     @for (m of i.mods; track m.name) {
                       <li
@@ -66,7 +66,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                       >
                         {{ m.name }} {{ m.version }}
                         @if (updates.to().get(m.name); as to) {
-                          <span class="text-brand" [attr.title]="to + ' is on the mod portal for Factorio ' + line(i.factorio)" data-update-to
+                          <span class="text-brand-foreground" [attr.title]="to + ' is on the mod portal for Factorio ' + line(i.factorio)" data-update-to
                             >→ {{ to }}<span class="sr-only">, update available: {{ to }}</span></span
                           >
                         }
@@ -78,7 +78,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                   <p class="text-sm text-muted-foreground" data-not-reported>Its Agent hasn't said yet what the server runs: it does once it is connected.</p>
                 }
               </div>
-              <div class="flex flex-col items-end gap-1">
+              <div class="flex flex-col items-start gap-2">
                 <button hlmBtn [disabled]="!g.installed || !!g.blocked || busy()" (click)="open()" data-update>Update game</button>
                 @if (updates.state()?.updates?.length; as n) {
                   <button hlmBtn variant="outline" [disabled]="!g.installed || !!g.blocked || busy()" (click)="open(true)" data-update-all>Update {{ n }} {{ n === 1 ? 'mod' : 'mods' }}…</button>
@@ -89,7 +89,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               </div>
             </div>
             @if (failedPrep(); as f) {
-              <div class="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm" data-failed-prep>
+              <div class="ar-callout ar-callout--danger mt-4 block text-sm" data-failed-prep>
                 <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
               </div>
             }
@@ -108,14 +108,14 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             @if (browsing()) {
               <div class="flex items-center gap-1">
                 <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeBrowse()" data-browse-back>
-                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                  <ng-icon name="arArrowLeft" aria-hidden="true" />
                 </button>
                 <h2 hlmSheetTitle>Browse mods</h2>
               </div>
             } @else if (importing()) {
               <div class="flex items-center gap-1">
                 <button hlmBtn variant="ghost" size="icon-sm" class="-ms-2" aria-label="Back to the update" (click)="closeImport()" data-import-back>
-                  <ng-icon name="lucideArrowLeft" aria-hidden="true" />
+                  <ng-icon name="arArrowLeft" aria-hidden="true" />
                 </button>
                 <h2 hlmSheetTitle>Import mod list</h2>
               </div>
@@ -161,15 +161,15 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
           <div class="flex flex-col gap-4 px-4 pb-4 text-sm" [hidden]="browsing() || importing()" data-update-view>
             <label
               >Factorio version
-              <select class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" (change)="setFactorio($any($event.target).value)" data-factorio>
+              <select class="ar-input mt-1 w-full" (change)="setFactorio($any($event.target).value)" data-factorio>
                 @for (v of versions(); track v.version) {
                   <option [value]="v.version" [selected]="v.version === factorio()">{{ v.label }}</option>
                 }
               </select>
             </label>
             <div>
-              <h3 class="mb-1 font-medium">Mods</h3>
-              <ul class="divide-y rounded-lg border">
+              <h3 class="ar-t-ui-strong mb-1">Mods</h3>
+              <ul class="ar-panel divide-y">
                 @for (p of picks(); track p.name) {
                   <li class="flex items-center gap-2 px-3 py-2" [attr.data-pick]="p.name">
                     <div class="min-w-0 flex-1">
@@ -177,7 +177,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                       <p class="truncate font-mono text-xs text-muted-foreground">{{ p.name }}</p>
                     </div>
                     <select
-                      class="h-8 max-w-40 rounded-md border bg-background px-2 text-sm"
+                      class="ar-input max-w-40"
                       [attr.aria-label]="'Version of ' + p.name"
                       (change)="setVersion(p.name, $any($event.target).value || null)"
                       data-version
@@ -189,15 +189,15 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                     </select>
                     @if (p.name === orrery) {
                       <span class="flex size-8 items-center justify-center text-muted-foreground" title="Its Agent needs it: not removable" data-locked>
-                        <ng-icon name="lucideLock" aria-hidden="true" /><span class="sr-only">Not removable: its Agent needs it</span>
+                        <ng-icon name="arLock" aria-hidden="true" /><span class="sr-only">Not removable: its Agent needs it</span>
                       </span>
                     } @else {
-                      <button hlmBtn variant="ghost" size="sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="lucideX" /></button>
+                      <button hlmBtn variant="ghost" size="icon-sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="arClose" /></button>
                     }
                   </li>
                 }
                 @for (m of dependencies(); track m.name) {
-                  <li class="flex items-center gap-2 bg-muted/40 px-3 py-2 text-muted-foreground" [attr.data-dependency]="m.name">
+                  <li class="flex items-center gap-2 bg-muted px-3 py-2 text-muted-foreground" [attr.data-dependency]="m.name">
                     <div class="min-w-0 flex-1">
                       <p class="truncate">{{ m.title }}</p>
                       <p class="truncate font-mono text-xs">{{ m.name }} {{ m.version }}</p>
@@ -212,29 +212,29 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               <span class="flex gap-2">
                 <input
                   hlmInput
-                  class="min-w-0 flex-1 font-mono"
+                  class="min-w-0 flex-1 ar-input--mono"
                   placeholder="its name on the mod portal"
                   aria-label="Add a mod by its name on the mod portal"
                   [value]="adding()"
                   (input)="adding.set($any($event.target).value); addError.set(null)"
                   data-add-name
                 />
-                <button hlmBtn variant="outline" type="submit" [disabled]="!adding().trim()" data-add><ng-icon name="lucidePlus" /> Add</button>
+                <button hlmBtn variant="outline" type="submit" [disabled]="!adding().trim()" data-add><ng-icon name="arPlus" /> Add</button>
               </span>
               @if (addError(); as e) {
                 <span class="text-xs text-muted-foreground" data-add-error>{{ e }}</span>
               }
             </form>
             <span class="-mt-2 flex flex-wrap gap-1">
-              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="lucideSearch" aria-hidden="true" /> Browse the mod portal</button>
-              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="lucideFileUp" aria-hidden="true" /> Import mod list</button>
+              <button hlmBtn variant="ghost" (click)="openBrowse($event)" data-browse><ng-icon name="arSearch" aria-hidden="true" /> Browse the mod portal</button>
+              <button hlmBtn variant="ghost" (click)="openImport($event)" data-import><ng-icon name="arFileUp" aria-hidden="true" /> Import mod list</button>
             </span>
             @if (catalogError(); as e) {
               <p class="text-destructive" data-catalog-error>{{ e }}</p>
             }
             @if (current(); as c) {
               @if (c.unresolved.length) {
-                <div class="rounded-lg bg-destructive/10 px-3 py-2" data-unresolved>
+                <div class="ar-callout ar-callout--danger block" data-unresolved>
                   <b class="text-destructive">{{ c.unresolved.length === 1 ? 'A dependency' : c.unresolved.length + ' dependencies' }} can't be met.</b> The update can't start until
                   they are fixed: pick other versions, add the mod that's needed, or remove the one that needs it.
                   <ul class="mt-1 list-inside list-disc">
@@ -247,7 +247,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                 </div>
               }
               <div data-changes>
-                <h3 class="mb-1 font-medium">What changes</h3>
+                <h3 class="ar-t-ui-strong mb-1">What changes</h3>
                 @if (c.changes.length) {
                   <ul class="list-inside list-disc text-muted-foreground">
                     @for (line of c.changes; track line) {

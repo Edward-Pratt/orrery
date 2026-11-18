@@ -61,7 +61,7 @@ export class PortalUpdates {
   template: `
     @if (updates.state(); as u) {
       @if (u.updates.length) {
-        <span class="rounded-full bg-brand/15 px-2 py-0.5 text-xs font-medium text-brand" data-updates>{{ u.updates.length }} {{ u.updates.length === 1 ? 'update' : 'updates' }}</span>
+        <span class="ar-tag ar-tag--accent" data-updates>{{ u.updates.length }} {{ u.updates.length === 1 ? 'update' : 'updates' }}</span>
       } @else if (u.checked !== null) {
         <span class="text-xs text-muted-foreground" [attr.title]="'as of ' + time(u.checked)" data-up-to-date>Mods up to date</span>
       }

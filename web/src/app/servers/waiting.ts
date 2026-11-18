@@ -56,7 +56,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
         No Pending server {{ id() }}. If its setup ran, it is <a [routerLink]="['/servers', id()]" class="underline">a server now</a>.
       </p>
     } @else {
-      <hlm-skeleton class="h-32 max-w-3xl rounded-lg" data-skeleton />
+      <hlm-skeleton class="ar-skeleton--block h-32 max-w-3xl" data-skeleton />
     }
   `,
 })

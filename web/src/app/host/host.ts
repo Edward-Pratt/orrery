@@ -64,7 +64,7 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
     } @else {
       <div class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-skeleton>
         @for (i of [1, 2, 3, 4]; track i) {
-          <hlm-skeleton class="h-28 rounded-lg" />
+          <hlm-skeleton class="ar-skeleton--block h-28" />
         }
       </div>
     }

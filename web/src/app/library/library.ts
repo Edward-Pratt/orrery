@@ -101,7 +101,7 @@ export function fromFileName(file: string): { name: string; version: string } {
       } @else if (missing(); as why) {
         <p class="text-muted-foreground">{{ why }}</p>
       } @else {
-        <hlm-skeleton class="h-24 rounded-lg" data-skeleton />
+        <hlm-skeleton class="ar-skeleton--block h-24" data-skeleton />
       }
     </section>
 

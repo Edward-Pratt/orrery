@@ -33,7 +33,7 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
       <button hlmBtn type="submit">Look up</button>
     </form>
     @if (looking()) {
-      <hlm-skeleton class="mt-4 block h-24 max-w-md rounded-lg" data-skeleton />
+      <hlm-skeleton class="ar-skeleton--block mt-4 block h-24 max-w-md" data-skeleton />
     } @else if (player(); as p) {
       @if (p.found) {
         <app-player-card class="mt-4 block max-w-md" [player]="p" />

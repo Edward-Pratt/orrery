@@ -67,7 +67,7 @@ const sameDay = (at: number) => new Date(at).toDateString() === new Date().toDat
         </ol>
         @if (server.may('servers.chat')) {
           <form class="flex gap-2" (submit)="$event.preventDefault(); send(message)" data-chat-form>
-            <input #message class="flex-1 rounded-md border px-3 py-1.5 text-sm" maxlength="256" placeholder="Say something in game" aria-label="Message" />
+            <input #message class="ar-input flex-1" maxlength="256" placeholder="Say something in game" aria-label="Message" />
             <button hlmBtn type="submit">Send</button>
           </form>
         }

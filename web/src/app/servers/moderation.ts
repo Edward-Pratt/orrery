@@ -62,13 +62,13 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
           <p class="mb-2 text-status-warn" data-problem>{{ p }}</p>
         }
         @if (form(); as f) {
-          <form class="ar-panel mb-3 flex flex-col gap-2 bg-muted/30 p-3" (submit)="$event.preventDefault(); submit()" data-form>
+          <form class="mb-3 flex flex-col gap-2 rounded-lg border p-3" (submit)="$event.preventDefault(); submit()" data-form>
             <b>{{ f.action === 'ban' ? 'Ban' : 'Kick' }} {{ f.player ?? 'a player' }}?</b>
             <p class="text-muted-foreground">
               {{ f.action === 'ban' ? "They are disconnected if they are online, and can't join again until unbanned. Factorio shows them the reason." : 'They are disconnected and can join again at once.' }}
             </p>
             @if (f.player === null) {
-              <input hlmInput class="font-mono" aria-label="Player to ban" aria-describedby="mod-name-error" [value]="typed()" (input)="typed.set($any($event.target).value)" data-form-name />
+              <input hlmInput class="ar-input--mono" aria-label="Player to ban" aria-describedby="mod-name-error" [value]="typed()" (input)="typed.set($any($event.target).value)" data-form-name />
               @if (typed() && !nameOk(typed())) {
                 <span id="mod-name-error" class="text-xs text-destructive" data-name-error>{{ nameRule }}</span>
               }
@@ -88,7 +88,7 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
           </form>
         }
         <h3 class="ar-t-ui-strong mb-1">Online now ({{ s.online.length }})</h3>
-        <ul class="ar-panel mb-4 divide-y">
+        <ul class="mb-4 divide-y rounded-lg border">
           @for (p of s.online; track p) {
             <li class="flex flex-wrap items-center gap-2 px-3 py-1.5" [attr.data-online]="p">
               <span class="flex-1 font-medium">{{ p }} @if (isAdmin(p)) {<span class="ml-1 rounded bg-muted px-1.5 text-xs" data-admin-badge>Admin</span>}</span>
@@ -113,7 +113,7 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
               @if (l.bans.length > filterPast) {
                 <input hlmInput class="mb-2 w-full" placeholder="Filter" aria-label="Filter the bans" [value]="filter()" (input)="filter.set($any($event.target).value)" data-filter />
               }
-              <ul class="ar-panel divide-y">
+              <ul class="divide-y rounded-lg border">
                 @for (b of shownBans(); track b.name) {
                   <li class="flex items-center gap-2 px-3 py-1.5" [attr.data-banned]="b.name">
                     <span class="font-mono">{{ b.name }}</span>
@@ -142,7 +142,7 @@ const ALREADY: Record<ModerateAction, (p: string) => string> = {
                 }
               </ul>
               <form class="flex gap-2" (submit)="$event.preventDefault(); promote(adminName().trim())">
-                <input hlmInput class="min-w-0 flex-1 font-mono" aria-label="Player to make an admin" aria-describedby="mod-admin-error" [value]="adminName()" (input)="adminName.set($any($event.target).value)" data-admin-name />
+                <input hlmInput class="min-w-0 flex-1 ar-input--mono" aria-label="Player to make an admin" aria-describedby="mod-admin-error" [value]="adminName()" (input)="adminName.set($any($event.target).value)" data-admin-name />
                 <button hlmBtn variant="outline" type="submit" [disabled]="!!s.blocked || busy() || !nameOk(adminName().trim())" data-admin-add>Promote…</button>
               </form>
               @if (adminName().trim() && !nameOk(adminName().trim())) {

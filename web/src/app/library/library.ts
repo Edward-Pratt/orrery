@@ -53,8 +53,8 @@ export function fromFileName(file: string): { name: string; version: string } {
       }
       @if (ended(); as e) {
         <div
-          class="ar-panel flex items-center gap-3 p-3 text-sm"
-          [class]="e.outcome === 'failed' ? 'border-status-down/40 bg-status-down/10' : 'bg-muted'"
+          class="ar-callout items-center gap-3 text-sm"
+          [class]="e.outcome === 'failed' ? 'ar-callout--danger' : ''"
           [attr.data-ended]="e.outcome"
         >
           @if (e.outcome === 'failed') {

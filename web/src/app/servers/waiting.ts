@@ -28,9 +28,9 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
       <div class="flex max-w-3xl flex-col gap-4">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="ar-t-heading-md">{{ p.name }}</h1>
-          <span hlmBadge variant="outline" class="border-status-warn/50 text-status-warn" data-badge>Waiting for setup</span>
+          <span hlmBadge variant="outline" class="ar-tag--warn" data-badge>Waiting for setup</span>
           @if (mayDiscard) {
-            <button hlmBtn variant="ghost" size="sm" class="ml-auto text-status-down" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
+            <button hlmBtn variant="destructive" size="sm" class="ml-auto" [disabled]="busy()" (click)="discard()" data-discard>Discard</button>
           }
         </div>
         <p class="text-sm text-muted-foreground" data-meta>

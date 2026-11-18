@@ -80,7 +80,7 @@ type Scope = string[] | null;
           @if (owner()) {
             <label
               >Discord id <span class="text-muted-foreground">(optional)</span>
-              <input hlmInput class="mt-1 w-full font-mono" inputmode="numeric" [value]="discordId()" (input)="discordId.set($any($event.target).value.trim())" data-discord
+              <input hlmInput class="mt-1 w-full ar-input--mono" inputmode="numeric" [value]="discordId()" (input)="discordId.set($any($event.target).value.trim())" data-discord
             /></label>
             <p class="-mt-3 text-xs text-muted-foreground">Their dashboard chat goes in game under the name this Discord user linked.</p>
             @if (!discordOk()) {

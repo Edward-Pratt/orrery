@@ -197,7 +197,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                   </li>
                 }
                 @for (m of dependencies(); track m.name) {
-                  <li class="flex items-center gap-2 bg-muted/40 px-3 py-2 text-muted-foreground" [attr.data-dependency]="m.name">
+                  <li class="flex items-center gap-2 bg-muted px-3 py-2 text-muted-foreground" [attr.data-dependency]="m.name">
                     <div class="min-w-0 flex-1">
                       <p class="truncate">{{ m.title }}</p>
                       <p class="truncate font-mono text-xs">{{ m.name }} {{ m.version }}</p>
@@ -212,7 +212,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               <span class="flex gap-2">
                 <input
                   hlmInput
-                  class="min-w-0 flex-1 font-mono"
+                  class="min-w-0 flex-1 ar-input--mono"
                   placeholder="its name on the mod portal"
                   aria-label="Add a mod by its name on the mod portal"
                   [value]="adding()"

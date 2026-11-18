@@ -29,7 +29,7 @@ const PERIODS: { period: Period; label: string; short: string }[] = [
       <app-moderation />
     }
     <form class="flex max-w-md gap-2" (submit)="$event.preventDefault(); look(name.value)" data-lookup>
-      <input #name class="flex-1 rounded-md border px-3 py-1.5 text-sm" placeholder="Player name" aria-label="Player" [value]="asked() ?? ''" />
+      <input #name class="ar-input flex-1" placeholder="Player name" aria-label="Player" [value]="asked() ?? ''" />
       <button hlmBtn type="submit">Look up</button>
     </form>
     @if (looking()) {

@@ -246,7 +246,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                   }
                 </li>
               }
-              <li class="flex items-center gap-3 bg-muted/40 px-3 py-2.5 text-sm" data-mod-row>
+              <li class="flex items-center gap-3 bg-muted px-3 py-2.5 text-sm" data-mod-row>
                 <ng-icon name="arLock" class="text-muted-foreground" />
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-mono text-xs">{{ p.mod ?? 'mods/orrery-*.jar' }}</p>
@@ -364,7 +364,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                   <label>File <input type="file" hlmInput class="mt-1 w-full" (change)="setExtraFile($any($event.target).files?.[0])" data-extra-file /></label>
                 }
                 @if (!s.extra) {
-                  <label>Put at <input hlmInput class="mt-1 w-full font-mono" [value]="target()" (input)="target.set($any($event.target).value)" data-target /></label>
+                  <label>Put at <input hlmInput class="mt-1 w-full ar-input--mono" [value]="target()" (input)="target.set($any($event.target).value)" data-target /></label>
                   @if (replacesPack()) {
                     <p class="text-xs text-status-warn" data-replaces>The pack has this file: this Extra replaces it.</p>
                   }
@@ -380,9 +380,9 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 <p class="text-xs text-muted-foreground">Nothing changes on the server until you apply.</p>
               }
               @case ('edit') {
-                <label>File <input hlmInput class="mt-1 w-full font-mono" [value]="editPath()" (input)="editPath.set($any($event.target).value); previewSoon()" data-edit-path /></label>
-                <label>Find (regex) <input hlmInput class="mt-1 w-full font-mono" [value]="find()" (input)="find.set($any($event.target).value); previewSoon()" data-find /></label>
-                <label>Replace with <input hlmInput class="mt-1 w-full font-mono" [value]="replace()" (input)="replace.set($any($event.target).value)" data-replace-with /></label>
+                <label>File <input hlmInput class="mt-1 w-full ar-input--mono" [value]="editPath()" (input)="editPath.set($any($event.target).value); previewSoon()" data-edit-path /></label>
+                <label>Find (regex) <input hlmInput class="mt-1 w-full ar-input--mono" [value]="find()" (input)="find.set($any($event.target).value); previewSoon()" data-find /></label>
+                <label>Replace with <input hlmInput class="mt-1 w-full ar-input--mono" [value]="replace()" (input)="replace.set($any($event.target).value)" data-replace-with /></label>
                 <label>Note <input hlmInput class="mt-1 w-full" placeholder="optional" [value]="note()" (input)="note.set($any($event.target).value)" data-note /></label>
                 @if (preview(); as pv) {
                   <p class="rounded bg-muted px-2 py-1 text-xs" data-preview>Against the installed {{ state()?.installed?.version }}: {{ pv }}</p>

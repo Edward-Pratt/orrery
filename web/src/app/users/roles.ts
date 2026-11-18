@@ -45,7 +45,7 @@ import { RoleSheet } from './role-sheet';
             </div>
             @if (owner() && r.id !== 'owner') {
               <button hlmBtn variant="outline" size="sm" (click)="editing.set(r)" data-edit>Edit…</button>
-              <button hlmBtn variant="ghost" size="sm" class="text-status-down" (click)="remove(r)" data-delete>Delete…</button>
+              <button hlmBtn variant="destructive" size="sm" (click)="remove(r)" data-delete>Delete…</button>
             }
           </div>
         }

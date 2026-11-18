@@ -150,7 +150,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
             <p class="font-medium">{{ words().empty }}</p>
             <p class="mb-3 text-sm text-muted-foreground">{{ words().emptyDetail }}</p>
             @if (may('servers.control')) {
-              <button hlmBtn size="sm" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
+              <button hlmBtn size="sm" variant="outline" [disabled]="!online() || !!progress()" (click)="start()" data-backup-start-empty>{{ words().start }}</button>
             }
           </div>
         }

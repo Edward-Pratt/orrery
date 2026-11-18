@@ -30,7 +30,7 @@ const MEMORY = /^[1-9]\d{0,5}[MG]$/;
         <div class="flex flex-col gap-3 px-4 pb-4 text-sm">
           <div class="grid grid-cols-2 gap-2">
             <label
-              >Id <input hlmInput class="mt-1 w-full font-mono" placeholder="creative" [value]="id()" (input)="id.set($any($event.target).value.trim())" data-id
+              >Id <input hlmInput class="mt-1 w-full ar-input--mono" placeholder="creative" [value]="id()" (input)="id.set($any($event.target).value.trim())" data-id
             /></label>
             <label>Name <input hlmInput class="mt-1 w-full" placeholder="Creative" [value]="name()" (input)="name.set($any($event.target).value)" data-name /></label>
             <label

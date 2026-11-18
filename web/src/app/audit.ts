@@ -39,7 +39,7 @@ type Entry = AuditLog['entries'][number];
         Who
         <input
           hlmInput
-          class="w-64"
+          class="max-w-64"
           list="audit-actors"
           placeholder="discord:alice (123)"
           autocomplete="off"

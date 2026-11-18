@@ -78,7 +78,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         <form class="absolute top-full right-0 z-10 mt-1.5 flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-popover p-3 text-sm shadow-[var(--shadow-glass)]" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
           <label class="flex items-center gap-2">
             Restart in
-            <input #minutes type="number" min="0" max="60" step="1" value="5" class="w-16 rounded-md border px-2 py-1" />
+            <input #minutes type="number" min="0" max="60" step="1" value="5" class="ar-input max-w-16" />
             minutes
           </label>
           <button hlmBtn size="sm" type="submit">Schedule</button>

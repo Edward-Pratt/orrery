@@ -76,7 +76,7 @@ function load(key: string): Remembered | null {
         <form class="flex gap-2" (submit)="$event.preventDefault(); run(command.value, command)" data-console-form>
           <input
             #command
-            class="flex-1 rounded-md border px-3 py-1.5 font-mono text-sm"
+            class="ar-input ar-input--mono flex-1"
             [placeholder]="server.card()!.game === 'factorio' ? 'A console command, e.g. /players' : 'A console command, e.g. list'"
             aria-label="Command"
             (keydown.arrowup)="$event.preventDefault(); step(command, -1)"

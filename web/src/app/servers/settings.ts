@@ -154,7 +154,7 @@ export function generatePassword(): string {
           </label>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Max players @if (changed('max_players')) { <span [title]="was('max_players')" data-changed="max_players">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1000" step="1" class="w-32" [value]="form().max_players" (input)="setNumber('max_players', $any($event.target).value)" aria-describedby="hint-max-players" data-field="max_players" />
+            <input hlmInput type="number" min="0" max="1000" step="1" class="max-w-32" [value]="form().max_players" (input)="setNumber('max_players', $any($event.target).value)" aria-describedby="hint-max-players" data-field="max_players" />
             <span id="hint-max-players" class="text-xs text-muted-foreground">0: no limit</span>
             @if (errors()['max_players']; as e) {
               <span class="text-xs text-destructive" data-error="max_players">{{ e }}</span>
@@ -176,7 +176,7 @@ export function generatePassword(): string {
               <span class="flex flex-wrap items-center gap-2">
                 <input
                   hlmInput
-                  class="min-w-0 flex-1 font-mono"
+                  class="min-w-0 flex-1 ar-input--mono"
                   [type]="reveal() ? 'text' : 'password'"
                   autocomplete="new-password"
                   aria-labelledby="label-password"
@@ -228,7 +228,7 @@ export function generatePassword(): string {
           </div>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Kick idle players after (minutes) @if (changed('afk_autokick_interval')) { <span [title]="was('afk_autokick_interval')" data-changed="afk_autokick_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="w-32" [value]="form().afk_autokick_interval" (input)="setNumber('afk_autokick_interval', $any($event.target).value)" aria-describedby="hint-afk" data-field="afk_autokick_interval" />
+            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().afk_autokick_interval" (input)="setNumber('afk_autokick_interval', $any($event.target).value)" aria-describedby="hint-afk" data-field="afk_autokick_interval" />
             <span id="hint-afk" class="text-xs text-muted-foreground">0: never</span>
             @if (errors()['afk_autokick_interval']; as e) {
               <span class="text-xs text-destructive" data-error="afk_autokick_interval">{{ e }}</span>
@@ -240,7 +240,7 @@ export function generatePassword(): string {
           <legend class="px-1 font-semibold">Pausing</legend>
           @for (k of pauseKeys; track k) {
             <label class="flex items-center gap-2">
-              <input type="checkbox" class="size-4" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
+              <input type="checkbox" class="size-4 accent-[var(--accent)]" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
               {{ labelOf(k) }}
               @if (atRestart(k)) {
                 <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
@@ -256,7 +256,7 @@ export function generatePassword(): string {
           <legend class="px-1 font-semibold">Saving</legend>
           <label class="flex flex-col gap-1">
             <span class="flex items-center gap-2">Autosave every (minutes) @if (changed('autosave_interval')) { <span [title]="was('autosave_interval')" data-changed="autosave_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="w-32" [value]="form().autosave_interval" (input)="setNumber('autosave_interval', $any($event.target).value)" aria-describedby="hint-autosave" data-field="autosave_interval" />
+            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().autosave_interval" (input)="setNumber('autosave_interval', $any($event.target).value)" aria-describedby="hint-autosave" data-field="autosave_interval" />
             <span id="hint-autosave" class="text-xs text-muted-foreground">0: off</span>
             @if (errors()['autosave_interval']; as e) {
               <span class="text-xs text-destructive" data-error="autosave_interval">{{ e }}</span>
@@ -267,7 +267,7 @@ export function generatePassword(): string {
               >Autosave slots <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
               @if (changed('autosave_slots')) { <span [title]="was('autosave_slots')" data-changed="autosave_slots">● <span class="sr-only">changed</span></span> }</span
             >
-            <input hlmInput type="number" min="1" max="100" step="1" class="w-32" [value]="form().autosave_slots" (input)="setNumber('autosave_slots', $any($event.target).value)" data-field="autosave_slots" />
+            <input hlmInput type="number" min="1" max="100" step="1" class="max-w-32" [value]="form().autosave_slots" (input)="setNumber('autosave_slots', $any($event.target).value)" data-field="autosave_slots" />
             @if (errors()['autosave_slots']; as e) {
               <span class="text-xs text-destructive" data-error="autosave_slots">{{ e }}</span>
             }
@@ -303,7 +303,7 @@ export function generatePassword(): string {
                   @if (!form().require_user_verification) {
                     <span class="font-sans text-muted-foreground">(name not checked)</span>
                   }
-                  <button hlmBtn variant="ghost" size="sm" type="button" class="size-6 p-0" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
+                  <button hlmBtn variant="ghost" size="icon-sm" type="button" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
                     <ng-icon name="arClose" />
                   </button>
                 </li>
@@ -316,7 +316,7 @@ export function generatePassword(): string {
             <span class="flex gap-2">
               <input
                 hlmInput
-                class="min-w-0 flex-1 font-mono"
+                class="min-w-0 flex-1 ar-input--mono"
                 aria-label="A player name to make an admin"
                 [attr.aria-describedby]="adminError() ? 'err-admin' : null"
                 [value]="adding()"

@@ -16,7 +16,7 @@ export class HlmInput {
     classes(
       () =>
         // Armil's Field control (`ar-input`); spartan's invalid flag gets the danger border in styles.css.
-        'ar-input file:h-7 file:text-sm file:font-medium file:text-foreground file:inline-flex file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45',
+        'ar-input file:h-7 file:text-sm file:font-medium file:text-foreground file:inline-flex file:border-0 file:bg-[var(--clear)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45',
     );
   }
 }

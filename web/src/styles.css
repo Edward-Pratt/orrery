@@ -58,11 +58,14 @@
   --radius-xl: var(--radius-xl);
 }
 
-/* Every theme scope, not only <html>: the toaster sets its own data-theme. */
-:root,
-[data-theme] {
-  --accent: var(--accent-orrery);
-  --on-accent: var(--on-accent-orrery);
+/* Every theme scope, not only <html>: the toaster sets its own data-theme. Not in print, where armil.css's black accent
+   (the same selectors) must win. */
+@media not print {
+  :root,
+  [data-theme] {
+    --accent: var(--accent-orrery);
+    --on-accent: var(--on-accent-orrery);
+  }
 }
 
 @layer base {

@@ -10,9 +10,9 @@ import { RouterLink, RouterLinkActive, RouterOutlet, type Routes } from '@angula
   imports: [RouterLink, RouterLinkActive, RouterOutlet],
   template: `
     <h1 class="ar-t-heading-md mb-2">Users</h1>
-    <nav class="mb-4 flex gap-4 border-b text-sm" data-tabs>
-      <a routerLink="." routerLinkActive="border-b-2 border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px pb-2 hover:underline">Users</a>
-      <a routerLink="roles" routerLinkActive="border-b-2 border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]" class="-mb-px pb-2 hover:underline">Roles</a>
+    <nav class="ar-tabs mb-4" data-tabs>
+      <a routerLink="." routerLinkActive="border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]" [routerLinkActiveOptions]="{ exact: true }">Users</a>
+      <a routerLink="roles" routerLinkActive="border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]">Roles</a>
     </nav>
     <router-outlet />
   `,

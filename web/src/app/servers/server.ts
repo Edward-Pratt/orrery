@@ -50,11 +50,11 @@ const SECTIONS: { path: string; label: string; factorio?: string; has: (d: Serve
         </div>
         <app-server-actions [card]="c" [full]="true" (changed)="refresh()" />
       </header>
-      <!-- Eight tabs don't fit a phone: the row scrolls sideways. -->
-      <nav class="-mx-4 mb-4 flex gap-4 overflow-x-auto border-b px-4 text-sm whitespace-nowrap md:mx-0 md:px-0" data-sections>
+      <!-- Armil's Tabs; eight don't fit a phone, so the row scrolls sideways. The current tab is marked by class, not aria-current. -->
+      <nav class="ar-tabs -mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0" data-sections>
         @for (s of sections; track s.path) {
           @if (s.has(detail()!, may)) {
-            <a [routerLink]="s.path" routerLinkActive="border-b-2 border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]" [routerLinkActiveOptions]="{ exact: true }" class="-mb-px shrink-0 pb-2 hover:underline">{{ (c.game === 'factorio' && s.factorio) || s.label }}</a>
+            <a [routerLink]="s.path" routerLinkActive="border-[var(--verdigris)] font-semibold text-[var(--verdigris-hi)]" [routerLinkActiveOptions]="{ exact: true }">{{ (c.game === 'factorio' && s.factorio) || s.label }}</a>
           }
         }
       </nav>

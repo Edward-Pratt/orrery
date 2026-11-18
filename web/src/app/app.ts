@@ -92,7 +92,7 @@ export class UserMenu {
               }
             </nav>
             <div class="ar-sidebar__foot flex items-center justify-between gap-2">
-              <app-user-menu class="min-w-0" [user]="session.user()!" [showName]="true" /><app-theme-switch />
+              <app-user-menu class="min-w-0" [user]="session.user()!" [showName]="true" /><app-theme-switch class="shrink-0" />
             </div>
           </aside>
           <div class="ar-shell__main">

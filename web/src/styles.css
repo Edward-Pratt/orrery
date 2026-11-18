@@ -71,5 +71,7 @@
 @layer base {
   * {
     @apply border-border;
+    /* Armil gives scrollbars no colours; without these a scrolling list or sheet can show a white default bar in dark. */
+    scrollbar-color: var(--line-strong) var(--clear);
   }
 }

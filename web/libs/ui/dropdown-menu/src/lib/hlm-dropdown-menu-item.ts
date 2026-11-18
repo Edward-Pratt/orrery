@@ -36,7 +36,7 @@ export class HlmDropdownMenuItem {
   constructor() {
     classes(() => [
       // Armil's Menu item; the destructive one is in danger.
-      "ar-menu__item group/dropdown-menu-item relative cursor-default select-none outline-hidden data-inset:ps-8 data-disabled:pointer-events-none data-disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
+      "ar-menu__item group/dropdown-menu-item relative cursor-default select-none data-inset:ps-8 data-disabled:pointer-events-none data-disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
       this.variant() === 'destructive' && 'ar-menu__item--danger',
     ]);
   }

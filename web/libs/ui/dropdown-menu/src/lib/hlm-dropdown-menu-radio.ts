@@ -43,7 +43,7 @@ export class HlmDropdownMenuRadio {
   constructor() {
     classes(
       () =>
-        "ar-menu__item group/dropdown-menu-radio relative cursor-default select-none outline-hidden data-disabled:pointer-events-none data-disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
+        "ar-menu__item group/dropdown-menu-radio relative cursor-default select-none data-disabled:pointer-events-none data-disabled:opacity-45 [&_ng-icon:not([class*='text-'])]:text-[length:--spacing(4)] [&_ng-icon]:pointer-events-none [&_ng-icon]:shrink-0",
     );
   }
 }

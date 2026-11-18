@@ -38,8 +38,8 @@
   --color-sidebar-accent: var(--raised);
   --color-sidebar-border: var(--line);
   --color-brand: var(--accent);
-  /* teal text: accent-orrery is 3.1:1 on Paper, so text takes verdigris (accent is for fills and marks) */
-  --color-brand-foreground: var(--verdigris);
+  /* teal text too: accent-orrery is deep enough in Paper to pass as text (4.66:1 on ground) */
+  --color-brand-foreground: var(--accent);
   --color-status-ok: var(--ok);
   --color-status-warn: var(--warn);
   --color-status-down: var(--danger);
@@ -58,14 +58,11 @@
   --radius-xl: var(--radius-xl);
 }
 
-/* Every theme scope, not only <html>: the toaster sets its own data-theme. Not in print, where armil.css's black accent
-   (the same selectors) must win. */
-@media not print {
-  :root,
-  [data-theme] {
-    --accent: var(--accent-orrery);
-    --on-accent: var(--on-accent-orrery);
-  }
+/* orrery's accent, once, after armil.css: it covers both themes, and armil.css's print values are !important. The
+   toaster's own data-theme scope keeps Armil's default accent, which nothing in a toast uses. */
+:root {
+  --accent: var(--accent-orrery);
+  --on-accent: var(--on-accent-orrery);
 }
 
 @layer base {

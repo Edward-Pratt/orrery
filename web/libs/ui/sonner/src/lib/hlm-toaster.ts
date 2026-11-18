@@ -106,6 +106,11 @@ export class HlmToaster {
       classes: {
         ...options?.classes,
         toast: hlm('ar-t-ui shadow-[var(--shadow-glass)]!', options?.classes?.toast),
+        // Armil's Notice: the dismiss button is a small ghost close button at the line's end, not a disc on its corner.
+        closeButton: hlm(
+          'static! order-last! ms-auto! size-7! shrink-0 transform-none! rounded-md! border-0! bg-[var(--clear)]! text-[var(--ink-soft)]! hover:bg-[var(--raised)]! hover:text-[var(--ink)]!',
+          options?.classes?.closeButton,
+        ),
       },
     };
   });

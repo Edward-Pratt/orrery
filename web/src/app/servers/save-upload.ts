@@ -28,8 +28,8 @@ const MAX = 1024 ** 3;
     <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="file.click()" data-upload>Upload save…</button>
     @if (state(); as u) {
       <div
-        class="mt-3 flex w-full flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm"
-        [class]="u.state === 'failed' ? 'bg-[var(--danger-wash)]' : u.state === 'done' ? 'bg-[var(--ok-wash)]' : 'bg-muted'"
+        class="ar-callout mt-3 flex w-full flex-wrap items-center gap-2 text-sm"
+        [class]="u.state === 'failed' ? 'ar-callout--danger' : u.state === 'done' ? 'ar-callout--ok' : ''"
         role="status"
         aria-live="polite"
         data-upload-state

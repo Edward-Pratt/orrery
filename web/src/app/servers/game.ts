@@ -89,7 +89,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
               </div>
             </div>
             @if (failedPrep(); as f) {
-              <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)] mt-4 text-sm" data-failed-prep>
+              <div class="ar-callout ar-callout--danger mt-4 block text-sm" data-failed-prep>
                 <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
               </div>
             }
@@ -234,7 +234,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
             }
             @if (current(); as c) {
               @if (c.unresolved.length) {
-                <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)]" data-unresolved>
+                <div class="ar-callout ar-callout--danger block" data-unresolved>
                   <b class="text-destructive">{{ c.unresolved.length === 1 ? 'A dependency' : c.unresolved.length + ' dependencies' }} can't be met.</b> The update can't start until
                   they are fixed: pick other versions, add the mod that's needed, or remove the one that needs it.
                   <ul class="mt-1 list-inside list-disc">

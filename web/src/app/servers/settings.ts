@@ -106,7 +106,7 @@ export function generatePassword(): string {
     } @else if (state(); as s) {
       <div class="flex max-w-3xl flex-col gap-4 pb-28 text-sm">
         @if (s.rolledBack; as r) {
-          <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)]" role="alert" data-rolled-back>
+          <div class="ar-callout ar-callout--danger block" role="alert" data-rolled-back>
             <b class="text-destructive">The server didn't start with the settings saved last,</b> so the Agent put back the ones it last started with: {{ r }}
           </div>
         }
@@ -129,10 +129,10 @@ export function generatePassword(): string {
           </div>
         }
         @if (stopped()) {
-          <p class="bg-card border-[var(--line-strong)] border rounded-lg px-3 py-2 text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
+          <p class="ar-callout block text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
         }
         @if (s.problem; as p) {
-          <p class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)]" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
+          <p class="ar-callout ar-callout--warn block" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
         }
 
         @if (!unreported()) {
@@ -216,7 +216,7 @@ export function generatePassword(): string {
           </div>
           <div aria-live="polite" data-warning-region>
             @if (!form().require_user_verification) {
-              <div class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)]" data-warning>
+              <div class="ar-callout ar-callout--warn block" data-warning>
                 <b>Names are not checked.</b> Without this, players join with no factorio.com account check: anyone who has the game password can join under any name, an admin's included. As an admin they can run Lua commands,
                 when commands are on for admins, and through those take over the game, post to Discord as anyone, and pass for a linked player. Bans by name stop no one. Turn it off only for players without a factorio.com account
                 (such as a family-shared copy). Keep the game password secret, and change it here if it leaks.

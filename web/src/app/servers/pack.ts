@@ -160,7 +160,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 </div>
               </div>
               @if (p.pending.length) {
-                <div class="rounded-lg py-2.5 px-3 bg-[var(--warn-wash)] mt-4 text-sm" data-pending>
+                <div class="ar-callout ar-callout--warn mt-4 block text-sm" data-pending>
                   <b class="text-status-warn">{{ p.pending.length }} change{{ p.pending.length === 1 ? '' : 's' }} pending</b>, not on the server until applied (a
                   restart, with a backup first):
                   <ul class="mt-1 list-inside list-disc text-muted-foreground">
@@ -200,7 +200,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                 }
               </div>
               @if (failedPrep(); as f) {
-                <div class="rounded-lg py-2.5 px-3 bg-[var(--danger-wash)] mt-4 text-sm" data-failed-prep>
+                <div class="ar-callout ar-callout--danger mt-4 block text-sm" data-failed-prep>
                   <b class="text-destructive">Update to {{ f.to }} failed while preparing.</b> The server wasn't touched. {{ f.why }}
                 </div>
               }

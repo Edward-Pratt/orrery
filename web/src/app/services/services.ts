@@ -118,9 +118,9 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
         @if (c.up === null) {
           <span class="text-muted-foreground">not checked yet</span>
         } @else if (c.up) {
-          <span class="text-status-ok">✓</span> {{ c.ms }} ms
+          <span class="ar-status ar-status--ok">{{ c.ms }} ms</span>
         } @else {
-          <span class="text-status-down">✗ {{ c.error }}</span>
+          <span class="ar-status ar-status--danger">{{ c.error }}</span>
         }
       </span>
     </ng-template>

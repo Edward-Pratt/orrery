@@ -2,6 +2,8 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
+  <!-- Armil's theme before the first paint: dark unless this browser chose Paper (theme.ts takes over once booted). -->
+  <script>try { if (localStorage.getItem('armil-theme') === 'light') document.documentElement.setAttribute('data-theme', 'light'); } catch (e) {}</script>
   <title>orrery</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">

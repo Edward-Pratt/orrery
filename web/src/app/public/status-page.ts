@@ -2,8 +2,9 @@
 // `main.ts` with `PUBLIC_CONFIG` when `isStatusPath` holds: no router, no shell, no session, no interceptor, so its one
 // request is `GET /api/public/status`, every `POLL_MS`. Each listed server's name, game, state (`Status`), the players
 // online and uptime; "Updated … ago". When the hub doesn't answer (any error, a 401 from a hub without the Status page
-// too), the last answer stays greyed out under "Can't reach orrery right now"; the next poll tries again. Light or dark
-// from `Theme` (the system's, unless this browser picked one on the dashboard).
+// too), the last answer stays greyed out under "Can't reach orrery right now"; the next poll tries again. Dark, or Paper
+// from `Theme` when this browser chose it on the dashboard at the same address (it has no switch of its own, so on
+// status.orrery.run, another address, it is always dark).
 
 import { formatPercent } from '@angular/common';
 import { HttpClient, provideHttpClient, withFetch } from '@angular/common/http';
@@ -93,7 +94,7 @@ export class StatusPage {
   });
 
   constructor() {
-    inject(Theme); // light or dark before the first paint
+    inject(Theme); // dark, or a Paper chosen on the dashboard
     inject(Title).setTitle('orrery status');
     const http = inject(HttpClient);
     timer(0, POLL_MS)

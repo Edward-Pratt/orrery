@@ -100,24 +100,48 @@ describe('the shell', () => {
     return [...document.body.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]')];
   };
 
-  it('offers Account, Theme and Log out in the user menu, and Log out logs out', async () => {
+  it('offers Account and Log out in the user menu, and Log out logs out', async () => {
     const r = await open(ALEX);
     const items = await openMenu(r);
-    expect(document.body.textContent).toContain('Theme');
-    expect(items.map((i) => i.textContent!.replace(/\s+/g, ' ').trim().replace(/on$/, ''))).toEqual(['Account', 'light', 'system', 'dark', 'Log out']);
+    expect(items.map((i) => i.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Account', 'Log out']);
     items.find((i) => i.textContent!.includes('Log out'))!.click();
     r.backend.expectOne('/api/logout').flush(null, { status: 204, statusText: 'No Content' });
     r.fixture.detectChanges();
     expect(r.el.querySelector('aside')).toBeNull();
   });
 
-  it('picks a theme from the menu', async () => {
+  const switchIn = (el: HTMLElement, where: string) => el.querySelector<HTMLButtonElement>(`${where} [data-theme-switch]`)!;
+  const said = (b: HTMLElement) => b.textContent!.trim();
+
+  it('switches to Paper and back with the switch in the sidebar foot, and stores the choice', async () => {
     const r = await open(ALEX);
-    (await openMenu(r)).find((i) => i.textContent!.includes('dark'))!.click();
+    const sw = switchIn(r.el, 'aside .ar-sidebar__foot');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(said(sw)).toBe('Paper');
+    expect(sw.querySelector('.ar-icon--sun')).not.toBeNull();
+    sw.click();
+    r.fixture.detectChanges();
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(localStorage.getItem('armil-theme')).toBe('light');
+    expect(said(sw)).toBe('Dark');
+    expect(sw.querySelector('.ar-icon--moon')).not.toBeNull();
+    sw.click();
     r.fixture.detectChanges();
     TestBed.tick();
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('theme')).toBe('dark');
+    expect(localStorage.getItem('armil-theme')).toBe('dark');
+  });
+
+  it('has the same switch in the phone header, beside the user menu', async () => {
+    const r = await open(ALEX);
+    const sw = switchIn(r.el, 'header.ar-topbar');
+    expect(said(sw)).toBe('Paper');
+    sw.click();
+    r.fixture.detectChanges();
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(said(switchIn(r.el, 'aside .ar-sidebar__foot'))).toBe('Dark');
   });
 
   it('has a phone tab bar with the same pages', async () => {
@@ -151,14 +175,29 @@ describe('Theme', () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => (vi.restoreAllMocks(), document.documentElement.removeAttribute('data-theme')));
 
-  it('follows the system by default, stores a choice and restores it', () => {
-    expect(TestBed.inject(Theme).mode()).toBe('system');
-    TestBed.inject(Theme).set('dark');
+  it('opens dark whatever the system prefers, stores a choice under armil-theme and restores it', () => {
+    const asked = vi.spyOn(window, 'matchMedia');
+    expect(TestBed.inject(Theme).mode()).toBe('dark');
     TestBed.tick();
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('theme')).toBe('dark');
+    expect(asked).not.toHaveBeenCalled(); // the system's colour scheme is not consulted
+    TestBed.inject(Theme).set('light');
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(localStorage.getItem('armil-theme')).toBe('light');
     TestBed.resetTestingModule();
-    expect(TestBed.inject(Theme).mode()).toBe('dark');
+    expect(TestBed.inject(Theme).mode()).toBe('light');
+  });
+
+  it('is dark for any stored value but light, and follows a choice made in another tab', () => {
+    localStorage.setItem('armil-theme', 'system');
+    localStorage.setItem('theme', 'light'); // the old key is not read
+    const theme = TestBed.inject(Theme);
+    expect(theme.mode()).toBe('dark');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'armil-theme', newValue: 'light' }));
+    expect(theme.mode()).toBe('light');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'armil-theme', newValue: null }));
+    expect(theme.mode()).toBe('dark');
   });
 
   it('still works when storage is blocked', () => {
@@ -169,7 +208,7 @@ describe('Theme', () => {
       throw new Error('blocked');
     });
     const theme = TestBed.inject(Theme);
-    expect(theme.mode()).toBe('system');
+    expect(theme.mode()).toBe('dark');
     theme.set('light');
     expect(theme.mode()).toBe('light');
   });
@@ -179,7 +218,8 @@ describe('Theme', () => {
       throw new Error('blocked');
     });
     const theme = TestBed.inject(Theme);
-    expect(theme.mode()).toBe('system');
-    expect(() => theme.set('dark')).not.toThrow();
+    expect(theme.mode()).toBe('dark');
+    expect(() => theme.toggle()).not.toThrow();
+    expect(theme.mode()).toBe('light');
   });
 });

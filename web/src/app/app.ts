@@ -1,6 +1,7 @@
 // The shell: sidebar (a bottom tab bar and slim header on a phone) with the switched-on integrations' pages
 // (`PAGES`; Audit log, Library and Users only for a user with that permission), `UserMenu` (initials → Account,
-// Theme, Log out); the attention strip above `<router-outlet>` and amber count badges
+// Log out) and the `ThemeSwitch` in the sidebar's foot (in the header on a phone); the attention strip above
+// `<router-outlet>` and count badges
 // on Servers, Services (down checks count there too) and Host (overdue releases). An invite link opened while logged in
 // leaves the address at once, with a notice to log out first. With `checks` on and `systemd` off
 // the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
@@ -10,8 +11,6 @@ import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { Integrations as IntegrationsOn, Me, Permission } from '@hub/api';
-import { NgIcon, provideIcons } from '@ng-icons/core';
-import { arMonitor, arMoon, arSun } from '@armil/icons';
 import { HlmAvatarImports } from '@spartan-ng/helm/avatar';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
@@ -23,7 +22,8 @@ import { Feedback } from './feedback';
 import { Login, takeInvite } from './login';
 import { Logo } from './logo';
 import { reguardOnChange, Session } from './session';
-import { MODES, Theme } from './theme';
+import { Theme } from './theme';
+import { ThemeSwitch } from './theme-switch';
 
 /** A page per switched-on integration that has one, in the sidebar's order. */
 const PAGES: { path: string; label: string; icon: string; on?: keyof IntegrationsOn; unless?: keyof IntegrationsOn; needs?: Permission }[] = [
@@ -36,13 +36,11 @@ const PAGES: { path: string; label: string; icon: string; on?: keyof Integration
   { path: 'audit', label: 'Audit log', icon: 'logs', on: 'web', needs: 'audit' },
   { path: 'users', label: 'Users', icon: 'users', on: 'web', needs: 'users' },
 ];
-const MODE_ICONS = { light: 'arSun', system: 'arMonitor', dark: 'arMoon' };
 
-/** The user's initials; opens a menu with Account, Theme and Log out. */
+/** The user's initials; opens a menu with Account and Log out. */
 @Component({
   selector: 'app-user-menu',
-  imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports, NgIcon],
-  viewProviders: [provideIcons({ arSun, arMonitor, arMoon })],
+  imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports],
   template: `
     <button type="button" class="flex max-w-full items-center gap-2 rounded-md p-1 text-[var(--ink-soft)] hover:bg-muted hover:text-foreground" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
       <hlm-avatar>
@@ -56,18 +54,6 @@ const MODE_ICONS = { light: 'arSun', system: 'arMonitor', dark: 'arMoon' };
       <div hlmDropdownMenu class="w-44">
         <a hlmDropdownMenuItem routerLink="/account" data-account>Account</a>
         <div hlmDropdownMenuSeparator></div>
-        <div hlmDropdownMenuLabel>Theme</div>
-        <div hlmDropdownMenuGroup>
-          @for (m of modes; track m) {
-            <button hlmDropdownMenuItem type="button" (click)="theme.set(m)" [attr.aria-current]="theme.mode() === m">
-              <ng-icon [name]="icons[m]" /> <span class="capitalize">{{ m }}</span>
-              @if (theme.mode() === m) {
-                <span class="ar-menu__keys ar-t-caption text-muted-foreground">on</span>
-              }
-            </button>
-          }
-        </div>
-        <div hlmDropdownMenuSeparator></div>
         <button hlmDropdownMenuItem type="button" (click)="session.logout()">Log out</button>
       </div>
     </ng-template>
@@ -77,16 +63,13 @@ export class UserMenu {
   readonly user = input.required<Me>();
   readonly showName = input(false);
   protected readonly session = inject(Session);
-  protected readonly theme = inject(Theme);
-  protected readonly modes = MODES;
-  protected readonly icons = MODE_ICONS;
   protected readonly initials = computed(() => this.user().username.slice(0, 2).toUpperCase());
 }
 
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, UserMenu, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, UserMenu, ThemeSwitch, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
   template: `
     <hlm-toaster [theme]="theme.dark() ? 'dark' : 'light'" />
     @switch (session.user()) {
@@ -108,12 +91,14 @@ export class UserMenu {
                 </a>
               }
             </nav>
-            <div class="ar-sidebar__foot"><app-user-menu [user]="session.user()!" [showName]="true" /></div>
+            <div class="ar-sidebar__foot flex items-center justify-between gap-2">
+              <app-user-menu class="min-w-0" [user]="session.user()!" [showName]="true" /><app-theme-switch />
+            </div>
           </aside>
           <div class="ar-shell__main">
             <header class="ar-topbar sticky top-0 z-10 justify-between bg-[var(--glass)] backdrop-blur-[var(--blur-glass)]">
               <span class="flex items-center gap-2"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
-              <app-user-menu [user]="session.user()!" [showName]="false" />
+              <span class="ar-t-ui flex items-center gap-4"><app-theme-switch /><app-user-menu [user]="session.user()!" [showName]="false" /></span>
             </header>
             <app-attention-strip />
             <main class="mx-auto w-full max-w-[var(--content)] px-4 pt-4 pb-28 md:px-5 md:pt-5 md:pb-10">
@@ -140,7 +125,7 @@ export class UserMenu {
 })
 export class App {
   protected readonly session = inject(Session);
-  protected readonly theme = inject(Theme); // applies the remembered mode before the first page shows
+  protected readonly theme = inject(Theme); // applies the remembered theme before the first page shows
   readonly #on = toSignal(inject(Integrations).on$.pipe(catchError(() => of(undefined))));
   readonly #attention = inject(Attention);
   protected readonly visible = computed(() =>

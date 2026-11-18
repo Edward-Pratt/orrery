@@ -1,44 +1,52 @@
-// `Theme`: light / system / dark, kept in `localStorage` (blocked storage is fine), applied as Armil's `data-theme`
-// (`dark` or `light`, Paper) on `<html>`; dark when the system can't say.
+// `Theme`: Armil's two themes, dark (the default, whatever the system prefers) and light (Paper), applied as
+// `data-theme` on `<html>` and kept under Armil's `armil-theme` key in `localStorage` (blocked storage is fine: the
+// choice lasts until the page closes). Another tab's choice is followed through the `storage` event. `index.html`
+// applies a stored Paper before the first paint; `ThemeSwitch` (`theme-switch.ts`) is the control.
 
 import { DOCUMENT } from '@angular/common';
-import { computed, effect, inject, Injectable, signal } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, signal } from '@angular/core';
 
-export type Mode = 'light' | 'system' | 'dark';
-export const MODES: Mode[] = ['light', 'system', 'dark'];
-const KEY = 'theme';
+export type Mode = 'light' | 'dark';
+/** Armil's storage key (its ThemeSwitch), shared with every Armil page on the same address. */
+export const THEME_KEY = 'armil-theme';
 
-/** Light, system (the default) or dark, remembered per browser; applied as `data-theme` on <html>. */
+/** Anything but `light` is dark: no stored value, an old one, or one from elsewhere. */
+const modeOf = (value: string | null): Mode => (value === 'light' ? 'light' : 'dark');
+
+/** Dark unless this browser chose Paper; applied as `data-theme` on <html>. */
 @Injectable({ providedIn: 'root' })
 export class Theme {
   readonly #doc = inject(DOCUMENT);
   readonly mode = signal<Mode>(this.#stored());
-  readonly #systemDark = signal(true);
-  /** Whether the page is dark now: the mode, or for `system` the system's (dark when it can't say). */
-  readonly dark = computed(() => this.mode() === 'dark' || (this.mode() === 'system' && this.#systemDark()));
+  readonly dark = computed(() => this.mode() === 'dark');
 
   constructor() {
-    const dark = this.#doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)');
-    this.#systemDark.set(dark?.matches ?? true);
-    dark?.addEventListener('change', (e) => this.#systemDark.set(e.matches));
-    effect(() => this.#doc.documentElement.setAttribute('data-theme', this.dark() ? 'dark' : 'light'));
+    effect(() => this.#doc.documentElement.setAttribute('data-theme', this.mode()));
+    const view = this.#doc.defaultView;
+    const follow = (e: StorageEvent) => e.key === THEME_KEY && this.mode.set(modeOf(e.newValue));
+    view?.addEventListener('storage', follow);
+    inject(DestroyRef).onDestroy(() => view?.removeEventListener('storage', follow));
   }
 
   set(mode: Mode): void {
     this.mode.set(mode);
     try {
-      localStorage.setItem(KEY, mode);
+      localStorage.setItem(THEME_KEY, mode);
     } catch {
       // storage blocked: the choice lasts until the page closes
     }
   }
 
+  /** Paper from dark, dark from Paper. */
+  toggle(): void {
+    this.set(this.dark() ? 'light' : 'dark');
+  }
+
   #stored(): Mode {
     try {
-      const v = localStorage.getItem(KEY);
-      return MODES.includes(v as Mode) ? (v as Mode) : 'system';
+      return modeOf(localStorage.getItem(THEME_KEY));
     } catch {
-      return 'system';
+      return 'dark';
     }
   }
 }

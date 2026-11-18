@@ -2,9 +2,10 @@
 // coloured from the theme's tokens. It loads `echarts.ts` (only the parts it uses, SVG renderer) lazily.
 // `PeriodPicker`: the period buttons (`PERIODS`) of every graph page.
 
-import { Component, computed, input, model } from '@angular/core';
+import { Component, computed, inject, input, model } from '@angular/core';
 import type { EChartsCoreOption } from 'echarts/core';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
+import { Theme } from './theme';
 
 /** One line: `[time in ms, value]` points, oldest first. */
 export type Series = { name: string; points: [number, number][] };
@@ -12,7 +13,7 @@ export type Series = { name: string; points: [number, number][] };
 /**
  * A time-series line chart (ngx-echarts), drawn as Armil's Chart: `--chart-1` to `--chart-6` in order, 2px lines,
  * a faint fill under the first series only, a `line` grid and mono axis labels in `ink-faint`, a raised tooltip.
- * The tokens are read each time the series change, so it follows the theme.
+ * The tokens are read again whenever the series or the theme change.
  */
 @Component({
   selector: 'app-time-series',
@@ -29,7 +30,10 @@ export class TimeSeries {
   /** Draws each value flat until the next, for values that change in steps (a count, a state). */
   readonly step = input(false);
 
+  readonly #theme = inject(Theme);
+
   protected readonly options = computed((): EChartsCoreOption => {
+    this.#theme.mode(); // the tokens below are the theme's
     const css = getComputedStyle(document.documentElement);
     const token = (name: string) => css.getPropertyValue(name).trim() || undefined;
     const text = token('--ink-faint');

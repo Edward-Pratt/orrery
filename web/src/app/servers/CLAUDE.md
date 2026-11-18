@@ -6,7 +6,7 @@ the shell's attention strip doesn't load the page; with `newServer` on, New serv
 full-height sheet: id, name, game port, memory, pack version from `GET /api/library`, its start script from
 `…/scripts` (a looping one preselected, its loop edit pre-ticked), the runtime (the newest; System java), the EULA
 tick; checked as the hub checks them; the hub's refusals as toasts), the running install's card from `install` events
-(a failure's reason in red), and each Pending server as a dashed row with a "Waiting for setup" badge linking to
+(a failure's reason in red), and each Pending server as a tile with a "Waiting for setup" badge linking to
 `waiting.ts` (`/servers/waiting/<id>`, routed before `:id`: the setup command with Copy, after the script's install
 line when the hub sends one, and Discard, typed id); `row.ts`: state dot and word, amber while `lagging`, the card's
 rate (TPS or UPS, by its `rate.label`; "Paused" while `paused`), player count, 24 h uptime, and the actions its state
@@ -27,8 +27,8 @@ server's `milestone`s as "Research finished: …", "First rocket launched from �
 `features.console`; a factorio command keeps its `/`, e.g. `/players`; a refused one shows the hub's why, such as a
 factorio command over 256 characters, kept in the box (no `maxlength`: a cut paste would run); full-height logs that
 stick to the bottom, `log.ts`'s `StickBottom`; console output is shown from the stream only; ↑/↓ step through the
-commands this browser ran on the server and ☆ saves the box's command as a chip, both in `localStorage` under
-`orrery.console.<serverId>`, ☆ hidden without storage); `players.ts` (`/stats` redirects): on a factorio server first
+commands this browser ran on the server and Save command (a star) saves the box's command as a chip, both in
+`localStorage` under `orrery.console.<serverId>`, the star hidden without storage); `players.ts` (`/stats` redirects): on a factorio server first
 `moderation.ts`'s `ModerationSection` (`GET …/moderation`: who is online with an Admin badge, Kick… and Ban… (an
 inline confirm under the heading with an optional reason, its counter and the hub's rule checked inline; Ban's button
 destructive; Ban a player… takes a typed name), Promote… (`Feedback.confirm`) or Demote; the bans with their reasons

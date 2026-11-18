@@ -108,7 +108,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
           </div>
         }
         @if (b.backups.length) {
-          <table class="ar-table">
+          <div class="ar-panel"><table class="ar-table">
             <thead>
               <tr><th>Name</th><th>{{ words().finished }}</th><th>Size</th><th class="sr-only">Actions</th></tr>
             </thead>
@@ -128,7 +128,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                   <td>{{ bytes(backup.size) }}</td>
                   <td class="text-right">
                     @if (may('servers.restore')) {
-                      <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
+                      <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-backup-more>
                         <ng-icon name="arMore" />
                       </button>
                     }
@@ -144,7 +144,7 @@ const KINDS: Record<SaveKind, { label: string; title: string }> = {
                 </tr>
               }
             </tbody>
-          </table>
+          </table></div>
         } @else {
           <div class="ar-empty" data-empty>
             <p class="font-medium">{{ words().empty }}</p>

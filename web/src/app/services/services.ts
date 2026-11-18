@@ -56,7 +56,7 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
             } @else {
               <div class="flex items-center gap-2" data-actions>
                 @if (session.can('services.control') && stopped(s)) {
-                  <button hlmBtn size="sm" data-action="start" [disabled]="!!control.busy()" (click)="act('start', s)">
+                  <button hlmBtn variant="outline" size="sm" data-action="start" [disabled]="!!control.busy()" (click)="act('start', s)">
                     @if (busy(s) === 'start') {
                       <hlm-spinner />
                     }
@@ -71,7 +71,7 @@ const HEALTH: Record<string, Health> = { active: 'ok', reloading: 'ok', activati
                   </button>
                 }
                 @if (session.can('services.control') || session.can('services.logs')) {
-                  <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
+                  <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
                     <ng-icon name="arMore" />
                   </button>
                 }

@@ -67,7 +67,7 @@ function load(key: string): Remembered | null {
                   {{ c }}
                 </button>
                 <button type="button" class="px-1.5 py-1 text-muted-foreground hover:text-foreground" (click)="unsave(c)" [attr.aria-label]="'Remove ' + c" data-unsave>
-                  ×
+                  <i class="ar-icon ar-icon--close"></i>
                 </button>
               </li>
             }
@@ -84,7 +84,7 @@ function load(key: string): Remembered | null {
             (input)="unstep()"
           />
           @if (stored()) {
-            <button hlmBtn variant="outline" type="button" (click)="save(command)" title="Save this command" aria-label="Save command" data-save>☆</button>
+            <button hlmBtn variant="outline" size="icon" type="button" (click)="save(command)" title="Save this command" aria-label="Save command" data-save><i class="ar-icon ar-icon--star"></i></button>
           }
           <button hlmBtn type="submit" [disabled]="running()">Run</button>
         </form>

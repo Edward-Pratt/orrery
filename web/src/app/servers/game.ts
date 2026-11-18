@@ -192,7 +192,7 @@ const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.
                         <ng-icon name="arLock" aria-hidden="true" /><span class="sr-only">Not removable: its Agent needs it</span>
                       </span>
                     } @else {
-                      <button hlmBtn variant="ghost" size="sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="arClose" /></button>
+                      <button hlmBtn variant="ghost" size="icon-sm" [attr.aria-label]="'Remove ' + p.name" (click)="remove(p.name)" data-remove><ng-icon name="arClose" /></button>
                     }
                   </li>
                 }

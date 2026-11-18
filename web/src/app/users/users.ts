@@ -42,7 +42,7 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
         <p>The link for <b>{{ l.username }}</b> works once, for 24 hours, and isn't shown again: send it to them.</p>
         <div class="flex items-start gap-2 rounded-md border bg-background p-2">
           <code class="min-w-0 flex-1 font-mono text-xs break-all" data-link-url>{{ l.invite }}</code>
-          <button hlmBtn variant="ghost" size="sm" (click)="copy(l.invite)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
+          <button hlmBtn variant="ghost" size="icon-sm" (click)="copy(l.invite)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
         </div>
         <button hlmBtn variant="ghost" size="sm" class="self-end" (click)="link.set(null)" data-done>Done</button>
       </div>
@@ -72,7 +72,7 @@ export function grantsText(u: UserView, serverName: (id: string) => string): str
               }
             </span>
             @if (manageable(u)) {
-              <button hlmBtn variant="outline" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more>
+              <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more>
                 <ng-icon name="arMore" />
               </button>
               <ng-template #menu>

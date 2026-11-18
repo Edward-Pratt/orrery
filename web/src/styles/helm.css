@@ -9,3 +9,11 @@
 .ar-menu[data-slot='dropdown-menu'] {
   margin-block: calc(var(--spacing) * var(--side-offset, 1));
 }
+
+/* Below 768px armil.css makes an icon button the touch width, but its own `.ar-btn--icon.ar-btn--sm` (desktop) is
+   more specific and keeps a small one 28px wide beside its 44px height; square it again. */
+@media (max-width: 767px) {
+  .ar-btn--icon.ar-btn--sm {
+    width: var(--control-touch);
+  }
+}

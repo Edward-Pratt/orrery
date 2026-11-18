@@ -474,7 +474,7 @@ describe('server console section', () => {
       expect(key(s.el, 'ArrowUp')).toBe('');
     });
 
-    it('saves the box\'s command as a chip that runs it, and removes it with ×', async () => {
+    it('saves the box\'s command as a chip that runs it, and removes it with its close button', async () => {
       const s = await setup('/gtnh/console');
       box(s.el).value = ' spark tps ';
       s.el.querySelector<HTMLButtonElement>('[data-save]')!.click();
@@ -496,7 +496,7 @@ describe('server console section', () => {
       expect(stored().saved).toEqual([]);
     });
 
-    it('still works when storage throws: the history lasts until a reload and there is no ☆', async () => {
+    it('still works when storage throws: the history lasts until a reload and there is no Save command', async () => {
       vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
         throw new Error('blocked');
       });

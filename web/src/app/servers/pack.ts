@@ -235,7 +235,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                     <span class="ar-tag ar-tag--warn" data-change>{{ e.change }}</span>
                   }
                   @if (!e.removed) {
-                    <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more><ng-icon name="arMore" /></button>
+                    <button hlmBtn variant="ghost" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="menu" data-more><ng-icon name="arMore" /></button>
                     <ng-template #menu>
                       <div hlmDropdownMenu class="w-48">
                         <button hlmDropdownMenuItem (click)="openSheet({ kind: 'extra', extra: e, replace: true })" data-replace>Replace file…</button>
@@ -283,7 +283,7 @@ type Sheet = { kind: 'update' } | { kind: 'extra'; extra?: Extra; replace?: bool
                       </p>
                     }
                   </div>
-                  <button hlmBtn variant="ghost" size="sm" aria-label="More actions" [hlmDropdownMenuTrigger]="emenu" data-more><ng-icon name="arMore" /></button>
+                  <button hlmBtn variant="ghost" size="icon-sm" aria-label="More actions" [hlmDropdownMenuTrigger]="emenu" data-more><ng-icon name="arMore" /></button>
                   <ng-template #emenu>
                     <div hlmDropdownMenu class="w-44">
                       <button hlmDropdownMenuItem (click)="openSheet({ kind: 'edit', edit: c })" data-change-edit>Edit…</button>

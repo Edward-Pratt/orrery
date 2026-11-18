@@ -63,7 +63,7 @@ type Entry = AuditLog['entries'][number];
     } @else if (!entries().length) {
       <p class="ar-empty text-muted-foreground" data-empty>No entries{{ server() || actor() ? ' for this filter' : ' yet' }}.</p>
     } @else {
-      <table class="ar-table hidden md:table">
+      <div class="ar-panel hidden md:block"><table class="ar-table">
         <thead>
           <tr><th>When</th><th>Who</th><th>What</th><th>Which</th><th>Details</th></tr>
         </thead>
@@ -78,7 +78,7 @@ type Entry = AuditLog['entries'][number];
             </tr>
           }
         </tbody>
-      </table>
+      </table></div>
       <ul class="flex flex-col gap-2 md:hidden">
         @for (e of entries(); track e.id) {
           <li class="ar-panel p-3 text-sm" data-card>

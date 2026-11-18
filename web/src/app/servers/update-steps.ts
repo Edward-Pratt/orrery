@@ -91,7 +91,7 @@ export class UpdateSteps {
     <section data-history>
       <h2 class="ar-t-heading-sm mb-2">History</h2>
       @if (rows().length) {
-        <table class="ar-table">
+        <div class="ar-panel"><table class="ar-table">
           <thead>
             <tr>
               <th>When</th>
@@ -120,7 +120,7 @@ export class UpdateSteps {
               </tr>
             }
           </tbody>
-        </table>
+        </table></div>
       } @else {
         <p class="text-sm text-muted-foreground" data-no-history>{{ empty() }}</p>
       }

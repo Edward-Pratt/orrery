@@ -46,7 +46,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
             <p class="text-sm font-medium">{{ step.label }}</p>
             <div class="ar-panel flex items-start gap-2 bg-muted p-3">
               <code class="min-w-0 flex-1 break-all font-mono text-xs" data-command>{{ step.command }}</code>
-              <button hlmBtn variant="ghost" size="sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
+              <button hlmBtn variant="ghost" size="icon-sm" (click)="copy(step.command)" aria-label="Copy" data-copy><ng-icon name="arCopy" /></button>
             </div>
           </div>
         }

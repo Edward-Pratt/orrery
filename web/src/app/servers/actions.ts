@@ -36,7 +36,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
       @if (c.restart; as r) {
         <span class="text-sm" data-restart-pending>{{ r.stop ? 'Stop' : 'Restart' }} at {{ r.at | date: 'HH:mm:ss' }}, <span class="tabular-nums" data-restart-left>{{ left() }}</span></span>
         @if (may().control) {
-          <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
+          <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="cancel" [disabled]="!!busy()" (click)="cancel()">
             @if (busy() === 'cancel') {
               <hlm-spinner />
             }
@@ -45,7 +45,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
       } @else if (c.online) {
         @if (c.features.chat && may().control) {
-          <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="restart" [disabled]="!!busy()" (click)="restart(RESTART_MINUTES)">
+          <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="restart" [disabled]="!!busy()" (click)="restart(RESTART_MINUTES)">
             @if (busy() === 'restart') {
               <hlm-spinner />
             }
@@ -59,7 +59,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
       } @else if (c.service && may().service) {
         @let blocked = startBlocked();
-        <button hlmBtn size="sm" class="flex-1 sm:flex-none" data-action="start" [disabled]="!!busy() || !!blocked" (click)="start()">
+        <button hlmBtn variant="outline" size="sm" class="flex-1 sm:flex-none" data-action="start" [disabled]="!!busy() || !!blocked" (click)="start()">
           @if (busy() === 'start') {
             <hlm-spinner />
           }
@@ -70,7 +70,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         }
       }
       @if (menu().any) {
-        <button hlmBtn variant="outline" size="sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
+        <button hlmBtn variant="outline" size="icon-sm" aria-label="More actions" data-action="more" [hlmDropdownMenuTrigger]="more">
           <ng-icon name="arMore" />
         </button>
       }

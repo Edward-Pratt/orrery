@@ -32,8 +32,8 @@ export class HlmDropdownMenu {
 
   constructor() {
     classes(
-      // Armil's Menu: solid raised, a line-strong edge and the glass shadow; the offset from its button is in styles/helm.css.
-      () => 'ar-menu motion-safe:data-open:animate-in motion-safe:data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 duration-[120ms] overflow-x-hidden overflow-y-auto outline-none',
+      // Armil's Menu: solid raised, a line-strong edge and the glass shadow, its side offset from its button.
+      () => 'ar-menu motion-safe:data-open:animate-in motion-safe:data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 duration-[120ms] my-[--spacing(var(--side-offset))] overflow-x-hidden overflow-y-auto outline-none',
     );
 
     this.setSideFromTransformOrigin();

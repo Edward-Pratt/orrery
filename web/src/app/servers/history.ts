@@ -53,7 +53,7 @@ const tpsOf = (tps: number) => tps.toFixed(1);
     } @else {
       <div class="grid gap-4 lg:grid-cols-2" data-skeleton>
         @for (i of [1, 2, 3]; track i) {
-          <hlm-skeleton class="h-48 rounded-xl" />
+          <hlm-skeleton class="h-48 rounded-lg" />
         }
       </div>
     }

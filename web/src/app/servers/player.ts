@@ -51,7 +51,7 @@ export const lookupError = (name: string, err: HttpErrorResponse) =>
         } @else if (error(); as e) {
           <p class="text-sm text-muted-foreground" data-never>{{ e }}</p>
         } @else {
-          <hlm-skeleton class="h-24 rounded-xl" data-skeleton />
+          <hlm-skeleton class="h-24 rounded-lg" data-skeleton />
         }
         <hlm-alert-dialog-footer>
           <button hlmAlertDialogCancel data-confirm-cancel>Close</button>

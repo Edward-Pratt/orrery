@@ -96,9 +96,9 @@ export class UserMenu {
             </div>
           </aside>
           <div class="ar-shell__main">
-            <header class="ar-topbar sticky top-0 z-10 justify-between bg-[var(--glass)] backdrop-blur-[var(--blur-glass)]">
-              <span class="flex items-center gap-2"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
-              <span class="ar-t-ui flex items-center gap-4"><app-theme-switch /><app-user-menu [user]="session.user()!" [showName]="false" /></span>
+            <header class="ar-topbar">
+              <span class="flex flex-1 items-center gap-2"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
+              <app-user-menu [user]="session.user()!" [showName]="false" /><app-theme-switch class="ar-t-ui" />
             </header>
             <app-attention-strip />
             <main class="mx-auto w-full max-w-[var(--content)] px-4 pt-4 pb-28 md:px-5 md:pt-5 md:pb-10">

@@ -11,7 +11,7 @@ Edward's design system, copied in from `~/ClaudeCode/armil`. Nothing here is edi
   ```
 
   The same flags always give the same bytes. Built on 18 November 2026 from Armil source `6341863a8d9b` (the hash in
-  the file's first line): 70682 bytes, sha256 `96136253dd66727327c3a036019e1bcd79763fe3f4c5b37b884a090a176d13b5`.
+  the file's first line): 70686 bytes (the script reports 70682, its length in characters), sha256 `96136253dd66727327c3a036019e1bcd79763fe3f4c5b37b884a090a176d13b5`.
   Rebuild after Armil's `tokens.json` or `components/bundle.css` changes, and when an `ar-icon--<name>` class is added
   to or dropped from the app (`chevron-down` and `check` are always kept).
 - `fonts/`: Armil's whole `fonts/` folder, with the licences from `assets/Licences/` beside the font files.

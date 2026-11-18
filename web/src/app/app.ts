@@ -105,9 +105,9 @@ export class UserMenu {
               <router-outlet />
             </main>
           </div>
-          <nav class="tabbar fixed inset-x-0 bottom-0 z-10 flex md:hidden" aria-label="Pages">
+          <nav class="ar-tabbar fixed" aria-label="Pages">
             @for (p of visible(); track p.path) {
-              <a [routerLink]="p.path" routerLinkActive ariaCurrentWhenActive="page" class="ar-t-caption">
+              <a [routerLink]="p.path" routerLinkActive ariaCurrentWhenActive="page">
                 <span class="relative">
                   <i class="ar-icon ar-icon--lg" [class]="'ar-icon--' + p.icon"></i>
                   @if (badge(p.path); as n) {

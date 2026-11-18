@@ -42,7 +42,7 @@ const PAGES: { path: string; label: string; icon: string; on?: keyof Integration
   selector: 'app-user-menu',
   imports: [RouterLink, HlmAvatarImports, HlmDropdownMenuImports],
   template: `
-    <button type="button" class="flex max-w-full items-center gap-2 rounded-md p-1 text-[var(--ink-soft)] hover:bg-muted hover:text-foreground" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
+    <button type="button" class="flex max-w-full items-center gap-2 rounded-md p-1 text-[var(--ink-soft)] hover:bg-muted hover:text-foreground max-md:min-h-[var(--control-touch)] max-md:min-w-[var(--control-touch)] max-md:justify-center" [hlmDropdownMenuTrigger]="menu" aria-label="Account menu">
       <hlm-avatar>
         <span hlmAvatarFallback>{{ initials() }}</span>
       </hlm-avatar>

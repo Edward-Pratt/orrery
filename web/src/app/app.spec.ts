@@ -117,14 +117,14 @@ describe('the shell', () => {
     const r = await open(ALEX);
     const sw = switchIn(r.el, 'aside .ar-sidebar__foot');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(said(sw)).toBe('Paper');
+    expect(said(sw)).toBe('Use Paper');
     expect(sw.querySelector('.ar-icon--sun')).not.toBeNull();
     sw.click();
     r.fixture.detectChanges();
     TestBed.tick();
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(localStorage.getItem('armil-theme')).toBe('light');
-    expect(said(sw)).toBe('Dark');
+    expect(said(sw)).toBe('Use Dark');
     expect(sw.querySelector('.ar-icon--moon')).not.toBeNull();
     sw.click();
     r.fixture.detectChanges();
@@ -136,12 +136,12 @@ describe('the shell', () => {
   it('has the same switch in the phone header, beside the user menu', async () => {
     const r = await open(ALEX);
     const sw = switchIn(r.el, 'header.ar-topbar');
-    expect(said(sw)).toBe('Paper');
+    expect(said(sw)).toBe('Use Paper');
     sw.click();
     r.fixture.detectChanges();
     TestBed.tick();
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    expect(said(switchIn(r.el, 'aside .ar-sidebar__foot'))).toBe('Dark');
+    expect(said(switchIn(r.el, 'aside .ar-sidebar__foot'))).toBe('Use Dark');
   });
 
   it('has a phone tab bar with the same pages', async () => {
@@ -187,6 +187,20 @@ describe('Theme', () => {
     expect(localStorage.getItem('armil-theme')).toBe('light');
     TestBed.resetTestingModule();
     expect(TestBed.inject(Theme).mode()).toBe('light');
+  });
+
+  it('takes ?armil-theme= in the address for that load, over a stored choice, and stores nothing', () => {
+    localStorage.setItem('armil-theme', 'dark');
+    history.replaceState(null, '', '/servers?armil-theme=light');
+    expect(TestBed.inject(Theme).mode()).toBe('light');
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(localStorage.getItem('armil-theme')).toBe('dark');
+    TestBed.resetTestingModule();
+    localStorage.setItem('armil-theme', 'light');
+    history.replaceState(null, '', '/servers?armil-theme=sepia');
+    expect(TestBed.inject(Theme).mode()).toBe('light'); // not a theme: the stored choice stands
+    history.replaceState(null, '', '/');
   });
 
   it('is dark for any stored value but light, and follows a choice made in another tab', () => {

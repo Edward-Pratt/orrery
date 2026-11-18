@@ -1,7 +1,8 @@
 // `Theme`: Armil's two themes, dark (the default, whatever the system prefers) and light (Paper), applied as
 // `data-theme` on `<html>` and kept under Armil's `armil-theme` key in `localStorage` (blocked storage is fine: the
-// choice lasts until the page closes). Another tab's choice is followed through the `storage` event. `index.html`
-// applies a stored Paper before the first paint; `ThemeSwitch` (`theme-switch.ts`) is the control.
+// choice lasts until the page closes). `?armil-theme=light` or `dark` in the address wins for that load and stores
+// nothing (Armil's form for screenshots and checks). Another tab's choice is followed through the `storage` event.
+// `index.html` applies Paper the same way before the first paint; `ThemeSwitch` (`theme-switch.ts`) is the control.
 
 import { DOCUMENT } from '@angular/common';
 import { computed, DestroyRef, effect, inject, Injectable, signal } from '@angular/core';
@@ -17,7 +18,7 @@ const modeOf = (value: string | null): Mode => (value === 'light' ? 'light' : 'd
 @Injectable({ providedIn: 'root' })
 export class Theme {
   readonly #doc = inject(DOCUMENT);
-  readonly mode = signal<Mode>(this.#stored());
+  readonly mode = signal<Mode>(this.#asked() ?? this.#stored());
   readonly dark = computed(() => this.mode() === 'dark');
 
   constructor() {
@@ -40,6 +41,12 @@ export class Theme {
   /** Paper from dark, dark from Paper. */
   toggle(): void {
     this.set(this.dark() ? 'light' : 'dark');
+  }
+
+  /** `light` or `dark` from `?armil-theme=` in the address, for this load only. */
+  #asked(): Mode | null {
+    const asked = new URLSearchParams(this.#doc.defaultView?.location.search ?? '').get(THEME_KEY);
+    return asked === 'light' || asked === 'dark' ? asked : null;
   }
 
   #stored(): Mode {

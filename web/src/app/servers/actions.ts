@@ -75,7 +75,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         </button>
       }
       @if (asking()) {
-        <form class="ar-menu absolute top-full right-0 z-10 mt-1.5 flex items-center gap-2 p-3 text-sm" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
+        <form class="ar-menu ar-menu--form absolute top-full right-0 z-10 mt-1.5 flex items-center gap-2 text-sm" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
           <label class="flex items-center gap-2">
             Restart in
             <input #minutes type="number" min="0" max="60" step="1" value="5" class="ar-input max-w-16" />

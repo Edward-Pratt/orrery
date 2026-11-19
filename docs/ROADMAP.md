@@ -260,6 +260,17 @@ App, whose login (`docs/notes/android-app.md`) is the same password login. Built
 ADR 0005) and cut 2026-11-06 as `hub-v2.22.0` and `web-v0.21.0`; `web-v0.21.1` fixed the pages shown after an in-page
 login. Deployed to production.
 
+## Hardening pass — planned (2026-11-06)
+
+Notes: `docs/notes/hardening.md`. Fix what could become an issue, no feature work: dependency advisories and
+Dependabot, test timeouts and job limits, the two flaky tests (the mod-browser one since fixed), `@types/node` on the 24 line, a guard for
+`changes.sh`'s map, by-hand installs that wait for a release's assets, pnpm as the installer (CI and the hub's host,
+two hub releases because `deploy-hub.sh` runs from the running release), a release gate that trusts `main`'s CI run
+instead of re-running it, lint for the hub and the Agent, the Agent's Node version in its hello with a nightly
+notice when it falls behind, the Staging environment removed (#91; the pack-update staging and `failed in staging`
+stay), and the 36 long files split or marked exempt with `check-file-length` then failing any over-cap file. Owner
+decisions in the note: no Bun, the Agent stays Node (ADR 0004 kept), `hub.db` backups off the host come after.
+
 ## Later / if needed
 
 - More GitHub integration: a repo's CI runs and open issues, growing #89's `integrations.github` (introduces a Project term).

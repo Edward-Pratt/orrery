@@ -9,6 +9,7 @@ jobs:
   # Decides which parts run; see .github/changes.sh for the mapping.
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       hub: ${{ steps.parts.outputs.hub }}
       mod: ${{ steps.parts.outputs.mod }}
@@ -39,6 +40,7 @@ jobs:
   file-length:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,9 +53,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.hub == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
-        node: [24, 26]
+        # Production runs 24; 26 is the canary, on pushes to main only (not on pull requests or release tags).
+        node: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/main' && '[24, 26]' || '[24]') }}
     defaults:
       run:
         working-directory: hub
@@ -72,6 +76,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mod == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: mod
@@ -95,6 +100,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -117,6 +123,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: agent
@@ -144,6 +151,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.factorio == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: | # a factorio-v tag's own version; any other run the changelog's top one (the zip refuses a mismatch)
@@ -159,6 +167,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: bash deploy/test-restore-backup.sh

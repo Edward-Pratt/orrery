@@ -3,7 +3,7 @@
 Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts` directly (type stripping) — there is no build step.
 
 ```bash
-npm test            # node --test "test/*.test.ts"
+npm test            # node --test --test-timeout=30000 "test/**/*.test.ts": a test still running after 30 s fails, named
 npm run typecheck   # tsc, noEmit
 npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
 npm run users -- invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link

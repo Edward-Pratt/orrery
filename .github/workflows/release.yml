@@ -15,17 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Notes from this part's history only
         run: bash .github/notes.sh "${GITHUB_REF_NAME%%-v*}" "$GITHUB_REF_NAME" > notes.md # release.sh previews the same
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: startsWith(github.ref_name, 'mod-v')
         with:
           name: mod-jar
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: startsWith(github.ref_name, 'web-v')
         with:
           name: web-dist
@@ -33,7 +33,7 @@ jobs:
       - name: Archive the dashboard build
         if: startsWith(github.ref_name, 'web-v')
         run: mkdir -p dist && tar -czf "dist/orrery-$GITHUB_REF_NAME.tar.gz" -C web-dist .
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: startsWith(github.ref_name, 'agent-v')
         with:
           name: agent-dist
@@ -45,7 +45,7 @@ jobs:
           [[ $v == "${GITHUB_REF_NAME#agent-v}" ]] || { echo "the agent's tarball says version $v, not $GITHUB_REF_NAME's"; exit 1; }
           mkdir -p dist && mv agent-dist/agent-dist.tar.gz "dist/orrery-$GITHUB_REF_NAME.tar.gz"
           cd dist && sha256sum "orrery-$GITHUB_REF_NAME.tar.gz" > "orrery-$GITHUB_REF_NAME.tar.gz.sha256"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: startsWith(github.ref_name, 'factorio-v')
         with:
           name: factorio-zip

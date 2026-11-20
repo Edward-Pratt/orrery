@@ -1,4 +1,4 @@
-// npm run check-config [-- path]: validates config.json offline (no DISCORD_TOKEN, no network), same rules as startup.
+// pnpm check-config [path]: validates config.json offline (no DISCORD_TOKEN, no network), same rules as startup.
 import { loadConfig } from './config.ts';
 
 const path = process.argv[2] ?? 'config.json';

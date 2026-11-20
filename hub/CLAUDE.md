@@ -3,11 +3,11 @@
 Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts` directly (type stripping) — there is no build step.
 
 ```bash
-npm test            # node --test --test-timeout=30000 "test/**/*.test.ts": a test still running after 30 s fails, named
-npm run typecheck   # tsc, noEmit
-npm run check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
-npm run users -- invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link
-npm start           # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord),
+pnpm test           # node --test --test-timeout=30000 "test/**/*.test.ts": a test still running after 30 s fails, named
+pnpm run typecheck  # tsc, noEmit
+pnpm check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
+pnpm users invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link
+pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord),
                     # GITHUB_TOKEN (with integrations.github; also lets the library fetch Actions artifacts),
                     # FACTORIO_USERNAME and FACTORIO_TOKEN (optional, for game updates' mod links; without both, a warning, and every game update is refused: each has `orrery`, a portal mod)
 ```

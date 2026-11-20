@@ -24,9 +24,16 @@ On an Agent's Host, an Agent deploy changes only the Agent's code: a release tha
 `orrery-agent-deploy@.service`, `60-orrery-agent.rules`, `factorio.container` or `deploy-agent.sh` still needs the
 friend to re-run `setup-agent-host.sh` from its tag, as do a new image (`--image`, `--refresh-image`) and `--memory-max`.
 
+The hub's deploy installs with pnpm (`pnpm install --frozen-lockfile --prod` in `deploy-hub.sh`), so the hub's host needs
+pnpm at the version in `hub/package.json`'s `packageManager`, on the deploy unit's `PATH`: `sudo npm install -g
+pnpm@12.21.0`, then `pnpm --version` as `opc`. Without it a hub deploy fails before cloning, saying so. The script runs
+from the running release, so the first hub release with pnpm is still installed by the old script's `npm ci --omit=dev`:
+until the hub release after it, `hub/package-lock.json` stays next to `pnpm-lock.yaml`, and CI's hub job ends with
+`npm ci --omit=dev` to check that it still agrees with `package.json`.
+
 Deploying from Releases needs the `deploys` permission. Dashboard logins are local Users (ADR 0005, `docs/notes/users.md`):
 an Environment's first owner, and an owner locked out with no other to help, come from the users CLI on the host as the
-hub's OS user, which prints a one-use invite link (production: `cd /home/opc/orrery/current/hub && npm run users --
+hub's OS user, which prints a one-use invite link (production: `cd /home/opc/orrery/current/hub && pnpm users
 invite <you> /home/opc/orrery/config.json` as `opc`; Staging: the same from `/srv/orrery-staging/current/hub` as
 `orrery-staging`, with `/srv/orrery-staging/config.json`); everyone else is invited from the Users page. The release
 that brought Users is a hub and a dashboard release back to back (the old login card's "Log in with Discord" is a 404

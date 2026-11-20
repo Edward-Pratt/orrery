@@ -29,7 +29,8 @@ pnpm at the version in `hub/package.json`'s `packageManager`, on the deploy unit
 pnpm@12.21.0`, then `pnpm --version` as `opc`. Without it a hub deploy fails before cloning, saying so. The script runs
 from the running release, so the first hub release with pnpm is still installed by the old script's `npm ci --omit=dev`:
 until the hub release after it, `hub/package-lock.json` stays next to `pnpm-lock.yaml`, and CI's hub job ends with
-`npm ci --omit=dev` to check that it still agrees with `package.json`.
+`npm ci --omit=dev` to check that it still agrees with `package.json`. Once a pnpm-era script runs, a hub tag from before pnpm has no
+`pnpm-lock.yaml` and its deploy fails before the flip; an automatic Rollback is unaffected, as it only moves the link.
 
 Deploying from Releases needs the `deploys` permission. Dashboard logins are local Users (ADR 0005, `docs/notes/users.md`):
 an Environment's first owner, and an owner locked out with no other to help, come from the users CLI on the host as the

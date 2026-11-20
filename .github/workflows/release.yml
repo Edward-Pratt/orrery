@@ -5,13 +5,95 @@ on:
 
 permissions:
   contents: write # gh release create
+  actions: read # the gate reads main's CI run
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
+  # main's CI already tested this commit (release.sh tags only a pushed main): wait for that run, refuse if it failed.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/release-gate.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+
+  # Build-only, beside the gate, each for its own part's tag: formatting and tests already ran on main.
+  web:
+    if: startsWith(github.ref_name, 'web-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-dist
+          path: web/dist/web/browser
+
+  agent:
+    if: startsWith(github.ref_name, 'agent-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: bash .github/agent-tarball.sh agent "${GITHUB_REF_NAME#agent-v}" agent-dist.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-dist
+          path: agent-dist.tar.gz
+
+  mod:
+    if: startsWith(github.ref_name, 'mod-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mod
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # the version comes from mod-v* tags
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - run: ./gradlew assemble
+      - run: bash ../.github/mod-jars.sh . dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mod-jar
+          path: mod/dist/orrery-*.jar
+
+  factorio:
+    if: startsWith(github.ref_name, 'factorio-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: bash .github/factorio-zip.sh factorio "${GITHUB_REF_NAME#factorio-v}" dist # refuses a changelog that disagrees
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: factorio-zip
+          path: dist/orrery_*.zip
 
   release:
-    needs: ci
+    needs: [gate, web, agent, mod, factorio]
+    # The builds of the other parts are skipped, which must not skip this; a failed or cancelled one must.
+    if: ${{ !cancelled() && !failure() && needs.gate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

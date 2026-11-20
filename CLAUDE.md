@@ -73,7 +73,7 @@ bash deploy/test-add-server.sh            # with fake systemctl, runuser and SEL
 bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more (needs jq)
 bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
 bash .github/test-changes.sh              # which parts CI runs (.github/changes.sh)
-bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, agent-tarball.sh, factorio-zip.sh and factorio-publish.sh (needs zip, unzip and jq)
+bash .github/test-release.sh              # the release script against a throwaway repo, mod-jars.sh, agent-tarball.sh, factorio-zip.sh, factorio-publish.sh and release-gate.sh (needs zip, unzip and jq)
 bash .github/check-file-length main     # no source file over 300 lines grew on the branch, or it says why: `modular-exempt: <reason>` in the first 10 lines
 ```
 

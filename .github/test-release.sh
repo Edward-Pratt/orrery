@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests release.sh against a throwaway bare "origin" and a clone of it.
+# Tests release.sh against a throwaway bare "origin" and a clone of it, then the scripts release.yml runs.
 #   bash .github/test-release.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -201,4 +201,33 @@ cp "$ZIP" "$T/fdist/orrery_1.2.4.zip"
 check 'the zip must be orrery_X.Y.Z.zip holding that version' \
   '! portal known "$T/fdist/orrery_1.2.4.zip" && says "doesn'\''t name orrery 1.2.4" && [[ $(calls) == 0 ]] &&
    ! portal known "$T/fdist" && ! portal known "$T/fdist/missing.zip" && [[ $(calls) == 0 ]]'
+# The release gate: release-gate.sh against a fake gh (on PATH for these runs only) that plays the Actions API. $G/run
+# is the newest CI run's "id status conclusion" (empty: none), $G/ends how a watched run ends; $G/calls keeps each call.
+G=$T/gate
+mkdir -p "$T/gbin" "$G"
+cat > "$T/gbin/gh" << 'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$G/calls"
+case "$1 $2" in
+  'api repos/o/r/actions/workflows/ci.yml/runs?'*) cat "$G/run" ;;
+  'run watch') [[ $(cat "$G/ends") == success ]] ;;
+  'api repos/o/r/actions/runs/'*) cat "$G/ends" ;;
+  *) exit 9 ;;
+esac
+EOF
+chmod +x "$T/gbin/gh"
+export G
+gate() { # <run line> [how a watched run ends]: one gate run for commit abc123 of o/r
+  : > "$G/calls"; printf '%s' "$1" > "$G/run"; echo "${2:-}" > "$G/ends"
+  PATH=$T/gbin:$PATH bash "$HERE/release-gate.sh" o/r abc123 > "$T/out" 2>&1
+}
+watched() { grep -q '^run watch 7 --repo o/r' "$G/calls"; }
+check 'the gate passes a passed run without waiting, asking only for pushes to main of the tagged commit' \
+  'gate "7 completed success" && says "CI run 7 on main passed" && ! watched &&
+   grep -qF "runs?head_sha=abc123&branch=main&event=push&per_page=1" "$G/calls"'
+check 'no CI run on main for the commit: no release' '! gate "" && says "push main and let CI pass first"'
+check 'a run that failed or was cancelled: no release, naming how it ended' \
+  '! gate "7 completed failure" && says "ended failure" && ! watched && ! gate "7 completed cancelled" && says "ended cancelled"'
+check 'a run still going is waited for, and passes if it passes' 'gate "7 in_progress " success && watched && says "passed"'
+check 'a run still going that fails: no release' '! gate "7 queued " failure && watched && says "ended failure"'
 exit $fail

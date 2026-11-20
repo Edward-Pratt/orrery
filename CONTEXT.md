@@ -91,7 +91,7 @@ A Role given to a User, for every server or for the servers listed; one listing 
 _Avoid_: assignment, membership
 
 **Invite**:
-A one-use link, for 24 hours, that lets its User set a password and logs them in; also how a password is reset. Made on the Users page, or for an owner by `npm run users -- invite` on the host.
+A one-use link, for 24 hours, that lets its User set a password and logs them in; also how a password is reset. Made on the Users page, or for an owner by `pnpm users invite` on the host.
 _Avoid_: token (it holds one), signup, reset link (it is an Invite)
 
 ### Backups

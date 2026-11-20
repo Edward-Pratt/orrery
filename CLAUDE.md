@@ -18,7 +18,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `docs/ROADMAP.md` — planned releases, linking each to its notes (older ones to their spec issue); update it when a
   release ships or scope moves.
 
-Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `mod/`.
+Nothing builds at the root: run pnpm in `hub/`, `web/` and `agent/` (each pins its version in `packageManager`), Gradle in `mod/`.
 
 ## Architecture rules
 
@@ -39,7 +39,7 @@ Nothing builds at the root: run npm in `hub/`, `web/` and `agent/`, Gradle in `m
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with local Users (`hub/src/users/`:
   passwords, Roles of Permissions, per-server Grants, invites; `docs/adr/0005`; no bot needed), each route's permission in
   `hub/src/web/permit.ts`, and SQLite sessions (`hub/src/web/web.ts`). Same frontend rule as Discord, plus `Users`, `Roles`
-  and its own session rows in `Db`. Off: no HTTP port. The first owner: `npm run users -- invite <name>` on the host.
+  and its own session rows in `Db`. Off: no HTTP port. The first owner: `pnpm users invite <name>` on the host.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge. The Factorio mod is the same, and talks only to its
   server's Agent (events out over local UDP, commands in over RCON), never to the hub.
@@ -62,13 +62,13 @@ raise `MIN_PROTOCOL` only one release after a bump.
 ## Verify before claiming done
 
 ```bash
-cd hub && npm test && npm run typecheck
+cd hub && pnpm test && pnpm run typecheck
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
-cd web && npm test && npm run build       # the build also type-checks against the hub's API types
-cd agent && npm test && npm run typecheck # the typecheck also covers the hub's types it imports
+cd web && pnpm test && pnpm run build     # the build also type-checks against the hub's API types
+cd agent && pnpm test && pnpm run typecheck # the typecheck also covers the hub's types it imports
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
-bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, npm and gh
+bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, pnpm and gh
 bash deploy/test-add-server.sh            # with fake systemctl, runuser and SELinux tools; the config check is real
 bash deploy/test-setup-agent-host.sh      # the agent Host's setup, with fake dnf, podman, Quadlet, systemctl, curl and more (needs jq)
 bash deploy/test-deploy-agent.sh          # deploy-agent.sh, with fake curl, systemctl (playing the agent) and id
@@ -102,7 +102,7 @@ for each mod's signed download link, and the links sent to the Agent carry no cr
 the hub warns at start, the catalog still answers, and every game update is refused (409), naming the file) live in the
 root-only `/etc/orrery-factorio-account.env`, read by `orrery-hub.service` alone through its
 `EnvironmentFile=-/etc/orrery-factorio-account.env` (the leading `-`: a hub without the file starts; `test-deploy.sh` checks
-that no other unit names it): the deploy units load `/etc/orrery.env`, and their `npm ci` must never see the account.
+that no other unit names it): the deploy units load `/etc/orrery.env`, and their `pnpm install` must never see the account.
 Staging has no Agent and no such file. Never commit them or put them in `config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
 `release.yml`'s portal step.
 On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's

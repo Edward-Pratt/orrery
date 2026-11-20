@@ -1,0 +1,36 @@
+# Weekly updates for each part: its minor and patch updates in one grouped PR, each major in a PR of its own.
+# The npm ecosystem reads the pnpm lockfiles. @types/node majors are ignored: its major follows the Node line production
+# runs (docs/notes/hardening.md §4), so it moves with that line, not with the newest types.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /hub
+    schedule: { interval: weekly }
+    groups:
+      hub: { update-types: [minor, patch] }
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly }
+    groups:
+      web: { update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /agent
+    schedule: { interval: weekly }
+    groups:
+      agent: { update-types: [minor, patch] }
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: gradle
+    directory: /mod
+    schedule: { interval: weekly }
+    groups:
+      mod: { update-types: [minor, patch] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { update-types: [minor, patch] }

@@ -44,21 +44,21 @@ and start/stop/crash alerts.
 
 ```bash
 cd hub
-npm ci
+pnpm install --frozen-lockfile   # pnpm: the version in package.json's packageManager
 cp config.example.json config.json
 openssl rand -hex 24          # one token per game server
 $EDITOR config.json           # servers[]: id, name; integrations.minecraft.tokens and
                               # integrations.discord (guildId, adminRoleId, channels), keyed by server id
 echo 'DISCORD_TOKEN=<bot token>' > .env   # only needed with integrations.discord
-set -a; . ./.env; set +a; npm start
-npm run users -- invite <you>  # in another shell, with integrations.web: the first owner's invite link
+set -a; . ./.env; set +a; pnpm start
+pnpm users invite <you>  # in another shell, with integrations.web: the first owner's invite link
 ```
 
 `config.json` and `.env` are git-ignored. Each section under `integrations` is
 optional: leave out `discord` to run without the bot (and without a token), or
 `minecraft` to open no mod port. `web` serves the dashboard's API on
 `127.0.0.1`, with local Users: a username and password each, Roles of Permissions, and invites (no bot needed).
-`npm run users -- invite <name>` makes the first owner, or resets an owner who is locked out; everyone else is invited
+`pnpm users invite <name>` makes the first owner, or resets an owner who is locked out; everyone else is invited
 from the dashboard's Users page. A server needs a token when `minecraft` is on,
 but a Discord channel is optional: one left out of `channels` just isn't
 bridged to Discord. `checks` lists URLs the hub requests on a schedule (`id`, `url`,
@@ -70,7 +70,7 @@ the units the hub may see (`id`, `unit`); no other unit exists to it. It watches
 and reads their logs, so the hub's user needs journal access (e.g. the `systemd-journal` group); a check may name one
 as its `service`, and a server the `service` it runs as. The dashboard can start, stop and restart them once
 `deploy/orrery-hub.rules` is installed with the same units (keep the two in sync); stopping a server's service with
-players online counts down in game first, then stops it for good. `npm run check-config` checks the file
+players online counts down in game first, then stops it for good. `pnpm check-config` checks the file
 offline. A config from before orrery 2.0 (with `listenPort`, `guildId` and each
 server's `token`/`channelId` at the old places) is rejected, and `check-config`
 lists each key and where it moves. To run it permanently, see
@@ -198,7 +198,7 @@ id and token.
 ## Development
 
 ```bash
-cd hub && npm test && npm run typecheck
+cd hub && pnpm test && pnpm run typecheck
 cd mod && ./gradlew spotlessApply build   # build runs the JUnit tests
 ```
 

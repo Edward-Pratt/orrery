@@ -1,4 +1,4 @@
-// npm run users -- invite <username> [config path]: the break-glass invite, run on the host as the hub's OS user from
+// pnpm users invite <username> [config path]: the break-glass invite, run on the host as the hub's OS user from
 // the running release's hub/ folder (`config.json` by default). There is no email in the hub, so this is how the first
 // owner, and an owner locked out with no other owner to help, get in: a new name becomes a user with an unscoped
 // `owner` grant (never anything less: adding users is the Users page's job); an existing one gets a reset, at the
@@ -36,7 +36,7 @@ export function cliInvite(configPath: string, username: string, by = `cli:${user
 if (import.meta.main) {
   const [verb, username, path = 'config.json'] = process.argv.slice(2);
   if (verb !== 'invite' || !username) {
-    console.error('Usage: npm run users -- invite <username> [config path]');
+    console.error('Usage: pnpm users invite <username> [config path]');
     process.exitCode = 2;
   } else {
     try {

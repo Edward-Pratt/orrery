@@ -80,7 +80,9 @@ clone() (
   fi
   git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$tag" "$repo" "$dir"
 )
-if ! clone || ! (cd "$dir/hub" && npm ci --omit=dev); then
+# Before cloning, so a host without pnpm (installed by hand: docs/RELEASING.md) fails with this line and nothing on disk.
+command -v pnpm > /dev/null || { echo "no pnpm on PATH ($PATH): install it on the host, then deploy again"; finish failed; }
+if ! clone || ! (cd "$dir/hub" && pnpm install --frozen-lockfile --prod); then
   rm -rf "$dir"
   finish failed
 fi

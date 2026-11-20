@@ -8,7 +8,7 @@ serves the dashboard from `/var/www/orrery`, `/api` to the hub; `status.orrery.r
 Status page, passing only `/api/public/*` to the hub), `install-web.sh` (installs a dashboard release
 there, stamping `<webDir>.release` with the tag; tested by `test-install-web.sh`), `restore-backup.sh` (puts a backup back over a stopped server's world; the hub runs it for the dashboard's restore;
 tested by `test-restore-backup.sh`) and the deploys, which the hub starts per tag through polkit:
-`orrery-deploy@.service` runs `deploy-hub.sh` as the hub's user (builds `<root>/releases/<tag>`, flips the
+`orrery-deploy@.service` runs `deploy-hub.sh` as the hub's user (builds `<root>/releases/<tag>` with pnpm, which the host needs: `docs/RELEASING.md`; flips the
 `current` symlink, rolls back if the hub won't stay up 30 s), `orrery-deploy-web@.service` runs `deploy-web.sh` as
 root from a root-owned copy in `/usr/local/lib/orrery` (around `install-web.sh`); both write
 `<root>/deploy-status.json` and are tested by `test-deploy.sh`. `orrery-deploy-staging@` and

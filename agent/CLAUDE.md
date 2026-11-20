@@ -8,8 +8,8 @@ and `settingsSet`, from `agent-v1.2.0` on: `docs/notes/factorio-world-settings.m
 dependencies: Node built-ins only (game tarballs go through the Host's `xz`, which setup installs).
 
 ```bash
-npm test            # node --test --test-timeout=30000 "test/*.test.ts": a test still running after 30 s fails, named
-npm run typecheck   # tsc, noEmit; also type-checks the hub types src/ imports
+pnpm test           # node --test --test-timeout=30000 "test/*.test.ts": a test still running after 30 s fails, named
+pnpm run typecheck  # tsc, noEmit; also type-checks the hub types src/ imports
 node src/index.ts           # the agent (orrery-agent.service)
 node src/index.ts check     # the first-boot check: a report on stdout, line by line, exit 0 when nothing failed
 ```

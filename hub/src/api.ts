@@ -4,11 +4,11 @@
 // `ModCheck`, `ModCheckAnswer`, and the game settings ones: `GameSettingsState`, `GameSettingsRequest`,
 // `GameSettingsAnswer`; `Features.settings`, left out by an older hub), for the dashboard (`web/`) to import
 // type-only; Users' (`Me` among them) are in `api-users.ts`. Imports only pure files, so it compiles without
-// `@types/node` (`npm run typecheck` checks it with `tsconfig.api.json`); routes check payloads with `satisfies`.
+// `@types/node` (`pnpm run typecheck` checks it with `tsconfig.api.json`); routes check payloads with `satisfies`.
 
 /**
  * The HTTP API's types, for the dashboard to import type-only. Imports only pure type files (no Node types), so it
- * compiles on its own: `npm run typecheck` checks that with `tsconfig.api.json`.
+ * compiles on its own: `pnpm run typecheck` checks that with `tsconfig.api.json`.
  */
 import type {
   AuditRow,

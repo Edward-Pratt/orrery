@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests deploy-hub.sh and deploy-web.sh against a throwaway git repo as the remote, with fake systemctl, npm, id and gh.
+# Tests deploy-hub.sh and deploy-web.sh against a throwaway git repo as the remote, with fake systemctl, pnpm, id and gh.
 #   bash deploy/test-deploy.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -24,9 +24,9 @@ case $1 in
     else printf 'ActiveState=active\nSubState=running\nMainPID=%s\n' "$p"; fi ;;
 esac
 EOF
-cat > "$T/bin/npm" <<'EOF'
+cat > "$T/bin/pnpm" <<'EOF'
 #!/usr/bin/env bash
-[[ $* == 'ci --omit=dev' && ! -e $F/npm-fails ]] || { echo "npm ERR! fake failure"; exit 1; }
+[[ $* == 'install --frozen-lockfile --prod' && ! -e $F/pnpm-fails ]] || { echo "ERR_PNPM fake failure"; exit 1; }
 mkdir node_modules
 EOF
 cat > "$T/bin/id" <<'EOF'
@@ -41,6 +41,15 @@ if [[ -e $R/deploy-status.json ]]; then touch "$F/gh-saw-old-status"; fi
 cp "$F/web.tar.gz" "$9/$7"
 EOF
 chmod +x "$T/bin/"*
+# Every other command on PATH, linked one by one leaving out pnpm, for the case of a host without it.
+mkdir "$T/sys"
+IFS=: read -ra dirs <<< "$PATH"
+for d in "${dirs[@]:1}"; do
+  for c in "$d"/*; do
+    n=${c##*/}
+    [[ -x $c && ! -d $c && $n != pnpm* && ! -e $T/sys/$n ]] && ln -s "$c" "$T/sys/$n"
+  done
+done
 
 # The remote: hub-v1.0.0 to hub-v1.0.4, each a commit with hub/package.json and deploy/.
 git init -q "$T/remote"
@@ -80,10 +89,15 @@ check 'refuses to run as root' '! FAKE_UID=0 deploy hub-v1.0.1 && grep -q root "
   [[ ! -e $R/releases/hub-v1.0.1 && ! -e $R/deploy-status.json ]]'
 check 'refuses while another deploy holds the lock' '! flock "$R/deploy.lock" bash "$HERE/deploy-hub.sh" "$R" orrery-hub.service hub-v1.0.1 > "$T/out" 2>&1 &&
   grep -q deploy.lock "$T/out" && current hub-v1.0.0 && [[ ! -e $R/releases/hub-v1.0.1 && ! -e $R/deploy-status.json ]]'
-touch "$F/npm-fails"
-check 'a failed npm ci leaves current and no release directory' '! deploy hub-v1.0.1 && current hub-v1.0.0 &&
+mv "$T/bin/pnpm" "$T/pnpm"
+check 'without pnpm on PATH it fails before cloning, saying so' '! PATH=$T/bin:$T/sys deploy hub-v1.0.1 &&
+  grep -q "no pnpm on PATH" "$T/out" && current hub-v1.0.0 && [[ ! -e $R/releases/hub-v1.0.1 && ! -s $F/calls ]] &&
+  status hub-v1.0.1 hub-v1.0.0 failed'
+mv "$T/pnpm" "$T/bin/pnpm"
+touch "$F/pnpm-fails"
+check 'a failed pnpm install leaves current and no release directory' '! deploy hub-v1.0.1 && current hub-v1.0.0 &&
   [[ ! -e $R/releases/hub-v1.0.1 && ! -s $F/calls ]] && status hub-v1.0.1 hub-v1.0.0 failed'
-rm "$F/npm-fails"
+rm "$F/pnpm-fails"
 check 'refuses a tag the remote does not have' '! deploy hub-v9.9.9 && current hub-v1.0.0 && [[ ! -e $R/releases/hub-v9.9.9 ]]'
 
 pids 100 101 200

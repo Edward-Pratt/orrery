@@ -58,8 +58,8 @@ test('the CLI says how to use it, and refuses without the web integration', (t) 
       return [status, stderr.trim()];
     }
   };
-  assert.deepEqual(run(), [2, 'Usage: npm run users -- invite <username> [config path]']);
-  assert.deepEqual(run('remove', 'edward'), [2, 'Usage: npm run users -- invite <username> [config path]']);
+  assert.deepEqual(run(), [2, 'Usage: pnpm users invite <username> [config path]']);
+  assert.deepEqual(run('remove', 'edward'), [2, 'Usage: pnpm users invite <username> [config path]']);
   const { path } = configFile(t, {});
   assert.deepEqual(run('invite', 'edward', path), [1, 'integrations.web is off: there is no dashboard to invite to']);
   const web = configFile(t, { web: WEB });

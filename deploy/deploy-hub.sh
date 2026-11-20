@@ -44,8 +44,11 @@ finish() { # <outcome>: writes the status file atomically, prunes releases/, exi
   exit 1
 }
 
+now_us() { local t=$EPOCHREALTIME; echo "${t//[!0-9]/}"; } # microseconds (bash 5): $SECONDS counts whole seconds from an
+# arbitrary point, so SECONDS + 1 can come at once, and a gate of a second then ends after one look
+
 up() { # true if the unit stays active/running with one MainPID for the whole gate
-  local end=$((SECONDS + gate)) first='' k v a s p
+  local end=$(($(now_us) + gate * 1000000)) first='' k v a s p
   while :; do
     a='' s='' p=''
     while IFS='=' read -r k v; do
@@ -56,7 +59,7 @@ up() { # true if the unit stays active/running with one MainPID for the whole ga
       echo "$unit didn't stay up: ActiveState=$a SubState=$s MainPID=$p (was $first)"
       return 1
     fi
-    ((SECONDS < end)) || return 0
+    (($(now_us) < end)) || return 0
     sleep "$poll"
   done
 }

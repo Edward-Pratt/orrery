@@ -8,6 +8,7 @@ trap 'rm -rf "$T"' EXIT
 R=$T/root F=$T/fake
 export F R PATH=$T/bin:$PATH ORRERY_REPO=file://$T/remote DEPLOY_GATE_SECONDS=1 DEPLOY_GATE_POLL=0.2
 export GITHUB_TOKEN=s3cret-t0ken LC_ALL=C
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 # this machine's signing, hooks and aliases stay out of it
 mkdir -p "$T/bin" "$F" "$R/releases"
 
 # systemctl: `restart` records which release current points at, and an earlier deploy's status file still there for

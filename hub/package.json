@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node src/index.ts",
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --test --test-timeout=30000 \"test/**/*.test.ts\"",
     "typecheck": "tsc && tsc -p tsconfig.api.json",
     "check-config": "node src/check-config.ts",
     "users": "node src/users-cli.ts"
@@ -18,7 +18,7 @@
     "hono": "^4.13.9"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "~24.19.2",
     "typescript": "^7.0.2"
   }
 }

@@ -13,12 +13,13 @@
     "users": "node src/users-cli.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.9",
     "discord.js": "^14.27.0",
     "hono": "^4.13.9"
   },
   "devDependencies": {
     "@types/node": "~24.19.2",
     "typescript": "^7.0.2"
-  }
+  },
+  "packageManager": "pnpm@12.21.0"
 }

@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# Which parts CI runs. Reads REF_TYPE and REF_NAME from the environment and the changed files on stdin;
-# pass `unknown` when the base can't be diffed, and every part runs. Prints GITHUB_OUTPUT lines.
-#   git diff --name-only BASE...HEAD | REF_TYPE=branch REF_NAME=main bash .github/changes.sh
+# Which parts CI runs, from the changed files on stdin; pass `unknown` when the base can't be diffed, and every part
+# runs. Prints GITHUB_OUTPUT lines. A release tag doesn't run CI: release.yml trusts main's run (release-gate.sh).
+#   git diff --name-only BASE...HEAD | bash .github/changes.sh
 set -euo pipefail
 hub=false mod=false web=false deploy=false agent=false factorio=false
 
-if [[ ${REF_TYPE:-} == tag ]]; then
-  # A release tag runs only its own part. An agent tag also runs deploy/'s tests: the agent Host's setup script and
-  # the deploy/ files it installs are fetched at that tag.
-  case ${REF_NAME%%-v*} in
-    hub) hub=true ;; mod) mod=true ;; web) web=true ;; agent) agent=true deploy=true ;; factorio) factorio=true ;;
-  esac
-elif [[ ${1:-} == unknown ]]; then
+if [[ ${1:-} == unknown ]]; then
   hub=true mod=true web=true deploy=true agent=true factorio=true
 else
   while IFS= read -r f; do

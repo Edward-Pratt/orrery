@@ -8,7 +8,11 @@ Hub, mod, dashboard, agent and Factorio mod are versioned separately (`docs/adr/
 Cut one with `.github/release.sh <hub|mod|web|agent|factorio> <major|minor|patch>`
 from an up-to-date, clean `main`: it shows the next tag and its notes, asks y/N (`--yes` skips) and pushes only that tag.
 Never delete or move a tag; fix a failed release forward with the next patch.
-`.github/workflows/release.yml` runs CI for that part only (`.github/changes.sh`; an agent tag also runs the deploy tests, as the agent Host's setup ships at that tag), then creates the GitHub release. Its notes are
+`.github/workflows/release.yml` doesn't run CI again: its gate (`.github/release-gate.sh`, tested by `test-release.sh`)
+waits for main's CI run on the tagged commit and refuses the release if there is none or it didn't pass, while build-only
+jobs make that part's asset beside it; then it creates the GitHub release. The whole of main's run counts, the hub's
+Node 26 leg too. A tag whose main run failed, a flaky test say, gets no release: re-run main's failed jobs, then re-run
+the Release run, whose gate asks again (the tag stays). Its notes are
 that part's commits (`.github/notes.sh`); for the mod it attaches one jar per Minecraft target, `orrery-<mc>-<version>.jar` (`.github/mod-jars.sh`, tested by `test-release.sh`), for the dashboard its build as `orrery-web-vX.Y.Z.tar.gz`
 (the server never builds Angular; `web-v0.x` until the dashboard is finished), for the agent `agent/` without its tests,
 its `package.json` carrying the tag's version (`.github/agent-tarball.sh`, tested by `test-release.sh`), as

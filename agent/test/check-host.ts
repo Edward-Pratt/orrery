@@ -232,6 +232,9 @@ export async function host(t: TestContext, s: Setup = {}) {
       await appendFile(log, `  12.000 Received ${s.signal ?? 'SIGINT'}, shutting down\n  12.000 Quitting: signal.\n${saved}  12.300 Goodbye\n`);
       unit = { active: 'inactive', sub: 'dead', since: second(Date.now()), result: 'success' };
     } else {
+      // systemd notes the start before Factorio writes its log; the log's mtime is set, not left to the filesystem's
+      // coarser clock, which can put it a few ms before Date.now() and so, across a second, before the start.
+      const started = Date.now();
       await rename(log, join(data, 'factorio-previous.log'));
       let newest = { name: 'world.zip', mtime: -1 };
       for (const name of await readdir(saves)) {
@@ -241,8 +244,10 @@ export async function host(t: TestContext, s: Setup = {}) {
       loaded = join(saves, s.load === 'world' ? 'world.zip' : newest.name);
       tick = Number(await readFile(loaded, 'utf8'));
       await writeFile(log, startLog());
+      const written = new Date(Math.max(Date.now(), started));
+      await utimes(log, written, written);
       rcon = await fakeRcon(handle, Infinity, rconPort);
-      unit = { active: 'active', sub: 'running', since: second(Date.now()), result: 'success' };
+      unit = { active: 'active', sub: 'running', since: second(started), result: 'success' };
       await appendFile(agentLog, lines());
     }
   };

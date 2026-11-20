@@ -38,7 +38,7 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
 - Mod input: every line goes through `parseModLine` (checks `Object.hasOwn` on the type, field types and every
   field's limit, and returns a copy holding only the schema's fields); Agent port input through `parseAgentLine`.
   Tokens 16–256 chars (an Agent's 32–256), compared with `timingSafeEqual`. The Mod port and the web API bind `127.0.0.1`.
-- Agent port (`agents.ts`): it binds only `integrations.agents.listen` (the tailnet address); a peer that isn't a
+- Agent port (`agents/`: `agents.ts`, with `listener.ts`, `budgets.ts` and `dispatch.ts`): it binds only `integrations.agents.listen` (the tailnet address); a peer that isn't a
   configured Agent's address is destroyed before a byte is read (both first lines); every line is capped at
   `LIMITS.lineBytes` and rate-limited, before and after the handshake, and each message type has its own budget per
   connection (`TYPES`; host samples one per 10 s per Agent, stored with the hub's clock; a heartbeat's names new to its

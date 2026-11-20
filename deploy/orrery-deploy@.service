@@ -13,6 +13,6 @@ TimeoutStartSec=15min
 User=opc
 # GITHUB_TOKEN=... (read access to the repo's contents), next to the hub's own secrets. Root-only, outside /home (SELinux).
 EnvironmentFile=/etc/orrery.env
-# Absolute paths for git, npm and the node npm runs; edit if node comes from nvm (`which node`).
+# Absolute paths for git, pnpm and node; edit if node or pnpm comes from somewhere else (`which node pnpm`).
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/bin/bash /home/opc/orrery/current/deploy/deploy-hub.sh /home/opc/orrery orrery-hub.service %i

@@ -3,9 +3,6 @@
 
 import type { Game } from './types.ts';
 
-/** `GET /api/environment`, read without a session: which Environment this hub is, for the dashboard's badge. */
-export type EnvironmentInfo = { environment: 'production' | 'staging' };
-
 /**
  * `GET /api/public/status`, read without a session, for the Status page: only the servers listed in
  * `integrations.web.status`, in that order (without it the route doesn't exist: 401 without a session, like any

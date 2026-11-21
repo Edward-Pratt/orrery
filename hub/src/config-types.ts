@@ -1,9 +1,8 @@
 // The config's types: `Config` as `loadConfig` returns it, with `ServerSettings` per server and each integration's
-// section, `ServerEntry` (a server as written, which `resolve` in `config-defaults.ts` turns into its settings) and
-// `ENVIRONMENTS`. `config.ts` re-exports every one but `ServerEntry`. Hub core.
+// section and `ServerEntry` (a server as written, which `resolve` in `config-defaults.ts` turns into its settings).
+// `config.ts` re-exports every one but `ServerEntry`. Hub core.
 //
-// Config shape: `environment` (`production`, the default, or `staging`: a label for the dashboard, never a switch),
-// `dbPath`, `healthcheckUrl`, `servers[]` (each with a `game`: `minecraft`, the default, or `factorio`; ids at most
+// Config shape: `dbPath`, `healthcheckUrl`, `servers[]` (each with a `game`: `minecraft`, the default, or `factorio`; ids at most
 // 256 characters, the wire's cap; only a minecraft server needs a Mod token (16 to 256 characters), and a factorio
 // server is refused one, a `dir`, a `backupDir` and `keep`, needs a `service`, and is the `server` of exactly one
 // Agent; `lagTps` up to the game's full rate, 20 or 60), `integrations.agents` (`listen`: an IPv4 address and a port
@@ -15,7 +14,7 @@
 // (id, unit name; the only units the hub touches), `integrations.checks` (id, URL, `intervalSeconds` ≥ 30, optional
 // linked `service`), `integrations.host` (id, mounts, memory and disk limits; defaulted by `loadConfig`),
 // `integrations.web` (port, public URL, session days, the Status page; the Discord login's keys warn, `web-config.ts`),
-// `integrations.github` (`repo`, `newerAfterDays` (14), and `deploys`: the environment's root, hub
+// `integrations.github` (`repo`, `newerAfterDays` (14), and `deploys`: the hub's root, hub
 // unit, deploy unit templates and dashboard folder, defaulted to production's `PRODUCTION_DEPLOYS`; paths absolute,
 // unit names checked; with GitHub on, `dbPath` must be a file directly in that root, never under `current/`, which
 // each hub deploy replaces), and a server's `keep` (paths in its folder a pack update never touches: relative, no
@@ -114,7 +113,7 @@ export type AgentConfig = { id: string; name: string; token: string; address: st
 export type AgentsIntegration = { listen: { host: string; port: number }; agents: AgentConfig[] };
 
 /**
- * Where an environment's deploys go: its root (`releases/`, `current`, `config.json`, `hub.db`, `deploy.lock`,
+ * Where the hub's deploys go: its root (`releases/`, `current`, `config.json`, `hub.db`, `deploy.lock`,
  * `deploy-status.json`), its hub's unit, the templates of its hub and dashboard deploy units (`<template>@<tag>.service`)
  * and where its dashboard is served from.
  */
@@ -122,17 +121,11 @@ export type DeployTargets = { root: string; hubUnit: string; hubTemplate: string
 
 /**
  * GitHub: the repo (`owner/name`) whose published releases the hub offers, how many days a newer one waits before
- * it needs attention, and this environment's deploy targets. The token comes from `GITHUB_TOKEN`, never config.
+ * it needs attention, and the hub's deploy targets. The token comes from `GITHUB_TOKEN`, never config.
  */
 export type GithubIntegration = { repo: string; newerAfterDays: number; deploys: DeployTargets };
 
-/** Which Environment a hub is: a label only, shown by the dashboard; what a hub can do comes from its integrations. */
-export const ENVIRONMENTS = ['production', 'staging'] as const;
-export type Environment = (typeof ENVIRONMENTS)[number];
-
 export type Config = {
-  /** Default production. */
-  environment: Environment;
   dbPath: string;
   healthcheckUrl?: string;
   servers: ServerSettings[];

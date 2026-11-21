@@ -19,7 +19,6 @@ export function config(t: TestContext, integrations: Config['integrations']): Co
   const dir = mkdtempSync(join(tmpdir(), 'hub-start-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return {
-    environment: 'production',
     dbPath: join(dir, 'hub.db'),
     healthcheckUrl: 'https://example.invalid/ping',
     servers: [

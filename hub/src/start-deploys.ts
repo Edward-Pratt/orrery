@@ -40,7 +40,6 @@ export function startDeploys(config: Config, deps: HubDeps, { hub, db, restarts,
         github: deps.github!, // checked above
         run: deps.run!,
         config: github,
-        environment: config.environment,
         servers: config.servers,
         hasMod: (id) => Boolean(minecraft?.tokens[id]),
         agents,

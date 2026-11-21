@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { DeployTargets, HostLimits, ServerEntry, ServerSettings } from './config-types.ts';
 import type { Game } from './types.ts';
 
-/** Production's deploy targets; staging sets its own. */
+/** Production's deploy targets, what `integrations.github.deploys` leaves out. */
 export const PRODUCTION_DEPLOYS: DeployTargets = {
   root: '/home/opc/orrery',
   hubUnit: 'orrery-hub.service',

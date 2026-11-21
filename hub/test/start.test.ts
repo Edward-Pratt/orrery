@@ -10,7 +10,6 @@ import type {
   AuditLog,
   CheckStatus,
   CommandOutput,
-  EnvironmentInfo,
   HostNow,
   HostSample,
   Integrations,
@@ -40,7 +39,7 @@ import { startHub } from '../src/start.ts';
 import type { Stats } from '../src/stats/stats.ts';
 import type { WebApi } from '../src/web/web.ts';
 import { fakeMod, online, sleep, TOKEN, until } from './fake-mod.ts';
-import { ACTOR, ADMIN, config, loginCookie, WEB, webHub } from './web/web-hub.ts';
+import { ACTOR, ADMIN, config, loginCookie, WEB } from './web/web-hub.ts';
 
 const MINECRAFT = { listenPort: 0, tokens: { gtnh: TOKEN } };
 const DISCORD = { guildId: '1'.repeat(18), adminRoleId: '2'.repeat(18), channels: { gtnh: '3'.repeat(18) } };
@@ -171,24 +170,10 @@ test('startup with Discord configured and no DISCORD_TOKEN fails with a clear me
   );
 });
 
-test('/api/environment answers without a session: production by default, else the configured one', async (t) => {
-  const { app } = await webHub(t);
-  const res = await app.request('/api/environment');
-  assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { environment: 'production' } satisfies EnvironmentInfo);
-  const handle = await startHub(
-    { ...config(t, { web: WEB }), environment: 'staging' },
-    { startFrontend: () => assert.fail('Discord is off'), get: async () => ({ ok: true, status: 200 }) },
-  );
-  t.after(() => handle.close());
-  assert.deepEqual(await (await handle.web!.app.request('/api/environment')).json(), { environment: 'staging' });
-});
-
-test("staging's hub, web and host only with an offline demo server, starts without a bot and shows demo with nothing to act on", async (t) => {
+test("a hub with web and host only and an offline demo server starts without a bot and shows demo with nothing to act on", async (t) => {
   const { healthcheckUrl: _, ...base } = config(t, { web: WEB, host: { id: 'oracle', mounts: ['/'], memoryMaxPercent: 90, memoryMinutes: 5, diskMinFreeGB: 10 } });
   const cfg: Config = {
     ...base,
-    environment: 'staging',
     servers: [{ id: 'demo', name: 'Demo', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' }],
   };
   const handle = await startHub(cfg, {

@@ -17,7 +17,7 @@
 
 import { join } from 'node:path';
 import type { Agents } from '../agents/agents.ts';
-import type { Environment, GithubIntegration, ServerSettings } from '../config.ts';
+import type { GithubIntegration, ServerSettings } from '../config.ts';
 import type { Db } from '../stats/db.ts';
 import type { RestartScheduler } from '../servers/restarts.ts';
 import type { ServerHub } from '../servers/servers.ts';
@@ -44,8 +44,6 @@ export type DeploysDeps = {
   github: GitHub;
   run: Run;
   config: GithubIntegration;
-  /** The target of this hub's own and its dashboard's deploys. */
-  environment: Environment;
   servers: Pick<ServerSettings, 'id' | 'dir'>[];
   /** Whether a server has a Mod token. */
   hasMod: (serverId: string) => boolean;
@@ -73,7 +71,7 @@ export type DeploysOptions = { pollMs?: number; watchMs?: number; modTimeoutMs?:
 /**
  * Releases and deploys: GitHub's published releases (asked hourly and on `check`) against what each part runs, and
  * deploying one, one at a time, recorded in the `deploys` history, audited and announced as `deploy` target notices.
- * The hub and dashboard deploy through their environment's templated units (`<template>@<tag>.service`, only for a
+ * The hub and dashboard deploy through their templated units (`<template>@<tag>.service`, only for a
  * tag GitHub listed), whose outcome comes back in `deploy-status.json`; a Mod deploy puts the jar in place itself,
  * at the end of the server's countdown when it runs; an Agent deploys itself (`deploy`), ok once it says hello as
  * the new release. Hub core.
@@ -247,7 +245,7 @@ export class Deploys {
     this.#c.starting = true;
     try {
       if (part === 'hub') this.#d.db.copyTo(join(this.#d.dbCopies, `hub-before-${tag}-${Date.now()}.db`));
-      const row = begin(this.#c, part, this.#d.environment, from, tag, by);
+      const row = begin(this.#c, part, 'production', from, tag, by);
       try {
         await this.#d.run('systemctl', ['start', '--no-block', '--', unit(this.#c, row)]);
       } catch (err) {

@@ -8,7 +8,6 @@ import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { checks, isDir, isObj, SNOWFLAKE, type Obj } from './config-check.ts';
 import { PRODUCTION_DEPLOYS } from './config-defaults.ts';
 import { checkServers } from './config-servers.ts';
-import { ENVIRONMENTS, type Environment } from './config-types.ts';
 import { checkWeb } from './web/web-config.ts';
 import { LIMITS } from './protocol.ts';
 
@@ -23,9 +22,6 @@ export function validateConfig(raw: unknown): string[] {
   const errors: string[] = [];
   const { err, str, id, num, port, hostLimits, byServer, httpUrl, list } = checks(errors);
 
-  if (raw.environment !== undefined && !ENVIRONMENTS.includes(raw.environment as Environment)) {
-    err('', `"environment" must be ${ENVIRONMENTS.join(' or ')}`);
-  }
   str(raw, 'dbPath', '');
   httpUrl(raw, 'healthcheckUrl', '');
 
@@ -188,7 +184,7 @@ export function validateConfig(raw: unknown): string[] {
         }
       }
     }
-    // One root per Environment (docs/adr/0003): hub.db sits directly in the deploys' root (production's when unset),
+    // One root (docs/adr/0003): hub.db sits directly in the deploys' root (production's when unset),
     // never under `current/` or `releases/`, which every hub deploy replaces with a fresh clone.
     const root = isObj(deploys) && typeof deploys.root === 'string' ? deploys.root : PRODUCTION_DEPLOYS.root;
     if (isAbsolute(root) && typeof raw.dbPath === 'string' && resolvePath(root) !== resolvePath(dirname(raw.dbPath))) {

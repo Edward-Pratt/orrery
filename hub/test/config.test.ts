@@ -518,20 +518,20 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { integrations: _, ...c } = valid(dir);
-  const github = (g: unknown, dbPath = '/srv/orrery-staging/hub.db') => validateConfig({ ...c, dbPath, integrations: { github: g } });
+  const github = (g: unknown, dbPath = '/srv/orrery-other/hub.db') => validateConfig({ ...c, dbPath, integrations: { github: g } });
   assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, '/home/opc/orrery/hub.db'), []); // production's root by default
-  const staging = {
-    root: '/srv/orrery-staging',
-    hubUnit: 'orrery-hub-staging.service',
-    hubTemplate: 'orrery-deploy-staging',
-    webTemplate: 'orrery-deploy-web-staging',
-    webDir: '/var/www/orrery-staging',
+  const other = {
+    root: '/srv/orrery-other',
+    hubUnit: 'orrery-hub-other.service',
+    hubTemplate: 'orrery-deploy-other',
+    webTemplate: 'orrery-deploy-web-other',
+    webDir: '/var/www/orrery-other',
   };
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', newerAfterDays: 7, deploys: staging }), []);
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: { root: '/srv/orrery-staging/' } }, '/srv/orrery-staging/./hub.db'), []);
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', newerAfterDays: 7, deploys: other }), []);
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: { root: '/srv/orrery-other/' } }, '/srv/orrery-other/./hub.db'), []);
   const under = (dbPath: string, root: string) =>
     `integrations.github: "dbPath" must be a file directly in the deploys root ${root} (like ${root}/hub.db), not ${dbPath}: a hub deploy replaces current/`;
-  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: staging }, '/srv/orrery/hub.db'), [under('/srv/orrery/hub.db', '/srv/orrery-staging')]);
+  assert.deepEqual(github({ repo: 'Edward-Pratt/orrery', deploys: other }, '/srv/orrery/hub.db'), [under('/srv/orrery/hub.db', '/srv/orrery-other')]);
   // Production's config as it was: hub.db inside the release `current` points at, lost on every hub deploy.
   for (const dbPath of ['/home/opc/orrery/current/hub.db', 'hub.db']) {
     assert.deepEqual(github({ repo: 'Edward-Pratt/orrery' }, dbPath), [under(dbPath, '/home/opc/orrery')], dbPath);
@@ -559,21 +559,11 @@ test('GitHub needs a repo; its deploy targets are absolute paths and unit names,
   });
 });
 
-test('environment defaults to production, may be staging, and nothing else', async (t) => {
+test('a config that still has the removed `environment` key is valid and loads, the key unread', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'config.json');
-  const load = async (extra: object) => {
-    await writeFile(path, JSON.stringify({ ...valid(dir), ...extra }));
-    return loadConfig(path).environment;
-  };
-  assert.equal(await load({}), 'production');
-  assert.equal(await load({ environment: 'staging' }), 'staging');
-  assert.deepEqual(validateConfig({ ...valid(dir), environment: 'Staging' }), ['"environment" must be production or staging']);
-});
-
-test("staging's example config is valid", () => {
-  const example = JSON.parse(readFileSync(new URL('../config.staging.example.json', import.meta.url), 'utf8'));
-  assert.deepEqual(validateConfig(example), []);
-  assert.equal(example.environment, 'staging');
+  await writeFile(path, JSON.stringify({ ...valid(dir), environment: 'production' }));
+  assert.deepEqual(validateConfig(JSON.parse(readFileSync(path, 'utf8'))), []);
+  assert.equal(loadConfig(path).servers.length, valid(dir).servers.length);
 });

@@ -161,7 +161,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const roles = web && new Roles(db.users, (entry) => db.audit(entry));
   const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
-  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations, environment: config.environment });
+  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 

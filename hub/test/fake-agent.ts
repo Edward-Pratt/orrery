@@ -95,7 +95,6 @@ export function gameConfig(t: TestContext, integrations: Partial<Config['integra
   const dir = mkdtempSync(join(tmpdir(), 'hub-game-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return {
-    environment: 'production',
     dbPath: join(dir, 'hub.db'),
     servers: [
       { id: 'gtnh', name: 'GTNH', game: 'minecraft', backupMinFreeGB: 10, lag: { tps: 15, minutes: 2, enabled: true }, quests: 'batched' },

@@ -1,4 +1,4 @@
-// The pack library (`library.ts`).
+// The pack library (`library.ts`, `library-entries.ts`).
 
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';

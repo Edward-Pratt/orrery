@@ -109,26 +109,28 @@ catalog's refusal inline; Update asks once (a stopped server: no save first, and
 sheet as it was); the step card (Backup called Save) and history from `packUpdate*` notices like the Pack tab's, also
 fetched again on card events, deploys and `agentLost`/`agentBack`; `settings.ts` (only with `features.settings`, a
 factorio server's while the hub's game settings are on, after Game; an older hub leaves `settings` out, so no tab, and
-its 404 says "This hub has no game settings yet: deploy hub-v2.16.0 or later."): its game settings as `GET …/settings`
-gives them, in cards (Server: name (a changed one at most 50 bytes in UTF-8, as Factorio keeps, the hub's
+its 404 says "This hub has no game settings yet: deploy hub-v2.16.0 or later."; it holds the state, the edits, the
+password and the requests, `settings-rules.ts` the pure rules): its game settings as `GET …/settings` gives them, in
+cards (`settings-form.ts`; Server: name (a changed one at most 50 bytes in UTF-8, as Factorio keeps, the hub's
 `GAME_SETTINGS.nameBytes`), description, max players, the game password; Joining: the account check, a `role="switch"`
 button, and the idle kick; Pausing; Saving; Lua commands, a native select; Admins, chips with "Remove <name> from the
-admins" and an Add checked as typed), changed fields marked "●" (the saved value in its `title`), "next restart"
-badges on `auto_pause` and `autosave_slots`, and a sticky footer saying what applies now and what at the next restart
-(or when the server starts, while stopped) and which `extra` keys a save drops, Save (disabled until a valid change,
-and with the hub's `blocked`); one `PUT` with every field and the admins, `game_password` only when changed (typed, or
-Generate: 20 letters and digits from `crypto.getRandomValues`, shown) or removed (null; Remove disabled while the
-account check is off); the password is never shown back, only "Set" or "Not set"; turning the account check off shows
-the note's warning in an `aria-live` region, switches Lua commands to Off (a red line if picked again), marks admins
-"(name not checked)" and needs a password; banners for a rollback (`rolledBack`), keys waiting for a restart
-(`pending`, with Restart…: `Feedback.confirm`, then a 5-minute countdown while players are on, else now), a stopped
-server, a file that can't be read (setup's defaults shown), and the hub's `blocked`; an Agent too old, one not
-connected or one that hasn't reported leaves the fields read-only, and with no report at all (too old, or none yet:
-`settings` and `problem` both null) only the hub's reason shows, no cards and no footer, never setup's defaults as the
-server's; fetched again on its `settings` notice, card events, deploys, service states and `agentLost`/`agentBack`;
-`update-steps.ts`: `UpdateSteps` (the step card; Cancel while `cancellable`, whatever the step) and `UpdateHistory`,
-shared by both; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new section is a child
-route plus a `SECTIONS` row (whose `has` reads the detail and `ServerPage.may`, a permission on this server).
+admins" and an Add checked as typed), changed fields marked "●" (the saved value in its `title`), "next restart" badges
+on `auto_pause` and `autosave_slots`, and a sticky footer (`settings-footer.ts`) saying what applies now and what at the
+next restart (or when the server starts, while stopped) and which `extra` keys a save drops, Save (disabled until a
+valid change, and with the hub's `blocked`); one `PUT` with every field and the admins, `game_password` only when
+changed (typed, or Generate: 20 letters and digits from `crypto.getRandomValues`, shown) or removed (null; Remove
+disabled while the account check is off); the password is never shown back, only "Set" or "Not set"; turning the account
+check off shows the note's warning in an `aria-live` region, switches Lua commands to Off (a red line if picked again),
+marks admins "(name not checked)" and needs a password; banners (`settings-banners.ts`) for a rollback (`rolledBack`),
+keys waiting for a restart (`pending`, with Restart…: `Feedback.confirm`, then a 5-minute countdown while players are
+on, else now), a stopped server, a file that can't be read (setup's defaults shown), and the hub's `blocked`; an Agent
+too old, one not connected or one that hasn't reported leaves the fields read-only, and with no report at all (too old,
+or none yet: `settings` and `problem` both null) only the hub's reason shows, no cards and no footer, never setup's
+defaults as the server's; fetched again on its `settings` notice, card events, deploys, service states and
+`agentLost`/`agentBack`; `update-steps.ts`: `UpdateSteps` (the step card; Cancel while `cancellable`, whatever the step)
+and `UpdateHistory`, shared by both; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new
+section is a child route plus a `SECTIONS` row (whose `has` reads the detail and `ServerPage.may`, a permission on this
+server).
 
 What a user may do decides what shows (`Session.can`, on the server; the hub refuses the rest either way): Console
 `servers.console`; Logs `servers.logs` (the linked service's journal in it `services.logs`); Pack and Game

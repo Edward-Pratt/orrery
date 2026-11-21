@@ -1,93 +1,19 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { AllowCommands, GameSettingsAnswer, GameSettingsFields, GameSettingsRequest, GameSettingsState, LiveEvent, RestartRequest } from '@hub/api';
-import { NgIcon, provideIcons } from '@ng-icons/core';
-import { arClose } from '@armil/icons';
-import { HlmButton } from '@spartan-ng/helm/button';
-import { HlmInput } from '@spartan-ng/helm/input';
-import { HlmSpinner } from '@spartan-ng/helm/spinner';
+import type { GameSettingsAnswer, GameSettingsRequest, GameSettingsState, RestartRequest } from '@hub/api';
 import { catchError, debounceTime, EMPTY, filter, firstValueFrom, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofServer, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { changesCard } from './changes';
 import ServerPage from './server';
+import { SettingsBanners } from './settings-banners';
+import { SettingsFooter } from './settings-footer';
+import { SettingsForm } from './settings-form';
+import { agentNotice, AT_RESTART, CONTROL, DEFAULTS, type Form, generatePassword, isChanged, type Key, KEYS, labels, NAME_BYTES, NEEDS_PASSWORD, PASSWORD, plural, RANGES, readOnlyWhy } from './settings-rules';
 
-type Key = keyof GameSettingsFields;
-/** The form: every field, and the admins. */
-type Form = GameSettingsFields & { admins: string[] };
-
-/** What a field is called on the page; `game_password` and `admins` too, for the footer and the pending banner. */
-const LABELS: Record<Key | 'game_password' | 'admins', string> = {
-  name: 'Name',
-  description: 'Description',
-  max_players: 'Max players',
-  game_password: 'Game password',
-  require_user_verification: "Check players' factorio.com accounts",
-  autosave_interval: 'Autosave every',
-  autosave_slots: 'Autosave slots',
-  afk_autokick_interval: 'Kick idle players after',
-  auto_pause: 'Pause while nobody is on',
-  auto_pause_when_players_connect: 'Pause while a player joins',
-  only_admins_can_pause_the_game: 'Only admins can pause',
-  allow_commands: 'Lua commands',
-  admins: 'Admins',
-};
-const KEYS = Object.keys(LABELS).filter((k): k is Key => k !== 'game_password' && k !== 'admins');
-/** The keys Factorio takes only at a start (no `/config set` option). */
-const AT_RESTART = new Set<string>(['auto_pause', 'autosave_slots']);
-/** What setup writes: shown while the file can't be read, so a save writes a fresh one. */
-const DEFAULTS: GameSettingsFields = {
-  name: 'orrery Factorio',
-  description: '',
-  max_players: 0,
-  require_user_verification: true,
-  autosave_interval: 10,
-  autosave_slots: 5,
-  afk_autokick_interval: 0,
-  auto_pause: true,
-  auto_pause_when_players_connect: false,
-  only_admins_can_pause_the_game: true,
-  allow_commands: 'admins-only',
-};
-// The hub's and the Agent's rules (hub/src/protocol.ts, GAME_SETTINGS), for the form's own checks.
-const RANGES: Partial<Record<Key, [number, number]>> = { max_players: [0, 1000], autosave_interval: [0, 1440], autosave_slots: [1, 100], afk_autokick_interval: [0, 1440] };
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
-const PASSWORD = /^[\x21-\x7e]{1,64}$/;
-const ADMIN = /^[A-Za-z0-9_.-]{1,60}$/;
-const ADMIN_RULE = 'Names are 1 to 60 letters, digits, _, . or -.';
-/** Factorio 2.1.24 keeps no more of a server's name (UTF-8): the hub and the Agent refuse a longer new one (GAME_SETTINGS.nameBytes). */
-const NAME_BYTES = 50;
-const NEEDS_PASSWORD = 'Without the account check a game password is needed.';
-const COMMANDS: { value: AllowCommands; label: string }[] = [
-  { value: 'false', label: 'Off' },
-  { value: 'admins-only', label: 'Admins only' },
-  { value: 'true', label: 'Everyone' },
-];
-const GENERATED = 20;
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-/** A Host's Agent went silent or came back: whether a save can go changes. */
-const agentNotice = (e: LiveEvent) => 'target' in e && e.target === 'host' && e.type === 'notice' && (e.kind === 'agentLost' || e.kind === 'agentBack');
-/**
- * The hub's reasons that leave nothing to edit (hub/src/servers/game-settings.ts): an Agent too old for game settings, one
- * not connected, and one that hasn't reported yet. Any other reason only holds Save back.
- */
-const readOnlyWhy = (blocked: string | null) =>
-  blocked !== null && (blocked.startsWith("This server's Agent runs ") || blocked === "The Agent isn't connected." || blocked.endsWith("hasn't reported its game settings yet."));
-const show = (v: unknown) => (typeof v === 'boolean' ? (v ? 'on' : 'off') : v === '' ? '(empty)' : String(v));
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const lower = (names: string[]) => names.map((n) => n.toLowerCase()).sort();
-
-/** 20 random letters and digits, made here in the browser. */
-export function generatePassword(): string {
-  const out: string[] = [];
-  const bytes = new Uint8Array(1);
-  while (out.length < GENERATED) {
-    crypto.getRandomValues(bytes);
-    if (bytes[0]! < 248) out.push(ALPHABET[bytes[0]! % ALPHABET.length]!); // 248 = 4 × 62: no bias
-  }
-  return out.join('');
-}
+// The spec makes one to compare with.
+export { generatePassword };
 
 /**
  * A factorio server's Settings section (only with `features.settings`): its game settings, as its Agent last read
@@ -95,263 +21,64 @@ export function generatePassword(): string {
  * footer says what applies now and what at the next restart; keys waiting for a restart stay in a banner with
  * Restart…. Turning the account check off shows what that costs, switches Lua commands off and needs a game
  * password. The password is write-only: typed or generated here, sent once, and never shown back.
+ * It holds the state, the form's edits, the password and every request; the banners are `settings-banners.ts`, the
+ * cards `settings-form.ts`, the footer `settings-footer.ts`, the pure rules `settings-rules.ts`.
  */
 @Component({
   selector: 'app-server-settings',
-  imports: [NgIcon, HlmButton, HlmInput, HlmSpinner],
-  viewProviders: [provideIcons({ arClose })],
+  imports: [SettingsBanners, SettingsFooter, SettingsForm],
   template: `
     @if (missing(); as why) {
       <p class="text-muted-foreground" data-missing>{{ why }}</p>
     } @else if (state(); as s) {
       <div class="flex max-w-3xl flex-col gap-4 pb-28 text-sm">
-        @if (s.rolledBack; as r) {
-          <div class="ar-callout ar-callout--danger block" role="alert" data-rolled-back>
-            <b class="text-destructive">The server didn't start with the settings saved last,</b> so the Agent put back the ones it last started with: {{ r }}
-          </div>
-        }
-        @if (old()) {
-          <p class="ar-panel px-3 py-2" data-old-agent>{{ s.blocked }}</p>
-        } @else if (readOnly()) {
-          <p class="ar-panel px-3 py-2 text-muted-foreground" data-read-only>{{ s.blocked }}@if (!unreported()) { The fields show its last report.}</p>
-        }
-        @if (s.pending.length) {
-          <div class="ar-callout ar-callout--warn flex flex-wrap items-center justify-between gap-2" data-pending>
-            <span>Waiting for a restart: {{ labels(s.pending) }}.</span>
-            @if (online()) {
-              <button hlmBtn variant="outline" size="sm" [disabled]="restarting()" (click)="restart()" data-restart>
-                @if (restarting()) {
-                  <hlm-spinner />
-                }
-                Restart…
-              </button>
-            }
-          </div>
-        }
-        @if (stopped()) {
-          <p class="ar-callout block text-muted-foreground" data-stopped>The server is stopped: changes are written now and apply when it starts.</p>
-        }
-        @if (s.problem; as p) {
-          <p class="ar-callout ar-callout--warn block" data-problem>server-settings.json can't be read ({{ p }}). Saving writes a new one from these fields.</p>
-        }
+        <app-settings-banners
+          [state]="s"
+          [old]="old()"
+          [readOnly]="readOnly()"
+          [unreported]="unreported()"
+          [online]="online()"
+          [restarting]="restarting()"
+          [stopped]="stopped()"
+          (restart)="restart()"
+        />
 
         @if (!unreported()) {
-        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="server">
-          <legend class="px-1 font-semibold">Server</legend>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Name @if (changed('name')) { <span [title]="was('name')" data-changed="name">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput [value]="form().name" (input)="set('name', $any($event.target).value)" [attr.aria-describedby]="errors()['name'] ? 'err-name' : null" data-field="name" />
-            @if (errors()['name']; as e) {
-              <span id="err-name" class="text-xs text-destructive" data-error="name">{{ e }}</span>
-            }
-          </label>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Description @if (changed('description')) { <span [title]="was('description')" data-changed="description">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput [value]="form().description" (input)="set('description', $any($event.target).value)" [attr.aria-describedby]="errors()['description'] ? 'err-description' : null" data-field="description" />
-            @if (errors()['description']; as e) {
-              <span id="err-description" class="text-xs text-destructive" data-error="description">{{ e }}</span>
-            }
-          </label>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Max players @if (changed('max_players')) { <span [title]="was('max_players')" data-changed="max_players">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1000" step="1" class="max-w-32" [value]="form().max_players" (input)="setNumber('max_players', $any($event.target).value)" aria-describedby="hint-max-players" data-field="max_players" />
-            <span id="hint-max-players" class="text-xs text-muted-foreground">0: no limit</span>
-            @if (errors()['max_players']; as e) {
-              <span class="text-xs text-destructive" data-error="max_players">{{ e }}</span>
-            }
-          </label>
-          <div class="flex flex-col gap-1" data-password>
-            <span id="label-password" class="flex items-center gap-2">Game password @if (password() !== 'keep') { <span title="Saved: {{ passwordSet() ? 'set' : 'not set' }}" data-changed="game_password">● <span class="sr-only">changed</span></span> }</span>
-            @if (password() === 'keep') {
-              <span class="flex items-center gap-2">
-                <span data-password-state>{{ passwordSet() ? 'Set' : 'Not set' }}</span>
-                <button hlmBtn variant="outline" size="sm" type="button" (click)="changePassword()" data-password-change>Change</button>
-              </span>
-            } @else if (password() === 'remove') {
-              <span class="flex items-center gap-2">
-                <span data-password-state>Removed when saved</span>
-                <button hlmBtn variant="ghost" size="sm" type="button" (click)="keepPassword()" data-password-keep>Keep it</button>
-              </span>
-            } @else {
-              <span class="flex flex-wrap items-center gap-2">
-                <input
-                  hlmInput
-                  class="min-w-0 flex-1 ar-input--mono"
-                  [type]="reveal() ? 'text' : 'password'"
-                  autocomplete="new-password"
-                  aria-labelledby="label-password"
-                  [attr.aria-describedby]="errors()['game_password'] ? 'err-password' : 'hint-password'"
-                  [value]="newPassword()"
-                  (input)="newPassword.set($any($event.target).value)"
-                  data-password-input
-                />
-                <button hlmBtn variant="outline" size="sm" type="button" (click)="reveal.set(!reveal())" [attr.aria-pressed]="reveal()" data-password-reveal>{{ reveal() ? 'Hide' : 'Show' }}</button>
-                <button hlmBtn variant="outline" size="sm" type="button" (click)="generate()" data-password-generate>Generate</button>
-                <button hlmBtn variant="ghost" size="sm" type="button" (click)="keepPassword()" data-password-keep>Keep the old one</button>
-              </span>
-              <span id="hint-password" class="text-xs text-muted-foreground" data-password-note>Players need the new password. /srv/factorio/first-boot.txt on the friend's VM still shows the first one.</span>
-            }
-            @if (password() !== 'remove' && passwordSet()) {
-              <button hlmBtn variant="ghost" size="sm" type="button" class="self-start" [disabled]="!form().require_user_verification" (click)="removePassword()" data-password-remove>Remove password</button>
-            }
-            @if (errors()['game_password']; as e) {
-              <span id="err-password" class="text-xs text-destructive" data-error="game_password">{{ e }}</span>
-            }
-          </div>
-        </fieldset>
-
-        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="joining">
-          <legend class="px-1 font-semibold">Joining</legend>
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              role="switch"
-              [attr.aria-checked]="form().require_user_verification"
-              aria-labelledby="label-verification"
-              class="ar-switch disabled:opacity-45"
-              (click)="setVerification(!form().require_user_verification)"
-              data-field="require_user_verification"
-            ></button>
-            <span id="label-verification" class="flex items-center gap-2">{{ labelOf('require_user_verification') }}: {{ form().require_user_verification ? 'on' : 'off' }} @if (changed('require_user_verification')) { <span [title]="was('require_user_verification')" data-changed="require_user_verification">● <span class="sr-only">changed</span></span> }</span>
-          </div>
-          <div aria-live="polite" data-warning-region>
-            @if (!form().require_user_verification) {
-              <div class="ar-callout ar-callout--warn block" data-warning>
-                <b>Names are not checked.</b> Without this, players join with no factorio.com account check: anyone who has the game password can join under any name, an admin's included. As an admin they can run Lua commands,
-                when commands are on for admins, and through those take over the game, post to Discord as anyone, and pass for a linked player. Bans by name stop no one. Turn it off only for players without a factorio.com account
-                (such as a family-shared copy). Keep the game password secret, and change it here if it leaks.
-              </div>
-            }
-          </div>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Kick idle players after (minutes) @if (changed('afk_autokick_interval')) { <span [title]="was('afk_autokick_interval')" data-changed="afk_autokick_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().afk_autokick_interval" (input)="setNumber('afk_autokick_interval', $any($event.target).value)" aria-describedby="hint-afk" data-field="afk_autokick_interval" />
-            <span id="hint-afk" class="text-xs text-muted-foreground">0: never</span>
-            @if (errors()['afk_autokick_interval']; as e) {
-              <span class="text-xs text-destructive" data-error="afk_autokick_interval">{{ e }}</span>
-            }
-          </label>
-        </fieldset>
-
-        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="pausing">
-          <legend class="px-1 font-semibold">Pausing</legend>
-          @for (k of pauseKeys; track k) {
-            <label class="ar-check flex items-center gap-2">
-              <input type="checkbox" [checked]="form()[k]" (change)="set(k, $any($event.target).checked)" [attr.data-field]="k" />
-              {{ labelOf(k) }}
-              @if (atRestart(k)) {
-                <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
-              }
-              @if (changed(k)) {
-                <span [title]="was(k)" [attr.data-changed]="k">● <span class="sr-only">changed</span></span>
-              }
-            </label>
-          }
-        </fieldset>
-
-        <fieldset class="ar-panel flex flex-col gap-3 p-5" [disabled]="readOnly()" data-card="saving">
-          <legend class="px-1 font-semibold">Saving</legend>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Autosave every (minutes) @if (changed('autosave_interval')) { <span [title]="was('autosave_interval')" data-changed="autosave_interval">● <span class="sr-only">changed</span></span> }</span>
-            <input hlmInput type="number" min="0" max="1440" step="1" class="max-w-32" [value]="form().autosave_interval" (input)="setNumber('autosave_interval', $any($event.target).value)" aria-describedby="hint-autosave" data-field="autosave_interval" />
-            <span id="hint-autosave" class="text-xs text-muted-foreground">0: off</span>
-            @if (errors()['autosave_interval']; as e) {
-              <span class="text-xs text-destructive" data-error="autosave_interval">{{ e }}</span>
-            }
-          </label>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2"
-              >Autosave slots <span class="rounded border px-1.5 text-xs text-muted-foreground" data-badge>next restart</span>
-              @if (changed('autosave_slots')) { <span [title]="was('autosave_slots')" data-changed="autosave_slots">● <span class="sr-only">changed</span></span> }</span
-            >
-            <input hlmInput type="number" min="1" max="100" step="1" class="max-w-32" [value]="form().autosave_slots" (input)="setNumber('autosave_slots', $any($event.target).value)" data-field="autosave_slots" />
-            @if (errors()['autosave_slots']; as e) {
-              <span class="text-xs text-destructive" data-error="autosave_slots">{{ e }}</span>
-            }
-          </label>
-          <p class="text-xs text-muted-foreground">orrery's own saves (every 6 h after play, and before updates) are separate from Factorio's autosaves.</p>
-        </fieldset>
-
-        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="commands">
-          <legend class="px-1 font-semibold">Lua commands</legend>
-          <label class="flex flex-col gap-1">
-            <span class="flex items-center gap-2">Who may run them @if (changed('allow_commands')) { <span [title]="was('allow_commands')" data-changed="allow_commands">● <span class="sr-only">changed</span></span> }</span>
-            <select class="ar-input max-w-48" (change)="set('allow_commands', $any($event.target).value)" aria-describedby="hint-commands" data-field="allow_commands">
-              @for (o of commands; track o.value) {
-                <option [value]="o.value" [selected]="o.value === form().allow_commands">{{ o.label }}</option>
-              }
-            </select>
-          </label>
-          @if (!form().require_user_verification && form().allow_commands !== 'false') {
-            <p class="text-xs text-destructive" data-commands-risk>Anyone with the game password can run Lua as an admin.</p>
-          } @else if (!form().require_user_verification && commandsOffWithCheck()) {
-            <p class="text-xs text-muted-foreground" data-commands-off>Turned off with the account check: names can't be trusted.</p>
-          }
-          <p id="hint-commands" class="text-xs text-muted-foreground">Commands can change anything in the game, and using one disables achievements for that save for good.</p>
-        </fieldset>
-
-        <fieldset class="ar-panel flex flex-col gap-2 p-5" [disabled]="readOnly()" data-card="admins">
-          <legend class="px-1 font-semibold">Admins @if (changed('admins')) { <span [title]="was('admins')" data-changed="admins">● <span class="sr-only">changed</span></span> }</legend>
-          @if (form().admins.length) {
-            <ul class="flex flex-wrap gap-1.5" aria-label="Admins">
-              @for (a of form().admins; track a) {
-                <li class="flex items-center gap-1 rounded-md border py-0.5 pr-0.5 pl-2 font-mono text-xs" [attr.data-admin]="a">
-                  {{ a }}
-                  @if (!form().require_user_verification) {
-                    <span class="font-sans text-muted-foreground">(name not checked)</span>
-                  }
-                  <button hlmBtn variant="ghost" size="icon-sm" type="button" [attr.aria-label]="'Remove ' + a + ' from the admins'" (click)="removeAdmin(a)" data-admin-remove>
-                    <ng-icon name="arClose" />
-                  </button>
-                </li>
-              }
-            </ul>
-          } @else {
-            <p class="text-muted-foreground" data-no-admins>No admins.</p>
-          }
-          <form class="flex flex-col gap-1" (submit)="$event.preventDefault(); addAdmin()">
-            <span class="flex gap-2">
-              <input
-                hlmInput
-                class="min-w-0 flex-1 ar-input--mono"
-                aria-label="A player name to make an admin"
-                [attr.aria-describedby]="adminError() ? 'err-admin' : null"
-                [value]="adding()"
-                (input)="adding.set($any($event.target).value)"
-                data-admin-name
-              />
-              <button hlmBtn variant="outline" type="submit" [disabled]="!adding().trim() || !!adminError()" data-admin-add>Add</button>
-            </span>
-            @if (adminError(); as e) {
-              <span id="err-admin" class="text-xs text-destructive" data-error="admin">{{ e }}</span>
-            }
-          </form>
-        </fieldset>
+          <app-settings-form
+            [form]="form()"
+            [saved]="saved()"
+            [readOnly]="readOnly()"
+            [errors]="errors()"
+            [password]="password()"
+            [passwordSet]="passwordSet()"
+            [newPassword]="newPassword()"
+            [reveal]="reveal()"
+            [commandsOffWithCheck]="commandsOffWithCheck()"
+            [adding]="adding()"
+            (edit)="set($event.key, $event.value)"
+            (verification)="setVerification($event)"
+            (changePassword)="changePassword()"
+            (generate)="generate()"
+            (keepPassword)="keepPassword()"
+            (removePassword)="removePassword()"
+            (newPasswordChange)="newPassword.set($event)"
+            (revealChange)="reveal.set($event)"
+            (addingChange)="adding.set($event)"
+          />
         }
       </div>
 
       @if (!old() && !unreported()) {
-        <footer class="sticky bottom-0 -mx-4 flex max-w-3xl flex-col gap-2 border-t bg-[var(--glass)] px-4 py-3 text-sm backdrop-blur-[var(--blur-glass)] md:mx-0 md:px-0" data-footer>
-          @if (dirty()) {
-            <p data-applies>{{ applies() }}</p>
-          }
-          @if (s.extra.length) {
-            <p class="text-xs text-muted-foreground" data-extra>Saving rewrites server-settings.json without: {{ s.extra.join(', ') }}.</p>
-          }
-          <div class="flex flex-wrap items-center gap-3">
-            <button hlmBtn [disabled]="!canSave()" (click)="save()" data-save>
-              @if (saving()) {
-                <hlm-spinner />
-              }
-              Save
-            </button>
-            @if (s.blocked && !readOnly()) {
-              <span class="text-muted-foreground" data-blocked>{{ s.blocked }}</span>
-            } @else if (dirty() && !valid()) {
-              <span class="text-destructive" data-invalid>Fix the fields marked above first.</span>
-            }
-          </div>
-        </footer>
+        <app-settings-footer
+          [state]="s"
+          [dirty]="dirty()"
+          [applies]="applies()"
+          [canSave]="canSave()"
+          [saving]="saving()"
+          [readOnly]="readOnly()"
+          [valid]="valid()"
+          (save)="save()"
+        />
       }
     }
   `,
@@ -361,8 +88,6 @@ export default class Settings {
   readonly #http = inject(HttpClient);
   readonly #feedback = inject(Feedback);
   readonly #url = `/api/servers/${encodeURIComponent(this.#server.id)}/settings`;
-  protected readonly commands = COMMANDS;
-  protected readonly pauseKeys = ['auto_pause', 'auto_pause_when_players_connect', 'only_admins_can_pause_the_game'] as const;
 
   readonly state = signal<GameSettingsState | null>(null);
   protected readonly missing = signal<string | null>(null);
@@ -431,18 +156,10 @@ export default class Settings {
   /** What a save would do, said before it is done. */
   protected readonly applies = computed(() => {
     const keys = this.changes();
-    if (this.stopped()) return `Applies when the server starts: ${this.labels(keys)}.`;
+    if (this.stopped()) return `Applies when the server starts: ${labels(keys)}.`;
     const later = keys.filter((k) => AT_RESTART.has(k));
     const now = keys.filter((k) => !later.includes(k));
-    return [now.length ? `Applies now: ${this.labels(now)}.` : '', later.length ? `At the next restart: ${this.labels(later)}.` : ''].filter(Boolean).join(' ');
-  });
-  protected readonly adminError = computed(() => {
-    const name = this.adding().trim();
-    if (!name) return null;
-    if (!ADMIN.test(name)) return ADMIN_RULE;
-    if (this.form().admins.some((a) => a.toLowerCase() === name.toLowerCase())) return `${name} is an admin already.`;
-    if (this.form().admins.length >= 100) return 'At most 100 admins.';
-    return null;
+    return [now.length ? `Applies now: ${labels(now)}.` : '', later.length ? `At the next restart: ${labels(later)}.` : ''].filter(Boolean).join(' ');
   });
 
   constructor() {
@@ -472,26 +189,10 @@ export default class Settings {
     });
   }
 
-  protected labelOf = (k: Key) => LABELS[k];
-  protected labels = (keys: string[]) => keys.map((k) => LABELS[k as Key] ?? k).join(', ');
-  protected atRestart = (k: string) => AT_RESTART.has(k);
-  protected changed = (k: Key | 'admins'): boolean => {
-    const f = this.form()[k];
-    const s = this.saved()[k];
-    return Array.isArray(f) ? lower(f).join() !== lower(s as string[]).join() : f !== s;
-  };
-  /** The saved value, for a changed field's title. */
-  protected was = (k: Key | 'admins') => {
-    const s = this.saved()[k];
-    return `Saved: ${Array.isArray(s) ? s.join(', ') || 'none' : show(s)}`;
-  };
+  protected changed = (k: Key | 'admins'): boolean => isChanged(this.form(), this.saved(), k);
 
   protected set<K extends keyof Form>(key: K, value: Form[K]): void {
     this.edits.update((e) => ({ ...e, [key]: value }));
-  }
-
-  protected setNumber(key: Key, raw: string): void {
-    this.edits.update((e) => ({ ...e, [key]: raw === '' ? Number.NaN : Number(raw) }));
   }
 
   /** Turning the account check off also switches Lua commands off, which the owner can change back. */
@@ -524,20 +225,6 @@ export default class Settings {
   protected removePassword(): void {
     this.password.set('remove');
     this.newPassword.set('');
-  }
-
-  protected addAdmin(): void {
-    const name = this.adding().trim();
-    if (!name || this.adminError()) return;
-    this.set('admins', [...this.form().admins, name]);
-    this.adding.set('');
-  }
-
-  protected removeAdmin(name: string): void {
-    this.set(
-      'admins',
-      this.form().admins.filter((a) => a !== name),
-    );
   }
 
   /** The request: every field and the admins; the password only when it changes. */

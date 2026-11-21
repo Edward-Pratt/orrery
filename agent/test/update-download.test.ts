@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { AgentLog, logTo } from '../src/logs.ts';
 import { type Http } from '../src/update.ts';
-import { SUMS, sha256, tarball, signedGame, modUrl, world, exists } from './fake-world.ts';
+import { SUMS, tarball, signedGame, modUrl, world, exists } from './fake-world.ts';
 
 test('a failing download leaves no query string in step details or agent.log', async (t) => {
   const w = await world(t);

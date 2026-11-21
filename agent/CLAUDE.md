@@ -10,6 +10,7 @@ dependencies: Node built-ins only (game tarballs go through the Host's `xz`, whi
 ```bash
 pnpm test           # node --test --test-timeout=30000 "test/*.test.ts": a test still running after 30 s fails, named
 pnpm run typecheck  # tsc, noEmit; also type-checks the hub types src/ imports
+pnpm lint           # oxlint, type-aware (.oxlintrc.json): promises nobody awaits or a void callback drops
 node src/index.ts           # the agent (orrery-agent.service)
 node src/index.ts check     # the first-boot check: a report on stdout, line by line, exit 0 when nothing failed
 ```
@@ -45,7 +46,11 @@ documentation, so read it before changing the file, and change it with the file.
 
 - Running: `index.ts` (the service, and `index.ts check`), `config.ts`, `check.ts` (the first-boot report),
   `host.ts` (host samples).
-- The hub: `wire.ts` (the agent's copy of the contract), `hub.ts` (the two connections).
+- The hub: `wire.ts` (the agent's copy of the contract), `hub.ts` (the two connections: `HubClient`, re-exporting the
+  rest), `hub-agent.ts` (the Agent connection: hello, welcome, requests, reconnects, the `connected` file),
+  `hub-game.ts` (the game connection and its stopping rule), `hub-link.ts` (one TCP connection), `hub-retry.ts` (the
+  reconnect waits), `hub-state.ts` (what `HubClient` keeps), `hub-files.ts` (`writeAtomic`, `installed.json`,
+  `started.json`).
 - The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `events.ts` (the mod's
   events), `settings.ts`, `moderation.ts`, `logs.ts`.
 - Saves and files: `saves.ts`, `save-check.ts`, `files.ts`.

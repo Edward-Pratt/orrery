@@ -209,6 +209,15 @@ its own piece of work; Dependabot does not fix lint).
 **Acceptance:** `pnpm lint` clean in both parts and in CI; the five guarded misused-promise sites either pass the
 rule's options or carry a one-line reason.
 
+**Built (2026-11-21):** oxlint with oxlint-tsgolint instead (the owner's pick: typescript-eslint supports TypeScript
+below 6.1 only, and the hub is on 7), `.oxlintrc.json` in `hub/` and `agent/`: the `correctness` category plus the
+rules above. A switch with a `default:` that handles the rest counts as exhaustive (`considerDefaultExhaustiveForUnions`):
+the three hits forward or name what the default takes. Off, each with its reason in the config: `require-await` (every
+hit was async to fit a Promise-typed slot, or so a throw is a rejection), and `no-control-regex`, `no-base-to-string`,
+`require-array-sort-compare`, `no-misused-spread`, `no-meaningless-void-operator`, `unbound-method`. The
+misused-promise hits: three in `deploy-rows.ts` and the Agent's sample interval wrap the call in `() => void f()`, and the
+Agent's `StartGate` start listener voids the promise it stores.
+
 ## 10 Node on the Agent's Host
 
 **Today:** `setup-agent-host.sh` installs Node from a tarball at its pinned `NODE_VERSION` (24.22.2) under
@@ -256,7 +265,7 @@ files", `restore-backup.sh`'s "unpacks to staging" and `test-install-web.sh`'s "
 `orrery-deploy@.service` and `orrery-deploy-web@.service` that point at the staging copies; remove `environment`,
 `ENVIRONMENTS` and `Environment` from `config.ts` (`validateConfig` checks the key only when present, line 206, and
 the loader passes unknown keys through, line 495: a config still carrying it starts, the key unread; prod has none)
-and its use in `start.ts` (line 276), the route and type from `api-public.ts`, `environment.ts` and every use of
+and its uses in `start-deploys.ts` and `start.ts` (`webApi`'s deps), the route and type from `api-public.ts`, `environment.ts` and every use of
 `StagingBadge` and the title
 effect from the dashboard, and their tests (`app.spec.ts`'s badge test goes; `app.routes.spec.ts`'s "Minecraft off"
 test stays with its text reworded). `DeployTargets` and `integrations.github.deploys` stay: they are the

@@ -11,7 +11,7 @@ import { LIMITS } from '../../src/protocol.ts';
 import { Packs, type PacksDeps } from '../../src/packs/packs.ts';
 import type { Notice } from '../../src/types.ts';
 import { beforeAgentFloor } from '../../src/agents/agents.ts';
-import { ACCOUNT, ACTOR, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, PNG, ready, rel, SHA256, sha, signed, WEB } from '../fake-agent.ts';
+import { ACCOUNT, AGENT_TOKEN, agentUp, eventually, gameConfig, gameHub, INSTALLED, MODS, PICK, PNG, ready, rel, SHA256, sha, signed, WEB } from '../fake-agent.ts';
 import { fakeMod } from '../fake-mod.ts';
 
 const kinds = (notices: Notice[]) => notices.filter((n) => n.kind !== 'packUpdateStep').map((n) => n.kind);

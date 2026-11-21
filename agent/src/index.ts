@@ -207,7 +207,7 @@ function run(): void {
       (err: Error) => console.error(`[host] sample failed: ${err.message}`),
     );
   void sample(); // the first CPU reading, which the next sample measures from
-  const sampling = setInterval(sample, 60_000);
+  const sampling = setInterval(() => void sample(), 60_000);
   hub.start();
   service.start();
   status.start();

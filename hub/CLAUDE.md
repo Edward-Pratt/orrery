@@ -5,6 +5,7 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 ```bash
 pnpm test           # node --test --test-timeout=30000 "test/**/*.test.ts": a test still running after 30 s fails, named
 pnpm run typecheck  # tsc, noEmit
+pnpm lint           # oxlint, type-aware (.oxlintrc.json): promises nobody awaits or a void callback drops
 pnpm check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
 pnpm users invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link
 pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord),
@@ -19,13 +20,17 @@ pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env D
 
 ## Modules
 
-`src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts` with its field checks `config-check.ts`,
+`src/` keeps the wiring (`index.ts`, `start.ts` (`startHub`) with the parts it builds: `start-core.ts` (database,
+`ServerHub` and its listeners, `updating`), `start-backups.ts`, `start-game.ts`, `start-deploys.ts` and
+`start-packs.ts`, `config.ts` (`loadConfig`; callers import every config name from it)
+with its types `config-types.ts`, defaults `config-defaults.ts`, validation `config-validate.ts` (`servers[]`'s in
+`config-servers.ts`) and field checks `config-check.ts`,
 `check-config.ts`, `users-cli.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
 `api-game-extras.ts`, `api-public.ts`, `api-users.ts`) and two small helpers (`daily.ts`,
 `units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
 what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
 `stats/`, `users/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
-change it with the file. `start.ts` wires them all from config, so it is the map. Tests mirror the folders under
+change it with the file. `start.ts` wires them all from config (through its `start-*.ts` parts), so it is the map. Tests mirror the folders under
 `test/`; `test/fake-mod.ts` and `test/fake-agent.ts` serve them all.
 
 ## Dependencies
@@ -38,7 +43,7 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
 - Mod input: every line goes through `parseModLine` (checks `Object.hasOwn` on the type, field types and every
   field's limit, and returns a copy holding only the schema's fields); Agent port input through `parseAgentLine`.
   Tokens 16–256 chars (an Agent's 32–256), compared with `timingSafeEqual`. The Mod port and the web API bind `127.0.0.1`.
-- Agent port (`agents.ts`): it binds only `integrations.agents.listen` (the tailnet address); a peer that isn't a
+- Agent port (`agents/`: `agents.ts`, with `listener.ts`, `budgets.ts` and `dispatch.ts`): it binds only `integrations.agents.listen` (the tailnet address); a peer that isn't a
   configured Agent's address is destroyed before a byte is read (both first lines); every line is capped at
   `LIMITS.lineBytes` and rate-limited, before and after the handshake, and each message type has its own budget per
   connection (`TYPES`; host samples one per 10 s per Agent, stored with the hub's clock; a heartbeat's names new to its

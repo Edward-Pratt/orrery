@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Message, Webhook } from 'discord.js';
-import { AGENT_ALERT_MS, channelFor, COMMANDS, postTargets, REFUSED_KEPT, relayAs, sendChat, shouldRelay } from '../../src/discord/discord.ts';
-import { formatTargetEvent, type Post } from '../../src/discord/format.ts';
+import { channelFor, COMMANDS, postTargets, REFUSED_KEPT, relayAs, sendChat, shouldRelay } from '../../src/discord/discord.ts';
 import { ServerHub, type TargetEvent } from '../../src/servers/servers.ts';
 
 const msg = (over: { bot?: boolean; webhookId?: string | null; system?: boolean }) =>
@@ -32,7 +31,7 @@ test('the command set includes stats and backup subcommands', () => {
   ]);
   assert.deepEqual(byName.backup.options?.map((o) => o.name), ['start', 'status', 'list']);
   assert.deepEqual(
-    (byName.top.options?.[0] as { choices?: { value: string }[] }).choices?.map((c) => c.value),
+    (byName.top.options?.[0] as { choices?: { value: string }[] } | undefined)?.choices?.map((c) => c.value),
     ['day', 'week', 'all'],
   );
 });

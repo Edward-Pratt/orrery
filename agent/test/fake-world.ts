@@ -9,9 +9,8 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test, type TestContext } from 'node:test';
+import type { TestContext } from 'node:test';
 import type { AgentMsg, ServiceVerb } from '../../hub/src/types.ts';
-import { HubClient } from '../src/hub.ts';
 import { Saves } from '../src/saves.ts';
 import type { UnitState } from '../src/service.ts';
 import type { Status } from '../src/status.ts';
@@ -20,7 +19,7 @@ import { installedOf, Updates, type Http, type InstalledMsg, type UpdatesOptions
 import type { Request } from '../src/wire.ts';
 import { eventually } from './fake-hub.ts';
 import { savedAs } from './fake-rcon.ts';
-import { OWN_MODS, releaseTar, tar } from './fake-release.ts';
+import { OWN_MODS, releaseTar } from './fake-release.ts';
 
 export const SUMS = 'https://www.factorio.com/download/sha256sums/';
 export const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');

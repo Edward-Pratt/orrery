@@ -5,55 +5,44 @@
 // `githubToken`: for Actions artifacts; `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod links):
 // wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose config
 // section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
-// awaited, and given to `Services` and `Stats`; `Stats` before the `BackupWatcher`, armed for each server with a
-// Backup source (an Agent's with `played`), and `Restores`, with systemd and a `RestoreSource` for any server (an
-// Agent's, or a folder's with the injected `restore`); `RestartScheduler`'s `restart` looks `Services` up late, as it
-// is built first; one `FactorioCatalog`, shared by `GameUpdates` and `ModUpdates` (which follows it, with its 6-hour
-// check) so the mod browser's cache serves both; `Moderation` with agents; `GameUpdates` with agents and systemd,
-// built and started (the last hub's running rows closed, the Agents listened to) before the first await, so before
-// any Agent can connect, and `GameSettings` beside it (its `updating`, restores and deploys the same; its `busy`
-// given to `Restores` (through its `updating`), `GameUpdates` and `Deploys` as `settingsSaving`); one
-// `updating(id?)`, a pack update (`Packs.busy`) or a game update (`GameUpdates.busy`) by kind, for every busy check:
-// `RestartScheduler`'s `paused`, `Restores`, `Deploys` and `DeploysAnswer.packing`; `Restores`' `deploying(id)`: a
-// hub deploy, or the server's Agent's (`agentBusy`); `Deploys` with GitHub, given `Agents` for the Agents' releases
-// and deploys, and `deploying` from it for `Packs` (a hub deploy or the server's Mod's) and `GameUpdates` (a hub
-// deploy or the server's Agent's); Discord: `startFrontend`; web: `Roles`, `Users` and the HTTP API); its
-// handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort` promise,
-// and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
+// awaited, and given to `Services` and `Stats`; Discord: `startFrontend`; web: `Roles`, `Users` and the HTTP API);
+// its handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort`
+// promise, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
+// It keeps the order of construction, starts and awaits, the checks and `Services`; the parts are built by
+// `start-core.ts` (database, `ServerHub` and its listeners, `updating`, `Late`), `start-backups.ts` (`Stats`, Backup
+// watchdogs, `Restores`), `start-game.ts` (game updates, mod updates, moderation, game settings, save uploads),
+// `start-deploys.ts` (`Deploys`) and `start-packs.ts` (uploads, library, packs). Nothing from `agents.start()` to
+// `startFrontend` awaits, so `GameUpdates` and `GameSettings` listen before any Agent can connect.
 
 import { dirname, join } from 'node:path';
 import { Agents, type AgentsOptions } from './agents/agents.ts';
-import { BackupWatcher } from './backups/backups.ts';
 import { Checks } from './services/checks.ts';
-import { Deploys, type DeploysOptions, type GitHub } from './updates/deploys.ts';
-import { FactorioCatalog, type FactorioAccount, type PortalFetch } from './updates/factorio.ts';
-import { GameSettings } from './servers/game-settings.ts';
-import { Moderation } from './servers/moderation.ts';
-import { ModUpdates, type ModUpdatesOptions } from './updates/mod-updates.ts';
-import { GameUpdates, type GameUpdatesOptions } from './updates/game-updates.ts';
+import type { DeploysOptions, GitHub } from './updates/deploys.ts';
+import type { FactorioAccount, PortalFetch } from './updates/factorio.ts';
+import type { ModUpdatesOptions } from './updates/mod-updates.ts';
+import type { GameUpdatesOptions } from './updates/game-updates.ts';
 import { Hosts, type HostReaders } from './agents/host.ts';
-import { Library, type Fetch } from './packs/library.ts';
-import { Packs, type PacksOptions } from './packs/packs.ts';
-import { agentRestore, folderRestore, Restores, type RestoreSource, type RunRestore } from './backups/restore.ts';
+import type { Fetch } from './packs/library.ts';
+import type { PacksOptions } from './packs/packs.ts';
+import type { RunRestore } from './backups/restore.ts';
 import { Services, type Run } from './services/services.ts';
 import type { Config, DiscordConfig } from './config.ts';
 import { everyDay } from './daily.ts';
-import { Db } from './stats/db.ts';
 import { startPinger, type Get } from './services/health.ts';
-import { LagMonitor } from './servers/lag.ts';
-import { Links } from './servers/links.ts';
-import { LiveFeed } from './stats/live.ts';
-import { PlaytimeTracker } from './servers/playtime.ts';
-import { QuestAnnouncer } from './servers/quests.ts';
-import { RestartScheduler } from './servers/restarts.ts';
-import { ServerHub, type HubOptions } from './servers/servers.ts';
-import { Stats } from './stats/stats.ts';
+import type { Links } from './servers/links.ts';
+import type { LiveFeed } from './stats/live.ts';
+import type { RestartScheduler } from './servers/restarts.ts';
+import type { ServerHub, HubOptions } from './servers/servers.ts';
+import type { Stats } from './stats/stats.ts';
 import { scheduleSummaries } from './stats/summary.ts';
-import { SaveUploads } from './backups/save-uploads.ts';
-import { Uploads } from './packs/uploads.ts';
 import { Roles } from './users/roles.ts';
 import { Users } from './users/users.ts';
 import { serveWebApi, webApi, type WebApi } from './web/web.ts';
+import { buildCore, type Late } from './start-core.ts';
+import { buildRestores, watchBackups } from './start-backups.ts';
+import { buildSaveUploads, startGame } from './start-game.ts';
+import { startDeploys } from './start-deploys.ts';
+import { buildPacks } from './start-packs.ts';
 
 /** What the hub needs from a frontend once it is running. */
 export type Frontend = { stop: () => void };
@@ -128,47 +117,8 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   if (hostCfg && !deps.host) throw new Error('integrations.host needs host readers');
   if (systemd && !deps.run) throw new Error('integrations.systemd needs a systemctl runner');
   if (github && !(deps.github && deps.run)) throw new Error('integrations.github needs a GitHub reader and a systemctl runner');
-  const db = new Db(config.dbPath);
-  db.markHubRestart(config.servers.map((s) => s.id)); // also ends sessions left open when the hub last stopped
-  const touch = setInterval(() => db.touch(), 60_000);
-
-  const hub = new ServerHub(
-    config.servers.map((s) => ({ id: s.id, name: s.name, game: s.game, token: minecraft?.tokens[s.id] })),
-    { ...deps.hub, audit: (entry) => db.audit(entry) },
-  );
-  hub.on('event', (e) => db.recordLifecycle(e.serverId, e.type));
-  const live = new LiveFeed(hub, db);
-
-  let deploys: Deploys | undefined;
-  let packs: Packs | undefined;
-  let gameUpdates: GameUpdates | undefined;
-  let library: Library | undefined;
-  let services: Services | undefined;
-  // The one check of an update running (on a server, or any): what kind, for each refusal's words.
-  const updating = (id?: string) => (packs?.busy(id) ? 'pack update' : gameUpdates?.busy(id) ? 'game update' : null);
-  const serviceOf = new Map(config.servers.flatMap((s) => (s.service ? [[s.id, s.service]] : [])));
-  const restarts = new RestartScheduler(hub, {
-    // A daily countdown during an update would clash with its stop; the update restarts the server anyway.
-    paused: (id) => {
-      const what = updating(id);
-      return what && `a ${what} is running`;
-    },
-    // A factorio server's countdown ends in its service's restart (config gives it one, and systemd), looked up late:
-    // Services is built after RestartScheduler, which it counts down with.
-    restart: async (id, by) => {
-      const service = serviceOf.get(id);
-      if (!services || service === undefined) throw new Error(`${id} has no service to restart`);
-      await services.now(service, 'restart', by);
-    },
-  });
-  for (const s of config.servers) if (s.dailyRestart) restarts.daily(s.id, s.dailyRestart); // throws on a bad time
-  const playtime = new PlaytimeTracker(hub, db);
-  const lag = new LagMonitor(hub, db, Object.fromEntries(config.servers.map((s) => [s.id, s.lag])));
-  const quests = new QuestAnnouncer(hub, Object.fromEntries(config.servers.map((s) => [s.id, s.quests])));
-  const links = new Links(db, hub);
-  hub.on('event', (e) => {
-    if (e.type === 'quest') quests.add(e.serverId, e.player, e.quests);
-  });
+  const late: Late = {};
+  const { db, touch, hub, live, updating, restarts, playtime, lag, quests, links } = buildCore(config, deps, late);
 
   const port = minecraft ? await hub.listen(minecraft.listenPort) : undefined;
   console.log(port === undefined ? '[hub] Minecraft integration off: no mod port' : `[hub] listening on 127.0.0.1:${port}`);
@@ -191,168 +141,16 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     (err) => console.error('[hub] Agent port failed, no Agent can connect:', err),
   );
   const agentOf = new Map((agentsCfg?.agents ?? []).map((a) => [a.server, a.id]));
-  // Before anything that reads Backups: each server's Backup source (its folder, or its Agent's saves) is Stats'.
-  const stats = new Stats(hub, db, config.servers, agents);
-  const backups = new BackupWatcher(
-    hub,
-    (serverId) => stats.backupSource(serverId)?.list() ?? Promise.resolve([]),
-    (serverId) => stats.backupSource(serverId)?.free() ?? Promise.resolve(null),
-  );
-  for (const s of config.servers) {
-    if (!stats.backupSource(s.id)) continue;
-    // An Agent saves only after play, so its saves are overdue only once someone has played since the newest.
-    const played = agentOf.has(s.id) ? (since: number) => db.sessionsSince(s.id, since).length > 0 : undefined;
-    backups.watchdog(s.id, { maxAgeHours: s.backupMaxAgeHours, minFreeGB: s.backupMinFreeGB, played });
-  }
-  services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!, agents); // checked above
+  const { stats, backups } = watchBackups(config, hub, db, agents, agentOf);
+  const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!, agents); // checked above
+  late.services = services;
   services?.start();
-  // A restore source per server: its Agent's restore, or its folder's script.
-  const restoreSources = new Map<string, RestoreSource>();
-  for (const s of config.servers) {
-    const agentId = agentOf.get(s.id);
-    if (agents && agentId !== undefined) restoreSources.set(s.id, agentRestore(agents, agentId, stats.backupSource(s.id)!.list));
-    else if (deps.restore && s.dir && s.backupDir) restoreSources.set(s.id, folderRestore(deps.restore, s.dir, s.backupDir));
-  }
-  const restores =
-    services && restoreSources.size
-      ? new Restores(hub, services, restoreSources, {
-          deploying: (id) => (deploys?.busy() ? 'hub' : agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!) ? 'agent' : null),
-          // A game settings save too: the Agent writes the config folder then.
-          updating: (id): string | null => updating(id) ?? (gameSettings?.busy(id) ? 'game settings save' : null),
-          restored: (id) => packs?.restored(id),
-        })
-      : undefined;
-  // One catalog: game updates, the mod browser and portal mod updates share its caches.
-  const catalog = new FactorioCatalog(deps.portal ?? fetch, deps.factorioAccount);
-  // Game updates, with an Agent's server: started (its interrupted rows closed, the Agents heard) before any can connect.
-  gameUpdates =
-    agents &&
-    services &&
-    new GameUpdates(
-      {
-        hub,
-        db,
-        agents,
-        services,
-        restarts,
-        catalog,
-        servers: config.servers,
-        restoring: (id) => restores?.busy(id) ?? false,
-        deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
-        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
-      },
-      deps.gameUpdates,
-    );
-  gameUpdates?.start();
-  const modUpdates = gameUpdates && new ModUpdates({ hub, db, catalog, gameUpdates, servers: config.servers.map((s) => s.id) }, deps.modUpdates);
-  modUpdates?.start();
-  const moderation = agents && new Moderation({ hub, agents, servers: config.servers });
-  // Game settings, with an Agent's server: listening before any Agent can connect.
-  const gameSettings =
-    agents &&
-    services &&
-    new GameSettings({
-      hub,
-      agents,
-      services,
-      restarts,
-      servers: config.servers,
-      updating,
-      restoring: (id) => restores?.busy(id) ?? false,
-      deploying: (agentId) => (deploys?.busy() ? 'hub' : deploys?.agentBusy(agentId) ? 'agent' : null),
-    });
-  gameSettings?.start();
+  const restores = buildRestores(config, deps, { hub, services, agents, agentOf, stats, updating, late });
+  const { gameUpdates, modUpdates, moderation, gameSettings } = startGame(config, deps, { hub, db, agents, services, restarts, restores, updating, late });
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
-  deploys =
-    github &&
-    new Deploys(
-      {
-        hub,
-        db,
-        restarts,
-        github: deps.github!, // checked above
-        run: deps.run!,
-        config: github,
-        environment: config.environment,
-        servers: config.servers,
-        hasMod: (id) => Boolean(minecraft?.tokens[id]),
-        agents,
-        restoring: (id) => restores?.busy(id) ?? false,
-        updating,
-        settingsSaving: (id): boolean => gameSettings?.busy(id) ?? false,
-        libraryAdding: () => library?.busy() ?? false,
-        installing: () => packs?.installRunning() ?? false,
-        mcOf: (id) => {
-          const libraryId = db.pack(id)?.libraryId;
-          return libraryId ? db.library().find((e) => e.id === libraryId)?.mc : undefined;
-        },
-        dbCopies,
-      },
-      deps.deploys,
-    );
-  deploys?.start();
-  // Packs need the server's service (systemd) and its Mod (Minecraft): which servers have both, `Packs.has` says.
-  // Uploads: for packs (a server's service and Mod), and for an Agent's server's uploaded saves.
-  const uploads = services && (minecraft || agents) ? new Uploads(join(dirname(config.dbPath), 'uploads'), deps.uploadIdleMs) : undefined;
-  // The library takes uploads and is one per Environment: on whenever packs are.
-  library =
-    uploads &&
-    minecraft &&
-    new Library({
-      hub,
-      db,
-      uploads,
-      root: dirname(config.dbPath),
-      download: deps.download ?? fetch,
-      githubToken: deps.githubToken,
-      installing: (id) => packs?.installing(id) ?? [],
-      installRunning: () => packs?.installRunning() ?? false,
-    });
-  packs =
-    services &&
-    minecraft &&
-    uploads &&
-    new Packs(
-      {
-        hub,
-        db,
-        services,
-        restarts,
-        servers: config.servers,
-        hasMod: (id) => Boolean(minecraft.tokens[id]),
-        uploads,
-        library: library!, // on whenever uploads are
-        dataDir: dirname(config.dbPath),
-        restoring: (id) => restores?.busy(id) ?? false,
-        deploying: (id) => (deploys?.busy() ? 'hub' : deploys?.modBusy(id) ? 'mod' : null),
-        // New server: the Mod comes from GitHub's releases, and the setup command names the hub's unit.
-        install: deploys && {
-          mods: deploys,
-          hubUnit: github!.deploys.hubUnit,
-          hubPort: port!, // Minecraft is on with packs
-          unitExists: async (unit) => /^LoadState=(?!not-found$)\S+$/m.test(await deps.run!('systemctl', ['show', '--property=LoadState', '--', unit])),
-        },
-      },
-      deps.packs,
-    );
-
-  // Saves uploaded from the dashboard, sent to an Agent's server: not while it updates, restores, saves its game settings or deploys its Agent.
-  const saveUploads =
-    agents &&
-    uploads &&
-    new SaveUploads({
-      hub,
-      agents,
-      uploads,
-      busy: (id) => {
-        const kind = updating(id);
-        if (kind) return `a ${kind} is running`;
-        if (gameSettings?.busy(id)) return 'a game settings save is running';
-        if (restores?.busy(id)) return 'a restore is running';
-        if (agentOf.has(id) && deploys?.agentBusy(agentOf.get(id)!)) return "the server's Agent is being deployed";
-        return null;
-      },
-    });
+  const deploys = startDeploys(config, deps, { hub, db, restarts, agents, restores, updating, gameSettings, dbCopies, late });
+  const { uploads, library, packs } = buildPacks(config, deps, { hub, db, services, restarts, restores, deploys, agents, port, late });
+  const saveUploads = buildSaveUploads({ hub, agents, uploads, agentOf, updating, gameSettings, restores, deploys });
   const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time

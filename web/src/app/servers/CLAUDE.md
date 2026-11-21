@@ -69,14 +69,16 @@ they're pending), Update and Apply ask once; the running update's step card foll
 only while preparing or counting down), a "Done" line on success; after a rollback an amber line
 (`pack-rolled-back.ts`) whose restore offer opens Backups with `?restore=<backup>` preselected (a typed restore like
 any); `game.ts` (only with `features.update`, a factorio
-server's while the hub's game updates are on, last; `hub-v2.14.0` reports it false, so no Game tab shows there):
-Factorio and every mod it runs (with `mod-updates.ts`'s `PortalUpdates`, provided by the tab: `GET …/game/updates`
+server's while the hub's game updates are on, last; `hub-v2.14.0` reports it false, so no Game tab shows there; it
+holds the state, the stream and the update's requests): the summary card (`game-summary.ts`): Factorio and every mod
+it runs (with `mod-updates.ts`'s `PortalUpdates`, provided by the tab: `GET …/game/updates`
 asked on its first state, whenever what the server runs changes, on a `modUpdates` notice and a finished update; a
 badge "N updates" or "Mods up to date" by Installed, each updatable chip's "→ <version>" with its words for screen
 readers, lines for releases needing a newer Factorio, mods gone from the portal (amber), the unchecked and a failed
 check, and Update N mods…, which opens the sheet with those at "Newest that fits"; an older hub's 404 shows none of
 it) (the game's own muted: `base`, `space-age`, `quality`, `elevated-rails`, `recycler`, never picked), Update game
-(disabled with the hub's `blocked`, not while stopped: the update starts it), its sheet the Factorio version (the
+(disabled with the hub's `blocked`, not while stopped: the update starts it), its sheet (`game-sheet.ts`, which
+holds the picks and the catalog's answer; its update view `game-update-view.ts`) the Factorio version (the
 running one and the catalog's per channel; one listed on both channels reads stable, whatever the order) and the
 portal mods, each at its version or "Newest that fits", Remove (none on `orrery`: its Agent needs it), Add by portal
 name or from the Browse view (a mod the server runs comes back at the version it runs) (`mod-browser.ts`'s
@@ -92,7 +94,8 @@ string shown as text), or a whole list through Import mod list (`mod-import.ts`'
 of the update view as Browse is, focus back on its button: the client's `mod-list.json` uploaded (where it is on
 Windows, Linux and macOS said; over 256 KiB not read) or names pasted one per line or comma-separated, read in the
 browser by `mod-list.ts`'s `parseModList` (JSON when it starts with `{`, its shape checked; enabled mods only, the
-game's own (`GAME_MODS`, which `game.ts` takes from there) and disabled ones left out, names checked with the Agent's
+game's own (`GAME_MODS`, which the Game tab's `game-summary.ts`, `game-sheet.ts` and `game-update-view.ts` take from
+there) and disabled ones left out, names checked with the Agent's
 rule (and not `.` alone, as the hub), each once, at most 500 (`MODS_MAX`, the hub's `LIMITS.mods`); `shown` makes a
 refused name safe to show); the names not in the update yet (picked, or added by the catalog for one) checked with
 `POST …/game/check` for the picked version's line (none asked when there are none; an older answer dropped; a 404

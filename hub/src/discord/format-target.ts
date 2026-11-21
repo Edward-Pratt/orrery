@@ -3,9 +3,9 @@
 // memory and disk (a mount `inline()`: an Agent's sample names it), `agentLost`/`agentBack` and `eventsOff`/`eventsOn`
 // (the Agent's reason `inline()`), `nodeUpdate` (what to do, `NODE_STEPS`, as the description); a check's URL as the
 // description; deploy notices, the Agent's as "the agent on <id>", with `from` escaped (a Mod's or an Agent's hello
-// names it). Embeds by `format.ts`'s rules. Unit-tested.
+// names it). Embeds by `format-text.ts`'s rules. Unit-tested.
 
-import { DESCRIPTION, embed, inline, SEVERITY_COLORS, title, type Post } from './format.ts';
+import { DESCRIPTION, embed, inline, SEVERITY_COLORS, title, type Post } from './format-text.ts';
 import { truncate, type TargetEvent } from '../servers/servers.ts';
 import { formatBytes } from '../units.ts';
 

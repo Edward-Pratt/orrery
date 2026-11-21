@@ -17,7 +17,7 @@ import { compareGlibc, glibcNeed, Refused, unpack, unxz } from '../src/unpack.ts
 import { ALLOWED_HOSTS, checkUpdate } from '../src/update.ts';
 import type { Request } from '../src/wire.ts';
 import { fakeElf, releaseTar, tar, type Entry } from './fake-release.ts';
-import { SUMS, sha256, sha1, tarball, gameUrl, signedGame, world, exists, until } from './fake-world.ts';
+import { SUMS, gameUrl, signedGame, world, exists, until } from './fake-world.ts';
 
 test('a version of ../../x, a mod name with .., an http URL and an unlisted host are each refused', async (t) => {
   const w = await world(t);

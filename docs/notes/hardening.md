@@ -209,6 +209,15 @@ its own piece of work; Dependabot does not fix lint).
 **Acceptance:** `pnpm lint` clean in both parts and in CI; the five guarded misused-promise sites either pass the
 rule's options or carry a one-line reason.
 
+**Built (2026-11-21):** oxlint with oxlint-tsgolint instead (the owner's pick: typescript-eslint supports TypeScript
+below 6.1 only, and the hub is on 7), `.oxlintrc.json` in `hub/` and `agent/`: the `correctness` category plus the
+rules above. A switch with a `default:` that handles the rest counts as exhaustive (`considerDefaultExhaustiveForUnions`):
+the three hits forward or name what the default takes. Off, each with its reason in the config: `require-await` (every
+hit was async to fit a Promise-typed slot, or so a throw is a rejection), and `no-control-regex`, `no-base-to-string`,
+`require-array-sort-compare`, `no-misused-spread`, `no-meaningless-void-operator`, `unbound-method`. The
+misused-promise hits: three in `deploy-rows.ts` and the Agent's sample interval wrap the call in `() => void f()`, and the
+Agent's `StartGate` start listener voids the promise it stores.
+
 ## 10 Node on the Agent's Host
 
 **Today:** `setup-agent-host.sh` installs Node from a tarball at its pinned `NODE_VERSION` (24.22.2) under

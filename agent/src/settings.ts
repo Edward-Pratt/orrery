@@ -399,7 +399,7 @@ export class GameSettings {
     this.#file = join(o.state, STATE_FILE);
     this.#state = readState(this.#file);
     this.#gate = new StartGate({ armedAt: this.#state.armedAt, goodWithinMs: o.goodWithinMs, now: this.#o.now });
-    this.#gate.on('start', (since) => (this.#starting = this.#started(since)));
+    this.#gate.on('start', (since) => void (this.#starting = this.#started(since)));
     this.#gate.on('good', (since, gated) => void this.#starting.then(() => this.#good(since, gated)));
     this.#gate.on('late', (since, gated) => void this.#starting.then(() => this.#late(since, gated)));
     this.#gate.on('failed', (s) => void this.#failed(s));

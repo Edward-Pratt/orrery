@@ -8,10 +8,13 @@
   },
   "scripts": {
     "test": "node --test --test-timeout=30000 \"test/*.test.ts\"",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "lint": "oxlint --type-aware --deny-warnings src test"
   },
   "devDependencies": {
     "@types/node": "~24.19.2",
+    "oxlint": "1.94.0",
+    "oxlint-tsgolint": "7.0.2007",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.21.0"

@@ -73,10 +73,10 @@ export function watch(c: DeployCtx, row: DeployRow, delayMs = 0): void {
   const poll = async () => {
     try {
       const out = await c.d.run('systemctl', ['show', '--property=ActiveState', '--', unit(c, row)]);
-      if (RUNNING_STATES.has(/^ActiveState=(.*)$/m.exec(out)?.[1] ?? '')) return void later(c, poll, c.watchMs);
+      if (RUNNING_STATES.has(/^ActiveState=(.*)$/m.exec(out)?.[1] ?? '')) return void later(c, () => void poll(), c.watchMs);
     } catch (err) {
       console.error(`[deploys] reading ${unit(c, row)} failed:`, (err as Error).message);
-      return void later(c, poll, c.watchMs);
+      return void later(c, () => void poll(), c.watchMs);
     }
     const status = readStatus(c);
     // A file from an earlier deploy of the same tag (one rolled back, then tried again) isn't this one's.
@@ -84,7 +84,7 @@ export function watch(c: DeployCtx, row: DeployRow, delayMs = 0): void {
       finish(c, row, status.outcome, status.log);
     } else finish(c, row, 'failed', 'interrupted: the deploy unit ended without reporting');
   };
-  if (delayMs) later(c, poll, delayMs);
+  if (delayMs) later(c, () => void poll(), delayMs);
   else void poll();
 }
 

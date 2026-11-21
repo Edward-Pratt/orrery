@@ -33,7 +33,7 @@ async function setup(t: TestContext, o: { size?: number; fileName?: string; vers
         notices.push(n);
         if (n.kind === 'saveUpload' && (n.state === 'done' || n.state === 'failed')) done();
       },
-      audit: (actor: string, action: string, target: string, details = '') => void audits.push(`${actor} ${action} ${target}: ${details}`),
+      audit: (actor: string, action: string, target: string, details: string) => void audits.push(`${actor} ${action} ${target}: ${details}`),
     },
     agents: {
       list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: o.connected ?? true, version: o.version === undefined ? 'agent-v1.3.0' : o.version }],

@@ -15,7 +15,7 @@ import { GAME_MODS as HUB_GAME_MODS } from '../../hub/src/updates/factorio.ts';
 import { GAME_MODS, labels, Updates } from '../src/update.ts';
 import type { Request } from '../src/wire.ts';
 import { eventually, fakeHub } from './fake-hub.ts';
-import { sha256, sha1, modUrl, zip, type Step, world, until } from './fake-world.ts';
+import { modUrl, zip, type Step, world, until } from './fake-world.ts';
 
 test("updateDone's from and to as the hub names its row: every enabled mod, the game's own included, from the latest installed", async (t) => {
   assert.deepEqual([...GAME_MODS].sort(), [...HUB_GAME_MODS].sort(), "the hub's list of the game's own mods");

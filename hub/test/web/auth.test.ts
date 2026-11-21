@@ -68,7 +68,7 @@ test("five failures lock the name from that address, Caddy's entry, for 15 min (
 test(`at most ${MAX_VERIFYING} password checks run at once: the rest are 429 at once, and not counted`, async (t) => {
   const web = await webHub(t);
   await loginAs(web);
-  const answers = await Promise.all(Array.from({ length: 6 }, () => login(web, 'alex', WRONG)));
+  const answers = await Promise.all(Array.from({ length: 6 }, async () => login(web, 'alex', WRONG)));
   const busy = answers.filter((r) => r.status === 429);
   assert.deepEqual(answers.map((r) => r.status).sort(), [401, 401, 429, 429, 429, 429]);
   assert.equal(await busy[0]!.text(), 'The hub is busy: try again in a moment');

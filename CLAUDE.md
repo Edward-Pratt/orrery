@@ -62,10 +62,10 @@ raise `MIN_PROTOCOL` only one release after a bump.
 ## Verify before claiming done
 
 ```bash
-cd hub && pnpm test && pnpm run typecheck
+cd hub && pnpm test && pnpm run typecheck && pnpm lint
 cd mod && ./gradlew spotlessApply build   # runs JUnit tests too
 cd web && pnpm test && pnpm run build     # the build also type-checks against the hub's API types
-cd agent && pnpm test && pnpm run typecheck # the typecheck also covers the hub's types it imports
+cd agent && pnpm test && pnpm run typecheck && pnpm lint # the typecheck and lint also cover the hub's types it imports
 bash deploy/test-restore-backup.sh        # needs zip and unzip
 bash deploy/test-install-web.sh
 bash deploy/test-deploy.sh                # deploy-hub.sh and deploy-web.sh, with fake systemctl, pnpm and gh

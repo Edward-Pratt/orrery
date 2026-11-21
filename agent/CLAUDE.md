@@ -10,6 +10,7 @@ dependencies: Node built-ins only (game tarballs go through the Host's `xz`, whi
 ```bash
 pnpm test           # node --test --test-timeout=30000 "test/*.test.ts": a test still running after 30 s fails, named
 pnpm run typecheck  # tsc, noEmit; also type-checks the hub types src/ imports
+pnpm lint           # oxlint, type-aware (.oxlintrc.json): promises nobody awaits or a void callback drops
 node src/index.ts           # the agent (orrery-agent.service)
 node src/index.ts check     # the first-boot check: a report on stdout, line by line, exit 0 when nothing failed
 ```

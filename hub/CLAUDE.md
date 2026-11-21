@@ -5,6 +5,7 @@ Node 24+ (tested on 24.21 and 26.9) + TypeScript + discord.js 14. Node runs `.ts
 ```bash
 pnpm test           # node --test --test-timeout=30000 "test/**/*.test.ts": a test still running after 30 s fails, named
 pnpm run typecheck  # tsc, noEmit
+pnpm lint           # oxlint, type-aware (.oxlintrc.json): promises nobody awaits or a void callback drops
 pnpm check-config   # validates ./config.json (or -- <path>) offline; same rules as startup
 pnpm users invite <name> [config]   # the break-glass invite: a new name becomes an owner, an existing one a reset; prints the link
 pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env DISCORD_TOKEN (only with integrations.discord),

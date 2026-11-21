@@ -68,7 +68,7 @@ import type {
 } from '../api.ts';
 import { listBackups } from '../backups/backups.ts';
 import type { ServerSettings } from '../config.ts';
-import type { Db, EditRow, LibraryRow, PackRow, PendingRow } from '../stats/db.ts';
+import type { Db, EditRow, LibraryRow, PackRow } from '../stats/db.ts';
 import type { Deploys } from '../updates/deploys.ts';
 import { RUNTIME, type Library } from './library.ts';
 import type { RestartScheduler } from '../servers/restarts.ts';

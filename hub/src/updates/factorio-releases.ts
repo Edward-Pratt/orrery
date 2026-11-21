@@ -8,7 +8,8 @@ import { LIMITS } from '../protocol.ts';
 
 /*
  * The mod portal's releases as the catalog checks them: names, versions and dependencies parsed, and which release
- * of a mod fits a Factorio version. Pure: no reads (those are `FactorioCatalog`'s, in `factorio.ts`).
+ * of a mod fits a Factorio version. Pure: no reads (those are `FactorioCatalog`'s, in `factorio.ts` and
+ * `factorio-fetch.ts`).
  */
 
 /**

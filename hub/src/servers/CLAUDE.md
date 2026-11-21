@@ -8,5 +8,6 @@ factorio server's budget for them (`lifecycle-budget.ts`), `runCommand` (`comman
 (`server-text.ts`); `servers.ts` re-exports the names callers import. The rest hang off it: countdown restarts
 (`restarts.ts`), link codes (`links.ts`), quest announcements (`quests.ts`), TPS lag notices (`lag.ts`), player
 sessions (`playtime.ts`), a server's logs and crash reports (`logs.ts`, `crashlogs.ts`), and a factorio server's
-moderation (`moderation.ts`) and game settings (`game-settings.ts`). Each file's header is its contract. Tests:
-`test/servers/`, `ServerHub`'s split along its parts, sharing their hubs (`server-hub.ts`).
+moderation (`moderation.ts`) and game settings (`game-settings.ts`, its rules in `game-settings-rules.ts`). Each file's
+header is its contract. Tests: `test/servers/`, `ServerHub`'s split along its parts, sharing their hubs (`server-hub.ts`);
+game settings' tests share their fixtures and hub (`game-settings-hub.ts`).

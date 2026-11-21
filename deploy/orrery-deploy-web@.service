@@ -4,7 +4,6 @@
 #   sudo install -D -m 755 -o root -g root -t /usr/local/lib/orrery deploy/deploy-web.sh deploy/install-web.sh
 #   sudo cp deploy/orrery-deploy-web@.service /etc/systemd/system/ && sudo systemctl daemon-reload
 # Re-run the first line when either script changes in a release. %i, never %I: deploy-web.sh validates the tag again.
-# orrery-deploy-web-staging@.service differs only in the root, the web dir and EnvironmentFile.
 [Unit]
 Description=Deploy orrery dashboard %i (production)
 

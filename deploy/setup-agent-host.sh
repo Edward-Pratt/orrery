@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Managed by orrery deploy/setup-agent-host.sh: this script, kept as /usr/local/lib/orrery/setup-agent-host.sh.
+# modular-exempt: the friend fetches this one file by its URL at an Agent tag and runs it as root; split, its
+# parts would each have to be fetched too.
 # Sets up a remote Host for the orrery Agent: Factorio in a rootful Podman container (Quadlet's factorio.service),
 # the Agent natively as orrery-agent.service with a private Node, and polkit for the agent's user. The friend runs it
 # as root on his Oracle Linux 9 (or 10) aarch64 VM, from a release tag:

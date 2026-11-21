@@ -33,7 +33,7 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
     case 'eventsOn':
       return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
-    case 'nodeUpdate': // both versions checked `vX.Y.Z` (`NODE_VERSION`): nothing to escape
+    case 'nodeUpdate': // both versions checked `vX.Y.Z` (`NODE_RELEASE`): nothing to escape
       return `⬆️ Host ${e.id}: Node ${e.node} on agent ${e.name} is behind ${e.newest}`;
     // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':

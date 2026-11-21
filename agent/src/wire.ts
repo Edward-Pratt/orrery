@@ -3,7 +3,7 @@
 // reader, the line encoder and the checks on what the hub sends. The message types come from hub/src/types.ts through
 // `import type` only: an agent release carries no hub code, so the constants are copies, checked by test/wire.test.ts.
 //
-// The agent's side of the wire: `PROTOCOL_VERSION`, `NODE_VERSION` (a copy of the hub's: the hello's `node`),
+// The agent's side of the wire: `PROTOCOL_VERSION`, `NODE_RELEASE` (a copy of the hub's: the hello's `node`),
 // `LIMITS` (copies of the hub's, the line cap 1 MiB, an `update`'s
 // URLs 2 KiB: `LIMITS.url`, as a signed mod link is longer than 256) and `GAME_SETTINGS` (a copy of the hub's rules
 // for one game settings field: the integer ranges, the characters a name or description may not hold, a game
@@ -31,10 +31,10 @@ import type { AgentHello, AgentMsg, AgentRequest, GameSettingsFields, Hello, Hub
 export const PROTOCOL_VERSION = 1;
 
 /**
- * The hub's `NODE_VERSION`: what the hello's `node` may be, a release's `process.version` of at most 32 characters. The
+ * The hub's `NODE_RELEASE`: what the hello's `node` may be, a release's `process.version` of at most 32 characters. The
  * hub refuses a hello with any other, so the agent leaves `node` out on a Node this doesn't match (a nightly build).
  */
-export const NODE_VERSION = /^(?=.{1,32}$)v\d+\.\d+\.\d+$/;
+export const NODE_RELEASE = /^(?=.{1,32}$)v\d+\.\d+\.\d+$/;
 
 /** The hub's field limits (`LIMITS` in hub/src/protocol.ts): characters (UTF-16 code units), entries, or bytes. */
 export const LIMITS = {

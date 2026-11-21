@@ -47,7 +47,7 @@ Lengths count characters (UTF-16 code units).
 | `pending[]` (`settings`, a `settingsSet` reply's `pending` and `applied`) | 16 entries, each 1 to 64 characters |
 | `extra[]` (`settings`) | 32 entries, each 1 to 64 characters |
 | `game_password` (`settingsSet`) | 64 characters |
-| `agentHello.node` | 32 characters, and `^v\d+\.\d+\.\d+$` (`NODE_VERSION`) |
+| `agentHello.node` | 32 characters, and `^v\d+\.\d+\.\d+$` (`NODE_RELEASE`) |
 | `bans[]` (a `playerLists` answer, and a `moderate` answer's `lists`) | 500 entries, each name 1 to 60 characters |
 | a ban's `reason`, and a `moderate`'s `reason` | 200 characters |
 | a `saveChunk`'s `data` (base64 of at most 512 KiB) | 700,000 characters |
@@ -152,7 +152,7 @@ An Agent opens two connections:
 
 `agentHello.protocol` shares `PROTOCOL_VERSION` and `MIN_PROTOCOL` with the Mod's hello.
 `agentHello.node` (optional, added without a protocol bump) is the Agent's Node, its `process.version`: a release,
-`^v\d+\.\d+\.\d+$`, at most 32 characters (`NODE_VERSION`). A hello whose `node` is anything else is refused like
+`^v\d+\.\d+\.\d+$`, at most 32 characters (`NODE_RELEASE`). A hello whose `node` is anything else is refused like
 one with any field over its limit, so the Agent leaves it out on a Node that doesn't match (a nightly build); an Agent
 before it sends none. The hub shows it on the Agent's Host and checks it nightly against nodejs.org.
 

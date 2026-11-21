@@ -12,7 +12,7 @@
 // `output` and a `backup`'s `detail` are cut to fit (Mods already deployed send up to 2000 lines of any length).
 // `LIMITS.lineBytes` (1 MiB, the newline not counted) is the Agent port's line cap, for its line reader.
 // `parseModLine` for a game connection (a Mod's, or an Agent's for its server: `milestone`, `heartbeat.paused`),
-// `parseAgentLine` for the Agent port (`agentHello`, its optional `node` by `NODE_VERSION`: a Node release's
+// `parseAgentLine` for the Agent port (`agentHello`, its optional `node` by `NODE_RELEASE`: a Node release's
 // `process.version`, at most 32 characters, else the hello is refused; a game `hello` as a first line, and the Agent
 // connection's messages), `parseReplyData(request, data)` for an ok `reply`'s data (`journal`/`log`: 1000 lines of
 // 1 KiB; `logs`: file entries; `settingsSet`: `applied` and `pending` keys; `playerLists` and `moderate`: the bans and
@@ -58,7 +58,7 @@ export const MIN_PROTOCOL = 1;
  * `process.version`, `vX.Y.Z`, at most 32 characters. A hello with any other `node` is refused, as is one with any
  * field over its limit; the Agent (`agent/src/wire.ts` holds a copy) sends only a version this matches.
  */
-export const NODE_VERSION = /^(?=.{1,32}$)v\d+\.\d+\.\d+$/;
+export const NODE_RELEASE = /^(?=.{1,32}$)v\d+\.\d+\.\d+$/;
 
 /**
  * Field limits, the same on the Mod port and the Agent port: string lengths in characters (UTF-16 code units),
@@ -294,7 +294,7 @@ const GAME: Schemas<Hello | ModMsg> = {
 const STEPS = ['prepare', 'backup', 'stop', 'swap', 'gate', 'rollback'];
 /** The first line on the Agent port (an `agentHello`, or a game connection's `hello`), and an Agent connection. */
 const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
-  agentHello: { protocol: num, agentId: str(), token: str(), agentVersion: str(), node: optional(matching(NODE_VERSION)) },
+  agentHello: { protocol: num, agentId: str(), token: str(), agentVersion: str(), node: optional(matching(NODE_RELEASE)) },
   hello,
   ping: {},
   bye: {},

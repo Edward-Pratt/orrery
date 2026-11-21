@@ -97,7 +97,7 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   version it reported), and never a path or a command.
 - Node check (`agents/node-check.ts`): nodejs.org's release index is untrusted. It is read nightly through the
   injected `nodeIndex` fetch only (no redirect followed, 15 s, 4 MiB counted as read), must be a JSON array of at most
-  10,000 entries, and an entry counts only with a `version` matching `NODE_VERSION`; nothing from it but those versions
+  10,000 entries, and an entry counts only with a `version` matching `NODE_RELEASE`; nothing from it but those versions
   reaches a notice. An Agent's `node` is the hello's, matched to the same pattern by `parseAgentLine`.
 - Moderation: the hub never builds a Factorio command; it sends the checked `action`, a `player` by the admins' rule
   and a `reason` it refuses with any control character, separator, bidi control or BOM (the Agent cleans it again).

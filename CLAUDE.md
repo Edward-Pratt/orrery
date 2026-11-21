@@ -49,7 +49,7 @@ Nothing builds at the root: run pnpm in `hub/`, `web/` and `agent/` (each pins i
 Protocol lives in four places that must change together:
 1. `hub/src/protocol.ts` (`SCHEMAS` validation; the message types are in `hub/src/types.ts`),
 2. the mod (`HubClient.java` hello, `GameEvents.java` messages) and the Agent (`agent/src`: it imports the hub's types
-   with `import type` only, and `wire.ts` keeps copies of `PROTOCOL_VERSION`, `LIMITS` and `NODE_VERSION` that
+   with `import type` only, and `wire.ts` keeps copies of `PROTOCOL_VERSION`, `LIMITS` and `NODE_RELEASE` that
    `agent/test/wire.test.ts` checks against `protocol.ts`),
 3. for game-connection messages the Factorio mod produces, `factorio/control.lua` and its UDP table in
    `factorio/CLAUDE.md` (the Agent turns those datagrams into the messages),

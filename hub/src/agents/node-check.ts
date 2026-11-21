@@ -2,7 +2,7 @@
 // `https://nodejs.org/dist/index.json` (`NODE_INDEX`) through the injected `NodeFetch` (`redirect: 'manual'`: a
 // redirect is a failure; 15 s; at most `INDEX_BYTES`, 4 MiB, counted as read, `content-length` only a first check). The
 // answer is untrusted: it must be a JSON array of at most `INDEX_ENTRIES` (10,000); an entry counts only when it is an
-// object whose `version` matches `NODE_VERSION` (a release, at most 32 characters), others are dropped, and at least
+// object whose `version` matches `NODE_RELEASE` (a release, at most 32 characters), others are dropped, and at least
 // one must count; versions compare as numbers, never by the index's order. For each Agent whose latest hello named
 // its Node (`AgentStatus.node`), the newest release of that Node's major, when newer, raises one `nodeUpdate` host
 // notice (`info`, the Agent's id and name, its Node and the newest), once per Agent and newest while the hub runs (a
@@ -12,7 +12,7 @@
 // `NODE_CHECK_TIME` (05:00 local, `everyDay`) and returns its cancel. Hub core.
 
 import { everyDay } from '../daily.ts';
-import { NODE_VERSION } from '../protocol.ts';
+import { NODE_RELEASE } from '../protocol.ts';
 import type { ServerHub } from '../servers/servers.ts';
 import { compareVersions } from '../updates/factorio-releases.ts';
 import type { AgentStatus } from './public.ts';
@@ -45,7 +45,7 @@ export function newestByMajor(data: unknown): Map<string, string> {
   const newest = new Map<string, string>();
   for (const entry of data) {
     const version: unknown = typeof entry === 'object' && entry !== null && !Array.isArray(entry) ? (entry as Record<string, unknown>).version : undefined;
-    if (typeof version !== 'string' || !NODE_VERSION.test(version)) continue;
+    if (typeof version !== 'string' || !NODE_RELEASE.test(version)) continue;
     const known = newest.get(majorOf(version));
     if (known === undefined || compareVersions(bare(version), bare(known)) > 0) newest.set(majorOf(version), version);
   }

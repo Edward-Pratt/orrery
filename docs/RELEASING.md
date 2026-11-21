@@ -76,3 +76,17 @@ By hand for the Factorio server, once, in this order:
    friend runs `deploy/setup-agent-host.sh` from the newest agent tag (its header has the options; `--no-hub` while the
    hub doesn't listen yet). After that, Agent releases deploy from Host > Releases (from `agent-v1.1.0` on), and the
    friend re-runs the setup only as above: to leave `agent-v1.0.0`, or for a release that changes the files it installs.
+
+## Updating Node on an Agent's Host
+
+An Agent's Host runs its own Node, installed by `deploy/setup-agent-host.sh` from nodejs.org's tarball at the
+script's pinned `NODE_VERSION` (with its `NODE_SHA256`) under `/usr/local/lib/orrery/node-v…`. An Agent deploy can't
+change it (it runs as `factorio` and writes only `/srv/orrery-agent`); only a setup run, as root, does. The Agent's
+hello names its Node (`node`), the Host page shows it, and the hub checks it every night against nodejs.org: when a
+newer release of the same major is out, a `nodeUpdate` notice names the Host, its Node and the newest. Then:
+
+1. Bump `NODE_VERSION` in `deploy/setup-agent-host.sh` to that release, and `NODE_SHA256` to the
+   `linux-arm64.tar.xz` line of `https://nodejs.org/dist/v<version>/SHASUMS256.txt` (update the comment's date).
+2. Cut an Agent patch (`.github/release.sh agent patch`): the friend's setup is fetched at an Agent tag.
+3. Ask the friend to re-run `setup-agent-host.sh` from that tag. Setup fetches the missing version, checks its sha256
+   and flips the `node` symlink to it, keeping the rest; the Agent restarts on it, and its next hello names it.

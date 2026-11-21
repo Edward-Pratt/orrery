@@ -80,7 +80,7 @@ test('a restart of the agent mid-swap rolls back from state/update.json', async 
   await w.u.update(w.request('2.1.25', [['orrery', '0.2.0'], ['flib', '0.16.2']], 'u2'));
   await until(async () => JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase === 'stop', 5000, 'u2 at its stop');
   await w.u.cancel();
-  await until(async () => JSON.parse(await readFile(join(w.state, 'update.json'), 'utf8')).phase === 'done', 3000, 'u2 done');
+  await eventually(() => !w.u.busy, 3000, 'u2 done'); // not update.json's phase: it is written before the job ends
   assert.equal(w.sent.length, before, 'nothing sent while not connected');
   w.connected = true;
   w.u.connected();

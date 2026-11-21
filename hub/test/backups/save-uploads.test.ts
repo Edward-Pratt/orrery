@@ -36,8 +36,8 @@ async function setup(t: TestContext, o: { size?: number; fileName?: string; vers
       audit: (actor: string, action: string, target: string, details: string) => void audits.push(`${actor} ${action} ${target}: ${details}`),
     },
     agents: {
-      list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: o.connected ?? true, version: o.version === undefined ? 'agent-v1.3.0' : o.version }],
-      get: () => ({ id: 'vm', name: 'VM', server: 'space', connected: o.connected ?? true, version: o.version === undefined ? 'agent-v1.3.0' : o.version }),
+      list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: o.connected ?? true, version: o.version === undefined ? 'agent-v1.3.0' : o.version, node: null }],
+      get: () => ({ id: 'vm', name: 'VM', server: 'space', connected: o.connected ?? true, version: o.version === undefined ? 'agent-v1.3.0' : o.version, node: null }),
       request: (async (_agent: string, call: Record<string, unknown>) => {
         requests.push(call);
         if (o.refuse && call.type === o.refuse) throw new AgentRefused('no room for it');

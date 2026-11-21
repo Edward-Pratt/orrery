@@ -1,3 +1,4 @@
+// modular-exempt: the shared types of the hub, the dashboard and the Agent (docs/notes/hardening.md, section 12).
 // The hub's plain data types (wire messages, events, notices, audit entries, stats answers): the game connection's
 // (`Hello`, `ModMsg` with `milestone` and `heartbeat.paused`, `HubMsg` with Factorio's `notice` and `save`) and the
 // Agent connection's (`AgentHello`, `AgentMsg` with `settings`, `AgentRequest` with `settingsSet`, `HubAgentMsg`,
@@ -5,9 +6,10 @@
 // settings: `AllowCommands`, `GameSettingsFields`, `GameSettingsValues` (with `game_password_set`, never the
 // password), `GameSettingsReport`); `Lifecycle` with the silent `lost`; the `paused` event (`Paused`); a factorio
 // server's `settings`, `verificationOff`, `verificationOn` and `settingsRolledBack` notices; `agentLost`/`agentBack`
-// and `eventsOff`/`eventsOn` host notices (`AgentMsg`'s `events`); `DeployPart` with `agent`. Pure types that import
-// nothing, so the dashboard and the Agent (`agent/`, with `import type`) can use them; the modules that own them
-// (`protocol`, `servers`, `stats`, `summary`, `backups`) re-export them.
+// and `eventsOff`/`eventsOn` host notices (`AgentMsg`'s `events`), the `nodeUpdate` one (`AgentHello`'s `node`);
+// `DeployPart` with `agent`. Pure types that import nothing, so the dashboard and the Agent (`agent/`, with `import
+// type`) can use them; the modules that own them (`protocol`, `servers`, `stats`, `summary`, `backups`) re-export
+// them.
 
 /**
  * The hub's plain data types: the wire messages, its events, audit entries and stats answers. Pure types that import
@@ -57,8 +59,11 @@ export type HubMsg =
   /** To an Agent's game connection only: make a named save, answered with `backup`. */
   | { type: 'save' };
 
-/** The first line of an Agent connection, on the Agent port. `protocol` is the same number as a Mod's hello. */
-export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string; token: string; agentVersion: string };
+/**
+ * The first line of an Agent connection, on the Agent port. `protocol` is the same number as a Mod's hello. `node` is
+ * the Agent's Node (`process.version`), left out by an Agent older than it.
+ */
+export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string; token: string; agentVersion: string; node?: string };
 
 /**
  * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState
@@ -372,6 +377,11 @@ export type TargetNotice = { severity: Severity } & (
   /** About a Host (`id`: the Agent's): its Agent turned its server's game events off (`reason`, the Agent's words), then on again. */
   | { kind: 'eventsOff'; name: string; reason: string }
   | { kind: 'eventsOn'; name: string }
+  /**
+   * About a Host (`id`: the Agent's): its Agent's Node (`node`, from its hello) is behind `newest`, the newest Node
+   * release of the same major on nodejs.org (the hub's nightly check).
+   */
+  | { kind: 'nodeUpdate'; name: string; node: string; newest: string }
   | { kind: 'deployStarted'; part: DeployPart; from: string | null; to: string; by: string }
   | { kind: 'deployFinished'; part: DeployPart; from: string | null; to: string; outcome: DeployOutcome }
 );

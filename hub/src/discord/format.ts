@@ -1,22 +1,21 @@
 // Pure Discord output: `Post` = plain text or embeds; `md`, `format*` (a server's rate named and scaled by `rateOf`;
 // `lost` and `paused` not posted; a `milestone` per kind (research, a force's first rocket, platform and landing),
 // its `text` capped at 200 and `text`, `player` and `force` escaped, the force named only when set; a lag notice
-// names the slowest dimension only in TPS (Minecraft); `agentLost`/`agentBack` and `eventsOff`/`eventsOn` host
-// notices; a factorio server's `packUpdateStarted`/`packUpdateFinished` worded as a game update, its `modUpdates` as
+// names the slowest dimension only in TPS (Minecraft); a factorio server's `packUpdateStarted`/`packUpdateFinished` worded as a game update, its `modUpdates` as
 // a "Portal mod updates" embed in its own channel (each update's name and versions through `inline()`, the first 10,
 // then "and N more"), its `verificationOff`/`verificationOn` (the dashboard user's name only when a save made it) and
 // `settingsRolledBack` (naming the game password and user verification as put back too) notices (the `settings` one
 // not posted), `formatEvent(e, game)`, its `from` (the version the Agent reported) and the Agent's pre-update save
-// through `inline()`; deploy notices, the Agent's as "the agent on <id>", with `from` escaped: a Mod's or an Agent's
-// hello names it), plain-text posts cut to 2000 characters after escaping, `chatContent` (a relayed chat line,
+// through `inline()`), plain-text posts cut to 2000 characters after escaping, `chatContent` (a relayed chat line,
 // escaped and cut the same), `formatLinkHint` (`/link`'s answer, naming each game that has a server: "In Minecraft,
 // type `/discord link CODE` within 10 minutes.", or each game's sentence, then "The code works for 10 minutes."),
 // Backup names escaped (with `md()` as the newest, with `inline()` in `backupOverdue`, without a backtick in the
 // list's code spans: an Agent's come from the game's folder), and every other text an Agent controls escaped:
 // `inline()` (inline markdown and masked links, not the line-start rules, which would put a backslash before a GTNH
 // backup's "12.3 seconds") where it goes mid-line in a notice's embed title (a backup's `detail`, a `restartFailed`
-// error, a mount in `diskLow`/`diskOk`, an `eventsOff` reason, a deploy's `from` version, a game update's `from` and
-// pre-update save), `md()` for the players in a topic, `topicDue`. Unit-tested.
+// error, a game update's `from` and pre-update save), `md()` for the players in a topic, `topicDue`; `title`, `embed`,
+// `SEVERITY_COLORS` and `DESCRIPTION` for `format-target.ts`, which formats the host's, services', checks' and
+// deploys' notices. Unit-tested.
 
 import { escapeMarkdown, type APIEmbed } from 'discord.js';
 import { growthPerDay, type Backup } from '../backups/backups.ts';
@@ -31,7 +30,6 @@ import {
   type Notice,
   type ServerState,
   type Severity,
-  type TargetEvent,
 } from '../servers/servers.ts';
 import type { Game } from '../types.ts';
 import type { Summary } from '../stats/summary.ts';
@@ -46,7 +44,7 @@ export const COLORS = { green: 0x2ecc71, grey: 0x95a5a6, red: 0xe74c3c, orange: 
 const CONTENT = 2000;
 const TITLE = 256;
 const FIELD = 1024;
-const DESCRIPTION = 4096;
+export const DESCRIPTION = 4096;
 
 /** Escapes Minecraft text for Discord: no § codes, no markdown, headings, lists or masked links. */
 export function md(s: string): string {
@@ -63,11 +61,11 @@ export function inline(s: string): string {
 }
 
 /** Embed titles render less markdown than descriptions, so they only get § codes stripped. */
-function title(s: string): string {
+export function title(s: string): string {
   return truncate(stripCodes(s), TITLE);
 }
 
-const embed = (e: APIEmbed): Post => ({ embeds: [e] });
+export const embed = (e: APIEmbed): Post => ({ embeds: [e] });
 /** A plain-text post, cut to Discord's 2000 characters after escaping (escaping can double a 1 KiB message). */
 const plain = (s: string): Post => ({ content: truncate(s, CONTENT) });
 
@@ -106,7 +104,7 @@ export function formatLinkHint(code: string, games: Game[]): string {
   return `${lines[0] ?? how.minecraft} within 10 minutes.`; // no servers at all: Minecraft's, as before Factorio
 }
 
-const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
+export const SEVERITY_COLORS: Record<Severity, number> = { problem: COLORS.red, warning: COLORS.orange, good: COLORS.green, info: COLORS.blue };
 
 /** A countdown's words: a restart's, or a stop's (of a server's service). */
 const COUNTDOWN = { restart: { in: '🔄 Restart in', now: '🔄 Restarting now' }, stop: { in: '🛑 Stop in', now: '🛑 Stopping now' } };
@@ -256,53 +254,6 @@ export function formatEvent(e: HubEvent, game: Game = 'minecraft'): Post | null 
     case 'paused': // for the dashboard's card
       return null;
   }
-}
-
-function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
-  switch (e.kind) {
-    case 'checkDown':
-      return `❌ Check ${e.id} is down: ${e.error}`;
-    case 'checkUp':
-      return `✅ Check ${e.id} is back up (${e.ms} ms)`;
-    case 'memoryHigh':
-      return `⚠️ Host ${e.id}: memory at ${e.percent}% for ${e.minutes} min`;
-    case 'memoryOk':
-      return `✅ Host ${e.id}: memory back to ${e.percent}%`;
-    case 'diskLow':
-      return `⚠️ Host ${e.id}: low disk on ${inline(e.mount)}: ${formatBytes(e.free)} free (limit ${e.minFreeGB} GB)`; // an Agent's sample names it
-    case 'diskOk':
-      return `✅ Host ${e.id}: disk on ${inline(e.mount)} back to ${formatBytes(e.free)} free`;
-    case 'serviceFailed':
-      return `❌ Service ${e.id} failed (${e.unit})`;
-    case 'agentLost':
-      return `⚠️ Host ${e.id}: agent ${e.name} is not connected`;
-    case 'agentBack':
-      return `✅ Host ${e.id}: agent ${e.name} is connected again`;
-    case 'eventsOff': // the Agent's words
-      return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
-    case 'eventsOn':
-      return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
-    // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
-    case 'deployStarted':
-      return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : inline(e.from)} → ${e.to} (by ${e.by})`;
-    case 'deployFinished':
-      if (e.outcome === 'ok') return `✅ Deployed ${deployed(e)}: ${e.to}`;
-      if (e.outcome === 'rolled back') return `❌ Deploying ${deployed(e)} ${e.to} failed: rolled back to ${e.from === null ? 'the previous release' : inline(e.from)}`;
-      return `❌ Deploying ${deployed(e)} ${e.to} failed`;
-  }
-}
-
-/** What a deploy was of, and where: "the hub on production", "the Mod on gtnh", "the agent on factorio-vm". */
-const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
-
-/**
- * The alerts channel's post for an event about the host, a service or a check, naming what it is about (the channel
- * is shared); null for events that aren't announced.
- */
-export function formatTargetEvent(e: TargetEvent): Post | null {
-  if (e.type !== 'notice') return null; // samples and service states are for the dashboard
-  const url = 'url' in e ? { description: truncate(e.url, DESCRIPTION) } : {};
-  return embed({ title: title(targetText(e)), ...url, color: SEVERITY_COLORS[e.severity] });
 }
 
 /** A short informational line as an embed (e.g. a command's "server is offline" reply). */

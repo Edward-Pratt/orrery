@@ -23,12 +23,12 @@ import type {
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
-  TargetEvent,
-} from '../src/api.ts';
+  TargetEvent } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/stats/db.ts';
 import { backupCommand, postTargets, type BackupInteraction } from '../src/discord/discord.ts';
-import { formatEvent, formatTargetEvent, type Post } from '../src/discord/format.ts';
+import { formatEvent, type Post } from '../src/discord/format.ts';
+import { formatTargetEvent } from '../src/discord/format-target.ts';
 import type { Links } from '../src/servers/links.ts';
 import type { RestoreEnv, RunRestore } from '../src/backups/restore.ts';
 import type { Run } from '../src/services/services.ts';
@@ -1005,7 +1005,7 @@ async function hostHub(t: TestContext) {
 
 test('a host sample is stored, served as the latest and in the history, and streamed', async (t) => {
   const { use, next, events, get } = await hostHub(t);
-  assert.deepEqual(await get<HostNow>('/api/host'), { id: 'oracle', sample: null });
+  assert.deepEqual(await get<HostNow>('/api/host'), { id: 'oracle', sample: null, node: null });
   use({ busy: 30, idle: 70, memUsed: 4 * GB });
   await next();
   const { sample } = await get<HostNow>('/api/host');
@@ -1127,7 +1127,7 @@ const vmSample = (memUsed: number, free = 50 * GB): HostSample => ({
 
 test("every host is listed, the hub's own first, and serves its own samples; /api/host stays the hub's own", async (t) => {
   const { use, next, get, app, cookie, hosts } = await hostHub(t);
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: null }]);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: null, node: null }]);
   const vm = hosts.add(VM);
   assert.throws(() => hosts.add({ ...VM, id: 'oracle' }), /already known/);
   const reported = vmSample(4 * GB);
@@ -1136,7 +1136,7 @@ test("every host is listed, the hub's own first, and serves its own samples; /ap
   await next();
   const own = (await get<HostNow>('/api/host')).sample!;
   assert.equal(own.cpu, 0.3);
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: own }, { id: 'vm', sample: reported }]);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'oracle', sample: own, node: null }, { id: 'vm', sample: reported, node: null }]);
   assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [reported]);
   assert.deepEqual(await get<HostSample[]>('/api/hosts/oracle/samples?hours=1'), [own]);
   assert.deepEqual(await get<HostSample[]>('/api/host/samples?hours=1'), [own]);
@@ -1660,7 +1660,7 @@ test("with agents but no host integration, each Agent's Host is served with its 
     assert.equal(res.status, 200, path);
     return res.json() as Promise<T>;
   };
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: null }]);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: null, node: null }]);
   const { agent } = await agentOnline(await handle.agentPort!);
   const sample: HostSample = { ts: Date.now(), cpu: 0.5, load: [1, 1, 1], memory: { used: 2, total: 8 }, disks: [{ mount: '/', free: 50 * 1024 ** 3, total: 100 * 1024 ** 3 }] };
   agent.send({ type: 'hostSample', sample });
@@ -1668,7 +1668,7 @@ test("with agents but no host integration, each Agent's Host is served with its 
   const stored = handle.hosts.get('vm')!.latest()!; // stamped with the hub's clock
   assert.ok(stored.ts >= sample.ts && stored.ts <= Date.now());
   assert.deepEqual(stored, { ...sample, ts: stored.ts });
-  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: stored }]);
+  assert.deepEqual(await get<HostNow[]>('/api/hosts'), [{ id: 'vm', sample: stored, node: null }]);
   assert.deepEqual(await get<HostSample[]>('/api/hosts/vm/samples?hours=1'), [stored]);
   assert.equal((await app.request('/api/host', { headers: { cookie } })).status, 404);
   assert.equal((await app.request('/api/hosts/oracle/samples', { headers: { cookie } })).status, 404);

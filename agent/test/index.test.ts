@@ -16,7 +16,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { eventually, fakeHub } from './fake-hub.ts';
+import { eventually, fakeHub, killed } from './fake-hub.ts';
 import { PASSWORD, factorioConfig, fakeRcon } from './fake-rcon.ts';
 
 const TOKEN = 'k'.repeat(40);
@@ -98,7 +98,7 @@ test('the agent connects both ways, pushes its saves, carries out serviceAct wit
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
 
   const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
   assert.equal(agent.lines[0]!.agentVersion, 'agent-v0.0.0', 'package.json version, as a tag');
@@ -144,7 +144,7 @@ test('deploy: starts its own deploy unit (the reply means started), and reports 
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
 
   const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
   const result = await eventually(() => agent.lines.find((m) => m.type === 'deployResult'), 5000, 'the deployResult');
@@ -174,7 +174,7 @@ test('restore and update are refused while a deploy unit of the agent runs (its 
   });
   const { dir, env } = await world(t, rcon.port, hub.port);
   const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
   const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
   await eventually(() => agent.lines.some((m) => m.type === 'serviceState'), 5000, 'serviceState');
   const ask = async (msg: Record<string, unknown>) => {
@@ -229,7 +229,7 @@ test('game settings: pushed on connect, written and applied live on settingsSet,
   );
   await writeFile(adminlist, '[]');
   const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
   const agent = await eventually(() => hub.of('agentHello')[0], 5000, 'the agentHello');
   const pushed = () => agent.lines.filter((m) => m.type === 'settings') as Record<string, any>[];
   await eventually(() => pushed().length > 0, 5000, 'settings on connect');
@@ -263,7 +263,7 @@ test('with no hub reachable the agent keeps running, logs that once, and connect
   const child = spawn(process.execPath, [INDEX], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => (out += d));
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
   await eventually(() => out.includes('no connection to the hub'), 5000, 'the offline log line');
   const hub = await fakeHub(undefined, port);
   t.after(() => hub.close());
@@ -304,7 +304,7 @@ test('check: each line reaches the pipe as its check ends, not at exit (setup sh
   t.after(() => rcon.close());
   const { env } = await world(t, rcon.port, 1);
   const child = spawn(process.execPath, [INDEX, 'check'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  t.after(() => child.kill('SIGKILL'));
+  t.after(() => killed(child));
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   await eventually(() => out.includes('waiting for /orrery-status'), 10_000, 'the waiting note');

@@ -13,7 +13,7 @@ test("an agent-backed service's failures are a notice at most once per 10 min; a
   const targets: TargetEvent[] = [];
   const hub = { publishTarget: (e: TargetEvent) => void targets.push(e), audit: () => {}, get: () => undefined };
   const agents = new EventEmitter() as EventEmitter & Pick<Agents, 'list' | 'request'>;
-  const vm: AgentStatus = { id: 'vm', name: 'Factorio VM', server: 'space', connected: true, version: null };
+  const vm: AgentStatus = { id: 'vm', name: 'Factorio VM', server: 'space', connected: true, version: null, node: null };
   Object.assign(agents, { list: () => [vm], request: () => Promise.reject(new Error('not asked')) });
   let local = 'active';
   const run: Run = async () => `ActiveState=${local}\nSubState=${local === 'failed' ? 'failed' : 'running'}\n`;

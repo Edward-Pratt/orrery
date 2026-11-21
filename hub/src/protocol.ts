@@ -1,3 +1,4 @@
+// modular-exempt: one parser, the wire schemas and their checks (docs/notes/hardening.md, section 12).
 // Wire contract between the hub and what connects to it, one JSON object per line: a Mod or an Agent's game
 // connection (`parseModLine`), and an Agent connection (`parseAgentLine`).
 // The message types live in types.ts (pure types, for the dashboard and the agent too); this file validates against them.
@@ -11,14 +12,15 @@
 // `output` and a `backup`'s `detail` are cut to fit (Mods already deployed send up to 2000 lines of any length).
 // `LIMITS.lineBytes` (1 MiB, the newline not counted) is the Agent port's line cap, for its line reader.
 // `parseModLine` for a game connection (a Mod's, or an Agent's for its server: `milestone`, `heartbeat.paused`),
-// `parseAgentLine` for the Agent port (`agentHello`, a game `hello` as a first line, and the Agent connection's
-// messages), `parseReplyData(request, data)` for an ok `reply`'s data (`journal`/`log`: 1000 lines of 1 KiB; `logs`:
-// file entries; `settingsSet`: `applied` and `pending` keys; `playerLists` and `moderate`: the bans and admins by the
-// admins' rule, `outcome` one of four). `GAME_SETTINGS`: the rules of one game settings field, each integer key's
-// range, the characters a name or description may not hold, a game password's, an admin name's and a settings key's
-// patterns, and `nameBytes`, a changed name's most UTF-8 bytes (the Agent's `wire.ts` holds a copy), which the
-// `settings` schema applies to every field (a name also trimmed); the rules across fields are the modules'. Each
-// returns a new object of only the schema's fields, nested ones too, or null; a `reply`'s `data` alone is only
+// `parseAgentLine` for the Agent port (`agentHello`, its optional `node` by `NODE_RELEASE`: a Node release's
+// `process.version`, at most 32 characters, else the hello is refused; a game `hello` as a first line, and the Agent
+// connection's messages), `parseReplyData(request, data)` for an ok `reply`'s data (`journal`/`log`: 1000 lines of
+// 1 KiB; `logs`: file entries; `settingsSet`: `applied` and `pending` keys; `playerLists` and `moderate`: the bans and
+// admins by the admins' rule, `outcome` one of four). `GAME_SETTINGS`: the rules of one game settings field, each
+// integer key's range, the characters a name or description may not hold, a game password's, an admin name's and a
+// settings key's patterns, and `nameBytes`, a changed name's most UTF-8 bytes (the Agent's `wire.ts` holds a copy),
+// which the `settings` schema applies to every field (a name also trimmed); the rules across fields are the modules'.
+// Each returns a new object of only the schema's fields, nested ones too, or null; a `reply`'s `data` alone is only
 // size-checked (one too deep to serialise is refused), so nothing reads it before `parseReplyData`.
 // `PROTOCOL_VERSION` is shared by the Mod's hello and `agentHello`. The contract with the mod and the Agent.
 import type {
@@ -50,6 +52,13 @@ export const PROTOCOL_VERSION = 1;
  * previous version, so servers can update their mods one at a time.
  */
 export const MIN_PROTOCOL = 1;
+
+/**
+ * An Agent's Node as its `agentHello` names it (`node`, optional: an older Agent sends none): a release's
+ * `process.version`, `vX.Y.Z`, at most 32 characters. A hello with any other `node` is refused, as is one with any
+ * field over its limit; the Agent (`agent/src/wire.ts` holds a copy) sends only a version this matches.
+ */
+export const NODE_RELEASE = /^(?=.{1,32}$)v\d+\.\d+\.\d+$/;
 
 /**
  * Field limits, the same on the Mod port and the Agent port: string lengths in characters (UTF-16 code units),
@@ -285,7 +294,7 @@ const GAME: Schemas<Hello | ModMsg> = {
 const STEPS = ['prepare', 'backup', 'stop', 'swap', 'gate', 'rollback'];
 /** The first line on the Agent port (an `agentHello`, or a game connection's `hello`), and an Agent connection. */
 const AGENT: Schemas<AgentHello | Hello | AgentMsg> = {
-  agentHello: { protocol: num, agentId: str(), token: str(), agentVersion: str() },
+  agentHello: { protocol: num, agentId: str(), token: str(), agentVersion: str(), node: optional(matching(NODE_RELEASE)) },
   hello,
   ping: {},
   bye: {},

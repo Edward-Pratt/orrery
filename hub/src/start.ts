@@ -1,11 +1,13 @@
 // `startHub(config, { startFrontend, get, host, run, restore, github, deploys, download, packs, uploadIdleMs,
-// hub, agents, portal, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub` (`HubOptions`),
-// `agents` (`AgentsOptions`), `gameUpdates` (`GameUpdatesOptions`): shorter timings for tests; `download`: the
-// library's HTTP requests, default `fetch`; `portal`: factorio.com's and the mod portal's, default `fetch`;
-// `githubToken`: for Actions artifacts; `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod links):
-// wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose config
-// section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
-// awaited, and given to `Services` and `Stats`; Discord: `startFrontend`; web: `Roles`, `Users` and the HTTP API);
+// hub, agents, portal, nodeIndex, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub`
+// (`HubOptions`), `agents` (`AgentsOptions`), `gameUpdates` (`GameUpdatesOptions`): shorter timings for tests;
+// `download`: the library's HTTP requests, default `fetch`; `portal`: factorio.com's and the mod portal's, default
+// `fetch`; `githubToken`: for Actions artifacts; `nodeIndex`: nodejs.org's request, for the Node check;
+// `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod
+// links): wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose
+// config section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
+// awaited, and given to `Services`, `Stats` and the web API, and with `nodeIndex` the nightly Node check; Discord:
+// `startFrontend`; web: `Roles`, `Users` and the HTTP API);
 // its handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort`
 // promise, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
 // It keeps the order of construction, starts and awaits, the checks and `Services`; the parts are built by
@@ -22,6 +24,7 @@ import type { FactorioAccount, PortalFetch } from './updates/factorio.ts';
 import type { ModUpdatesOptions } from './updates/mod-updates.ts';
 import type { GameUpdatesOptions } from './updates/game-updates.ts';
 import { Hosts, type HostReaders } from './agents/host.ts';
+import { startNodeCheck, type NodeFetch } from './agents/node-check.ts';
 import type { Fetch } from './packs/library.ts';
 import type { PacksOptions } from './packs/packs.ts';
 import type { RunRestore } from './backups/restore.ts';
@@ -76,6 +79,8 @@ export type HubDeps = {
   packs?: PacksOptions;
   /** factorio.com's and the mod portal's requests, for game updates (default: `fetch`). */
   portal?: PortalFetch;
+  /** nodejs.org's request, for the nightly check of each Agent's Node; without it (tests), no check runs. */
+  nodeIndex?: NodeFetch;
   /**
    * `FACTORIO_USERNAME` and `FACTORIO_TOKEN`: the mods' download links are asked with them, of mods.factorio.com only.
    * Without them a game update is refused at that step (each has mods: `orrery` at least); everything else works.
@@ -140,6 +145,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
     (p) => console.log(`[hub] Agent port on ${agentsCfg!.listen.host}:${p}`),
     (err) => console.error('[hub] Agent port failed, no Agent can connect:', err),
   );
+  const stopNodeCheck = agents && deps.nodeIndex ? startNodeCheck({ agents, hub, fetch: deps.nodeIndex }) : () => {};
   const agentOf = new Map((agentsCfg?.agents ?? []).map((a) => [a.server, a.id]));
   const { stats, backups } = watchBackups(config, hub, db, agents, agentOf);
   const services = systemd && new Services(hub, restarts, systemd, config.servers, checkList ?? [], deps.run!, agents); // checked above
@@ -161,7 +167,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const roles = web && new Roles(db.users, (entry) => db.audit(entry));
   const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
-  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
+  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, agents, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 
@@ -189,6 +195,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
       uploads?.stop();
       stopSummaries();
       upkeep();
+      stopNodeCheck();
       stopPing();
       frontend?.stop();
       return Promise.all([hub.close(), agents?.close(), http?.close()]).then(() => {}).finally(() => {

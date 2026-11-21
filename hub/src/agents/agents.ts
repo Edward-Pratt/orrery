@@ -10,10 +10,10 @@
 // sends, dropped: `NOT_FROM_AGENTS`); either refused (`reconnecting too fast`) under 5 s after the last one of its
 // kind for that Agent was welcomed (`HANDSHAKE_MS`, exported: the agent's tests check its copy), the live one kept;
 // else `reject`, then the connection is ended and destroyed within 2 s whatever the peer does. The registry (`get`,
-// `list`: connected, and the version its latest `agentHello` named). An Agent with no line for 20 s, or whose
-// connection closes without `bye`, is lost: `ServerHub.agentDown` (its server `lost`), one `agentLost` host notice,
-// then `agentBack` when it connects again; after `bye` only `agentDown`. What an Agent connection's lines do (its
-// `events`, host samples, replies and pushes) is `dispatch.ts`'s.
+// `list`: connected, and the version and Node (`node`, null without one) its latest `agentHello` named). An Agent
+// with no line for 20 s, or whose connection closes without `bye`, is lost: `ServerHub.agentDown` (its server
+// `lost`), one `agentLost` host notice, then `agentBack` when it connects again; after `bye` only `agentDown`. What
+// an Agent connection's lines do (its `events`, host samples, replies and pushes) is `dispatch.ts`'s.
 // `request(id, call, { id, timeoutMs })`: typed RPCs with a fresh id (or `id`: an `update`'s, which its steps and end
 // carry) and a 30 s timeout unless the call gives its own, an ok reply's data through `parseReplyData`; rejected when
 // not connected, refused (`AgentRefused`, its `error`: an `ok: false` reply), late, malformed or cut off. Events
@@ -78,6 +78,7 @@ export class Agents extends EventEmitter<AgentEvents> {
   #addresses: Set<string>;
   #conns = new Map<string, Conn>();
   #versions = new Map<string, string>();
+  #nodes = new Map<string, string>(); // each Agent's Node, as its latest hello named it
   #lost = new Set<string>(); // lost (not after `bye`) and not back yet
   #eventsOff = new Set<string>(); // the Agents whose game events are off, as the latest `events` each sent said
   #sockets = new Set<Socket>();
@@ -170,7 +171,7 @@ export class Agents extends EventEmitter<AgentEvents> {
 
   get(id: string): AgentStatus | undefined {
     const a = this.#byId.get(id);
-    return a && { id, name: a.name, server: a.server, connected: this.#conns.has(id), version: this.#versions.get(id) ?? null };
+    return a && { id, name: a.name, server: a.server, connected: this.#conns.has(id), version: this.#versions.get(id) ?? null, node: this.#nodes.get(id) ?? null };
   }
 
   /** Every configured Agent, in config order. */
@@ -223,6 +224,8 @@ export class Agents extends EventEmitter<AgentEvents> {
     this.#conns.set(cfg.id, conn);
     old?.socket.destroy();
     this.#versions.set(cfg.id, hello.agentVersion);
+    if (hello.node === undefined) this.#nodes.delete(cfg.id);
+    else this.#nodes.set(cfg.id, hello.node);
     send(socket, { type: 'welcome' });
     this.#hub.agentUp(cfg.server);
     this.emit('agentUp', cfg.id);

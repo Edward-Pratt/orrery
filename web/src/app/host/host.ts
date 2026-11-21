@@ -34,6 +34,9 @@ const newer = (a: HostSample | null, b: HostSample | null) => (!a || (b && b.ts 
   imports: [DatePipe, HlmSkeleton, HlmToggleGroupImports, PeriodPicker, Releases, TimeSeries],
   template: `
     <h1 class="ar-t-heading-md mb-4">Host {{ id() }}</h1>
+    @if (node(); as n) {
+      <p class="-mt-3 mb-4 text-sm text-muted-foreground" data-node>Node {{ n }}</p>
+    }
     @if (hosts().length > 1) {
       <hlm-toggle-group class="mb-4" type="single" variant="outline" [value]="id()" (valueChange)="choose($any($event) || id())" aria-label="Host" data-hosts>
         @for (h of hosts(); track h.id) {
@@ -93,6 +96,8 @@ export default class Host {
   /** The host shown: the hub's own until another is chosen. */
   readonly id = signal('');
   readonly sample = computed(() => this.hosts().find((h) => h.id === this.id())?.sample ?? null);
+  /** An Agent's Host's Node, as its Agent's hello named it; none for the hub's own, an older Agent or an older hub. */
+  readonly node = computed(() => this.hosts().find((h) => h.id === this.id())?.node ?? null);
   /** Whether the host shown is the hub's own (listed first; the others are Agents'). */
   protected readonly own = computed(() => (this.hosts()[0]?.id ?? '') === this.id());
   /** The first answer is in (a skeleton shows until then). */
@@ -141,7 +146,7 @@ export default class Host {
     const http = inject(HttpClient);
     http.get<HostNow[]>('/api/hosts').subscribe({ error: () => this.loaded.set(true), next: (list) => {
       // A live sample may have come first.
-      this.hosts.update((known) => list.map((h) => ({ id: h.id, sample: newer(known.find((k) => k.id === h.id)?.sample ?? null, h.sample) })));
+      this.hosts.update((known) => list.map((h) => ({ ...h, node: h.node ?? null, sample: newer(known.find((k) => k.id === h.id)?.sample ?? null, h.sample) })));
       if (!this.id() && list.length) this.id.set(list[0].id);
       this.loaded.set(true);
     } });
@@ -159,7 +164,7 @@ export default class Host {
       .subscribe(({ event }) => {
         if (event.type !== 'sample') return;
         const { id, sample } = event;
-        this.hosts.update((list) => (list.some((h) => h.id === id) ? list.map((h) => (h.id === id ? { id, sample } : h)) : [...list, { id, sample }]));
+        this.hosts.update((list) => (list.some((h) => h.id === id) ? list.map((h) => (h.id === id ? { ...h, sample } : h)) : [...list, { id, sample, node: null }]));
         if (id !== this.id()) return;
         this.history.update((h) => (h.length && h.at(-1)!.ts >= sample.ts ? h : [...h, sample]));
       });

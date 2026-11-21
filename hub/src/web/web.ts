@@ -38,6 +38,7 @@ import type { ModUpdates } from '../updates/mod-updates.ts';
 import type { SaveUploads } from '../backups/save-uploads.ts';
 import type { GameUpdates } from '../updates/game-updates.ts';
 import type { GameSettings } from '../servers/game-settings.ts';
+import type { Agents } from '../agents/agents.ts';
 import type { Hosts } from '../agents/host.ts';
 import type { Config, WebIntegration } from '../config.ts';
 import type { Db } from '../stats/db.ts';
@@ -71,6 +72,8 @@ export type WebDeps = {
   checks?: Checks;
   /** Only with the host or agents integration: the hub's own Host and each Agent's. */
   hosts?: Hosts;
+  /** Only with the agents integration: each Agent's Node, for its Host. */
+  agents?: Agents;
   /** Only with the systemd integration. */
   services?: Services;
   /** Only with the systemd integration, and a server with a restore source: a folder and the restore script, or an Agent. */
@@ -96,7 +99,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: logins, sessions, and every other route behind a session and its permissions. */
-export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, agents, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations }: WebDeps) {
   // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
   const newServer = Boolean(packs && library && deploys);
   const app = new Hono<Env>().basePath('/api');
@@ -122,7 +125,7 @@ export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats
   if (deploys) deploysRoutes(app, { deploys, hub, integrations });
   if (checks) app.get('/checks', (c) => c.json(checks.list() satisfies CheckStatus[]));
   if (services) servicesRoutes(app, { services, actor });
-  hostsRoutes(app, { hosts, integrations });
+  hostsRoutes(app, { hosts, agents, integrations });
   if (newServer) newServerRoutes(app, { packs });
   serversRoutes(app, { live, hub, stats, restarts, lag, services, packs, gameUpdates, gameSettings, saveUploads, integrations });
   // Restore needs the server down, so it comes before the online check below, with checks of its own.

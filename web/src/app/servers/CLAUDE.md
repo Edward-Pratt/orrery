@@ -85,12 +85,13 @@ name or from the Browse view (a mod the server runs comes back at the version it
 `ModBrowser`, in the sheet in place of the update view, which stays as it was, scroll included; a `@defer` chunk
 prefetched once the sheet is idle: the portal's mods for the picked version's line from `GET …/game/mods` (search sent
 300 ms after typing stops, category, sort, 24 a page with Load more, which waits while a new search is asked or loads,
-a row a later page repeats dropped, an older answer dropped), each with its thumbnail from the hub's route (a
-placeholder when it fails), owner, compact download count, version, "Mod pack" and "Space Age" badges and a portal
+a row a later page repeats dropped, an older answer dropped; it holds the search, the reads and the rows,
+`mod-browser-rules.ts` the pure rules), the list (`mod-browser-list.ts`), each with its thumbnail from the hub's route
+(a placeholder when it fails), owner, compact download count, version, "Mod pack" and "Space Age" badges and a portal
 link the hub built, its standing in words on one `aria-disabled` button (Installed, Added, Required by X, Add back,
 Add), so the focus stays on it, Add going through Add by name's path so its dependencies (a mod pack's mods) follow, a
-footer counting the changes (a live region) with Review the update; a 404 names the hub release it needs; every portal
-string shown as text), or a whole list through Import mod list (`mod-import.ts`'s `ModImport`, in the sheet in place
+footer (`mod-browser-footer.ts`) counting the changes (a live region) with Review the update; a 404 names the hub
+release it needs; every portal string shown as text), or a whole list through Import mod list (`mod-import.ts`'s `ModImport`, in the sheet in place
 of the update view as Browse is, focus back on its button: the client's `mod-list.json` uploaded (where it is on
 Windows, Linux and macOS said; over 256 KiB not read) or names pasted one per line or comma-separated, read in the
 browser by `mod-list.ts`'s `parseModList` (JSON when it starts with `{`, its shape checked; enabled mods only, the

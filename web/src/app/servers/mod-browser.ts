@@ -2,45 +2,31 @@ import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http'
 import { afterNextRender, Component, computed, ElementRef, inject, input, type OnInit, output, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { ModBrowse, PortalCategory, PortalListing, PortalSort } from '@hub/api';
-import { NgIcon, provideIcons } from '@ng-icons/core';
-import { arCheck, arExternal, arPackage, arPlus } from '@armil/icons';
-import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { catchError, map, of, Subject, switchMap, tap, timer } from 'rxjs';
+import { type BrowseStatus, ModBrowserFooter } from './mod-browser-footer';
+import { ModBrowserList } from './mod-browser-list';
+import { SORTS, whole, why } from './mod-browser-rules';
 
-/** Where the update sheet's catalog answer stands, for the footer: how many changes, or why there's no count. */
-export type BrowseStatus = { checking: boolean; changes: number | null; unresolved: number; error: boolean };
+export type { BrowseStatus } from './mod-browser-footer';
 /** How long typing waits before it asks the hub. */
 export const SEARCH_WAIT_MS = 300;
-/** The mods that come with Factorio itself: the portal doesn't list them, and they are never picked. */
-const GAME_MODS = new Set(['base', 'elevated-rails', 'quality', 'recycler', 'space-age']);
-const SORTS: { id: PortalSort; label: string }[] = [
-  { id: 'downloads', label: 'Most downloaded' },
-  { id: 'updated', label: 'Recently updated' },
-  { id: 'name', label: 'Name' },
-];
-const compact = new Intl.NumberFormat(undefined, { notation: 'compact' });
-const whole = new Intl.NumberFormat();
-const HUB_RELEASE = 'This hub has no mod browser yet: deploy hub-v2.16.0 or later.';
-const why = (err: HttpErrorResponse) => (err.status === 404 ? HUB_RELEASE : typeof err.error === 'string' && err.error ? err.error : `The hub didn't answer (HTTP ${err.status}).`);
 
-/** What a mod on the portal is to the update being picked, said in words on its button. */
-type Standing = { kind: 'installed' | 'added' | 'required' | 'removed' | 'add'; by?: string };
 type Load = { page: number; wait: number };
 
 /**
  * The update sheet's Browse view: the mod portal's mods for the picked Factorio version's line, read through the hub
  * (`GET …/game/mods`, which searches, filters, sorts and pages them; thumbnails from its own route). Add hands a name
  * to the sheet, which puts it in the picks and asks the catalog again, so a mod's dependencies (a portal mod pack's
- * mods too) follow. Every portal string is shown as text.
+ * mods too) follow. Every portal string is shown as text. It holds the search, the reads and the rows; the list is
+ * `mod-browser-list.ts`, the footer `mod-browser-footer.ts`, the pure rules `mod-browser-rules.ts`.
  */
 @Component({
   selector: 'app-mod-browser',
-  imports: [NgIcon, HlmBadge, HlmButton, HlmInput, HlmSkeleton, HlmSpinner],
-  viewProviders: [provideIcons({ arCheck, arExternal, arPackage, arPlus })],
+  imports: [HlmButton, HlmInput, HlmSkeleton, HlmSpinner, ModBrowserList, ModBrowserFooter],
   host: { class: 'flex grow flex-col gap-4' },
   template: `
     <div class="flex flex-col gap-2 px-4">
@@ -107,87 +93,17 @@ type Load = { page: number; wait: number };
           <button hlmBtn variant="link" class="self-start px-0" (click)="clearSearch()" data-browse-clear>Clear search</button>
         }
         @if (list.length) {
-          <ul class="divide-y" aria-label="Mods on the portal" [attr.aria-busy]="loading() === 'first'" [class.opacity-60]="loading() === 'first'" data-browse-list>
-            @for (m of list; track m.name) {
-              @if (!isGame(m.name)) {
-                <li class="flex gap-3 py-3 first:pt-0" [attr.data-listing]="m.name">
-                  @if (noThumb().has(m.name)) {
-                    <span class="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted text-xl text-muted-foreground" data-no-thumb>
-                      <ng-icon name="arPackage" aria-hidden="true" />
-                    </span>
-                  } @else {
-                    <img
-                      class="size-14 shrink-0 rounded-md bg-muted object-cover"
-                      [src]="thumbnail(m.name)"
-                      alt=""
-                      width="56"
-                      height="56"
-                      loading="lazy"
-                      decoding="async"
-                      (error)="missingThumb(m.name)"
-                      data-thumb
-                    />
-                  }
-                  <div class="min-w-0 flex-1">
-                    <h3 class="ar-t-ui-strong line-clamp-2" data-title>{{ m.title }}</h3>
-                    <p class="text-xs text-muted-foreground" data-meta>
-                      @if (m.owner) {
-                        by {{ m.owner }} ·
-                      }
-                      <span [attr.title]="whole(m.downloads) + ' downloads'">{{ compact(m.downloads) }} downloads</span> · {{ m.version }}
-                    </p>
-                    @if (m.summary) {
-                      <p class="mt-1 line-clamp-3 text-muted-foreground" data-summary>{{ m.summary }}</p>
-                    }
-                    @if (m.category === 'mod-packs' || m.spaceAge) {
-                      <p class="mt-1.5 flex flex-wrap gap-1">
-                        @if (m.category === 'mod-packs') {
-                          <span hlmBadge variant="outline" data-badge>Mod pack</span>
-                        }
-                        @if (m.spaceAge) {
-                          <span hlmBadge variant="outline" data-badge>Space Age</span>
-                        }
-                      </p>
-                    }
-                    <div class="mt-2 flex items-center gap-1">
-                      @let s = standing(m.name);
-                      <!-- one button whatever its standing, aria-disabled, so the focus stays on it when Add flips it to Added -->
-                      <button
-                        hlmBtn
-                        variant="outline"
-                        size="sm"
-                        class="aria-disabled:pointer-events-none aria-disabled:opacity-50"
-                        [attr.aria-disabled]="addable(s) ? null : true"
-                        [attr.aria-label]="s.kind === 'add' ? 'Add ' + m.title : s.kind === 'removed' ? 'Add back ' + m.title : null"
-                        (click)="addable(s) && add.emit(m.name)"
-                        data-add-mod
-                      >
-                        @if (addable(s)) {
-                          <ng-icon name="arPlus" aria-hidden="true" />
-                        } @else if (s.kind !== 'required') {
-                          <ng-icon name="arCheck" aria-hidden="true" />
-                        }
-                        {{ label(s) }}
-                      </button>
-                      <a
-                        hlmBtn
-                        variant="ghost"
-                        size="icon-sm"
-                        [href]="m.page"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        [attr.aria-label]="m.title + ' on the mod portal'"
-                        [attr.title]="m.title + ' on the mod portal'"
-                        data-portal
-                      >
-                        <ng-icon name="arExternal" aria-hidden="true" />
-                      </a>
-                    </div>
-                  </div>
-                </li>
-              }
-            }
-          </ul>
+          <app-mod-browser-list
+            [base]="base()"
+            [mods]="list"
+            [loading]="loading()"
+            [noThumb]="noThumb()"
+            [picks]="picks()"
+            [installed]="installed()"
+            [required]="required()"
+            (add)="add.emit($event)"
+            (missingThumb)="missingThumb($event)"
+          />
         }
         @if (list.length && list.length < total()) {
           <div class="flex flex-col items-start gap-2 pb-2">
@@ -215,20 +131,7 @@ type Load = { page: number; wait: number };
       }
     </div>
 
-    <div class="sticky bottom-0 mt-auto flex flex-wrap items-center justify-between gap-2 border-t bg-popover px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-browse-footer>
-      <p class="flex min-w-0 items-center gap-2" aria-live="polite" data-browse-changes>
-        @if (status().checking) {
-          <hlm-spinner /> <span class="text-muted-foreground">Checking with the mod portal…</span>
-        } @else if (status().error) {
-          <span class="text-destructive">The catalog refused: review the update.</span>
-        } @else if (status().unresolved) {
-          <span class="text-destructive">{{ status().unresolved === 1 ? "A dependency can't be met" : status().unresolved + " dependencies can't be met" }}</span>
-        } @else if (status().changes !== null) {
-          <span>{{ status().changes === 1 ? '1 change' : status().changes + ' changes' }}</span>
-        }
-      </p>
-      <button hlmBtn (click)="back.emit()" data-browse-review>Review the update</button>
-    </div>
+    <app-mod-browser-footer [status]="status()" (back)="back.emit()" />
   `,
 })
 export class ModBrowser implements OnInit {
@@ -250,7 +153,6 @@ export class ModBrowser implements OnInit {
   readonly back = output<void>();
 
   protected readonly sorts = SORTS;
-  protected readonly compact = (n: number) => compact.format(n);
   protected readonly whole = (n: number) => whole.format(n);
   protected readonly q = signal('');
   protected readonly category = signal('');
@@ -280,8 +182,6 @@ export class ModBrowser implements OnInit {
     const where = c ? ` in ${c.title}` : '';
     return this.q() ? `No mods for Factorio ${this.line()} match "${this.q()}"${where}.` : `No mods for Factorio ${this.line()}${where}.`;
   });
-  readonly #picked = computed(() => new Set(this.picks()));
-  readonly #installed = computed(() => new Set(this.installed()));
 
   constructor() {
     // One read at a time: a newer search (or page) drops the older one, so a late answer is never shown.
@@ -340,28 +240,9 @@ export class ModBrowser implements OnInit {
     return params.set('sort', this.sort()).set('page', page);
   }
 
-  protected isGame = (name: string) => GAME_MODS.has(name);
-  protected thumbnail = (name: string) => `${this.base()}/mods/${encodeURIComponent(name)}/thumbnail`;
-
   protected missingThumb(name: string): void {
     this.noThumb.update((s) => new Set([...s, name]));
   }
-
-  protected addable = (s: Standing) => s.kind === 'add' || s.kind === 'removed';
-  protected label = (s: Standing) =>
-    ({ add: 'Add', removed: 'Add back', installed: 'Installed', added: 'Added', required: `Required by ${s.by}` })[s.kind];
-
-  /** What the mod is to the update, in the order the rows' buttons say it. */
-  protected standing = (name: string): Standing => {
-    const picked = this.#picked().has(name);
-    const installed = this.#installed().has(name);
-    if (picked && installed) return { kind: 'installed' };
-    if (picked) return { kind: 'added' };
-    const by = this.required().get(name);
-    if (by !== undefined) return { kind: 'required', by };
-    if (installed) return { kind: 'removed' };
-    return { kind: 'add' };
-  };
 
   protected setQuery(q: string): void {
     this.q.set(q);

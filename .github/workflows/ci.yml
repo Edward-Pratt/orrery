@@ -196,6 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: if grep -qE 'failure|cancelled' <<< "$RESULTS"; then echo "a part failed: $RESULTS"; exit 1; fi
+      - run: |
+          if grep -qE 'failure|cancelled' <<< "$RESULTS"; then echo "a part failed: $RESULTS"; exit 1; fi
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}

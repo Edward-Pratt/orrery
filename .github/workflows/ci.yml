@@ -74,9 +74,6 @@ jobs:
       - run: pnpm test
       - run: pnpm run typecheck
       - run: pnpm lint
-      # Until the hub's host has pnpm, the running release's deploy-hub.sh installs a new one with npm: package-lock.json
-      # must still agree with package.json. Last, as it replaces pnpm's node_modules.
-      - run: npm ci --omit=dev
 
   mod:
     needs: changes

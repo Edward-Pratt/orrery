@@ -47,6 +47,7 @@ Lengths count characters (UTF-16 code units).
 | `pending[]` (`settings`, a `settingsSet` reply's `pending` and `applied`) | 16 entries, each 1 to 64 characters |
 | `extra[]` (`settings`) | 32 entries, each 1 to 64 characters |
 | `game_password` (`settingsSet`) | 64 characters |
+| `agentHello.node` | 32 characters, and `^v\d+\.\d+\.\d+$` (`NODE_VERSION`) |
 | `bans[]` (a `playerLists` answer, and a `moderate` answer's `lists`) | 500 entries, each name 1 to 60 characters |
 | a ban's `reason`, and a `moderate`'s `reason` | 200 characters |
 | a `saveChunk`'s `data` (base64 of at most 512 KiB) | 700,000 characters |

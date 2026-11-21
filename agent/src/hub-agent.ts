@@ -4,13 +4,13 @@
 // `tellEvents` and `tellSettings`, `settings` never twice the same on one connection), then the `welcomed` hook (a
 // game update's latest step and pending `updateDone`, a deploy's outcome not yet sent), and the game connection opens
 // if RCON has answered. A `reply` by id to every request: a `Handlers` entry's result (a rejection's message as its
-// `error`, `redact`ed and cut to 2 KiB), or `ok: false` for one that is invalid, of an unknown type or has no handler.
-// Any close reconnects (`hub-retry.ts`: `backoff`, or for a hello the hub refused as `reconnecting too fast`,
-// `tooFastWait`); state changes are logged once each, and that refusal is logged without `(rejected: `, which the
-// first-boot check stops at. After each welcome it writes `<root>/connected`, `{"version":"agent-vX.Y.Z","time":<epoch
-// ms>}`, atomically (temp file and rename; `writeAtomic`): exactly what `deploy-agent.sh`'s gate reads (`version`
-// equal to the tag; the script removes the file right before each restart, so `time` is never compared). Its close
-// closes the game connection too.
+// `error`, `redact`ed and cut to 2 KiB), or `ok: false` for one that is invalid, of an unknown type or has no
+// handler. Any close reconnects (`hub-retry.ts`: `backoff`, or for a hello the
+// hub refused as `reconnecting too fast`, `tooFastWait`); state changes are logged once each, and that refusal is
+// logged without `(rejected: `, which the first-boot check stops at. After each welcome it writes `<root>/connected`,
+// `{"version":"agent-vX.Y.Z","time":<epoch ms>}`, atomically (temp file and rename; `writeAtomic`): exactly what
+// `deploy-agent.sh`'s gate reads (`version` equal to the tag; the script removes the file right before each restart,
+// so `time` is never compared). Its close closes the game connection too.
 
 import { join } from 'node:path';
 import type { AgentMsg, AgentRequest } from '../../hub/src/types.ts';

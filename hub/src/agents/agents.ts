@@ -1,28 +1,28 @@
 // `Agents` (with `integrations.agents`): the Agent port, a second listener on `listen` (`start` resolves once it is
 // bound; while its address isn't on this machine yet, EADDRNOTAVAIL, it tries again every 10 s, logged once, and
-// startup never waits for it). A connection is accepted only from a configured Agent's address with fewer than 4 open,
-// nothing read first (`listener.ts`); its lines are read within the Agent port's budgets (`budgets.ts`: the one table
-// of them), before and after the handshake; a line whose handling throws ends only its own connection. Its first line,
-// within 5 s: an `agentHello` (an id in config whose `address` is the peer's, its token by `timingSafeEqual`, the
-// protocol in range; a second connection replaces the first) or a game `hello` (that Agent's token, for its own
+// startup never waits for it). A connection is accepted only from a configured Agent's address with fewer than 4
+// open, nothing read first (`listener.ts`); its lines are read within the Agent port's budgets (`budgets.ts`: the one
+// table of them), before and after the handshake; a line whose handling throws ends only its own connection. Its first
+// line, within 5 s: an `agentHello` (an id in config whose `address` is the peer's, its token by `timingSafeEqual`,
+// the protocol in range; a second connection replaces the first) or a game `hello` (that Agent's token, for its own
 // `server`, while its Agent connection is up), whose lines it then parses with `parseModLine` and hands, within their
 // budgets, to the handler `ServerHub.attach` returns (`cmdLate`, `quest` and `achievement`, which an Agent never
 // sends, dropped: `NOT_FROM_AGENTS`); either refused (`reconnecting too fast`) under 5 s after the last one of its
 // kind for that Agent was welcomed (`HANDSHAKE_MS`, exported: the agent's tests check its copy), the live one kept;
 // else `reject`, then the connection is ended and destroyed within 2 s whatever the peer does. The registry (`get`,
-// `list`: connected, and the version and Node (`node`, null without one) its latest `agentHello` named). An Agent with
-// no line for 20 s, or whose connection closes without `bye`, is lost: `ServerHub.agentDown` (its server `lost`), one
-// `agentLost` host notice, then `agentBack` when it connects again; after `bye` only `agentDown`. What an Agent
-// connection's lines do (its `events`, host samples, replies and pushes) is `dispatch.ts`'s. `request(id, call, { id,
-// timeoutMs })`: typed RPCs with a fresh id (or `id`: an `update`'s, which its steps and end carry) and a 30 s timeout
-// unless the call gives its own, an ok reply's data through `parseReplyData`; rejected when not connected, refused
-// (`AgentRefused`, its `error`: an `ok: false` reply), late, malformed or cut off. Events (typed): `agentUp` (every
-// welcomed Agent connection), `agentLost`, `agentBack` and what an Agent pushes (`serviceState`, `saves`, `installed`,
-// `updateStep`, `updateDone`, `deployResult`, `settings`, each the parser's schema-only copy). Its throttles by the
-// hub's clock (handshakes, host samples, drop logs) treat a time before their last stamp, a clock stepped back, as
-// long after it. It re-exports `public.ts` (`AgentsOptions`, the event and request types, `AgentStatus`,
-// `AGENT_FLOOR`, `beforeAgentFloor`, `beforeAgentRelease`, `AgentRefused`) and `budgets.ts`'s `everyMinute` and
-// `DropLogs`. Hub core.
+// `list`: connected, and the version and Node (`node`, null without one) its latest `agentHello` named). An Agent
+// with no line for 20 s, or whose connection closes without `bye`, is lost: `ServerHub.agentDown` (its server
+// `lost`), one `agentLost` host notice, then `agentBack` when it connects again; after `bye` only `agentDown`. What
+// an Agent connection's lines do (its `events`, host samples, replies and pushes) is `dispatch.ts`'s.
+// `request(id, call, { id, timeoutMs })`: typed RPCs with a fresh id (or `id`: an `update`'s, which its steps and end
+// carry) and a 30 s timeout unless the call gives its own, an ok reply's data through `parseReplyData`; rejected when
+// not connected, refused (`AgentRefused`, its `error`: an `ok: false` reply), late, malformed or cut off. Events
+// (typed): `agentUp` (every welcomed Agent connection), `agentLost`, `agentBack` and what an Agent pushes
+// (`serviceState`, `saves`, `installed`, `updateStep`, `updateDone`, `deployResult`, `settings`, each the parser's
+// schema-only copy). Its throttles by the hub's clock (handshakes, host samples, drop logs) treat a time before their
+// last stamp, a clock stepped back, as long after it. It re-exports `public.ts` (`AgentsOptions`, the event and
+// request types, `AgentStatus`, `AGENT_FLOOR`, `beforeAgentFloor`, `beforeAgentRelease`, `AgentRefused`) and
+// `budgets.ts`'s `everyMinute` and `DropLogs`. Hub core.
 
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';

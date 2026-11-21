@@ -1,7 +1,7 @@
 // `hostsRoutes`, registered by `webApi`: `/api/hosts` (every Host, the hub's own first, then each Agent's, its `node`
 // from `Agents`) and `/api/hosts/:id/samples?hours=` (404 unknown id) with the host or agents on, and `/api/host` and
-// `/api/host/samples?hours=`, the hub's own alone, only with the host on, kept for one release for an older dashboard;
-// `hours` as `hoursOf` reads it (400 `BAD_HOURS` otherwise).
+// `/api/host/samples?hours=`, the hub's own alone, only with the host on, kept for one release for an older
+// dashboard; `hours` as `hoursOf` reads it (400 `BAD_HOURS` otherwise).
 
 import type { Context, Hono } from 'hono';
 import type { HostHistory, HostNow } from '../api.ts';

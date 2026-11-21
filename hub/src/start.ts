@@ -1,15 +1,16 @@
-// `startHub(config, { startFrontend, get, host, run, restore, github, deploys, download, packs, uploadIdleMs, hub,
-// agents, portal, nodeIndex, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub`
+// `startHub(config, { startFrontend, get, host, run, restore, github, deploys, download, packs, uploadIdleMs,
+// hub, agents, portal, nodeIndex, factorioAccount, gameUpdates })` (`deploys`, `packs`, `uploadIdleMs`, `hub`
 // (`HubOptions`), `agents` (`AgentsOptions`), `gameUpdates` (`GameUpdatesOptions`): shorter timings for tests;
 // `download`: the library's HTTP requests, default `fetch`; `portal`: factorio.com's and the mod portal's, default
 // `fetch`; `githubToken`: for Actions artifacts; `nodeIndex`: nodejs.org's request, for the Node check;
-// `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod links): wires and starts a whole hub (`get` serves
-// the health ping and checks), switching on each integration whose config section is present (Minecraft: `listen`;
-// agents: `Agents`, each Agent's Host added to `Hosts`, its port not awaited, and given to `Services`, `Stats` and the
-// web API, and with `nodeIndex` the nightly Node check; Discord: `startFrontend`; web: `Roles`, `Users` and the HTTP
-// API); its handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort`
-// promise, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests. It
-// keeps the order of construction, starts and awaits, the checks and `Services`; the parts are built by
+// `factorioAccount`: `FACTORIO_USERNAME`/`FACTORIO_TOKEN`, for mod
+// links): wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose
+// config section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
+// awaited, and given to `Services`, `Stats` and the web API, and with `nodeIndex` the nightly Node check; Discord:
+// `startFrontend`; web: `Roles`, `Users` and the HTTP API);
+// its handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort`
+// promise, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
+// It keeps the order of construction, starts and awaits, the checks and `Services`; the parts are built by
 // `start-core.ts` (database, `ServerHub` and its listeners, `updating`, `Late`), `start-backups.ts` (`Stats`, Backup
 // watchdogs, `Restores`), `start-game.ts` (game updates, mod updates, moderation, game settings, save uploads),
 // `start-deploys.ts` (`Deploys`) and `start-packs.ts` (uploads, library, packs). Nothing from `agents.start()` to

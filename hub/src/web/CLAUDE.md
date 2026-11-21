@@ -10,4 +10,4 @@ reads (cards, details, logs, history, players) and the audit log; `web-packs.ts`
 and the packs; `web-game.ts` a factorio server's game updates, mod browser, game settings and save uploads;
 `web-actions.ts` the restore, the online check and the actions behind it; `web-events.ts` the event stream (SSE); `web-config.ts` the check of `integrations.web` for `validateConfig`, and `resolveWeb`. Each file's header is its contract, and the trust boundaries in
 `hub/CLAUDE.md` apply to every route. Tests: `test/web/` (with the shared hub and login helpers in `web-hub.ts`) and,
-for the older ones, `test/start.test.ts`.
+for the older ones, `test/start-web-*.test.ts` and the other `test/start-*.test.ts`.

@@ -1,6 +1,6 @@
 // `integrations.web.status` in `validateConfig` (`src/web/web-config.ts`): optional; when set, an object whose
 // `servers` is a non-empty list of real server ids, each listed once. The rest of `integrations.web`'s rules are
-// tested in `test/config.test.ts`.
+// tested in `test/config-web.test.ts`.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

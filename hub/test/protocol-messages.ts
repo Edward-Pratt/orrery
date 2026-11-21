@@ -1,0 +1,40 @@
+// The protocol tests' shared Agent port messages (`test/protocol*.test.ts`): one valid message of each type the Agent
+// port takes (`AGENT_MSGS`), for the Agent port, limits and game settings tests to change one field of.
+
+export const AGENT_MSGS = {
+  agentHello: { type: 'agentHello', protocol: 1, agentId: 'factorio-vm', token: 'an-agent-token-of-at-least-32-chars', agentVersion: '1.0.0' },
+  hello: { type: 'hello', protocol: 1, serverId: 'space', token: 'an-agent-token-of-at-least-32-chars', modVersion: '1.0.0' },
+  ping: { type: 'ping' },
+  bye: { type: 'bye' },
+  hostSample: { type: 'hostSample', sample: { ts: 1, cpu: 0.25, load: [0.5, 0.4, 0.3], memory: { used: 1, total: 4 }, disks: [{ mount: '/', free: 2, total: 8 }] } },
+  serviceState: { type: 'serviceState', unit: 'factorio.service', active: 'active', sub: 'running', since: 1700000000000, result: 'success' },
+  saves: { type: 'saves', saves: [{ name: 'orrery-20261031T120000Z.zip', size: 1024, mtime: 1700000000000, kind: 'named', current: false }], free: 5e9 },
+  installed: { type: 'installed', factorio: '2.1.24', mods: [{ name: 'base', version: '2.1.24' }, { name: 'orrery', version: '1.0.0' }] },
+  updateStep: { type: 'updateStep', id: '7', step: 'prepare', state: 'running', detail: 'Downloading 2 mods' },
+  updateDone: { type: 'updateDone', id: '7', outcome: 'rolled back', from: '2.1.24 · 5 mods', to: '2.1.25 · 5 mods', backup: 'orrery-pre-update-2.1.24-x.zip' },
+  deployResult: { type: 'deployResult', tag: 'agent-v1.0.1', outcome: 'ok', log: 'flipped current\nconnected' },
+  events: { type: 'events', on: false, reason: 'Factorio could not open its Lua UDP socket (is 127.0.0.1:34198 taken?)' },
+  settings: {
+    type: 'settings',
+    settings: {
+      name: 'orrery Factorio',
+      description: 'Our base, on a friend\'s VM',
+      max_players: 0,
+      game_password_set: true,
+      require_user_verification: false,
+      autosave_interval: 10,
+      autosave_slots: 5,
+      afk_autokick_interval: 0,
+      auto_pause: true,
+      auto_pause_when_players_connect: false,
+      only_admins_can_pause_the_game: true,
+      allow_commands: 'admins-only',
+    },
+    admins: ['alice', 'Bob.the-2nd_'],
+    problem: null,
+    pending: ['auto_pause'],
+    extra: ['tags', 'max_upload_slots'],
+    rolledBack: null,
+  },
+  reply: { type: 'reply', id: '3', ok: true, data: { lines: ['a', 'b'] } },
+};

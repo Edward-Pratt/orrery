@@ -58,8 +58,11 @@ export type HubMsg =
   /** To an Agent's game connection only: make a named save, answered with `backup`. */
   | { type: 'save' };
 
-/** The first line of an Agent connection, on the Agent port. `protocol` is the same number as a Mod's hello. */
-export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string; token: string; agentVersion: string };
+/**
+ * The first line of an Agent connection, on the Agent port. `protocol` is the same number as a Mod's hello. `node` is
+ * the Agent's Node (`process.version`), left out by an Agent older than it.
+ */
+export type AgentHello = { type: 'agentHello'; protocol: number; agentId: string; token: string; agentVersion: string; node?: string };
 
 /**
  * An Agent connection's messages to the hub. `serviceState` is its unit's systemd ActiveState (`active`), SubState

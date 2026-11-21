@@ -150,6 +150,10 @@ An Agent opens two connections:
   like a Mod's: its messages are the ones in "Mod → hub" and "Hub → mod" above.
 
 `agentHello.protocol` shares `PROTOCOL_VERSION` and `MIN_PROTOCOL` with the Mod's hello.
+`agentHello.node` (optional, added without a protocol bump) is the Agent's Node, its `process.version`: a release,
+`^v\d+\.\d+\.\d+$`, at most 32 characters (`NODE_VERSION`). A hello whose `node` is anything else is refused like
+one with any field over its limit, so the Agent leaves it out on a Node that doesn't match (a nightly build); an Agent
+before it sends none. The hub shows it on the Agent's Host and checks it nightly against nodejs.org.
 
 ### Handshake
 
@@ -157,14 +161,14 @@ The first line on the Agent port is one of:
 
 | first line | accepted when | reply |
 |---|---|---|
-| `agentHello` `{ protocol, agentId, token, agentVersion }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
+| `agentHello` `{ protocol, agentId, token, agentVersion, node? }` | `agentId` is in config, `token` is its token (32 to 256 characters, compared in constant time), `protocol` is in range. A second connection replaces the first | `welcome` / `reject` |
 | `hello` `{ protocol, serverId, token, modVersion }` | `token` is that Agent's token, `serverId` is its `server`, and its Agent connection is up (else `reject` with `its agent is not connected`). `modVersion` is the Factorio mod's (`orrery`) version | `welcome` / `reject` |
 
 Either is refused (`reject` with `reconnecting too fast`) under 5 s after the last one of its kind for that Agent was
 welcomed; the connection that one opened stays.
 
 ```json
-{"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0"}
+{"type":"agentHello","protocol":1,"agentId":"factorio-vm","token":"<32 to 256 characters>","agentVersion":"agent-v1.0.0","node":"v24.22.2"}
 ```
 
 ### Agent → hub

@@ -1,18 +1,30 @@
-// Every constant against the hub's, the line cap, `url` and `GAME_SETTINGS` included; an update's URLs taken up to
-// 2048 characters, refused at 2049; a `settingsSet`'s every field at and past its rule, its password left out, null or
-// set; `printable`, also in command output and log lines.
+// Every constant against the hub's, the line cap, `url`, `GAME_SETTINGS` and `NODE_VERSION` included (the hello's
+// `node` sent only when the hub's parser takes it); an update's URLs taken up to 2048 characters, refused at 2049; a
+// `settingsSet`'s every field at and past its rule, its password left out, null or set; `printable`, also in command
+// output and log lines.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as hub from '../../hub/src/protocol.ts';
-import { GAME_SETTINGS, LIMITS, LineReader, LineTooLong, PROTOCOL_VERSION, encode, outputLines, printable, readAgentLine, readGameLine, replyLines } from '../src/wire.ts';
+import { GAME_SETTINGS, LIMITS, LineReader, LineTooLong, NODE_VERSION, PROTOCOL_VERSION, encode, outputLines, printable, readAgentLine, readGameLine, replyLines } from '../src/wire.ts';
 
 test('the constants are the hub contract: the protocol version and every field limit; the line cap is 1 MiB', () => {
   assert.equal(PROTOCOL_VERSION, hub.PROTOCOL_VERSION);
   assert.deepEqual(LIMITS, hub.LIMITS, 'every limit, the line cap included');
   assert.deepEqual(GAME_SETTINGS, hub.GAME_SETTINGS, "the game settings' rules: ranges and patterns");
+  assert.deepEqual(NODE_VERSION, hub.NODE_VERSION, "the hello's node");
   // An update's URLs have their own limit: a signed dl-mod.factorio.com link is longer than `text`.
   assert.equal(LIMITS.url, 2048);
   assert.equal(LIMITS.lineBytes, 1024 * 1024, "the owner's decision (2026-10-31): 1 MiB per line on the Agent port");
+});
+
+test("the hello's node is sent only when the hub takes it: a release's process.version, not a nightly or an over-long one", () => {
+  const hello = (node: string) => JSON.stringify({ type: 'agentHello', protocol: 1, agentId: 'vm', token: 't', agentVersion: 'agent-v1.5.0', node });
+  const long = `v1.2.${'3'.repeat(28)}`; // 33 characters
+  for (const node of [process.version, 'v24.22.2', 'v26.0.0-nightly20261101abcdef', 'v24.22.2-rc.1', '24.22.2', long, long.slice(0, 32)]) {
+    assert.equal(NODE_VERSION.test(node), hub.parseAgentLine(hello(node)) !== null, node);
+  }
+  assert.ok(NODE_VERSION.test(process.version), 'the Node running the tests is a release');
+  assert.ok(!NODE_VERSION.test(long) && NODE_VERSION.test(long.slice(0, 32)), 'at most 32 characters');
 });
 
 test('the line reader splits lines across chunks and bytes, UTF-8 included, and skips blank lines', () => {

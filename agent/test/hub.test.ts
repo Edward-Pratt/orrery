@@ -70,7 +70,7 @@ test('agentHello first, nothing else before welcome; then serviceState, pings an
   client.service({ unit: 'factorio.service', active: 'active', sub: 'running', since: 1_700_000_000_000, result: 'success' });
   client.start();
   const [first] = await eventually(() => hub.of('agentHello').length === 1 && hub.of('agentHello'));
-  assert.deepEqual(first!.lines[0], { type: 'agentHello', protocol: 1, agentId: 'factorio-vm', token: TOKEN, agentVersion: VERSION });
+  assert.deepEqual(first!.lines[0], { type: 'agentHello', protocol: 1, agentId: 'factorio-vm', token: TOKEN, agentVersion: VERSION, node: process.version });
   client.sample({ ts: 1, cpu: 0.5, load: [1, 2, 3], memory: { used: 1, total: 2 }, disks: [] });
   client.status({ ...READING, ups: 60 });
   await sleep(60);

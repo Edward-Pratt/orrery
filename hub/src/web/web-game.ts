@@ -69,7 +69,7 @@ export function gameUpdatesRoutes(app: Hono<Env>, { gameUpdates }: { gameUpdates
 
 /** Registers the game settings and the save upload routes on `app`, each block only with its module on. */
 export function gameSettingsRoutes(app: Hono<Env>, { gameSettings, saveUploads }: Pick<WebDeps, 'gameSettings' | 'saveUploads'>): void {
-  // Game settings are written while the server is stopped too, so they come before the online check below.
+  // Game settings are written while the server is stopped too, so they come before the online check (`webApi` registers them first).
   if (gameSettings) {
     /** Runs a game settings call for a server an Agent runs, mapping its refusals to their status. */
     const settings = async (c: Context<Env>, fn: (id: string, user: Me) => Promise<object>) => {
@@ -87,7 +87,7 @@ export function gameSettingsRoutes(app: Hono<Env>, { gameSettings, saveUploads }
       settings(c, async (sid, user) => (await gameSettings.set(sid, await jsonBody(c.req), actor(user), user.username)) satisfies GameSettingsAnswer),
     );
   }
-  // An uploaded save goes to a stopped server too, so before the online check below.
+  // An uploaded save goes to a stopped server too, so before the online check (`webApi` registers it first).
   if (saveUploads) {
     app.post('/servers/:id/saves', async (c) => {
       const id = c.req.param('id');

@@ -38,7 +38,7 @@ Nothing builds at the root: run pnpm in `hub/`, `web/` and `agent/` (each pins i
   never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with local Users (`hub/src/users/`:
   passwords, Roles of Permissions, per-server Grants, invites; `docs/adr/0005`; no bot needed), each route's permission in
-  `hub/src/web/permit.ts`, and SQLite sessions (`hub/src/web/web.ts`). Same frontend rule as Discord, plus `Users`, `Roles`
+  `hub/src/web/permit.ts`, and SQLite sessions (`hub/src/web/auth.ts`). Same frontend rule as Discord, plus `Users`, `Roles`
   and its own session rows in `Db`. Off: no HTTP port. The first owner: `pnpm users invite <name>` on the host.
 - `hub/src/start.ts` (`startHub`) wires the hub from config; `index.ts` only builds the real outside world.
 - The mod has no business logic and no Discord knowledge. The Factorio mod is the same, and talks only to its

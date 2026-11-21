@@ -1,7 +1,7 @@
 // Entry point: raises Node's per-address connect attempt to 2.5 s (a lost SYN at 250 ms failed whole fetches with
 // ETIMEDOUT), reads config and env (`FACTORIO_USERNAME` and `FACTORIO_TOKEN` are optional: without both, with agents
 // on, a warning, and only game updates are refused: each has `orrery`, a portal mod), starts the hub with the real
-// Discord frontend, HTTP get and GitHub reader, wires signals. Dashboard logins are local Users: a
+// Discord frontend, HTTP get, nodejs.org fetch and GitHub reader, wires signals. Dashboard logins are local Users: a
 // `DISCORD_CLIENT_SECRET` left in the env only warns, for one release.
 
 import net from 'node:net';
@@ -54,6 +54,7 @@ const handle = await startHub(config, {
   github: github && githubToken ? githubReader(github.repo, githubToken) : undefined,
   githubToken: githubToken || undefined,
   factorioAccount,
+  nodeIndex: fetch,
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

@@ -6,4 +6,5 @@ folder's public names. `listener.ts` is the port's sockets (the address check, t
 the rate limits (the one table of the port's budgets), `dispatch.ts` what an Agent connection's lines do (pushes,
 `events`, host samples, the request and reply bookkeeping) and a heartbeat's new players, `public.ts` the exported
 types, `AgentRefused` and the Agent release floors. `host.ts` is every Host the hub knows, measured by its Agent or,
-for the hub's own, by the hub. Each file's header is its contract. Tests: `test/agents/`.
+for the hub's own, by the hub; `node-check.ts` the nightly check of each Agent's Node against nodejs.org's releases
+(a `nodeUpdate` notice when it is behind its major's newest). Each file's header is its contract. Tests: `test/agents/`.

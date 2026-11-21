@@ -222,7 +222,7 @@ test('handshake: a bad token, an unknown Agent or protocol, a wrong server, and 
   await agent.closed;
   await sleep(50);
   assert.deepEqual(types(), ['connected']);
-  assert.deepEqual(agents.list(), [{ id: 'vm', name: 'Factorio VM', server: 'space', connected: true, version: 'agent-v1.0.0' }]);
+  assert.deepEqual(agents.list(), [{ id: 'vm', name: 'Factorio VM', server: 'space', connected: true, version: 'agent-v1.0.0', node: null }]);
   second.send({ type: 'ping' });
 });
 

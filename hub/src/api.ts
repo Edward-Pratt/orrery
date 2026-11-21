@@ -101,9 +101,11 @@ export type Integrations = {
  * `GET /api/hosts` (with the host or agents integration): every Host, the hub's own first, then each Agent's (`id`:
  * the Agent's), each with its id and latest sample, null until the first (for the hub's own, a minute after the hub
  * starts; for an Agent's, its first `hostSample`). Each new sample is also a `sample` event on the stream, with the
- * host's id. `GET /api/host` is the hub's own alone, only with the host integration (kept for one release).
+ * host's id. `node`: an Agent's Host's Node, as its Agent's latest `agentHello` named it (`v24.22.2`); null for the
+ * hub's own and for an Agent that named none (older than `node`); left out by a hub older than it. `GET /api/host` is
+ * the hub's own alone, only with the host integration (kept for one release).
  */
-export type HostNow = { id: string; sample: HostSample | null };
+export type HostNow = { id: string; sample: HostSample | null; node: string | null };
 
 /**
  * `GET /api/hosts/:id/samples[?hours=1–2160]` (404 unknown id): the host's samples over the last `hours` (default

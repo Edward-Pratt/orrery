@@ -1,8 +1,9 @@
 // The alerts channel's posts for events about the host, a service, a check or a deploy (`formatTargetEvent`): each
 // notice names what it is about, as the channel is shared; samples and service states are not posted. Host notices:
 // memory and disk (a mount `inline()`: an Agent's sample names it), `agentLost`/`agentBack` and `eventsOff`/`eventsOn`
-// (the Agent's reason `inline()`); a check's URL as the description; deploy notices, the Agent's as "the agent on
-// <id>", with `from` escaped (a Mod's or an Agent's hello names it). Embeds by `format.ts`'s rules. Unit-tested.
+// (the Agent's reason `inline()`), `nodeUpdate` (what to do, `NODE_STEPS`, as the description); a check's URL as the
+// description; deploy notices, the Agent's as "the agent on <id>", with `from` escaped (a Mod's or an Agent's hello
+// names it). Embeds by `format.ts`'s rules. Unit-tested.
 
 import { DESCRIPTION, embed, inline, SEVERITY_COLORS, title, type Post } from './format.ts';
 import { truncate, type TargetEvent } from '../servers/servers.ts';
@@ -32,6 +33,8 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
       return `⚠️ Host ${e.id}: game events from agent ${e.name} are off: ${inline(e.reason)}`;
     case 'eventsOn':
       return `✅ Host ${e.id}: game events from agent ${e.name} are on again`;
+    case 'nodeUpdate': // both versions checked `vX.Y.Z` (`NODE_VERSION`): nothing to escape
+      return `⬆️ Host ${e.id}: Node ${e.node} on agent ${e.name} is behind ${e.newest}`;
     // `from` is what the part said it runs (a Mod's or an Agent's hello): escaped. `to` is a tag GitHub listed.
     case 'deployStarted':
       return `🚀 Deploying ${deployed(e)}: ${e.from === null ? 'unknown' : inline(e.from)} → ${e.to} (by ${e.by})`;
@@ -42,6 +45,10 @@ function targetText(e: Extract<TargetEvent, { type: 'notice' }>): string {
   }
 }
 
+/** What to do about a `nodeUpdate`: docs/RELEASING.md, "Updating Node on an Agent's Host". */
+export const NODE_STEPS =
+  "Bump `NODE_VERSION` and `NODE_SHA256` in `deploy/setup-agent-host.sh`, cut an Agent patch release, then ask the friend to re-run setup from that tag (docs/RELEASING.md, \"Updating Node on an Agent's Host\").";
+
 /** What a deploy was of, and where: "the hub on production", "the Mod on gtnh", "the agent on factorio-vm". */
 const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 'the dashboard', mod: 'the Mod', agent: 'the agent' }[e.part]} on ${e.id}`;
 
@@ -51,6 +58,6 @@ const deployed = (e: { part: string; id: string }) => `${{ hub: 'the hub', web: 
  */
 export function formatTargetEvent(e: TargetEvent): Post | null {
   if (e.type !== 'notice') return null; // samples and service states are for the dashboard
-  const url = 'url' in e ? { description: truncate(e.url, DESCRIPTION) } : {};
+  const url = 'url' in e ? { description: truncate(e.url, DESCRIPTION) } : e.kind === 'nodeUpdate' ? { description: NODE_STEPS } : {};
   return embed({ title: title(targetText(e)), ...url, color: SEVERITY_COLORS[e.severity] });
 }

@@ -190,7 +190,7 @@ test("an Agent's server's Backups are the saves it last pushed, newest first wit
   const hub = { get: (id: string) => ({ gtnh, space })[id] } as unknown as Pick<ServerHub, 'get'>;
   const events = new EventEmitter<AgentEvents>();
   const agents = Object.assign(events, {
-    list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: true, version: null }],
+    list: () => [{ id: 'vm', name: 'VM', server: 'space', connected: true, version: null, node: null }],
     request: () => Promise.reject(new Error('not asked')),
   }) as unknown as Pick<Agents, 'list' | 'request' | 'on'>;
   const stats = new Stats(hub, db, [{ id: 'gtnh', backupMinFreeGB: 10 }, { id: 'space', backupMinFreeGB: 5 }], agents);

@@ -48,8 +48,11 @@ export type AgentCall = AgentRequest extends infer R ? (R extends AgentRequest ?
 /** What a request's promise resolves to: its reply's checked `data`, for the requests that answer with data. */
 export type AgentAnswer<T extends AgentRequest['type']> = T extends keyof AgentReplyData ? AgentReplyData[T] : void;
 
-/** An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves. */
-export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null };
+/**
+ * An Agent as the registry knows it: `version` is what its latest `agentHello` announced, kept after it leaves; `node`
+ * its Node as that hello named it (null when it named none: an Agent older than `node`).
+ */
+export type AgentStatus = { id: string; name: string; server: string; connected: boolean; version: string | null; node: string | null };
 
 /**
  * The first Agent release with game updates and its own deploys (release 2, `docs/ROADMAP.md`): `agent-v1.0.0` has

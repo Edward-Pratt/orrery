@@ -9,7 +9,7 @@ import { HlmSpinner } from '@spartan-ng/helm/spinner';
 import { firstValueFrom } from 'rxjs';
 import { Feedback } from '../feedback';
 
-/** The hub's rules for a new server (`packs.ts`), checked here first so the form says what's wrong. */
+/** The hub's rules for a new server (`packs/pack-install.ts`), checked here first so the form says what's wrong. */
 const ID = /^[a-z][a-z0-9-]{0,31}$/;
 const MEMORY = /^[1-9]\d{0,5}[MG]$/;
 

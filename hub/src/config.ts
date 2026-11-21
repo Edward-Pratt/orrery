@@ -2,13 +2,13 @@
 // `minecraft`, lag 15 TPS (50 UPS for factorio)/2 min, quests `batched`, 10 GB free, 7-day web sessions, web's guild
 // and admin role from `discord`) and the Backup folder derived (`backupDir`, else `<dir>/backups`), after
 // `validateConfig` (`config-validate.ts`) finds no problem. The per-server defaults, a Host's limits and production's
-// deploy targets are in `config-defaults.ts`; `loadConfig` itself defaults `environment`, `newerAfterDays` and a Host's
-// `mounts`, and `resolveWeb` (`web/web-config.ts`) the web ones. The shape and its types are in `config-types.ts`. Every caller imports from here: it re-exports the types, `ENVIRONMENTS`,
+// deploy targets are in `config-defaults.ts`; `loadConfig` itself defaults `newerAfterDays` and a Host's
+// `mounts`, and `resolveWeb` (`web/web-config.ts`) the web ones. The shape and its types are in `config-types.ts`. Every caller imports from here: it re-exports the types,
 // `PRODUCTION_DEPLOYS` and `validateConfig`. Used by startup and `check-config`. Hub core.
 
 import { readFileSync } from 'node:fs';
 import { HOST_LIMITS, PRODUCTION_DEPLOYS, resolve } from './config-defaults.ts';
-import type { Config, Environment, HostIntegration, HostLimits, ServerEntry } from './config-types.ts';
+import type { Config, HostIntegration, HostLimits, ServerEntry } from './config-types.ts';
 import { validateConfig } from './config-validate.ts';
 import { resolveWeb } from './web/web-config.ts';
 
@@ -19,7 +19,6 @@ export type {
   Config,
   DeployTargets,
   DiscordConfig,
-  Environment,
   GithubIntegration,
   HostIntegration,
   HostLimits,
@@ -28,7 +27,6 @@ export type {
   ServiceConfig,
   WebIntegration,
 } from './config-types.ts';
-export { ENVIRONMENTS } from './config-types.ts';
 export { PRODUCTION_DEPLOYS } from './config-defaults.ts';
 export { validateConfig } from './config-validate.ts';
 
@@ -44,7 +42,7 @@ export function loadConfig(path: string): Config {
   if (errors.length) {
     throw new Error(`${path} has ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n- ${errors.join('\n- ')}`);
   }
-  const c = raw as Omit<Config, 'servers' | 'environment'> & { environment?: Environment; servers: ServerEntry[] };
+  const c = raw as Omit<Config, 'servers'> & { servers: ServerEntry[] };
   const integrations = { ...c.integrations };
   const { web, host, github, agents } = integrations;
   if (github) {
@@ -62,5 +60,5 @@ export function loadConfig(path: string): Config {
     };
   }
   if (web) integrations.web = resolveWeb(web);
-  return { ...c, environment: c.environment ?? 'production', servers: c.servers.map(resolve), integrations };
+  return { ...c, servers: c.servers.map(resolve), integrations };
 }

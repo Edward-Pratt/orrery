@@ -11,11 +11,8 @@ tested by `test-restore-backup.sh`) and the deploys, which the hub starts per ta
 `orrery-deploy@.service` runs `deploy-hub.sh` as the hub's user (builds `<root>/releases/<tag>` with pnpm, which the host needs: `docs/RELEASING.md`; flips the
 `current` symlink, rolls back if the hub won't stay up 30 s), `orrery-deploy-web@.service` runs `deploy-web.sh` as
 root from a root-owned copy in `/usr/local/lib/orrery` (around `install-web.sh`); both write
-`<root>/deploy-status.json` and are tested by `test-deploy.sh`. `orrery-deploy-staging@` and
-`orrery-deploy-web-staging@` are staging's copies. Their polkit blocks are separate from `UNITS`: they allow only
-`start` on those templates for well-formed tags and `restart` on that environment's hub. Staging (`docs/ROADMAP.md`, #91) runs `orrery-hub-staging.service` as
-`orrery-staging` from `/srv/orrery-staging` (its header holds the one-time setup; config from
-`hub/config.staging.example.json`), behind the Caddyfile's `staging.orrery.run` site (port 25582, `/var/www/orrery-staging`).
+`<root>/deploy-status.json` and are tested by `test-deploy.sh`. Their polkit block is separate from `UNITS`: it allows
+only `start` on those templates for well-formed tags and `restart` on the hub.
 `add-server.sh` (run as root from its root-owned copy in `/usr/local/lib/orrery`) finishes a Pending server: its
 `config.json` entry, token and service link (checked as the hub user, `config.json.bak` kept), `<id>.service` and
 `<id>.socket` like `gtnh`'s, its polkit file, enabled, then the hub restarted; tested by `test-add-server.sh`.

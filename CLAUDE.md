@@ -8,7 +8,7 @@ A hub for everything its owner runs or ships (game servers first); today a Disco
 - `agent/` — Node/TypeScript service on a remote Host that dials out to the hub and runs that Host's Factorio server. See `agent/CLAUDE.md`.
 - `web/` — the dashboard, an Angular app talking only to the hub's HTTP API. See `web/CLAUDE.md`.
 - `factorio/` — the Factorio mod `orrery`, control-only Lua, published on the mod portal. See `factorio/CLAUDE.md`.
-- `deploy/` — systemd units, polkit rules, the `Caddyfile` and the scripts for the production host, staging and an
+- `deploy/` — systemd units, polkit rules, the `Caddyfile` and the scripts for the production host and an
   Agent's Host, each script with its test. See `deploy/CLAUDE.md`. **Keep `orrery-hub.rules`' `UNITS` in sync with
   `integrations.systemd`** (its exceptions are listed there).
 - `docs/protocol.md` — the wire protocol (living, authoritative).
@@ -96,14 +96,14 @@ workflow builds, how each part deploys, what still needs a hand, and the by-hand
 
 `hub/config.json` (server tokens, IDs) and `.env` (`DISCORD_TOKEN`) are git-ignored. Never commit them.
 `GITHUB_TOKEN` (with `integrations.github`, and for the library's Actions artifacts: a fine-grained token with read access to the repo's contents and Actions) lives in
-the root-only `/etc/orrery.env` on the host (staging: `/etc/orrery-staging.env`), read by the hub and its deploy units.
+the root-only `/etc/orrery.env` on the host, read by the hub and its deploy units.
 `FACTORIO_USERNAME` and `FACTORIO_TOKEN` (the owner's factorio.com account: a game update asks `mods.factorio.com` with them
 for each mod's signed download link, and the links sent to the Agent carry no credential, only `secure`; without both
 the hub warns at start, the catalog still answers, and every game update is refused (409), naming the file) live in the
 root-only `/etc/orrery-factorio-account.env`, read by `orrery-hub.service` alone through its
 `EnvironmentFile=-/etc/orrery-factorio-account.env` (the leading `-`: a hub without the file starts; `test-deploy.sh` checks
 that no other unit names it): the deploy units load `/etc/orrery.env`, and their `pnpm install` must never see the account.
-Staging has no Agent and no such file. Never commit them or put them in `config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
+Never commit them or put them in `config.json`. `FACTORIO_API_KEY` (the mod portal, with "Publish Mods" and "Upload Mods") is a GitHub repo secret, read only by
 `release.yml`'s portal step.
 On an Agent's Host, setup writes the root-only `/etc/orrery-agent.env` (`ORRERY_AGENT_TOKEN`, the Agent's token from the hub's
 `config.json`; read by `orrery-agent.service`) and `/etc/orrery-factorio.env` (`RCON_PASSWORD`; read by the Agent's unit and the

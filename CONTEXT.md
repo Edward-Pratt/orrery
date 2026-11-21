@@ -147,7 +147,7 @@ A newer release of a portal mod a factorio server runs that fits its Factorio. T
 _Avoid_: mod update (the Mod is the Minecraft one), upgrade
 
 **Pack library**:
-The pack versions an Environment's hub keeps, by pack name and version, for any of its servers to install or update to. A version is removed only by hand, and only while no server runs it.
+The pack versions the hub keeps, by pack name and version, for any of its servers to install or update to. A version is removed only by hand, and only while no server runs it.
 _Avoid_: cache, store, repository
 
 **Install**:
@@ -159,7 +159,7 @@ A server the hub has installed but that isn't in config yet, because the host's 
 _Avoid_: draft, new server, unconfigured server
 
 **Java runtime**:
-A Java build the hub keeps for its Environment's servers, named by vendor and full version (Temurin 21.0.8+9). Each server runs on the one it is set to, or on the host's own Java when none is set; a change applies at its next restart. A runtime is removed only by hand, and only while no server is set to it.
+A Java build the hub keeps for its servers, named by vendor and full version (Temurin 21.0.8+9). Each server runs on the one it is set to, or on the host's own Java when none is set; a change applies at its next restart. A runtime is removed only by hand, and only while no server is set to it.
 _Avoid_: JDK, JRE, Java version (a version is the number)
 
 ### Releases
@@ -169,19 +169,13 @@ A tagged version of one part (hub, Mod, dashboard, Agent or Factorio mod), e.g. 
 _Avoid_: build, version (a version is the number)
 
 **Deploy**:
-Putting one release of one part in place: the hub or dashboard onto an environment (production or staging), the Mod onto one server, an Agent onto its Host (from `agent-v1.1.0` on; an Agent on an older release is moved by its Host's owner re-running the setup). Each hub deploys only its own environment. Going back to an older release is a deploy too. The Factorio mod is not deployed: its releases reach its server through game updates.
+Putting one release of one part in place: the hub or dashboard onto the host, the Mod onto one server, an Agent onto its Host (from `agent-v1.1.0` on; an Agent on an older release is moved by its Host's owner re-running the setup). A hub deploys only itself and its own dashboard. Going back to an older release is a deploy too. The Factorio mod is not deployed: its releases reach its server through game updates.
 _Avoid_: install, rollout, push, redeploy (deploying the running release is refused)
 
 **Rollback**:
 Returning by itself to what ran before, when a deploy's new release, an update's new version or a factorio server's new game settings fail to come up: to the release before it, to the files before it (for a game update, also to its pre-update save), or to the game settings of its last good start.
 _Avoid_: revert, downgrade (choosing an older release is a deploy)
 
-**Environment**:
-One hub and its dashboard, with their own config, data and login: Production or Staging. A hub acts only on its own environment.
-
 **Production**:
-The hub and dashboard people really use, with the real servers.
-
-**Staging**:
-A second hub and dashboard for trying changes before production, with no game server of its own.
-_Avoid_: pre-production, test, dev
+The hub and dashboard people really use, with the real servers. There is no other: the Staging environment was removed (2026-11-21, `docs/notes/hardening.md` §11).
+_Avoid_: environment, staging (a pack update's working folder and `failed in staging` keep that word)

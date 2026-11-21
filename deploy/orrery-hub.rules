@@ -40,18 +40,3 @@ polkit.addRule(function (action, subject) {
     return polkit.Result.YES;
   }
 });
-
-// Staging's deploys: the same for staging's hub user over staging's templates and hub, never production's. The
-// orrery-staging user is created by deploy/orrery-hub-staging.service's one-time setup.
-polkit.addRule(function (action, subject) {
-  if (action.id !== 'org.freedesktop.systemd1.manage-units' || subject.user !== 'orrery-staging') return;
-  var unit = action.lookup('unit');
-  var verb = action.lookup('verb');
-  if (
-    (verb === 'start' && /^orrery-deploy-staging@hub-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
-    (verb === 'start' && /^orrery-deploy-web-staging@web-v\d+\.\d+\.\d+\.service$/.test(unit)) ||
-    (verb === 'restart' && unit === 'orrery-hub-staging.service')
-  ) {
-    return polkit.Result.YES;
-  }
-});

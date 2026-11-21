@@ -130,10 +130,10 @@ Cloudflare, which refuses bodies over 100 MB: the adopted zip went up over an SS
 updates). Still to smoke test on the real server: Apply changes, a version update with players online, a rollback and
 restoring its pre-update backup.
 
-**Staging — built, to set up on the host:** #91. Config's `environment` and `GET /api/environment`, the dashboard's
+**Staging — removed 2026-11-21 (hardening §11), never set up on the host:** #91. Config's `environment` and `GET /api/environment`, the dashboard's
 Staging badge and tab title, the Servers page without the Minecraft integration (for Staging's offline `demo`),
 `deploy/orrery-hub-staging.service` (its header: the one-time setup), the Caddyfile's `staging.orrery.run` site and
-`hub/config.staging.example.json`. Still to do on the host: the setup and the spec's manual smoke test.
+`hub/config.staging.example.json`, all deleted again; the host's `orrery-staging` user and folder go by hand.
 
 **Logs, history and console — done (`hub-v2.13.0` + `web-v0.11.0`, deployed 2026-10-26):** no spec, three issues.
 Chat and console history survive hub restarts and deploys: a server's chat lines and console entries go to a `feed`
@@ -146,7 +146,7 @@ the Logs tab against `gtnh`'s folder.
 |---|---|---|---|---|
 | 1 | Chat mirroring across dashboard, Discord and game, and a hub timestamp on every live event (folds in #85): #88 | hub + web + mod (optional wire field, no protocol bump) | M | — |
 | 2 | Releases and deploys: `.github/release.sh`, hub self-deploy with Rollback, dashboard and Mod deploys, `integrations.github`: #89 | repo + hub + web + deploy | L | — |
-| 3 | Staging: a second Environment at `staging.orrery.run`, its own OS user, OAuth app and `demo` server: #91 | hub + web + deploy | S | #89's release layout and deploy units |
+| 3 | Staging (removed 2026-11-21, hardening §11): a second Environment at `staging.orrery.run`, its own OS user, OAuth app and `demo` server: #91 | hub + web + deploy | S | #89's release layout and deploy units |
 | 4 | Packs: Adopt, Extras, Config edits, Pack updates with Rollback, the Pack tab: #90 | hub + web + deploy | L | #89's Mod deploy (a Pack update puts the Mod back) |
 | 5 | Packs v2: the pack library (chunked uploads, GitHub Actions artifacts), Java runtimes, New server with `add-server.sh`, the Mod renamed `orrery`: #134 · Map: #123 · Layout: `docs/adr/0003-host-directory-layout.md` | hub + web + mod + deploy (no protocol bump) | L | #90; staging set up for its smoke test |
 
@@ -270,6 +270,9 @@ instead of re-running it, lint for the hub and the Agent, the Agent's Node versi
 notice when it falls behind, the Staging environment removed (#91; the pack-update staging and `failed in staging`
 stay), and the 36 long files split or marked exempt with `check-file-length` then failing any over-cap file. Owner
 decisions in the note: no Bun, the Agent stays Node (ADR 0004 kept), `hub.db` backups off the host come after.
+Progress: steps 1–5 merged (#178, #179, #190, #192, #193: timeouts, pnpm, Dependabot, the release gate as
+`hub-v2.22.2`, the flakes, the first splits, oxlint, the map guard); step 6, Staging removed, in review. Hub release B
+comes after step 8.
 
 ## Later / if needed
 
@@ -280,4 +283,4 @@ decisions in the note: no Bun, the Agent stays Node (ADR 0004 kept), `hub.db` ba
 - Cross-server chat and a network-wide `/status` (multi-server already works in the hub).
 - Moderation: mute the bridge for a player, a word filter for Discord → game.
 - Grafana/InfluxDB export of hub stats (TPS, players, uptime).
-- Agents beyond the Factorio release: a Minecraft server run through an Agent, more than one server per Agent, Agents that only report a Host, and a staging Agent.
+- Agents beyond the Factorio release: a Minecraft server run through an Agent, more than one server per Agent, and Agents that only report a Host.

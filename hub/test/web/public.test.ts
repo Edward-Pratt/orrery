@@ -52,7 +52,7 @@ test('the Status page keeps its answer for 15 s, then reads the servers and thei
   const stats = { uptime: (_id: string, days: number) => (asked.push(days), 0.5) } as unknown as Stats;
   let clock = 1_000_000;
   const app = new Hono<Env>().basePath('/api');
-  publicRoutes(app, { environment: 'production', status: { servers: ['gtnh'] }, hub, stats }, () => clock);
+  publicRoutes(app, { status: { servers: ['gtnh'] }, hub, stats }, () => clock);
   const read = async () => ((await (await app.request('/api/public/status')).json()) as PublicStatus).servers[0]!;
   assert.deepEqual(await read(), { name: 'GTNH', game: 'minecraft', state: 'down', players: [], uptimeWeek: 0.5, uptimeMonth: 0.5 });
   assert.deepEqual(asked, [7, 30]);
@@ -65,9 +65,9 @@ test('the Status page keeps its answer for 15 s, then reads the servers and thei
   assert.deepEqual(asked, [7, 30, 7, 30]);
 });
 
-test('without integrations.web.status there is no Status page, and every other read but the Environment still needs a session', async (t) => {
+test('without integrations.web.status there is no Status page, and every other read still needs a session', async (t) => {
   const { app } = await webHub(t);
   assert.equal((await app.request('/api/public/status')).status, 401);
-  assert.equal((await app.request('/api/environment')).status, 200);
+  assert.equal((await app.request('/api/environment')).status, 401); // the Environment read, removed
   assert.equal((await app.request('/api/servers')).status, 401);
 });

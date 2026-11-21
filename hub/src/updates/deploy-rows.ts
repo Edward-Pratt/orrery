@@ -1,7 +1,7 @@
 // The deploy rows and the watch, for `Deploys`: each deploy is a row in the `deploys` history (`begin`, `finish`;
 // `amend` once an Agent's `deployResult` tells otherwise after its hello closed the row ok), its log cut to its last
 // 40 lines, audited as `deploy` and announced as `deployStarted`/`deployFinished` target notices (`target` `deploy`).
-// Its hub and dashboard deploys' `target` is config's `environment`, a Mod's its server, an Agent's its id. A hub or
+// Its hub and dashboard deploys' `target` is `production` (the name the history has always used), a Mod's its server, an Agent's its id. A hub or
 // dashboard deploy's unit (`<template>@<tag>.service`) is polled every 5 s until it is no longer activating and the
 // row closed from `<root>/deploy-status.json` (only that tag's, finished after the row started; else `failed`,
 // interrupted) — also by the next hub at start, as the hub's own deploy restarts it (`watch`). `DeployCtx` is what the deploy flows outside

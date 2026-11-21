@@ -3,7 +3,6 @@
 # its own Rollback. Install: sudo cp deploy/orrery-deploy@.service /etc/systemd/system/ && sudo systemctl daemon-reload
 # %i, never %I: the instance is the tag exactly as escaped, and deploy-hub.sh validates it again.
 # No PartOf=/BindsTo=: restarting the hub must not stop its own deploy. No OnFailure=: the status file is the record.
-# orrery-deploy-staging@.service differs only in User, the root, the hub unit and EnvironmentFile.
 [Unit]
 Description=Deploy orrery hub %i (production)
 

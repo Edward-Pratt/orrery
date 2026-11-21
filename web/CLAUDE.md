@@ -22,7 +22,7 @@ Each file in `src/` starts with a comment that says its job, and each page folde
 pages hold: read those before changing them, and change them with the code. By area:
 
 - The shell and the session: `app/app.ts`, `app/app.routes.ts`, `app/login.ts`, `app/session.ts`, `app/reload.ts`,
-  `app/theme.ts` (with `app/theme-switch.ts`, Armil's ThemeSwitch), `app/integrations.ts`, `app/environment.ts`.
+  `app/theme.ts` (with `app/theme-switch.ts`, Armil's ThemeSwitch), `app/integrations.ts`.
 - Shared pieces: `app/status.ts`, `app/chart.ts`, `app/feedback.ts`, `app/uploads.ts`, `app/units.ts`,
   `app/events.ts`, `app/attention.ts`, `app/logo.ts` (the mark; `public/favicon.svg` and `favicon.ico` are its copies).
 - Pages: `app/audit.ts`, and the folders `app/host/`, `app/library/`, `app/services/`, `app/servers/` and `app/users/`

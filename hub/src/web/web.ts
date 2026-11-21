@@ -93,16 +93,15 @@ export type WebDeps = {
   /** With packs. */
   library?: Library;
   integrations: Config['integrations'];
-  environment: Config['environment'];
 };
 
 /** The HTTP API under /api: logins, sessions, and every other route behind a session and its permissions. */
-export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations, environment }: WebDeps) {
+export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations }: WebDeps) {
   // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
   const newServer = Boolean(packs && library && deploys);
   const app = new Hono<Env>().basePath('/api');
 
-  publicRoutes(app, { environment, status: web.status, hub, stats });
+  publicRoutes(app, { status: web.status, hub, stats });
   authRoutes(app, web, { users, sessions: db.users, limit: new LoginLimit() });
   permitRoutes(app, (id) => services?.serverOf(id));
   usersRoutes(app, { users, roles, publicUrl: web.publicUrl });

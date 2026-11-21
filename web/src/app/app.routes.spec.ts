@@ -58,7 +58,7 @@ describe('routing by enabled integrations', () => {
     expect(off.routeNativeElement?.textContent).toContain('Nothing here');
   });
 
-  it('opens the servers page with Minecraft off too (Staging\'s demo server has no Mod)', async () => {
+  it('opens the servers page with Minecraft off too (a server with no Mod)', async () => {
     const harness = await open('/', { minecraft: false, discord: false, web: true, checks: false, host: true, systemd: false, github: false, agents: false, library: false, newServer: false });
     expect(harness.routeNativeElement?.textContent).toContain('Servers');
   });

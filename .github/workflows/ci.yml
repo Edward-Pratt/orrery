@@ -33,7 +33,8 @@ jobs:
             bash .github/changes.sh unknown
           fi | tee -a "$GITHUB_OUTPUT"
 
-  # A changed source file over 300 lines needs splitting, or a reason in its first 10 lines: .github/check-file-length.
+  # A changed source file over 300 lines needs splitting, or a reason in its first 10 lines: .github/check-file-length,
+  # tested first by .github/test-check-file-length.sh.
   file-length:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -42,6 +43,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+      - run: bash .github/test-check-file-length.sh
       - env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: .github/check-file-length "$BASE"

@@ -5,86 +5,18 @@
 // reloading or deactivating, not once it failed; a `deploy` of its own release (`agent-v0.0.0`) refused, then one as
 // `list-units` and `start --no-block -- orrery-agent-deploy@agent-v1.2.5.service`, and a `deploy-status.json` left at
 // start sent once as `deployResult` after its unit's `show`; game settings pushed on connect, a `settingsSet` written
-// and applied live (the reply, then the push); offline with no hub, then connecting when it listens; `check` (exit 1
-// exactly when a line is `FAIL`, a mod name's escape sequences printed as `?`, no secret; each line in the pipe while
-// RCON is still awaited).
+// and applied live (the reply, then the push); offline with no hub, then connecting when it listens. `check` is
+// `index-check.test.ts`, the world `index-world.ts`.
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test, type TestContext } from 'node:test';
+import { test } from 'node:test';
 import { eventually, fakeHub, killed } from './fake-hub.ts';
-import { PASSWORD, factorioConfig, fakeRcon } from './fake-rcon.ts';
-
-const TOKEN = 'k'.repeat(40);
-const INDEX = new URL('../src/index.ts', import.meta.url).pathname;
-
-/**
- * The agent's world in a temp folder: its config (pointing at a fake hub and a fake RCON), its own folder, the
- * server's data folder with server-settings.json, and a fake systemctl first on PATH that logs its argv (and can't
- * read orrery-agent.service, which only the check asks about).
- */
-async function world(t: TestContext, rconPort: number, hubPort: number) {
-  const dir = await mkdtemp(join(tmpdir(), 'orrery-index-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const root = join(dir, 'agent');
-  const data = join(dir, 'factorio');
-  await mkdir(root);
-  await mkdir(join(data, 'config'), { recursive: true });
-  await mkdir(join(data, 'saves'));
-  await writeFile(join(data, 'saves', 'world.zip'), 'map');
-  await mkdir(join(dir, 'bin'));
-  await writeFile(join(data, 'config', 'server-settings.json'), JSON.stringify({ auto_pause: true }));
-  const config = {
-    id: 'factorio-vm',
-    hub: { host: '127.0.0.1', port: hubPort },
-    server: { id: 'factorio', unit: 'factorio.service', install: join(dir, 'opt'), data, rconPort, factorioUdpPort: 34198, agentUdpPort: 34199 },
-    mounts: ['/'],
-  };
-  await writeFile(join(dir, 'config.json'), JSON.stringify(config));
-  await writeFile(
-    join(dir, 'bin', 'systemctl'),
-    // A deploy unit has ended (its oneshot is inactive); orrery-agent.service can't be read; every other unit runs.
-    // list-units prints `<dir>/units` (none: no deploy unit known).
-    `#!/bin/sh\necho "$*" >> "${dir}/systemctl.log"\ncase "$*" in list-units*) cat "${dir}/units" 2>/dev/null; exit 0;; *orrery-agent-deploy@*) echo ActiveState=inactive; exit 0;; *orrery-agent.service) exit 1;; esac\nprintf 'ActiveState=active\\nSubState=running\\nStateChangeTimestamp=@1793475924\\nResult=success\\n'\n`,
-  );
-  await chmod(join(dir, 'bin', 'systemctl'), 0o755);
-  const env = {
-    ...process.env,
-    PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
-    ORRERY_AGENT_CONFIG: join(dir, 'config.json'),
-    ORRERY_AGENT_ROOT: root,
-    ORRERY_AGENT_TOKEN: TOKEN,
-    RCON_PASSWORD: PASSWORD,
-  };
-  return { dir, root, env };
-}
-
-/** A `settingsSet` the hub's rules let through: a new name and player limit, Bob an admin. */
-const settingsSet = (id: string) => ({
-  type: 'settingsSet',
-  id,
-  settings: {
-    name: 'Our base',
-    description: '',
-    max_players: 8,
-    require_user_verification: true,
-    autosave_interval: 10,
-    autosave_slots: 5,
-    afk_autokick_interval: 0,
-    auto_pause: true,
-    auto_pause_when_players_connect: false,
-    only_admins_can_pause_the_game: true,
-    allow_commands: 'admins-only',
-  },
-  admins: ['bob'],
-});
-
-const status = () =>
-  JSON.stringify({ ok: true, tick: Date.now(), tick_paused: false, players: {}, version: '2.1.24', mods: { base: '2.1.24', orrery: '0.1.0' }, loaded: true });
+import { factorioConfig, fakeRcon } from './fake-rcon.ts';
+import { INDEX, settingsSet, status, world } from './index-world.ts';
 
 test('the agent connects both ways, pushes its saves, carries out serviceAct with stopping first; on SIGTERM sends bye, closes both connections and exits 0', async (t) => {
   const rcon = await fakeRcon(status);
@@ -273,51 +205,4 @@ test('with no hub reachable the agent keeps running, logs that once, and connect
   child.kill('SIGTERM');
   const [code] = await once(child, 'exit');
   assert.equal(code, 0);
-});
-
-test('check: exit 0 only without a FAIL; a mod name prints without its escapes, no secret', async (t) => {
-  // Any mod's name reaches the report, which setup prints on a root terminal: its escape sequences must not. A player
-  // on skips the stops; this machine is no Factorio host, so its own checks (S4, S16, S21, S25) fail, quickly.
-  const mods = { base: '2.1.24', 'x\u001b]0;pwned\u0007\u001b[2J': '1.0.0', orrery: '0.1.0' };
-  const rcon = await fakeRcon(() => JSON.stringify({ ...JSON.parse(status()), mods, players: ['alice'] }));
-  t.after(() => rcon.close());
-  const { env } = await world(t, rcon.port, 1);
-  const child = spawn(process.execPath, [INDEX, 'check'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
-  child.stdout.on('data', (d) => (out += d));
-  child.stderr.on('data', (d) => (out += d));
-  const [code] = await once(child, 'exit');
-  assert.equal(code, /^FAIL /m.test(out) ? 1 : 0, out);
-  assert.match(out, /^ok {3}config: agent factorio-vm/m);
-  assert.match(out, /^ok {3}host: cpu \d+%/m);
-  assert.match(out, /^ok {3}rcon: Factorio 2\.1\.24 answers \/orrery-status: tick \d+, 1 online/m);
-  assert.match(out, /^warn S1 skipped \(1 online\)/m);
-  assert.match(out, /^FAIL S29 .*; mods: base 2\.1\.24, x\?\]0;pwned\?\?\[2J 1\.0\.0, orrery 0\.1\.0$/m);
-  assert.doesNotMatch(out, /[\u001b\u0007]/, 'no escape sequence reaches the terminal');
-  assert.match(out, /^warn hub: can't reach 127\.0\.0\.1:1/m);
-  assert.match(out, /^summary: \d+ ok, \d+ FAIL, \d+ warn\nskip S4 /m);
-  assert.ok(!out.includes(TOKEN) && !out.includes(PASSWORD), 'no secret in the report');
-});
-
-test('check: each line reaches the pipe as its check ends, not at exit (setup shows the report live)', async (t) => {
-  const rcon = await fakeRcon(() => undefined); // takes the connection, never answers: the check waits up to 5 minutes
-  t.after(() => rcon.close());
-  const { env } = await world(t, rcon.port, 1);
-  const child = spawn(process.execPath, [INDEX, 'check'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  t.after(() => killed(child));
-  let out = '';
-  child.stdout.on('data', (d) => (out += d));
-  await eventually(() => out.includes('waiting for /orrery-status'), 10_000, 'the waiting note');
-  assert.equal(child.exitCode, null, 'still waiting for RCON');
-  assert.match(out, /^orrery agent agent-v0\.0\.0: first-boot check\nok {3}config: .*\nok {3}host: .*\n {5}waiting for \/orrery-status/);
-});
-
-test('check: a bad config fails with exit 1', async (t) => {
-  const { env } = await world(t, 1, 1);
-  const child = spawn(process.execPath, [INDEX, 'check'], { env: { ...env, ORRERY_AGENT_TOKEN: 'short' }, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
-  child.stdout.on('data', (d) => (out += d));
-  const [code] = await once(child, 'exit');
-  assert.equal(code, 1);
-  assert.match(out, /^FAIL config: .*\n.*ORRERY_AGENT_TOKEN/m);
 });

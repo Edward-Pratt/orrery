@@ -343,6 +343,14 @@ move-only commit leaves every suite's test count where it was (596 hub, 216 agen
 tests and §11 removes some, in their own commits); no public API of `ServerHub`, `Stats`, `Agents`, `Deploys` or
 the web routes changes.
 
+**Built (2026-11-21):** as six PRs instead of one, part by part: #196 and #197 (hub source), #198 (the Agent), #199
+(the dashboard: its inline templates cut into section child components with `display: contents` hosts, specs
+untouched), #200 (hub tests), then the markers and the mode change. Every file a split touched ended at 300 lines or
+less. Besides the four exemptions above, the owner exempted four files outside the table: `deploy/setup-agent-host.sh`
+(fetched and run as one file), its test, `factorio/control.lua` (a split means a portal release for nothing) and
+`web/libs/ui/utils/src/lib/hlm.ts` (spartan/ui generated). `check-file-length` now fails any changed file over the cap
+without a marker, a shrunk one too, and `.github/test-check-file-length.sh` tests it (run first in its CI job).
+
 ## Build order
 
 Each step is a branch and a PR, green on its own, in this order:

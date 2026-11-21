@@ -270,9 +270,10 @@ instead of re-running it, lint for the hub and the Agent, the Agent's Node versi
 notice when it falls behind, the Staging environment removed (#91; the pack-update staging and `failed in staging`
 stay), and the 36 long files split or marked exempt with `check-file-length` then failing any over-cap file. Owner
 decisions in the note: no Bun, the Agent stays Node (ADR 0004 kept), `hub.db` backups off the host come after.
-Progress: steps 1–5 merged (#178, #179, #190, #192, #193: timeouts, pnpm, Dependabot, the release gate as
-`hub-v2.22.2`, the flakes, the first splits, oxlint, the map guard); step 6, Staging removed, in review. Hub release B
-comes after step 8.
+Progress: steps 1–7 merged (#178, #179, #190, #192, #193, #194, #195: timeouts, pnpm, Dependabot, the release gate
+as `hub-v2.22.2`, the flakes, the first splits, oxlint, the map guard, Staging removed, the Agent's Node notice); step
+8's splits merged as #196–#200, its `check-file-length` mode change in review. Hub release B, then the dashboard and
+the Agent, come next.
 
 ## Later / if needed
 

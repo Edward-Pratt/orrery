@@ -1,232 +1,47 @@
-import { DatePipe, DecimalPipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { LibraryAdd, LibraryAddAnswer, LibraryAddRequest, LibraryPack, LibraryRuntime, LibraryState, RuntimeAddRequest } from '@hub/api';
-import { NgIcon, provideIcons } from '@ng-icons/core';
-import { arCircleAlert, arCoffee, arPackage, arPlus } from '@armil/icons';
-import { HlmButton } from '@spartan-ng/helm/button';
-import { HlmInput } from '@spartan-ng/helm/input';
-import { HlmSheetImports } from '@spartan-ng/helm/sheet';
-import { HlmSkeleton } from '@spartan-ng/helm/skeleton';
-import { HlmSpinner } from '@spartan-ng/helm/spinner';
-import { HlmToggleGroupImports } from '@spartan-ng/helm/toggle-group';
+import type { LibraryAdd, LibraryAddAnswer, LibraryPack, LibraryRuntime, LibraryState, RuntimeAddRequest } from '@hub/api';
 import { catchError, debounceTime, EMPTY, filter, firstValueFrom, startWith, Subject, switchMap } from 'rxjs';
 import { LiveEvents, ofTarget } from '../events';
 import { Feedback } from '../feedback';
 import { formatBytes } from '../units';
-import { Uploader } from '../uploads';
+import { LibraryPacks } from './library-packs';
+import { LibraryRunning } from './library-running';
+import { LibraryRuntimes } from './library-runtimes';
+import { LibrarySheet, type SheetSave } from './library-sheet';
+
+export { fromFileName } from './library-rules';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
-/** A GitHub Actions artifact's page, as the hub accepts it. */
-const ARTIFACT = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+\/artifacts\/\d+\/?$/;
-
-/** A pack's name and version from its zip's file name ("GT_New_Horizons_2.7.4_Server_Java_17-21.zip"): a guess to correct. */
-export function fromFileName(file: string): { name: string; version: string } {
-  const base = file.split(/[/?#]/).filter(Boolean).at(-1)?.replace(/\.zip$/i, '') ?? '';
-  const m = /\d+\.\d+(?:\.\d+)*(?:-(?:beta|rc|pre)(?:[-.]?\d+)*)?/i.exec(base);
-  if (!m) return { name: base.replace(/[_-]+/g, ' ').trim(), version: '' };
-  return { name: base.slice(0, m.index).replace(/[_-]+/g, ' ').trim(), version: m[0] };
-}
 
 /**
- * The Library page: the Environment's pack versions, newest first, an add sheet (a link, an Actions artifact or an
- * upload), its Java runtimes with an add sheet (a Java version), and the running add's card (either kind) with its
- * progress and Cancel, followed live from `libraryAdd` events. Delete asks for the typed name.
+ * The Library page: the running add's card (either kind) with its progress and Cancel (`library-running.ts`), followed
+ * live from `libraryAdd` events, the Environment's pack versions, newest first (`library-packs.ts`), its Java runtimes
+ * (`library-runtimes.ts`), and their add sheets (`library-sheet.ts`: a link, an Actions artifact or an upload; a Java
+ * version). Delete asks for the typed name. It holds the state, the stream and every request; the pure rules are
+ * `library-rules.ts`.
  */
 @Component({
   selector: 'app-library',
-  imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, HlmInput, HlmSheetImports, HlmSkeleton, HlmSpinner, HlmToggleGroupImports],
-  viewProviders: [provideIcons({ arCircleAlert, arCoffee, arPackage, arPlus })],
+  imports: [LibraryPacks, LibraryRunning, LibraryRuntimes, LibrarySheet],
   template: `
     <h1 class="ar-t-heading-md mb-4">Library</h1>
-    <div class="mb-4 flex max-w-4xl flex-col gap-4 empty:hidden">
-      @if (running(); as r) {
-        <div class="ar-panel flex flex-wrap items-center gap-3 p-4 text-sm" data-running>
-          <hlm-spinner />
-          <span class="min-w-0 flex-1">
-            Adding <b>{{ r.name }} {{ r.version }}</b><span class="text-muted-foreground"> (by {{ r.by }})</span>
-            <span class="block text-xs text-muted-foreground" data-detail>{{ r.detail }}</span>
-          </span>
-          <button hlmBtn variant="outline" size="sm" [disabled]="busy()" (click)="cancel()" data-cancel>Cancel</button>
-        </div>
-      }
-      @if (ended(); as e) {
-        <div
-          class="ar-callout items-center gap-3 text-sm"
-          [class]="e.outcome === 'failed' ? 'ar-callout--danger' : ''"
-          [attr.data-ended]="e.outcome"
-        >
-          @if (e.outcome === 'failed') {
-            <ng-icon name="arCircleAlert" class="text-status-down" />
-            <span>Adding {{ e.name }} {{ e.version }} failed: {{ e.reason }}</span>
-          } @else {
-            <span>{{ e.reason }}</span>
-          }
-        </div>
-      }
-    </div>
-    <section class="flex max-w-4xl flex-col gap-4" data-packs>
-      <div class="flex items-center gap-3">
-        <h2 class="ar-t-heading-sm">Packs</h2>
-        <button hlmBtn size="sm" class="ml-auto" [disabled]="!!running()" (click)="openSheet()" data-add>
-          <ng-icon name="arPlus" /> Add pack
-        </button>
-      </div>
-      @if (state(); as s) {
-        @if (s.packs.length) {
-          <ul class="ar-panel divide-y">
-            @for (p of s.packs; track p.id) {
-              <li class="flex flex-wrap items-start gap-x-4 gap-y-1 p-3 text-sm" [attr.data-pack]="p.id">
-                <div class="min-w-0 flex-1">
-                  <p class="font-medium" data-name>{{ p.name }} {{ p.version }}</p>
-                  <p class="text-xs text-muted-foreground" data-meta>
-                    Minecraft {{ p.mc }} · {{ p.loader }} · {{ bytes(p.size) }} · added by {{ p.by }} {{ p.at | date: 'd MMM y HH:mm' }}
-                  </p>
-                  <p class="truncate text-xs text-muted-foreground" [title]="p.source" data-source>{{ p.source }}</p>
-                  <p class="truncate font-mono text-xs text-muted-foreground" [title]="p.sha256" data-sha>sha256 {{ p.sha256 }}</p>
-                </div>
-                <span class="text-xs text-muted-foreground" data-used>{{ p.usedBy.length ? 'used by ' + p.usedBy.join(', ') : 'used by no server' }}</span>
-                <button hlmBtn variant="ghost" size="sm" [disabled]="busy()" (click)="remove(p)" data-delete>Delete</button>
-              </li>
-            }
-          </ul>
-        } @else {
-          <div class="ar-empty" data-empty>
-            <ng-icon name="arPackage" class="text-2xl text-muted-foreground" />
-            <p class="mt-2 font-medium">No packs yet</p>
-            <p class="text-sm text-muted-foreground">Add a pack version from a link or an upload: servers install and update from here.</p>
-          </div>
-        }
-      } @else if (missing(); as why) {
-        <p class="text-muted-foreground">{{ why }}</p>
-      } @else {
-        <hlm-skeleton class="ar-skeleton--block h-24" data-skeleton />
-      }
-    </section>
+    <app-library-running [running]="running()" [ended]="ended()" [busy]="busy()" (cancel)="cancel()" />
+    <app-library-packs [state]="state()" [missing]="missing()" [running]="running()" [busy]="busy()" (add)="openSheet()" (remove)="remove($event)" />
 
     @if (state(); as s) {
-      <section class="mt-8 flex max-w-4xl flex-col gap-4" data-runtimes>
-        <div class="flex items-center gap-3">
-          <div>
-            <h2 class="ar-t-heading-sm">Java runtimes</h2>
-            <p class="text-sm text-muted-foreground">Temurin JDKs from Adoptium. Each server runs on the one set on its Pack tab, or on the host's own java.</p>
-          </div>
-          <button hlmBtn size="sm" class="ml-auto shrink-0" [disabled]="!!running()" (click)="openRuntimeSheet()" data-add-runtime>
-            <ng-icon name="arPlus" /> Add runtime
-          </button>
-        </div>
-        @if (s.runtimes.length) {
-          <ul class="ar-panel divide-y">
-            @for (r of s.runtimes; track r.name) {
-              <li class="flex flex-wrap items-start gap-x-4 gap-y-1 p-3 text-sm" [attr.data-runtime]="r.name">
-                <div class="min-w-0 flex-1">
-                  <p class="font-medium" data-name>{{ r.label }}</p>
-                  <p class="text-xs text-muted-foreground" data-meta>Java {{ r.feature }} · {{ bytes(r.size) }} · added by {{ r.by }} {{ r.at | date: 'd MMM y HH:mm' }}</p>
-                  <p class="truncate font-mono text-xs text-muted-foreground" [title]="r.sha256">sha256 {{ r.sha256 }}</p>
-                </div>
-                <span class="text-xs text-muted-foreground" data-used>{{ r.usedBy.length ? 'set on ' + r.usedBy.join(', ') : 'set on no server' }}</span>
-                <button hlmBtn variant="ghost" size="sm" [disabled]="busy()" (click)="removeRuntime(r)" data-delete>Delete</button>
-              </li>
-            }
-          </ul>
-        } @else {
-          <div class="ar-empty text-sm text-muted-foreground" data-runtimes-empty>
-            <ng-icon name="arCoffee" class="text-2xl" />
-            <p>No runtimes yet: every server runs on the host's own java.</p>
-          </div>
-        }
-      </section>
+      <app-library-runtimes [state]="s" [running]="running()" [busy]="busy()" (add)="openRuntimeSheet()" (remove)="removeRuntime($event)" />
     }
 
-    @if (sheet() === 'runtime') {
-      <hlm-sheet side="right" state="open" (closed)="sheet.set(null)">
-        <hlm-sheet-content *hlmSheetPortal="let ctx" class="data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
-          <hlm-sheet-header>
-            <h2 hlmSheetTitle>Add runtime</h2>
-          </hlm-sheet-header>
-          <div class="flex flex-col gap-3 px-4 pb-4 text-sm">
-            <p>Java version</p>
-            <hlm-toggle-group type="single" [value]="feature()" (valueChange)="feature.set($any($event) || feature())" class="w-full">
-              @for (f of features; track f) {
-                <button hlmToggleGroupItem [value]="f" class="flex-1" [attr.data-feature]="f">{{ f }}</button>
-              }
-            </hlm-toggle-group>
-            <p class="text-xs text-muted-foreground">
-              The latest GA Temurin JDK of that version for this host, checked against Adoptium's sha256 and installed only once java -version runs here.
-              A newer build becomes its own entry.
-            </p>
-            <button hlmBtn [disabled]="busy()" (click)="addRuntime()" data-go>
-              @if (busy()) {
-                <hlm-spinner />
-              }
-              Add Temurin {{ feature() }}
-            </button>
-          </div>
-        </hlm-sheet-content>
-      </hlm-sheet>
-    }
-
-    @if (sheet() === 'pack') {
-      <hlm-sheet side="right" state="open" (closed)="sheet.set(null)">
-        <hlm-sheet-content *hlmSheetPortal="let ctx" class="data-[side=right]:w-full data-[side=right]:sm:max-w-md" data-sheet>
-          <hlm-sheet-header>
-            <h2 hlmSheetTitle>Add pack</h2>
-          </hlm-sheet-header>
-          <div class="flex flex-col gap-3 px-4 pb-4 text-sm">
-            <hlm-toggle-group type="single" [value]="from()" (valueChange)="from.set($any($event) || from())" class="w-full">
-              <button hlmToggleGroupItem value="url" class="flex-1" data-from-url>Link</button>
-              <button hlmToggleGroupItem value="artifact" class="flex-1" data-from-artifact>Actions artifact</button>
-              <button hlmToggleGroupItem value="upload" class="flex-1" data-from-upload>Upload</button>
-            </hlm-toggle-group>
-            @if (from() === 'url') {
-              <label>Pack URL <input hlmInput class="mt-1 w-full" [value]="url()" (input)="setUrl($any($event.target).value)" data-url /></label>
-            } @else if (from() === 'artifact') {
-              <label
-                >Artifact link
-                <input
-                  hlmInput
-                  class="mt-1 w-full"
-                  placeholder="https://github.com/…/actions/runs/…/artifacts/…"
-                  [value]="artifact()"
-                  (input)="artifact.set($any($event.target).value)"
-                  data-artifact
-              /></label>
-              <p class="text-xs text-muted-foreground">The hub fetches it with its own GitHub token: no expiring blob link to copy.</p>
-            } @else {
-              <label>Zip <input type="file" accept=".zip" hlmInput class="mt-1 w-full" (change)="setFile($any($event.target).files?.[0])" data-file /></label>
-            }
-            <div class="grid grid-cols-2 gap-2">
-              <label>Name <input hlmInput class="mt-1 w-full" [value]="name()" (input)="name.set($any($event.target).value)" data-name /></label>
-              <label>Version <input hlmInput class="mt-1 w-full" [value]="version()" (input)="version.set($any($event.target).value)" data-version /></label>
-              <label>Minecraft <input hlmInput class="mt-1 w-full" placeholder="from the zip" [value]="mc()" (input)="mc.set($any($event.target).value)" data-mc /></label>
-              <label>Loader <input hlmInput class="mt-1 w-full" placeholder="from the zip" [value]="loader()" (input)="loader.set($any($event.target).value)" data-loader /></label>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              Name and version are read from the file name; fix them if wrong. Left blank, the Minecraft version and loader are read from the zip's Forge jar.
-            </p>
-            <button hlmBtn [disabled]="busy() || !ready()" (click)="add()" data-go>
-              @if (busy()) {
-                <hlm-spinner />
-              }
-              Add to library
-            </button>
-            @if (uploaded() !== null) {
-              <p class="text-xs text-muted-foreground" data-uploaded>Uploading… {{ uploaded()! * 100 | number: '1.0-0' }}%</p>
-            }
-            <p class="text-xs text-muted-foreground">It runs in the background: you can leave the page.</p>
-          </div>
-        </hlm-sheet-content>
-      </hlm-sheet>
-    }
+    <app-library-sheet [sheet]="sheet()" [busy]="busy()" (closed)="sheet.set(null)" (save)="add($event)" (addRuntime)="addRuntime($event)" />
   `,
 })
 export default class Library {
   readonly #http = inject(HttpClient);
-  readonly #uploader = inject(Uploader);
   readonly #feedback = inject(Feedback);
   readonly #reload = new Subject<void>();
-  protected readonly bytes = formatBytes;
+  private readonly form = viewChild.required(LibrarySheet);
 
   readonly state = signal<LibraryState | null>(null);
   protected readonly missing = signal<string | null>(null);
@@ -234,24 +49,7 @@ export default class Library {
   /** How the last add watched here ended, when there is something to say: a failure, or "already in the library". */
   protected readonly ended = signal<Extract<LibraryAdd, { phase: 'finished' }> | null>(null);
   protected readonly busy = signal(false);
-  protected readonly uploaded = signal<number | null>(null);
   protected readonly sheet = signal<'pack' | 'runtime' | null>(null);
-  protected readonly features: RuntimeAddRequest['feature'][] = [8, 17, 21, 25];
-  protected readonly feature = signal<RuntimeAddRequest['feature']>(21);
-  protected readonly from = signal<'url' | 'artifact' | 'upload'>('url');
-  protected readonly url = signal('');
-  protected readonly artifact = signal('');
-  protected readonly file = signal<File | null>(null);
-  protected readonly name = signal('');
-  protected readonly version = signal('');
-  protected readonly mc = signal('');
-  protected readonly loader = signal('');
-  protected readonly ready = computed(
-    () =>
-      (this.from() === 'url' ? /^https:\/\//.test(this.url().trim()) : this.from() === 'artifact' ? ARTIFACT.test(this.artifact().trim()) : !!this.file()) &&
-      !!this.name().trim() &&
-      !!this.version().trim(),
-  );
 
   constructor() {
     this.#reload
@@ -285,30 +83,13 @@ export default class Library {
   }
 
   protected openSheet(): void {
-    for (const s of [this.url, this.name, this.version, this.mc, this.loader]) s.set('');
-    this.file.set(null);
+    this.form().open('pack');
     this.sheet.set('pack');
   }
 
   protected openRuntimeSheet(): void {
-    this.feature.set(21);
+    this.form().open('runtime');
     this.sheet.set('runtime');
-  }
-
-  protected setUrl(url: string): void {
-    this.url.set(url);
-    this.#guess(url);
-  }
-
-  protected setFile(file: File | undefined): void {
-    this.file.set(file ?? null);
-    if (file) this.#guess(file.name);
-  }
-
-  #guess(file: string): void {
-    const { name, version } = fromFileName(file);
-    if (name) this.name.set(name);
-    if (version) this.version.set(version);
   }
 
   /** Runs a request with the buttons disabled; reports a failure as a toast. Resolves with the answer, or undefined. */
@@ -325,30 +106,16 @@ export default class Library {
     }
   }
 
-  protected async add(): Promise<void> {
-    const fields = { name: this.name().trim(), version: this.version().trim(), mc: this.mc().trim(), loader: this.loader().trim() };
-    const answer = await this.#request(`Adding ${fields.name} ${fields.version}`, async () => {
-      let body: LibraryAddRequest;
-      if (this.from() === 'url') body = { url: this.url().trim(), ...fields };
-      else if (this.from() === 'artifact') body = { url: this.artifact().trim(), ...fields };
-      else {
-        this.uploaded.set(0);
-        try {
-          body = { upload: await this.#uploader.send(this.file()!, (share) => this.uploaded.set(share)), ...fields };
-        } finally {
-          this.uploaded.set(null);
-        }
-      }
-      return firstValueFrom(this.#http.post<LibraryAddAnswer>('/api/library/packs', body));
-    });
+  protected async add(c: SheetSave): Promise<void> {
+    const answer = await this.#request(c.what, c.run);
     if (!answer) return;
     this.sheet.set(null);
     this.ended.set(null);
     this.#reload.next();
   }
 
-  protected async addRuntime(): Promise<void> {
-    const body: RuntimeAddRequest = { feature: this.feature() };
+  protected async addRuntime(feature: RuntimeAddRequest['feature']): Promise<void> {
+    const body: RuntimeAddRequest = { feature };
     const answer = await this.#request(`Adding Temurin ${body.feature}`, () => firstValueFrom(this.#http.post<LibraryAddAnswer>('/api/library/runtimes', body)));
     if (!answer) return;
     this.sheet.set(null);

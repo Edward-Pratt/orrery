@@ -55,41 +55,48 @@ from this browser), shown in the tab and the attention strip, no reply text; `lo
 for another file dropped, and with a linked service its journal from `GET /api/services/:id/logs` with its own
 Refresh; `history.ts`: rate (the card's `rate`; "Paused" beside it while `paused`), player and uptime graphs extended
 by live events newer than the history's `asOf` (`lost`: uptime unknown, a gap, and no players); `pack.ts` (only with
-the detail's `pack`, last): #87's variant A, Adopt as the empty state (a version picked from `GET /api/library`, with
-a link to the Library page, Compare, the report's keep boxes (all unticked to start), no confirm), then the summary
-card (Update pack, its sheet the same library picker, or Apply N changes; its Java runtime row: a `<select>` of System
-java and the library's runtimes with "pending restart", or, when the unit doesn't name the link, the two
-`Environment=` lines to add; disabled with the hub's `blocked` or offline), the amber pending box, the red box for a
-failure while preparing, Extras (pills, ⋯ Replace / Edit label and note / Remove, the Mod as a locked last row),
-Config edits (a red line when one matched nothing, a match preview in its sheet), Kept path chips and the history (By
-hidden on a phone); sheets full screen on a phone; changes ask nothing (a toast says they're pending), Update and
-Apply ask once; the running update's step card follows `packUpdateStep` notices (Cancel only while preparing or
-counting down), a "Done" line on success; after a rollback an amber line whose restore offer opens Backups with
-`?restore=<backup>` preselected (a typed restore like any); `game.ts` (only with `features.update`, a factorio
-server's while the hub's game updates are on, last; `hub-v2.14.0` reports it false, so no Game tab shows there):
-Factorio and every mod it runs (with `mod-updates.ts`'s `PortalUpdates`, provided by the tab: `GET …/game/updates`
+the detail's `pack`, last; it holds the state, the stream and the requests, `pack-rules.ts` the pure rules): #87's
+variant A, Adopt as the empty state (`pack-adopt.ts`: a version picked from `GET /api/library` in `pack-source.ts`'s
+picker, with a link to the Library page, Compare, the report's keep boxes (all unticked to start), no confirm), then
+the summary card (`pack-summary.ts`: Update pack, its sheet the same library picker, or Apply N changes; its Java
+runtime row: a `<select>` of System java and the library's runtimes with "pending restart", or, when the unit doesn't
+name the link, the two `Environment=` lines to add; disabled with the hub's `blocked` or offline), the amber pending
+box, the red box for a failure while preparing, Extras (`pack-extras.ts`: pills, ⋯ Replace / Edit label and note /
+Remove, the Mod as a locked last row), Config edits (`pack-edits.ts`: a red line when one matched nothing, a match
+preview in its sheet), Kept path chips (`pack-kept.ts`) and the history (By hidden on a phone); sheets
+(`pack-sheet.ts`, which holds the Extra and edit forms) full screen on a phone; changes ask nothing (a toast says
+they're pending), Update and Apply ask once; the running update's step card follows `packUpdateStep` notices (Cancel
+only while preparing or counting down), a "Done" line on success; after a rollback an amber line
+(`pack-rolled-back.ts`) whose restore offer opens Backups with `?restore=<backup>` preselected (a typed restore like
+any); `game.ts` (only with `features.update`, a factorio
+server's while the hub's game updates are on, last; `hub-v2.14.0` reports it false, so no Game tab shows there; it
+holds the state, the stream and the update's requests): the summary card (`game-summary.ts`): Factorio and every mod
+it runs (with `mod-updates.ts`'s `PortalUpdates`, provided by the tab: `GET …/game/updates`
 asked on its first state, whenever what the server runs changes, on a `modUpdates` notice and a finished update; a
 badge "N updates" or "Mods up to date" by Installed, each updatable chip's "→ <version>" with its words for screen
 readers, lines for releases needing a newer Factorio, mods gone from the portal (amber), the unchecked and a failed
 check, and Update N mods…, which opens the sheet with those at "Newest that fits"; an older hub's 404 shows none of
 it) (the game's own muted: `base`, `space-age`, `quality`, `elevated-rails`, `recycler`, never picked), Update game
-(disabled with the hub's `blocked`, not while stopped: the update starts it), its sheet the Factorio version (the
+(disabled with the hub's `blocked`, not while stopped: the update starts it), its sheet (`game-sheet.ts`, which
+holds the picks and the catalog's answer; its update view `game-update-view.ts`) the Factorio version (the
 running one and the catalog's per channel; one listed on both channels reads stable, whatever the order) and the
 portal mods, each at its version or "Newest that fits", Remove (none on `orrery`: its Agent needs it), Add by portal
 name or from the Browse view (a mod the server runs comes back at the version it runs) (`mod-browser.ts`'s
 `ModBrowser`, in the sheet in place of the update view, which stays as it was, scroll included; a `@defer` chunk
 prefetched once the sheet is idle: the portal's mods for the picked version's line from `GET …/game/mods` (search sent
 300 ms after typing stops, category, sort, 24 a page with Load more, which waits while a new search is asked or loads,
-a row a later page repeats dropped, an older answer dropped), each with its thumbnail from the hub's route (a
-placeholder when it fails), owner, compact download count, version, "Mod pack" and "Space Age" badges and a portal
+a row a later page repeats dropped, an older answer dropped; it holds the search, the reads and the rows,
+`mod-browser-rules.ts` the pure rules), the list (`mod-browser-list.ts`), each with its thumbnail from the hub's route
+(a placeholder when it fails), owner, compact download count, version, "Mod pack" and "Space Age" badges and a portal
 link the hub built, its standing in words on one `aria-disabled` button (Installed, Added, Required by X, Add back,
 Add), so the focus stays on it, Add going through Add by name's path so its dependencies (a mod pack's mods) follow, a
-footer counting the changes (a live region) with Review the update; a 404 names the hub release it needs; every portal
-string shown as text), or a whole list through Import mod list (`mod-import.ts`'s `ModImport`, in the sheet in place
+footer (`mod-browser-footer.ts`) counting the changes (a live region) with Review the update; a 404 names the hub
+release it needs; every portal string shown as text), or a whole list through Import mod list (`mod-import.ts`'s `ModImport`, in the sheet in place
 of the update view as Browse is, focus back on its button: the client's `mod-list.json` uploaded (where it is on
 Windows, Linux and macOS said; over 256 KiB not read) or names pasted one per line or comma-separated, read in the
 browser by `mod-list.ts`'s `parseModList` (JSON when it starts with `{`, its shape checked; enabled mods only, the
-game's own (`GAME_MODS`, which `game.ts` takes from there) and disabled ones left out, names checked with the Agent's
+game's own (`GAME_MODS`, which the Game tab's `game-summary.ts`, `game-sheet.ts` and `game-update-view.ts` take from
+there) and disabled ones left out, names checked with the Agent's
 rule (and not `.` alone, as the hub), each once, at most 500 (`MODS_MAX`, the hub's `LIMITS.mods`); `shown` makes a
 refused name safe to show); the names not in the update yet (picked, or added by the catalog for one) checked with
 `POST …/game/check` for the picked version's line (none asked when there are none; an older answer dropped; a 404
@@ -106,26 +113,28 @@ catalog's refusal inline; Update asks once (a stopped server: no save first, and
 sheet as it was); the step card (Backup called Save) and history from `packUpdate*` notices like the Pack tab's, also
 fetched again on card events, deploys and `agentLost`/`agentBack`; `settings.ts` (only with `features.settings`, a
 factorio server's while the hub's game settings are on, after Game; an older hub leaves `settings` out, so no tab, and
-its 404 says "This hub has no game settings yet: deploy hub-v2.16.0 or later."): its game settings as `GET …/settings`
-gives them, in cards (Server: name (a changed one at most 50 bytes in UTF-8, as Factorio keeps, the hub's
+its 404 says "This hub has no game settings yet: deploy hub-v2.16.0 or later."; it holds the state, the edits, the
+password and the requests, `settings-rules.ts` the pure rules): its game settings as `GET …/settings` gives them, in
+cards (`settings-form.ts`; Server: name (a changed one at most 50 bytes in UTF-8, as Factorio keeps, the hub's
 `GAME_SETTINGS.nameBytes`), description, max players, the game password; Joining: the account check, a `role="switch"`
 button, and the idle kick; Pausing; Saving; Lua commands, a native select; Admins, chips with "Remove <name> from the
-admins" and an Add checked as typed), changed fields marked "●" (the saved value in its `title`), "next restart"
-badges on `auto_pause` and `autosave_slots`, and a sticky footer saying what applies now and what at the next restart
-(or when the server starts, while stopped) and which `extra` keys a save drops, Save (disabled until a valid change,
-and with the hub's `blocked`); one `PUT` with every field and the admins, `game_password` only when changed (typed, or
-Generate: 20 letters and digits from `crypto.getRandomValues`, shown) or removed (null; Remove disabled while the
-account check is off); the password is never shown back, only "Set" or "Not set"; turning the account check off shows
-the note's warning in an `aria-live` region, switches Lua commands to Off (a red line if picked again), marks admins
-"(name not checked)" and needs a password; banners for a rollback (`rolledBack`), keys waiting for a restart
-(`pending`, with Restart…: `Feedback.confirm`, then a 5-minute countdown while players are on, else now), a stopped
-server, a file that can't be read (setup's defaults shown), and the hub's `blocked`; an Agent too old, one not
-connected or one that hasn't reported leaves the fields read-only, and with no report at all (too old, or none yet:
-`settings` and `problem` both null) only the hub's reason shows, no cards and no footer, never setup's defaults as the
-server's; fetched again on its `settings` notice, card events, deploys, service states and `agentLost`/`agentBack`;
-`update-steps.ts`: `UpdateSteps` (the step card; Cancel while `cancellable`, whatever the step) and `UpdateHistory`,
-shared by both; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new section is a child
-route plus a `SECTIONS` row (whose `has` reads the detail and `ServerPage.may`, a permission on this server).
+admins" and an Add checked as typed), changed fields marked "●" (the saved value in its `title`), "next restart" badges
+on `auto_pause` and `autosave_slots`, and a sticky footer (`settings-footer.ts`) saying what applies now and what at the
+next restart (or when the server starts, while stopped) and which `extra` keys a save drops, Save (disabled until a
+valid change, and with the hub's `blocked`); one `PUT` with every field and the admins, `game_password` only when
+changed (typed, or Generate: 20 letters and digits from `crypto.getRandomValues`, shown) or removed (null; Remove
+disabled while the account check is off); the password is never shown back, only "Set" or "Not set"; turning the account
+check off shows the note's warning in an `aria-live` region, switches Lua commands to Off (a red line if picked again),
+marks admins "(name not checked)" and needs a password; banners (`settings-banners.ts`) for a rollback (`rolledBack`),
+keys waiting for a restart (`pending`, with Restart…: `Feedback.confirm`, then a 5-minute countdown while players are
+on, else now), a stopped server, a file that can't be read (setup's defaults shown), and the hub's `blocked`; an Agent
+too old, one not connected or one that hasn't reported leaves the fields read-only, and with no report at all (too old,
+or none yet: `settings` and `problem` both null) only the hub's reason shows, no cards and no footer, never setup's
+defaults as the server's; fetched again on its `settings` notice, card events, deploys, service states and
+`agentLost`/`agentBack`; `update-steps.ts`: `UpdateSteps` (the step card; Cancel while `cancellable`, whatever the step)
+and `UpdateHistory`, shared by both; `/servers/<id>/chat` links deep), which `inject(ServerPage)` for the detail. A new
+section is a child route plus a `SECTIONS` row (whose `has` reads the detail and `ServerPage.may`, a permission on this
+server).
 
 What a user may do decides what shows (`Session.can`, on the server; the hub refuses the rest either way): Console
 `servers.console`; Logs `servers.logs` (the linked service's journal in it `services.logs`); Pack and Game

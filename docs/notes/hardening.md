@@ -256,10 +256,11 @@ title, their specs, and CONTEXT.md's Environment term. On the host: the `orrery-
 remain; the units, `/var/www/orrery-staging` and `/etc/orrery-staging.env` are already gone, the host's Caddyfile never
 had the site, and `orrery-hub-staging.service` is inactive. Production's `config.json` has no `environment` key.
 
-**Not this:** the word "staging" also names a pack update's working folder (`packs.ts`'s `.orrery-update`, the
-older `.orrery-staging`, `game-updates.ts`, the Agent's `update.ts`) and the `failed in staging` outcome
-(`protocol.ts`, `types.ts`, `format.ts`, the dashboard's `update-steps.ts` and specs), `backups.ts`'s "staging
-files", `restore-backup.sh`'s "unpacks to staging" and `test-install-web.sh`'s "staging folders". All of that stays.
+**Not this:** the word "staging" also names a pack update's working folder (`pack-paths.ts`'s `.orrery-update`, the
+older `.orrery-staging`, `game-run.ts`, `game-stop.ts`, `game-job.ts`, the Agent's `update.ts`) and the `failed in
+staging` outcome (`protocol.ts`, `types.ts`, `format.ts`, the dashboard's `update-steps.ts` and specs), `backups.ts`'s
+"staging files", `restore-backup.sh`'s "unpacks to staging" and `test-install-web.sh`'s "staging folders". All of that
+stays.
 
 **Change:** delete the three units, the example config, the Caddyfile site, the polkit block and the comments in
 `orrery-deploy@.service` and `orrery-deploy-web@.service` that point at the staging copies; remove `environment`,

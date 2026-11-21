@@ -16,10 +16,13 @@ else
       hub/src/api.ts | hub/src/types.ts) hub=true web=true agent=true ;;
       hub/src/api-*.ts | hub/src/users/permissions.ts) hub=true web=true ;;
       # The agent's tests load these at runtime, to check the agent's copies against them: protocol.ts (the
-      # parsers and LIMITS), factorio.ts (GAME_MODS) and agents.ts (HANDSHAKE_MS). agents.ts loads servers.ts and
-      # its imports too, but no constant the agent compares lives there: a change to them that breaks loading
-      # fails the hub's own tests, so they stay hub-only.
+      # parsers and LIMITS), factorio.ts (GAME_MODS; the catalog's parts it was split into on the next lines) and
+      # agents.ts (HANDSHAKE_MS). agents.ts loads servers.ts and its imports too, but no constant the agent compares
+      # lives there: a change to them that breaks loading fails the hub's own tests, so they stay hub-only.
       hub/src/protocol.ts | hub/src/updates/factorio.ts | hub/src/agents/agents.ts) hub=true agent=true ;;
+      hub/src/updates/factorio-fetch.ts | hub/src/updates/factorio-resolve.ts) hub=true agent=true ;;
+      hub/src/updates/factorio-link.ts | hub/src/updates/factorio-browse.ts) hub=true agent=true ;;
+      hub/src/updates/factorio-thumbs.ts) hub=true agent=true ;;
       hub/*) hub=true ;;
       web/*) web=true ;;
       mod/*) mod=true ;;

@@ -31,6 +31,7 @@ check '1 0 1 0 0 0' hub/src/api-users.ts
 check '1 0 1 0 0 0' hub/src/users/permissions.ts
 check '1 0 0 0 1 0' hub/src/protocol.ts
 check '1 0 0 0 1 0' hub/src/updates/factorio.ts
+check '1 0 0 0 1 0' hub/src/updates/factorio-fetch.ts
 check '1 0 0 0 1 0' hub/src/agents/agents.ts
 check '1 0 0 0 0 0' hub/package.json
 check '0 0 0 0 1 0' agent/src/main.ts

@@ -409,7 +409,7 @@ test('started once per run of the unit, after the game hello; not again for a ru
   await sleep(30);
   assert.deepEqual(sent(game, 'started'), []);
   client.service(unit(T0));
-  await eventually(() => sent(game, 'started').length === 1, 2000, 'started');
+  await eventually(() => sent(game, 'started').length === 1 && existsSync(join(root, 'state', 'started.json')), 2000, 'started, then started.json');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'state', 'started.json'), 'utf8')), { since: T0 });
 
   game.socket.destroy(); // the hub dropped the game connection: the next one is the same run

@@ -56,8 +56,11 @@ documentation, so read it before changing the file, and change it with the file.
   `hub-game.ts` (the game connection and its stopping rule), `hub-link.ts` (one TCP connection), `hub-retry.ts` (the
   reconnect waits), `hub-state.ts` (what `HubClient` keeps), `hub-files.ts` (`writeAtomic`, `installed.json`,
   `started.json`).
-- The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `events.ts` (the mod's
-  events), `moderation.ts`, `logs.ts`.
+- The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `moderation.ts`, `logs.ts`.
+- The mod's events: `events.ts` (`GameEvents`: the listener, the gate's state, `seq` and the hello; re-exporting the
+  rest), `events-gate.ts` (the log check, `Gate`, the size cap), `events-datagram.ts` (the event checks),
+  `events-budget.ts` (`EventBudget`), `events-link.ts` (the link flow), `events-options.ts` (its options,
+  `EventsState`), `events-commands.ts` (the hub's say, notice and linkResult as the mod's commands).
 - The game settings: `settings.ts` (`GameSettings`, re-exporting the rest), `settings-rules.ts` (the keys, the reads,
   the file it writes, the rules across fields), `settings-files.ts` (the config folder's files, `<state>/settings.json`),
   `settings-live.ts` (the `/config set` table, `/promote` and `/demote`).

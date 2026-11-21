@@ -45,8 +45,12 @@ the hello's `agentVersion` and the `connected` file carry it, and an agent deplo
 Each file in `src/` starts with a comment that says its job and its contract. That comment is the file's
 documentation, so read it before changing the file, and change it with the file. By area:
 
-- Running: `index.ts` (the service, and `index.ts check`), `config.ts`, `check.ts` (the first-boot report),
-  `host.ts` (host samples).
+- Running: `index.ts` (the service, and `index.ts check`), `config.ts`, `host.ts` (host samples).
+- The first-boot check: `check.ts` (the report: its order, the config and host lines, the count; re-exporting the
+  rest), `check-ctx.ts` (the waits, paths, options, `Report` and what the checks share), `check-util.ts` (their
+  helpers), `check-rcon.ts` (the unit and RCON, S2, S8), `check-stops.ts` (S1, S20, S3, S5), `check-events.ts` (S4),
+  `check-data.ts` (S6), `check-agent.ts` (S16), `check-container.ts` (S21, S25), `check-mods.ts` (S29),
+  `check-hub.ts` (the hub).
 - The hub: `wire.ts` (the agent's copy of the contract), `hub.ts` (the two connections: `HubClient`, re-exporting the
   rest), `hub-agent.ts` (the Agent connection: hello, welcome, requests, reconnects, the `connected` file),
   `hub-game.ts` (the game connection and its stopping rule), `hub-link.ts` (one TCP connection), `hub-retry.ts` (the

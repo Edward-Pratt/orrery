@@ -1,7 +1,7 @@
 # web
 
 The web integration: the HTTP API the dashboard talks to. `web.ts` is the Hono app under `/api`, wiring the route
-modules in the order Hono's matching needs; `web-public.ts` the reads without a session (the Environment, the Status page); `auth.ts` the CSRF check, the login and invites, the
+modules in the order Hono's matching needs; `web-public.ts` the reads without a session (the Status page); `auth.ts` the CSRF check, the login and invites, the
 session check and the session's own routes; `permit.ts` the permission each route needs, with default deny;
 `web-users.ts` the Users page's routes; `request.ts` what every route reads (the JSON body, the session's user, the
 audit actor, a history period's `hours`); `web-game-extras.ts` the routes for portal mod updates and moderation; `web-services.ts` the services'

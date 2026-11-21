@@ -37,12 +37,11 @@ until the hub release after it, `hub/package-lock.json` stays next to `pnpm-lock
 `pnpm-lock.yaml` and its deploy fails before the flip; an automatic Rollback is unaffected, as it only moves the link.
 
 Deploying from Releases needs the `deploys` permission. Dashboard logins are local Users (ADR 0005, `docs/notes/users.md`):
-an Environment's first owner, and an owner locked out with no other to help, come from the users CLI on the host as the
-hub's OS user, which prints a one-use invite link (production: `cd /home/opc/orrery/current/hub && pnpm users
-invite <you> /home/opc/orrery/config.json` as `opc`; Staging: the same from `/srv/orrery-staging/current/hub` as
-`orrery-staging`, with `/srv/orrery-staging/config.json`); everyone else is invited from the Users page. The release
+the first owner, and an owner locked out with no other to help, come from the users CLI on the host as the
+hub's OS user, which prints a one-use invite link (`cd /home/opc/orrery/current/hub && pnpm users
+invite <you> /home/opc/orrery/config.json` as `opc`); everyone else is invited from the Users page. The release
 that brought Users is a hub and a dashboard release back to back (the old login card's "Log in with Discord" is a 404
-between them), then that CLI invite on each Environment.
+between them), then that CLI invite.
 
 When a change ships in several parts, release them in this order, each in place before the next: hub, dashboard, agent,
 Factorio mod. The Factorio server ships in two releases (the owner's decision of 2026-10-31; `docs/ROADMAP.md`).

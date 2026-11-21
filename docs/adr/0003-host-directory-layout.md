@@ -1,5 +1,8 @@
 # One root per Environment holds everything
 
+_2026-11-21: the staging layout (`/srv/orrery-staging`, the `orrery-staging` user) was removed with the Staging
+environment (`docs/notes/hardening.md` §11); production's root is the only one. The rest stands._
+
 Packs v2 adds a pack library, Java runtimes and servers the hub creates itself. These need homes on the host, and so
 do the things that already exist: deploys, Extras, uploads, scratch space and backups. Each Environment gets **one
 root**, and everything lives under it. The hub finds its root as the directory holding `hub.db` (`dbPath`), so there

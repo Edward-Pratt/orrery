@@ -187,3 +187,15 @@ jobs:
       - run: bash deploy/test-setup-agent-host.sh
       - run: bash deploy/test-deploy-agent.sh
       - run: bash .github/test-release.sh
+
+  # The one check main's ruleset requires (auto-merge waits for it): the parts above run only when their files
+  # changed, and a skipped matrix job reports under another name, so no single part can be the required one.
+  ci:
+    needs: [changes, file-length, hub, mod, web, agent, factorio, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: if grep -qE 'failure|cancelled' <<< "$RESULTS"; then echo "a part failed: $RESULTS"; exit 1; fi
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}

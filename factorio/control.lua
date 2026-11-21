@@ -1,4 +1,6 @@
 -- orrery: connects a Factorio server to orrery's hub, through the agent on the server's host.
+-- modular-exempt: the mod's whole control stage, one event table and its commands; a split would mean a portal
+-- release for no change in behaviour.
 --
 -- Mod to agent: one JSON datagram per event, helpers.send_udp(AGENT_PORT, json, 0), sent by the server only.
 -- Agent to mod: the console commands below, over RCON, each answering with one JSON line through rcon.print.

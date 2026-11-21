@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# modular-exempt: one end-to-end run of setup-agent-host.sh with its fakes, the checks following it step by step.
 # Tests setup-agent-host.sh against a temp SETUP_ROOT, with logging fakes on PATH for every system command it runs
 # (dnf, rpm, useradd, getent, id, install's owner flags, runuser, systemctl, firewall-cmd, ip, selinuxenabled,
 # getenforce, semanage, restorecon, tailscale, uname, ss, df, podman, curl) and a fake Quadlet generator under the

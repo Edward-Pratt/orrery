@@ -17,14 +17,14 @@
 // `linkResult`), `cmd` (a `command` of one line, 1 to 256 characters: the hub strips control characters) and `save`.
 // A `settingsSet` is checked field by field by `GAME_SETTINGS` (every key; a name trimmed; `game_password` left out,
 // null or by its pattern; at most 100 admins by theirs); the rules across fields are left to its handler
-// (`settings.ts`); a `moderate`'s `action` one of the five, its `player` by the admins' rule and its `reason` at most
-// `LIMITS.reason` (200; `moderation.ts` cleans it again); `settingsFieldOk` gives one field's rule to `settings.ts`,
-// which reads the file by them. Cutting to the hub's limits before sending: `cut` (surrogate-safe), `outputLines` (an
-// RCON reply as `cmdResult` output: the first 500 lines, each 1 KiB) and `replyLines` (a `log` or `journal` reply's
-// last lines, each 1 KiB, the oldest dropped until `{ lines }` fits the hub's 256 KiB for a reply's `data`), both
-// `printable` line by line: `printable` makes every control character but a tab (C0, DEL, C1) and U+2028/9 `?`, for
-// anything RCON or a container-written file puts in a line the agent logs or reports (tabs stay: Lua tracebacks use
-// them).
+// (`settings-rules.ts`); a `moderate`'s `action` one of the five, its `player` by the admins' rule and its `reason` at
+// most `LIMITS.reason` (200; `moderation.ts` cleans it again); `settingsFieldOk` gives one field's rule to
+// `settings-rules.ts`, which reads the file by them. Cutting to the hub's limits before sending: `cut`
+// (surrogate-safe), `outputLines` (an RCON reply as `cmdResult` output: the first 500 lines, each 1 KiB) and
+// `replyLines` (a `log` or `journal` reply's last lines, each 1 KiB, the oldest dropped until `{ lines }` fits the
+// hub's 256 KiB for a reply's `data`), both `printable` line by line: `printable` makes every control character but a
+// tab (C0, DEL, C1) and U+2028/9 `?`, for anything RCON or a container-written file puts in a line the agent logs or
+// reports (tabs stay: Lua tracebacks use them).
 import type { AgentHello, AgentMsg, AgentRequest, GameSettingsFields, Hello, HubAgentMsg, HubMsg, ModMsg } from '../../hub/src/types.ts';
 
 /** The protocol version in both hellos: the hub's `PROTOCOL_VERSION`, which `agentHello` shares with the Mod's. */
@@ -213,7 +213,7 @@ const object =
 /** A request's id: what its reply carries back. */
 const id = str(LIMITS.text, 1);
 
-// A `settingsSet`'s fields, each by its rule in `GAME_SETTINGS`; the rules across fields are settings.ts's.
+// A `settingsSet`'s fields, each by its rule in `GAME_SETTINGS`; the rules across fields are settings-rules.ts's.
 const oneLine =
   (max: number, min = 0): Check =>
   (v) =>
@@ -233,8 +233,8 @@ const settingsFields = {
   allow_commands: oneOf('true', 'false', 'admins-only'),
 } satisfies Fields<GameSettingsFields>;
 /**
- * Whether `value` passes the hub's rule for one game settings field (`settings.ts` reads server-settings.json by these
- * rules, so what it reports is what the hub takes).
+ * Whether `value` passes the hub's rule for one game settings field (`settings-rules.ts` reads server-settings.json by
+ * these rules, so what it reports is what the hub takes).
  */
 export const settingsFieldOk = (key: keyof GameSettingsFields, value: unknown): boolean => settingsFields[key](value) !== BAD;
 /** Left out: keep the file's; null: remove it; else a password by the rule. */

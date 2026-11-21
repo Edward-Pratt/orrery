@@ -26,7 +26,7 @@ file (and `image.json`, read from beside it) and `ORRERY_AGENT_ROOT` the agent's
 `import type` only: a release tarball is `agent/` alone, so no runtime import may leave `agent/`. `src/wire.ts` holds
 the agent's copies of `PROTOCOL_VERSION`, `LIMITS` and `NODE_RELEASE` (the hello's `node`, its `process.version`, sent
 only when it matches: the hub refuses a hello with any other); `test/wire.test.ts` checks them against
-`hub/src/protocol.ts`, so change them together. `src/update.ts`'s `GAME_MODS` (the game's own mods, for an update's
+`hub/src/protocol.ts`, so change them together. `src/update-checks.ts`'s `GAME_MODS` (the game's own mods, for an update's
 `to`) is a copy of `hub/src/updates/factorio.ts`'s, checked by `test/update-messages.test.ts`. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
 set on 2026-10-31 while the owner was away: `docs/adr/0004`), its `\n` included, both ways.
 
@@ -45,17 +45,35 @@ the hello's `agentVersion` and the `connected` file carry it, and an agent deplo
 Each file in `src/` starts with a comment that says its job and its contract. That comment is the file's
 documentation, so read it before changing the file, and change it with the file. By area:
 
-- Running: `index.ts` (the service, and `index.ts check`), `config.ts`, `check.ts` (the first-boot report),
-  `host.ts` (host samples).
+- Running: `index.ts` (the service, and `index.ts check`), `config.ts`, `host.ts` (host samples).
+- The first-boot check: `check.ts` (the report: its order, the config and host lines, the count; re-exporting the
+  rest), `check-ctx.ts` (the waits, paths, options, `Report` and what the checks share), `check-util.ts` (their
+  helpers), `check-rcon.ts` (the unit and RCON, S2, S8), `check-stops.ts` (S1, S20, S3, S5), `check-events.ts` (S4),
+  `check-data.ts` (S6), `check-agent.ts` (S16), `check-container.ts` (S21, S25), `check-mods.ts` (S29),
+  `check-hub.ts` (the hub).
 - The hub: `wire.ts` (the agent's copy of the contract), `hub.ts` (the two connections: `HubClient`, re-exporting the
   rest), `hub-agent.ts` (the Agent connection: hello, welcome, requests, reconnects, the `connected` file),
   `hub-game.ts` (the game connection and its stopping rule), `hub-link.ts` (one TCP connection), `hub-retry.ts` (the
   reconnect waits), `hub-state.ts` (what `HubClient` keeps), `hub-files.ts` (`writeAtomic`, `installed.json`,
   `started.json`).
-- The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `events.ts` (the mod's
-  events), `settings.ts`, `moderation.ts`, `logs.ts`.
-- Saves and files: `saves.ts`, `save-check.ts`, `files.ts`.
-- Game updates and deploys: `update.ts`, `unpack.ts`, `deploy.ts`.
+- The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `moderation.ts`, `logs.ts`.
+- The mod's events: `events.ts` (`GameEvents`: the listener, the gate's state, `seq` and the hello; re-exporting the
+  rest), `events-gate.ts` (the log check, `Gate`, the size cap), `events-datagram.ts` (the event checks),
+  `events-budget.ts` (`EventBudget`), `events-link.ts` (the link flow), `events-options.ts` (its options,
+  `EventsState`), `events-commands.ts` (the hub's say, notice and linkResult as the mod's commands).
+- The game settings: `settings.ts` (`GameSettings`, re-exporting the rest), `settings-rules.ts` (the keys, the reads,
+  the file it writes, the rules across fields), `settings-files.ts` (the config folder's files, `<state>/settings.json`),
+  `settings-live.ts` (the `/config set` table, `/promote` and `/demote`).
+- Saves and files: `saves.ts` (`Saves`, re-exporting the rest), `saves-rules.ts` (the names, kinds, times, constants
+  and types), `saves-folder.ts` (the folder opened once, the listing, pruning, the sweep at start, a save made and
+  waited for), `saves-copy.ts` (a restore, `keep`), `saves-upload.ts` (an upload), `save-check.ts`, `files.ts`.
+- Game updates and deploys: `update.ts` (`Updates`, re-exporting the rest), `update-ctx.ts` (its options and the
+  context its flows share), `update-run.ts` (the steps in order), `update-checks.ts` (the input checks, `labels`),
+  `update-download.ts`, `update-prepare.ts`, `update-backup.ts` (the saves and the hub's stop), `update-swap.ts` (swap,
+  gate, rollback), `update-release.ts` (`current`, pruning, cleaning), `update-steps.ts` (the `updateStep` throttle),
+  `update-job.ts` (`update.json`), `update-files.ts`, `unpack.ts` (`unpack` and `unxz`, re-exporting the rest),
+  `unpack-tar.ts` (the tar reader: `Bytes`, the header fields, pax records, `Refused`), `unpack-paths.ts` (the path
+  rules), `unpack-glibc.ts` (`glibcNeed`, `compareGlibc`), `deploy.ts`.
 
 ## Trust boundaries (do not weaken)
 
@@ -70,7 +88,7 @@ documentation, so read it before changing the file, and change it with the file.
   Factorio's log (this run's, not the previous one) shows Factorio bound that port; a `link` or `unlink` only for a
   player online at the latest `/orrery-status` (a fresh one if the last poll's list lacks them; never a UDP `join`). Every field is checked against the hub's limits before it is sent.
 - RCON commands the agent builds are the mod's own commands with one line of JSON as the argument, and Factorio's
-  built-ins `/config set <option> <value>` (the option from a fixed table in `settings.ts`, the value one it validated:
+  built-ins `/config set <option> <value>` (the option from a fixed table in `settings-live.ts`, the value one it validated:
   one line, printable, within its field's limit), `/promote <name>`, `/demote <name>`, `/unban <name>`,
   `/kick <name> [reason]` and `/ban <name> [reason]` (the name checked against `^[A-Za-z0-9_.-]{1,60}$`, a kick only
   for a player online at the latest `/orrery-status` or a fresh one, under its spelling; the reason cleaned by

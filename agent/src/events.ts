@@ -1,242 +1,36 @@
 // The Factorio mod's game events, both ways (factorio/CLAUDE.md): its UDP datagrams in, checked and turned into the
 // game connection's messages, and the hub's say, notice and linkResult out, as the mod's RCON commands.
 //
-// The Factorio mod's game events, both ways (factorio/CLAUDE.md). `GameEvents`: a UDP listener on
-// 127.0.0.1:`agentUdpPort` (retried every 10 s while the port is taken) that takes datagrams only from
-// 127.0.0.1:`factorioUdpPort`, only while the unit is `active`, and after each start (it became active, or its change
-// time moved while active: a restart between two readings) only once `factorio-current.log` (`files.ts`'s `head`: a
-// regular file, its first 1 MiB, whole lines) has Factorio's engine line `Opening socket at (IP
-// ADDR:({127.0.0.1:<port>}))` followed by a line that is not `Closing socket`, and no `Opening Lua UDP Socket failed`
-// (`socketState`, the Opening line `openingLine`: Factorio writes the Opening line before it binds, so on a taken
-// port it is followed by `Closing socket`, `Socket closed` and the failure line, as seen on 2.1.24), so no other
-// local process bound that port first. A log not written since the agent saw the unit stopped (inactive, failed or
-// activating), or for an unseen restart since the second after it became active, is the previous run's and is read
-// again (every 1 s) until Factorio replaces it. The failure line, the Opening line followed by `Closing socket`, or
-// no decision within 60 s: events are off until the next start, logged once. `state` (`EventsState`) says on each
-// change whether events reach the hub, for the Agent connection's `events`: off, with why, once the gate is off or
-// while the UDP port can't be listened on past one retry; on once the gate is on and the port listened on (the first
-// decision since the agent started counts as a change). Over 4 KiB, or not the mod's shape (`parseDatagram`: `t`,
-// `seq` a safe integer, each field checked against the hub's limits and copied; `message` and `text` cut to 1 KiB):
-// dropped, each kind logged once per start. A `link`/`unlink` for a name not in `StatusPoller.players` (up to 5 s
-// old: the player may have just joined) waits for a fresh `/orrery-status` on the command connection (never a UDP
-// `join`), and is dropped, each one logged (its name `printable`), unless that has them online. `seq` gaps (and going
-// back) are logged; the baseline is the mod's `hello` datagram, asked for with `/orrery-hello` once per start after
-// the gate opens and RCON answers (`rconUp`); one that doesn't come within 5 s is logged. Emits `chat`, `join`,
-// `leave` (no `reason` on the wire), `death` (`deathMessage`: "Alice was killed by Bob", "… by a medium biter",
-// "Alice died"), `milestone` and `link` (`uuid` `""`), `unlink`, within `EventBudget`: 5 a second sustained and 30 at
-// once, all kinds together (a cell-rate check on a monotonic clock), so a chat flood can never push the game
-// connection past the hub's 20 lines a second, which it closes after 10 s; only events count, not the hello or a
-// datagram dropped as malformed, and a link or unlink counts before its fresh `/orrery-status`, so a flood of them
-// can't flood RCON. One over the budget is dropped (its `seq` still taken, so no gap is logged) and counted: the
-// first drop starts a minute, at whose end one line logs the count (`stop` logs what is counted). `toCommand`: `say`,
-// `notice`, `linkResult` as `/orrery-say {author, message, source}`, `/orrery-notice {message}`, `/orrery-reply
-// {player, ok, message}`, the argument `commandJson` (`JSON.stringify`, plus `\u` escapes for DEL, the C1 controls
-// and U+2028/9): one line, never Lua. `toGame` runs one and logs a failure or a reply that is not `{"ok":true, …}`.
+// `GameEvents`: a UDP listener on 127.0.0.1:`agentUdpPort` (retried every 10 s while the port is taken) that takes
+// datagrams only from 127.0.0.1:`factorioUdpPort`, only while the unit is `active`, and after each start only once
+// Factorio's log shows it bound that port itself (the UDP gate's rules, the 4 KiB cap and `Gate` are
+// `events-gate.ts`'s). `state` (`EventsState`) says on each change whether events reach the hub, for the Agent
+// connection's `events`: off, with why, once the gate is off or while the UDP port can't be listened on past one
+// retry; on once the gate is on and the port listened on (the first decision since the agent started counts as a
+// change). Over 4 KiB, or not the mod's shape (`events-datagram.ts`, the event checks): dropped, each kind logged once
+// per start. `seq` gaps (and going back) are logged; the baseline is the mod's `hello` datagram, asked for with
+// `/orrery-hello` once per start after the gate opens and RCON answers (`rconUp`); one that doesn't come within 5 s is
+// logged. Emits the events within `EventBudget` (`events-budget.ts`); a link or unlink for a name not online goes
+// through the link flow (`events-link.ts`, through `LinkCtx`). The hub's messages out, as the mod's commands, are
+// `events-commands.ts`'s (`toCommand`, `toGame`), its options and `EventsState` `events-options.ts`'s. Every name this
+// file exported before is re-exported here.
 import { createSocket, type RemoteInfo, type Socket } from 'node:dgram';
 import { EventEmitter } from 'node:events';
-import type { ModMsg } from '../../hub/src/types.ts';
+import { EventBudget } from './events-budget.ts';
+import { answeredOk } from './events-commands.ts';
+import { parseDatagram, type GameEvent } from './events-datagram.ts';
+import { HEAD_MAX, MAX_DATAGRAM, socketState, type Gate } from './events-gate.ts';
+import { confirmOnline, type LinkCtx } from './events-link.ts';
+import type { EventsOptions, EventsState } from './events-options.ts';
 import { head } from './files.ts';
 import type { UnitState } from './service.ts';
-import { parseStatus } from './status.ts';
-import { LIMITS, printable, type ToGame } from './wire.ts';
+import { printable } from './wire.ts';
 
-/** The game connection's messages that come from the mod's datagrams. */
-export type GameEvent = Extract<ModMsg, { type: 'chat' | 'join' | 'leave' | 'death' | 'milestone' | 'link' | 'unlink' }>;
-
-/** The most bytes of JSON in one datagram: the mod shortens its text to fit, so a bigger one is not the mod's. */
-export const MAX_DATAGRAM = 4096;
-/** Far over where Factorio logs its sockets (startup, before any map is loaded); the rest of the log is not read. */
-const HEAD_MAX = 1024 * 1024;
-const CODE = /^[A-Za-z0-9]{1,16}$/;
-type Kind = Extract<GameEvent, { type: 'milestone' }>['kind'];
-const KINDS: readonly string[] = ['research', 'rocket', 'platform', 'landing'] satisfies Kind[];
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-/** A player (or force) name as the hub takes it: 1 to 64 characters; else null. */
-const name = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 && v.length <= LIMITS.player ? v : null);
-/** Text cut to the hub's limit for chat and milestones, never leaving half a surrogate pair; null if not a string. */
-function text(v: unknown): string | null {
-  if (typeof v !== 'string') return null;
-  if (v.length <= LIMITS.message) return v;
-  const cut = v.slice(0, LIMITS.message);
-  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
-}
-
-/**
- * The hub's death `message`, which it posts as is, so a whole sentence with the player's name: killed by a player
- * (`killer`), by an entity (`cause`, its internal name made readable: `medium-biter` is "a medium biter"), or died.
- */
-export function deathMessage(player: string, cause: string | null, killer: string | null): string {
-  if (killer) return `${player} was killed by ${killer}`;
-  if (!cause) return `${player} died`;
-  const what = cause.replace(/[-_]/g, ' ');
-  return `${player} was killed by ${/^[aeiou]/i.test(what) ? 'an' : 'a'} ${what}`;
-}
-
-/** A datagram as read: an event and its `seq`, or the mod's `hello` (`event` null: only a `seq`). */
-export type Datagram = { seq: number; event: GameEvent | null };
-
-/**
- * One datagram of the mod's (factorio/CLAUDE.md, "Mod to agent: UDP"), read as untrusted: JSON with a `t` and a `seq`
- * (a safe integer, 0 or more), the fields of its kind checked against the hub's limits and copied, no others. A
- * required name that doesn't fit drops the event; an optional one (a milestone's `player` or `force`, a death's
- * `cause` or `killer`) is left out; `message` and `text` are cut to fit. A string says why it was dropped.
- */
-export function parseDatagram(data: Buffer): Datagram | string {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(data.toString('utf8'));
-  } catch {
-    return 'not JSON';
-  }
-  if (!isObject(raw) || typeof raw.t !== 'string') return 'no t';
-  const { seq } = raw;
-  if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) return 'no seq';
-  if (raw.t === 'hello') return { seq, event: null };
-  const event = toEvent(raw.t, raw);
-  return typeof event === 'string' ? event : { seq, event };
-}
-
-function toEvent(t: string, raw: Record<string, unknown>): GameEvent | string {
-  const player = name(raw.player);
-  switch (t) {
-    case 'chat': {
-      const message = text(raw.message);
-      return player && message !== null ? { type: 'chat', player, message } : 'a chat without a player or message';
-    }
-    case 'join':
-    case 'leave': // its reason is not on the wire: the hub's leave has only the player
-    case 'unlink':
-      return player ? { type: t, player } : `a ${t} without a player`;
-    case 'death':
-      return player ? { type: 'death', player, message: deathMessage(player, name(raw.cause), name(raw.killer)) } : 'a death without a player';
-    case 'milestone': {
-      const { kind } = raw;
-      const subject = text(raw.text);
-      if (typeof kind !== 'string' || !KINDS.includes(kind) || subject === null) return 'a milestone without a kind or text';
-      const m: Extract<GameEvent, { type: 'milestone' }> = { type: 'milestone', kind: kind as Kind, text: subject };
-      const force = name(raw.force);
-      if (player) m.player = player;
-      if (force) m.force = force;
-      return m;
-    }
-    case 'link':
-      // Factorio has no player UUIDs: the hub links a factorio server's player by name (docs/protocol.md).
-      return player && typeof raw.code === 'string' && CODE.test(raw.code) ? { type: 'link', player, uuid: '', code: raw.code } : 'a link without a player or code';
-    default:
-      return 'an unknown kind of event';
-  }
-}
-
-/** An engine line of the log (seconds since start, level, `File.cpp:N:`), so a chat line or a mod's `log()` can't pass for one. */
-export const ENGINE = String.raw`^ *\d+\.\d+ \w+ [\w.]+:\d+: `;
-const FAILED = new RegExp(ENGINE + 'Opening Lua UDP Socket failed');
-const CLOSING = new RegExp(ENGINE + 'Closing socket$');
-
-/** Factorio's `Opening socket` line for its Lua UDP socket on 127.0.0.1:`port` (a whole line, `\r` taken off). */
-export const openingLine = (port: number) => new RegExp(ENGINE + String.raw`Opening socket at \(IP ADDR:\(\{127\.0\.0\.1:${port}\}\)\)$`);
-
-/**
- * What a log says about Factorio's Lua UDP socket on 127.0.0.1:`port`. Factorio writes `Opening socket at (IP
- * ADDR:({127.0.0.1:34198}))` before it binds, so on a taken port that line is followed by `Closing socket`, `Socket
- * closed` and `Opening Lua UDP Socket failed` (seen on 2.1.24). `off` once the log has the failure line, or the Opening
- * line followed by `Closing socket`; `on` once the Opening line is followed by any other line and there is no failure
- * line; null while neither is known (no Opening line, or it is the last line yet). Only whole lines count.
- */
-export function socketState(log: string, port: number): 'on' | 'off' | null {
-  const opened = openingLine(port);
-  const lines = log.split('\n');
-  lines.pop(); // what follows the last newline is a line still being written (or nothing)
-  let open = -1;
-  for (const [i, raw] of lines.entries()) {
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    lines[i] = line;
-    if (FAILED.test(line)) return 'off';
-    if (open < 0 && opened.test(line)) open = i;
-  }
-  if (open < 0 || open + 1 === lines.length) return null; // the bind's outcome isn't logged yet
-  return CLOSING.test(lines[open + 1]!) ? 'off' : 'on';
-}
-
-/**
- * Game events the agent forwards to the hub, all kinds together: 5 a second sustained, 30 at once. The hub drops a
- * connection's lines over 20 a second (100 at once) and closes one that stays over that for 10 s, so a player
- * spamming chat can never take the game connection, and its heartbeats, down with it.
- */
-export const EVENT_RATE = 5;
-export const EVENT_BURST = 30;
-/** The events dropped over the budget are counted in one log line a minute at most. */
-export const DROP_LOG_MS = 60_000;
-
-/**
- * The game events' budget, `EVENT_RATE` a second and `EVENT_BURST` at once, on a monotonic clock (ms): a cell-rate
- * check, so a full burst comes back after a quiet 6 s and nothing builds up past it. `take` says whether one more
- * event goes now. What it refuses is counted: the first refusal starts a minute, at whose end (or at `flush`) one line
- * logs the count.
- */
-export class EventBudget {
-  #now: () => number;
-  /** When the next event would be on time; it may run up to `EVENT_BURST - 1` intervals ahead of the clock. */
-  #due = -Infinity;
-  #dropped = 0;
-  #timer: NodeJS.Timeout | undefined;
-
-  constructor(now: () => number = () => performance.now()) {
-    this.#now = now;
-  }
-
-  take(): boolean {
-    const now = this.#now();
-    const interval = 1000 / EVENT_RATE;
-    const due = Math.max(this.#due, now);
-    if (due - now <= (EVENT_BURST - 1) * interval) {
-      this.#due = due + interval;
-      return true;
-    }
-    if (this.#dropped++ === 0) this.#timer = setTimeout(() => this.flush(), DROP_LOG_MS);
-    return false;
-  }
-
-  /** Logs the count dropped since the minute started, if any, and ends that minute. */
-  flush(): void {
-    clearTimeout(this.#timer);
-    const n = this.#dropped;
-    if (n === 0) return;
-    this.#dropped = 0;
-    console.log(`[events] dropped ${n} game event${n === 1 ? '' : 's'} in the last minute: over ${EVENT_RATE} a second (${EVENT_BURST} at once)`);
-  }
-}
-
-/**
- * Whether UDP events are taken: `closed` while the unit isn't active; after each start `checking` until the log
- * decides, then `on`, or `off` until the next start.
- */
-export type Gate = 'closed' | 'checking' | 'on' | 'off';
-
-/** Whether game events reach the hub, as the Agent connection's `events` tells it: off says why. */
-export type EventsState = { on: true } | { on: false; reason: string };
-
-export type EventsOptions = {
-  /** The agent's UDP port on 127.0.0.1 (`agentUdpPort`, 34199; the mod sends there). */
-  port: number;
-  /** Factorio's Lua UDP port (`factorioUdpPort`, 34198): the only source port taken. */
-  factorioPort: number;
-  /** `factorio-current.log` in the server's data folder. */
-  log: string;
-  /** The players online at the latest `/orrery-status`: a link or unlink names one of them, or a fresh one decides. */
-  players: () => readonly string[];
-  /** Runs an RCON command (`/orrery-hello`, a fresh `/orrery-status`); rejects when RCON can't run it. */
-  run: (command: string) => Promise<string>;
-  /** How long after a start the log may take to show either line. */
-  deadlineMs?: number;
-  pollMs?: number;
-  /** How long after `/orrery-hello`'s answer its datagram may take before that is logged. */
-  helloMs?: number;
-  /** Between attempts to listen when the port is taken. */
-  retryMs?: number;
-  /** The event budget's monotonic clock (ms; `performance.now`). */
-  now?: () => number;
-};
+export { DROP_LOG_MS, EVENT_BURST, EVENT_RATE, EventBudget } from './events-budget.ts';
+export { commandJson, toCommand, toGame } from './events-commands.ts';
+export { deathMessage, parseDatagram, type Datagram, type GameEvent } from './events-datagram.ts';
+export { ENGINE, MAX_DATAGRAM, openingLine, socketState, type Gate } from './events-gate.ts';
+export type { EventsOptions, EventsState } from './events-options.ts';
 
 /**
  * The mod's game events: a UDP listener on 127.0.0.1:`port` taking datagrams only from 127.0.0.1:`factorioPort`, and
@@ -281,11 +75,20 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent]; state: [Event
   #last: number | null = null;
   #dropped = new Set<string>();
   #budget: EventBudget;
+  #link: LinkCtx;
 
   constructor(options: EventsOptions) {
     super();
     this.#o = { deadlineMs: 60_000, pollMs: 1000, helloMs: 5000, retryMs: 10_000, now: () => performance.now(), ...options };
     this.#budget = new EventBudget(this.#o.now);
+    this.#link = {
+      run: (command) => this.#o.run(command),
+      starts: () => this.#run,
+      gate: () => this.#gate,
+      emit: (event) => {
+        this.emit('event', event);
+      },
+    };
   }
 
   get gate(): Gate {
@@ -404,7 +207,7 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent]; state: [Event
       const text = await head(this.#o.log, HEAD_MAX, freshAfter);
       if (run !== this.#run) return;
       const state = text === null ? null : socketState(text, this.#o.factorioPort);
-      // check.ts (S4) reads this line, the "off" one below, and the hello lines from agent.log: keep their wording.
+      // check-events.ts (S4) reads this line, the "off" one below, and the hello lines from agent.log: keep their wording.
       if (state === 'on') {
         this.#gate = 'on';
         console.log(`[events] on: Factorio opened its Lua UDP socket on 127.0.0.1:${this.#o.factorioPort}`);
@@ -462,29 +265,8 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent]; state: [Event
     // Over the budget: counted, and its seq taken above, so no gap is logged. Taken before a fresh /orrery-status
     // too, so a flood of links for names not online can't flood RCON.
     if (!this.#budget.take()) return;
-    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) return void this.#online(event);
+    if ((event.type === 'link' || event.type === 'unlink') && !this.#o.players().includes(event.player)) return void confirmOnline(this.#link, event);
     this.emit('event', event);
-  }
-
-  /**
-   * A link or unlink for a name not online at the latest poll, which is up to 5 s old: a player who just joined. A
-   * fresh `/orrery-status` decides (never the UDP `join`, which anyone in the container can send); not online there
-   * either, it is dropped and logged.
-   */
-  async #online(event: Extract<GameEvent, { type: 'link' | 'unlink' }>): Promise<void> {
-    const run = this.#run;
-    let online = false;
-    let why = 'not online at a fresh /orrery-status';
-    try {
-      const status = parseStatus(await this.#o.run('/orrery-status'));
-      if (status) online = status.players.includes(event.player);
-      else why = '/orrery-status gave no status';
-    } catch (err) {
-      why = `/orrery-status failed: ${printable((err as Error).message)}`;
-    }
-    if (run !== this.#run || this.#gate !== 'on') return; // the server stopped meanwhile
-    if (online) return void this.emit('event', event);
-    console.log(`[events] dropped ${event.type === 'link' ? 'a link' : 'an unlink'} for ${printable(event.player)}: ${why}`);
   }
 
   #seq(seq: number, hello: boolean): void {
@@ -503,50 +285,5 @@ export class GameEvents extends EventEmitter<{ event: [GameEvent]; state: [Event
       console.log(`[events] ${lost} game event${lost === 1 ? '' : 's'} lost: seq ${lost === 1 ? last + 1 : `${last + 1} to ${seq - 1}`} never came`);
     }
     else console.log(`[events] seq went back from ${last} to ${seq}`);
-  }
-}
-
-/** Whether a mod command's reply is `{"ok": true, …}` (JSON from `table_to_json`, its keys in any order). */
-function answeredOk(reply: string): boolean {
-  try {
-    const r: unknown = JSON.parse(reply);
-    return isObject(r) && r.ok === true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * JSON for an RCON command's argument: `JSON.stringify` (control characters escaped, so never a newline), with the
- * characters it leaves as they are but that a console line shouldn't carry escaped too (DEL, the C1 controls, the
- * line and paragraph separators). Plain JSON either way, which `helpers.json_to_table` reads.
- */
-export function commandJson(value: object): string {
-  return JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-}
-
-/**
- * The mod's RCON command for a message from the hub (factorio/CLAUDE.md, "Agent to mod"): `say` is `/orrery-say
- * {author, message, source}`, `notice` `/orrery-notice {message}`, `linkResult` `/orrery-reply {player, ok, message}`.
- * One line with a JSON argument: never Lua, never `/c` or `/sc` (the mod makes the text safe to print).
- */
-export function toCommand(msg: ToGame): string {
-  switch (msg.type) {
-    case 'say':
-      return `/orrery-say ${commandJson({ author: msg.author, message: msg.message, source: msg.source })}`;
-    case 'notice':
-      return `/orrery-notice ${commandJson({ message: msg.message })}`;
-    case 'linkResult':
-      return `/orrery-reply ${commandJson({ player: msg.player, ok: msg.ok, message: msg.message })}`;
-  }
-}
-
-/** Carries out a message from the hub in game over RCON; a failure or an answer other than `{"ok":true}` is logged. */
-export async function toGame(run: (command: string) => Promise<string>, msg: ToGame): Promise<void> {
-  try {
-    const reply = await run(toCommand(msg));
-    if (!answeredOk(reply)) console.error(`[game] ${msg.type} was not shown: ${printable(JSON.stringify(reply.slice(0, 200)))}`);
-  } catch (err) {
-    console.error(`[game] ${msg.type} was not shown: ${(err as Error).message}`);
   }
 }

@@ -9,7 +9,6 @@ import { Component, computed, inject, signal } from '@angular/core';
 import type { InviteInfo, LoginRequest, PasswordRequest } from '@hub/api';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmSpinner } from '@spartan-ng/helm/spinner';
-import { StagingBadge } from './environment';
 import { Logo } from './logo';
 import { Session } from './session';
 
@@ -41,14 +40,13 @@ export function takeInvite(): string | null {
 /** The logged-out view: a centred card, no sidebar, with the login form or an invite's password form. */
 @Component({
   selector: 'app-login',
-  imports: [HlmButton, HlmSpinner, StagingBadge, Logo],
+  imports: [HlmButton, HlmSpinner, Logo],
   template: `
     <div class="flex min-h-dvh flex-col items-center justify-center gap-6 p-4">
       <app-logo class="size-16" [animated]="true" />
       <div class="ar-panel flex w-full max-w-[360px] flex-col items-center gap-5 p-6">
         <span class="ar-t-heading-lg flex items-center gap-2">
           orrery
-          <app-staging-badge />
         </span>
         @if (invite) {
           @if (invitee(); as name) {

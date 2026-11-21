@@ -4,10 +4,9 @@
 // `<router-outlet>` and count badges
 // on Servers, Services (down checks count there too) and Host (overdue releases). An invite link opened while logged in
 // leaves the address at once, with a notice to log out first. With `checks` on and `systemd` off
-// the Services entry reads "Checks". The tab title is "orrery (staging)" on Staging.
+// the Services entry reads "Checks".
 
 import { Component, computed, effect, inject, input } from '@angular/core';
-import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { Integrations as IntegrationsOn, Me, Permission } from '@hub/api';
@@ -16,7 +15,6 @@ import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { catchError, of } from 'rxjs';
 import { Attention, AttentionStrip } from './attention';
-import { Environment, StagingBadge } from './environment';
 import { Integrations } from './integrations';
 import { Feedback } from './feedback';
 import { Login, takeInvite } from './login';
@@ -69,7 +67,7 @@ export class UserMenu {
 /** The shell: sidebar (tab bar on a phone) of the integrations' pages, or the login card. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, UserMenu, ThemeSwitch, Login, HlmToaster, AttentionStrip, StagingBadge, Logo],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, UserMenu, ThemeSwitch, Login, HlmToaster, AttentionStrip, Logo],
   template: `
     <hlm-toaster [theme]="theme.dark() ? 'dark' : 'light'" />
     @switch (session.user()) {
@@ -80,7 +78,7 @@ export class UserMenu {
       @default {
         <div class="ar-shell">
           <aside class="ar-sidebar">
-            <span class="ar-sidebar__brand"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
+            <span class="ar-sidebar__brand"><app-logo class="size-6" /> orrery</span>
             <nav class="ar-nav" aria-label="Pages">
               @for (p of visible(); track p.path) {
                 <a [routerLink]="p.path" routerLinkActive ariaCurrentWhenActive="page">
@@ -97,7 +95,7 @@ export class UserMenu {
           </aside>
           <div class="ar-shell__main">
             <header class="ar-topbar">
-              <span class="flex flex-1 items-center gap-2"><app-logo class="size-6" /> orrery <app-staging-badge /></span>
+              <span class="flex flex-1 items-center gap-2"><app-logo class="size-6" /> orrery</span>
               <app-user-menu [user]="session.user()!" [showName]="false" /><app-theme-switch class="ar-t-ui" />
             </header>
             <app-attention-strip />
@@ -138,9 +136,6 @@ export class App {
   }
 
   constructor() {
-    const env = inject(Environment);
-    const title = inject(Title);
-    effect(() => title.setTitle(env.staging() ? 'orrery (staging)' : 'orrery'));
     reguardOnChange();
     const feedback = inject(Feedback);
     effect(() => {

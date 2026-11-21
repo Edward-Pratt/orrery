@@ -19,7 +19,9 @@ pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env D
 
 ## Modules
 
-`src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts` (`loadConfig`; callers import every config name from it)
+`src/` keeps the wiring (`index.ts`, `start.ts` (`startHub`) with the parts it builds: `start-core.ts` (database,
+`ServerHub` and its listeners, `updating`), `start-backups.ts`, `start-game.ts`, `start-deploys.ts` and
+`start-packs.ts`, `config.ts` (`loadConfig`; callers import every config name from it)
 with its types `config-types.ts`, defaults `config-defaults.ts`, validation `config-validate.ts` (`servers[]`'s in
 `config-servers.ts`) and field checks `config-check.ts`,
 `check-config.ts`, `users-cli.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
@@ -27,7 +29,7 @@ with its types `config-types.ts`, defaults `config-defaults.ts`, validation `con
 `units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
 what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
 `stats/`, `users/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
-change it with the file. `start.ts` wires them all from config, so it is the map. Tests mirror the folders under
+change it with the file. `start.ts` wires them all from config (through its `start-*.ts` parts), so it is the map. Tests mirror the folders under
 `test/`; `test/fake-mod.ts` and `test/fake-agent.ts` serve them all.
 
 ## Dependencies

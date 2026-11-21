@@ -1,5 +1,5 @@
 // `RestartScheduler`: countdown restarts (in-game warnings through `ServerHub.broadcast`, a Mod's `say` audited as
-// `hub:restart`, then `stop`; a factorio server's ends in its `restart` option instead, which `startHub` makes
+// `hub:restart`, then `stop`; a factorio server's ends in its `restart` option instead, which `buildCore` makes
 // `Services.now(<its service>, 'restart')`, looked up late as Services is built after it: one countdown, then one
 // restart of its unit, never a stop, as `factorio.service` restarts only on failure) and daily restarts; a countdown
 // can be a stop that ends in its own action (`{ stop, fire }`: a service's `systemctl stop`, so Restart=always

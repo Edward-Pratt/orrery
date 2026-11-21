@@ -256,7 +256,7 @@ files", `restore-backup.sh`'s "unpacks to staging" and `test-install-web.sh`'s "
 `orrery-deploy@.service` and `orrery-deploy-web@.service` that point at the staging copies; remove `environment`,
 `ENVIRONMENTS` and `Environment` from `config.ts` (`validateConfig` checks the key only when present, line 206, and
 the loader passes unknown keys through, line 495: a config still carrying it starts, the key unread; prod has none)
-and its use in `start.ts` (line 276), the route and type from `api-public.ts`, `environment.ts` and every use of
+and its uses in `start-deploys.ts` and `start.ts` (`webApi`'s deps), the route and type from `api-public.ts`, `environment.ts` and every use of
 `StagingBadge` and the title
 effect from the dashboard, and their tests (`app.spec.ts`'s badge test goes; `app.routes.spec.ts`'s "Minecraft off"
 test stays with its text reworded). `DeployTargets` and `integrations.github.deploys` stay: they are the

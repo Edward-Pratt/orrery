@@ -23,12 +23,12 @@ import type {
   ServiceActionAnswer,
   ServiceLogs,
   ServiceStatus,
-  TargetEvent,
-} from '../src/api.ts';
+  TargetEvent } from '../src/api.ts';
 import type { Config } from '../src/config.ts';
 import { Db } from '../src/stats/db.ts';
 import { backupCommand, postTargets, type BackupInteraction } from '../src/discord/discord.ts';
-import { formatEvent, formatTargetEvent, type Post } from '../src/discord/format.ts';
+import { formatEvent, type Post } from '../src/discord/format.ts';
+import { formatTargetEvent } from '../src/discord/format-target.ts';
 import type { Links } from '../src/servers/links.ts';
 import type { RestoreEnv, RunRestore } from '../src/backups/restore.ts';
 import type { Run } from '../src/services/services.ts';

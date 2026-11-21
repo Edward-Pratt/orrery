@@ -41,7 +41,6 @@ import {
   formatPlaytime,
   formatPresence,
   formatStatus,
-  formatTargetEvent,
   formatTop,
   formatTopic,
   formatTps,
@@ -49,6 +48,7 @@ import {
   type Post,
   type TopicEdit,
 } from './format.ts';
+import { formatTargetEvent } from './format-target.ts';
 import type { DiscordConfig } from '../config.ts';
 import type { Links } from '../servers/links.ts';
 import type { RestartScheduler } from '../servers/restarts.ts';

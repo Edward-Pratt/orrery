@@ -31,9 +31,8 @@ friend to re-run `setup-agent-host.sh` from its tag, as do a new image (`--image
 The hub's deploy installs with pnpm (`pnpm install --frozen-lockfile --prod` in `deploy-hub.sh`), so the hub's host needs
 pnpm at the version in `hub/package.json`'s `packageManager`, on the deploy unit's `PATH`: `sudo npm install -g
 pnpm@12.21.0`, then `pnpm --version` as `opc`. Without it a hub deploy fails before cloning, saying so. The script runs
-from the running release, so the first hub release with pnpm is still installed by the old script's `npm ci --omit=dev`:
-until the hub release after it, `hub/package-lock.json` stays next to `pnpm-lock.yaml`, and CI's hub job ends with
-`npm ci --omit=dev` to check that it still agrees with `package.json`. Once a pnpm-era script runs, a hub tag from before pnpm has no
+from the running release: the first hub release with pnpm (`hub-v2.22.2`) was still installed by the old script's
+`npm ci --omit=dev`, so it kept `hub/package-lock.json`, gone since the release after it. Once a pnpm-era script runs, a hub tag from before pnpm has no
 `pnpm-lock.yaml` and its deploy fails before the flip; an automatic Rollback is unaffected, as it only moves the link.
 
 Deploying from Releases needs the `deploys` permission. Dashboard logins are local Users (ADR 0005, `docs/notes/users.md`):

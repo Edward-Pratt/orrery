@@ -1,5 +1,5 @@
-// The web API's test hub, shared by `test/start.test.ts` and `test/web/`: `config` (one minecraft server, `gtnh`, in a
-// temporary folder), `WEB` (the web integration on port 0), `webHub` (a hub with only the web integration: its
+// The web API's test hub, shared by `test/start-*.test.ts` and `test/web/`: `config` (one minecraft server, `gtnh`,
+// in a temporary folder), `WEB` (the web integration on port 0), `webHub` (a hub with only the web integration: its
 // `HubHandle.web`, the app and its `Users`), and logging in through `app.request`, with no port: `loginAs` makes a
 // user through `Users` (an owner by default, `alex` with `ADMIN.id` as their Discord id) and logs them in through
 // their invite, or with `POST /api/login` once they have a password (`PASSWORD`, every test user's), answering their

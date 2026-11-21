@@ -1,39 +1,40 @@
 // `ServerHub`: the Mod port (`listen`) and the Agents' game connections (`attach(socket, serverId, modVersion)` from
 // `Agents`, which keeps reading the socket and feeds the returned function its messages, parsed and within their
-// budgets; the socket joins those `close` destroys), per-server state, liveness (crash/stop/hung; `started` once per
-// connection, a repeat on it ignored; `start()`, which `startHub` always calls, runs hung detection and the 60 s
-// grace period, after which a server that can't connect stays unknown: a factorio server whose Agent isn't connected,
-// a minecraft one while the Mod port isn't open (`listen`, only with `integrations.minecraft`)), the Agent rules
-// (`agentUp`/`agentDown`: an Agent leaving drops its server's game connection and makes it `lost`; a game connection
-// closing without `stopping` while its Agent connection is up waits `settleMs` (5 s) for that one to close too, else
-// it crashed; hung detection is off only while a factorio server's Agent is away; a factorio server's lifecycle
-// events at most 20 an hour, in bursts of 20, kept across connections: one over it is not emitted at all, so the
-// uptime log, the stream and Discord alike miss it, the drops logged at most once a minute with a count, and the
-// latest dropped one is emitted when the next token comes, within 3 min, unless a later one went out first; a Mod's
-// server has no such budget), `downs(id)` (how many times a server's game connection went away since the hub started,
-// counted in `#offline` whether or not its down event fits the budget), `say`, `broadcast(id, text, by)` (a hub line
-// in game, such as a countdown's: a Mod's server runs `say <text>` through `runCommand`, audited as `by`; a factorio
-// server's Agent gets a `notice`, cleaned like `say`, and builds the game's command itself), `backup(id, by)` (a
-// Backup now: a Mod's server runs `backup start` through `runCommand`, resolving with its output; a factorio server's
-// Agent gets `save`, audited as `backup`, resolving with none; the game's `backup` event follows either way),
-// `runCommand` (control characters taken out; a Mod's command without a leading `/`, a factorio server's as typed,
-// `/players`, and at most 256 characters, as its Agent runs no longer one: else `CommandRefused`, before it is
-// audited or sent), `audit` (entries go to the `HubOptions.audit` sink: the database), `event` emitter (game,
+// budgets; the socket joins those `close` destroys), per-server state, liveness (crash/stop/hung; `start()`, which
+// `startHub` always calls, runs hung detection and the 60 s grace period, after which a server that can't connect
+// stays unknown: a factorio server whose Agent isn't connected, a minecraft one while the Mod port isn't open
+// (`listen`, only with `integrations.minecraft`)), the Agent rules (`agentUp`/`agentDown`: an Agent leaving drops its
+// server's game connection and makes it `lost`), `downs(id)` (how many times a server's game connection went away
+// since the hub started, counted whether or not its down event fits the lifecycle budget), `say`, `broadcast(id, text,
+// by)` (a hub line in game, such as a countdown's: a Mod's server runs `say <text>` through `runCommand`, audited as
+// `by`; a factorio server's Agent gets a `notice`, cleaned like `say`, and builds the game's command itself),
+// `backup(id, by)` (a Backup now: a Mod's server runs `backup start` through `runCommand`, resolving with its output; a
+// factorio server's Agent gets `save`, audited as `backup`, resolving with none; the game's `backup` event follows
+// either way), `runCommand`, `audit` (entries go to the `HubOptions.audit` sink: the database), `event` emitter (game,
 // lifecycle and hub-core `notice` events, plus `say` for chat sent in game, with its `source` (`discord` or
-// `dashboard`), `console` for command output, late
-// output included, `tps` when a heartbeat's TPS moved by 0.1 or more, and `paused` when a heartbeat changed the
-// server's `paused`), `publish` (hub-core modules put typed notices — kind, severity, details — on it), `modVersion`
-// (what a server's Mod reported in its latest hello, kept after it disconnects), `paused` on each `ServerState` (from
-// an Agent's heartbeat: while paused the rate is ignored, not put on the state or the stream, but heartbeats still
-// count for hung detection), and `publishTarget` for notices about the host, a service, a check or a deploy (`target`
-// events, apart from server `event`s so server handlers never see them). The API frontends use.
+// `dashboard`), `console` for command output, late output included, `tps` and `paused` from heartbeats), `publish`
+// (hub-core modules put typed notices — kind, severity, details — on it), `modVersion` (what a server's Mod reported
+// in its latest hello, kept after it disconnects), and `publishTarget` for notices about the host, a service, a check
+// or a deploy (`target` events, apart from server `event`s so server handlers never see them). The API frontends use.
+// The class owns the state, the listener and every socket; its flows share that state (`ServerCtx`, `server-ctx.ts`):
+// a connection's handshake, open and close (`connections.ts`), its messages and hung detection (`dispatch.ts`), the
+// lifecycle events and a factorio server's budget for them (`lifecycle-budget.ts`), `runCommand` (`commands.ts`), and
+// the text and hello checks (`server-text.ts`). This file re-exports the names callers import from it.
 
-import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
-import { createInterface } from 'node:readline';
-import { LIMITS, MIN_PROTOCOL, PROTOCOL_VERSION, parseModLine, type Hello, type HubMsg, type ModMsg } from '../protocol.ts';
-import type { Announcement, AuditEntry, ChatSource, Game, HubEvent, Lifecycle, Notice, ServerState, TargetEvent } from '../types.ts';
+import { LIMITS, type ModMsg } from '../protocol.ts';
+import type { Announcement, AuditEntry, ChatSource, HubEvent, Notice, ServerState, TargetEvent } from '../types.ts';
+import { runCommand } from './commands.ts';
+import { offline, open, readHandshake } from './connections.ts';
+import { checkHung } from './dispatch.ts';
+import { emitLifecycle, type LifecycleBudget } from './lifecycle-budget.ts';
+import { send, type Conn, type HubOptions, type Late, type ServerConfig, type ServerCtx } from './server-ctx.ts';
+import { mcText } from './server-text.ts';
+
+export { CommandRefused } from './commands.ts';
+export type { HubOptions, ServerConfig } from './server-ctx.ts';
+export { mcText, protocolRefusal, stripCodes, tokenMatches, truncate } from './server-text.ts';
 export type {
   Announcement,
   AuditEntry,
@@ -58,96 +59,6 @@ export type {
   Tps,
 } from '../types.ts';
 
-/** No token: the server can't connect (the Minecraft integration is off, or it isn't a minecraft server). */
-export type ServerConfig = { id: string; name: string; game: Game; token?: string };
-
-export type HubOptions = {
-  hungMs?: number;
-  cmdTimeoutMs?: number;
-  helloTimeoutMs?: number;
-  graceMs?: number;
-  lateMs?: number;
-  /**
-   * How long a factorio server's game connection that closed without `stopping`, while its Agent connection is up,
-   * waits for that one to close too (then its Agent is lost, not the server crashed).
-   */
-  settleMs?: number;
-  /** Where audit entries go (the hub's database). */
-  audit?: (entry: AuditEntry) => void;
-};
-
-type Late = { command: string; by: string; onLate?: (output: string[]) => void; timer: NodeJS.Timeout };
-
-type Pending = { resolve: (output: string[]) => void; reject: (err: Error) => void; timer: NodeJS.Timeout };
-type Conn = {
-  socket: Socket;
-  stopping: boolean;
-  lastBeat: number;
-  hung: boolean;
-  pending: Map<string, Pending>;
-  /** The last TPS put on the event stream. */
-  sentTps: number | null;
-  /** Its `started` is on the stream: one per connection (a Mod's server starts once per connection anyway). */
-  started: boolean;
-};
-
-/**
- * A factorio server's lifecycle events, its connections and reconnects together (docs/protocol.md, "Rate rules"): 20 an
- * hour, in bursts of 20. Each is a row of the never-pruned uptime log, a stream event and maybe a Discord post, so an
- * Agent's token holder churning connections must not add them without end.
- */
-const LIFECYCLE = { perHour: 20, burst: 20 };
-const HOUR_MS = 3_600_000;
-const LOG_MS = 60_000;
-
-/**
- * A factorio server's lifecycle budget: a token bucket (a clock stepping back adds none), the latest event dropped
- * over it (put through when the next token comes), and the drops since the last log line.
- */
-type LifecycleBudget = { tokens: number; last: number; pending: Lifecycle | null; timer?: NodeJS.Timeout; dropped: number; loggedAt: number };
-
-/** Removes Minecraft § formatting codes. */
-export function stripCodes(s: string): string {
-  return s.replace(/§.?/gs, '');
-}
-
-/** Cuts s to at most max UTF-16 units without leaving half an emoji (a lone high surrogate) at the end. */
-export function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  const cut = s.slice(0, max);
-  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
-}
-
-/** Makes untrusted text safe for a single line of Minecraft chat. */
-export function mcText(s: string, max: number): string {
-  return truncate(
-    stripCodes(s)
-      .replace(/[\u0000-\u001f\u007f\s]+/g, ' ')
-      .trim(),
-    max,
-  );
-}
-
-/** Compares a configured token with one a connection sent, in constant time. */
-export function tokenMatches(expected: string, got: string): boolean {
-  const a = Buffer.from(expected);
-  const b = Buffer.from(got);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/**
- * A console command its server's game connection would not take, refused before it is audited or sent: a factorio
- * server's over `LIMITS.text` (256) characters, which its Agent refuses (docs/protocol.md, `cmd`).
- */
-export class CommandRefused extends Error {}
-
-/** Why a hello's protocol version is refused (the same range for a Mod's hello and an Agent's), or null. */
-export function protocolRefusal(p: number): string | null {
-  if (Number.isInteger(p) && p >= MIN_PROTOCOL && p <= PROTOCOL_VERSION) return null;
-  const speaks = MIN_PROTOCOL === PROTOCOL_VERSION ? `${PROTOCOL_VERSION}` : `${MIN_PROTOCOL}–${PROTOCOL_VERSION}`;
-  return `protocol ${p} not supported (hub speaks ${speaks})`;
-}
-
 /**
  * Owns the game connections (a Mod's on the Mod port; an Agent's for its factorio server, handed over by `Agents`
  * through `attach`) and every configured server's state.
@@ -155,6 +66,7 @@ export function protocolRefusal(p: number): string | null {
  * Server events are `event`s; events about the host, services and checks are `target`s, so server handlers never see them.
  */
 export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [TargetEvent] }> {
+  #c: ServerCtx; // what the flows share with this (`server-ctx.ts`)
   #configs = new Map<string, ServerConfig>();
   #states = new Map<string, ServerState>();
   #conns = new Map<string, Conn>();
@@ -165,17 +77,10 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   #settling = new Map<string, NodeJS.Timeout>(); // factorio servers whose game connection closed, waiting on the Agent
   #lifecycle = new Map<string, LifecycleBudget>(); // factorio servers' lifecycle budgets, kept across connections
   #server: Server | null = null;
-  #listening = false; // the Mod port is open: without it a minecraft server has no way to connect
   #timer: NodeJS.Timeout | undefined;
   #grace: NodeJS.Timeout | undefined;
-  #closing = false;
-  #hungMs: number;
-  #cmdTimeoutMs: number;
-  #lateMs: number;
   #late = new Map<string, Late>(); // command id -> handler for output that arrives after the result
-  #helloTimeoutMs: number;
   #graceMs: number;
-  #settleMs: number;
   #audit: (entry: AuditEntry) => void;
 
   constructor(servers: ServerConfig[], opts: HubOptions = {}) {
@@ -185,13 +90,28 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       this.#configs.set(s.id, s);
       this.#states.set(s.id, { id: s.id, name: s.name, game: s.game, online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
     }
-    this.#hungMs = opts.hungMs ?? 30_000;
-    this.#cmdTimeoutMs = opts.cmdTimeoutMs ?? 10_000;
-    this.#lateMs = opts.lateMs ?? 15 * 60_000; // Discord allows interaction follow-ups for 15 minutes
-    this.#helloTimeoutMs = opts.helloTimeoutMs ?? 5_000;
     this.#graceMs = opts.graceMs ?? 60_000; // longer than the mod's 30 s max reconnect backoff
-    this.#settleMs = opts.settleMs ?? 5_000;
     this.#audit = opts.audit ?? (() => {});
+    this.#c = {
+      configs: this.#configs,
+      states: this.#states,
+      conns: this.#conns,
+      modVersions: this.#modVersions,
+      downs: this.#downs,
+      agentsUp: this.#agentsUp,
+      settling: this.#settling,
+      lifecycle: this.#lifecycle,
+      late: this.#late,
+      listening: false,
+      closing: false,
+      hungMs: opts.hungMs ?? 30_000,
+      cmdTimeoutMs: opts.cmdTimeoutMs ?? 10_000,
+      lateMs: opts.lateMs ?? 15 * 60_000, // Discord allows interaction follow-ups for 15 minutes
+      helloTimeoutMs: opts.helloTimeoutMs ?? 5_000,
+      settleMs: opts.settleMs ?? 5_000,
+      emit: (e) => this.emit('event', e),
+      audit: (actor, action, target, details) => this.audit(actor, action, target, details),
+    };
   }
 
   /**
@@ -199,13 +119,13 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    * hub always calls it.
    */
   start(): void {
-    this.#timer = setInterval(() => this.#checkHung(), Math.min(5_000, this.#hungMs / 2));
+    this.#timer = setInterval(() => checkHung(this.#c), Math.min(5_000, this.#c.hungMs / 2));
     // Servers still not connected after the grace period are down (else uptime stays 'unknown' forever); one that
     // can't connect stays unknown: a factorio server whose Agent isn't connected, a minecraft one with no Mod port.
     this.#grace = setTimeout(() => {
       for (const s of this.#states.values()) {
-        const canConnect = s.game === 'factorio' ? this.#agentsUp.has(s.id) : this.#listening;
-        if (!this.#conns.has(s.id) && canConnect) this.#emit(s.id, 'offline');
+        const canConnect = s.game === 'factorio' ? this.#agentsUp.has(s.id) : this.#c.listening;
+        if (!this.#conns.has(s.id) && canConnect) emitLifecycle(this.#c, s.id, 'offline');
       }
     }, this.#graceMs);
   }
@@ -217,14 +137,14 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
       server.once('error', reject);
       server.listen(port, host, () => {
         this.#server = server;
-        this.#listening = true;
+        this.#c.listening = true;
         resolve((server.address() as AddressInfo).port);
       });
     });
   }
 
   close(): Promise<void> {
-    this.#closing = true;
+    this.#c.closing = true;
     clearInterval(this.#timer);
     clearTimeout(this.#grace);
     for (const timer of this.#settling.values()) clearTimeout(timer);
@@ -266,7 +186,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     const text = mcText(message, 256);
     if (!conn || !text) return false;
     const msg = { type: 'say', author: mcText(author, 32) || '?', message: text, source } as const;
-    this.#send(conn.socket, msg);
+    send(conn.socket, msg);
     this.emit('event', { ...msg, serverId: id });
     return true;
   }
@@ -282,7 +202,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     const message = mcText(text, LIMITS.message);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)!.name} is offline`));
     if (!message) return Promise.reject(new Error('empty notice'));
-    this.#send(conn.socket, { type: 'notice', message });
+    send(conn.socket, { type: 'notice', message });
     return Promise.resolve();
   }
 
@@ -296,7 +216,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     const conn = this.#conns.get(id);
     if (!conn) return Promise.reject(new Error(`${this.#states.get(id)!.name} is offline`));
     this.audit(by, 'backup', id, 'save');
-    this.#send(conn.socket, { type: 'save' });
+    send(conn.socket, { type: 'save' });
     return Promise.resolve([]);
   }
 
@@ -319,7 +239,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   sendLinkResult(id: string, player: string, ok: boolean, message: string): boolean {
     const conn = this.#conns.get(id);
     if (!conn) return false;
-    this.#send(conn.socket, { type: 'linkResult', player, ok, message });
+    send(conn.socket, { type: 'linkResult', player, ok, message });
     return true;
   }
 
@@ -336,33 +256,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
    * event stream.
    */
   runCommand(id: string, command: string, by: string, onLate?: (output: string[]) => void): Promise<string[]> {
-    const conn = this.#conns.get(id);
-    if (!conn) return Promise.reject(new Error(`${this.#states.get(id)?.name ?? id} is offline`));
-    const typed = command.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
-    const factorio = this.#states.get(id)!.game === 'factorio';
-    const cmd = factorio ? typed : typed.replace(/^\//, '');
-    if (!cmd) return Promise.reject(new Error('empty command'));
-    if (factorio && cmd.length > LIMITS.text) {
-      return Promise.reject(new CommandRefused(`A Factorio console command is at most ${LIMITS.text} characters`));
-    }
-    this.audit(by, 'command', id, cmd);
-    const cmdId = randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        conn.pending.delete(cmdId);
-        reject(new Error('command timed out — it may still run when the server responds'));
-      }, this.#cmdTimeoutMs);
-      conn.pending.set(cmdId, {
-        resolve: (output) => {
-          this.#late.set(cmdId, { command: cmd, by, onLate, timer: setTimeout(() => this.#late.delete(cmdId), this.#lateMs) });
-          this.emit('event', { serverId: id, type: 'console', command: cmd, by, output });
-          resolve(output);
-        },
-        reject,
-        timer,
-      });
-      this.#send(conn.socket, { type: 'cmd', id: cmdId, command: cmd });
-    });
+    return runCommand(this.#c, id, command, by, onLate);
   }
 
   /**
@@ -373,7 +267,7 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
   attach(socket: Socket, serverId: string, modVersion: string): (msg: ModMsg) => void {
     this.#sockets.add(socket);
     socket.on('close', () => this.#sockets.delete(socket));
-    return this.#open(socket, serverId, modVersion);
+    return open(this.#c, socket, serverId, modVersion);
   }
 
   /** A factorio server's Agent connection is up: its game connection may come, and it is offline until it does. */
@@ -393,215 +287,14 @@ export class ServerHub extends EventEmitter<{ event: [HubEvent]; target: [Target
     const conn = this.#conns.get(serverId);
     if (conn) {
       this.#conns.delete(serverId); // its close is then not a crash
-      this.#offline(serverId);
+      offline(this.#c, serverId);
       conn.socket.destroy();
     }
-    if (!this.#closing) this.#emit(serverId, 'lost');
+    if (!this.#c.closing) emitLifecycle(this.#c, serverId, 'lost');
   }
 
   #accept(socket: Socket): void {
-    let onMsg: ((msg: ModMsg) => void) | null = null;
     this.#sockets.add(socket);
-    socket.on('error', () => {}); // 'close' always follows and does the cleanup
-    const helloTimer = setTimeout(() => socket.destroy(), this.#helloTimeoutMs);
-    const lines = createInterface({ input: socket, crlfDelay: Infinity });
-    lines.on('error', () => {});
-    lines.on('line', (line) => {
-      if (socket.destroyed || socket.writableEnded) return;
-      const msg = parseModLine(line);
-      if (onMsg) {
-        if (msg && msg.type !== 'hello') onMsg(msg); // junk after handshake is ignored
-        return;
-      }
-      clearTimeout(helloTimer);
-      if (msg?.type !== 'hello') return void socket.destroy();
-      const reason = this.#checkHello(msg);
-      if (reason) {
-        this.#send(socket, { type: 'reject', reason });
-        return void socket.end();
-      }
-      onMsg = this.#open(socket, msg.serverId, msg.modVersion);
-    });
-    socket.on('close', () => {
-      this.#sockets.delete(socket);
-      clearTimeout(helloTimer);
-    });
-  }
-
-  /** Makes an accepted game connection its server's: welcomed, online, and its messages handled from then on. */
-  #open(socket: Socket, id: string, modVersion: string): (msg: ModMsg) => void {
-    this.#settle(id); // a crash waiting on the Agent is decided before the new connection counts
-    const conn: Conn = { socket, stopping: false, lastBeat: 0, hung: false, pending: new Map(), sentTps: null, started: false };
-    const old = this.#conns.get(id);
-    this.#conns.set(id, conn);
-    old?.socket.destroy();
-    Object.assign(this.#states.get(id)!, { online: true, hung: false });
-    this.#modVersions.set(id, modVersion); // before `connected`, which a Mod deploy waits on
-    this.#send(socket, { type: 'welcome' });
-    this.#emit(id, 'connected');
-    socket.on('close', () => this.#closed(id, conn));
-    return (msg) => {
-      if (!socket.destroyed && !socket.writableEnded) this.#handle(id, conn, msg);
-    };
-  }
-
-  #closed(id: string, conn: Conn): void {
-    for (const p of conn.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error('server disconnected'));
-    }
-    conn.pending.clear();
-    if (this.#conns.get(id) !== conn) return; // replaced by a newer connection, or dropped with its Agent: no alert
-    this.#conns.delete(id);
-    this.#offline(id);
-    if (this.#closing) return;
-    if (conn.stopping) return this.#emit(id, 'stopped');
-    if (!this.#agentsUp.has(id)) return this.#emit(id, 'crashed');
-    // An Agent's game connection, with the Agent connection still up: if that one closes too, the Agent is lost.
-    this.#settling.set(
-      id,
-      setTimeout(() => this.#settle(id), this.#settleMs),
-    );
-  }
-
-  /** Decides a game connection waiting on its Agent (see `#closed`): a crash. */
-  #settle(id: string): void {
-    const timer = this.#settling.get(id);
-    if (!timer) return;
-    clearTimeout(timer);
-    this.#settling.delete(id);
-    this.#emit(id, 'crashed');
-  }
-
-  #offline(id: string): void {
-    this.#downs.set(id, this.downs(id) + 1);
-    Object.assign(this.#states.get(id)!, { online: false, hung: false, paused: false, tps: null, players: [], dims: [] });
-  }
-
-  #checkHello(hello: Hello): string | null {
-    const refused = protocolRefusal(hello.protocol);
-    if (refused) return refused;
-    const cfg = this.#configs.get(hello.serverId);
-    if (!cfg?.token || !tokenMatches(cfg.token, hello.token)) return 'unknown serverId or bad token';
-    return null;
-  }
-
-  #handle(id: string, conn: Conn, msg: ModMsg): void {
-    const state = this.#states.get(id)!;
-    switch (msg.type) {
-      case 'heartbeat':
-        conn.lastBeat = Date.now(); // paused or not: a frozen game stops them, so hung detection stays on
-        if ((msg.paused === true) !== state.paused) {
-          // Only an Agent's heartbeat has `paused`; the card shows it, so a change goes on the stream.
-          state.paused = msg.paused === true;
-          this.emit('event', { serverId: id, type: 'paused', paused: state.paused });
-        }
-        if (!state.paused) {
-          // While paused the rate means nothing: it is left out of the state and the stream (and so of lag and history).
-          if (conn.sentTps === null || Math.abs(msg.tps - conn.sentTps) >= 0.1) {
-            conn.sentTps = msg.tps;
-            this.emit('event', { serverId: id, type: 'tps', tps: msg.tps });
-          }
-          state.tps = msg.tps;
-        }
-        state.players = msg.players;
-        state.dims = msg.dims ?? [];
-        if (conn.hung) {
-          conn.hung = state.hung = false;
-          this.#emit(id, 'recovered');
-        }
-        return;
-      case 'started':
-        if (conn.started) return; // a repeat would be another lifecycle row and another post for one start
-        conn.started = true;
-        return this.#emit(id, 'started');
-      case 'stopping':
-        conn.stopping = true;
-        return;
-      case 'cmdResult': {
-        const p = conn.pending.get(msg.id);
-        if (!p) return; // late or unknown id
-        conn.pending.delete(msg.id);
-        clearTimeout(p.timer);
-        return p.resolve(msg.output);
-      }
-      case 'cmdLate': {
-        const late = this.#late.get(msg.id);
-        if (!late) return; // expired or unknown
-        this.emit('event', { serverId: id, type: 'console', command: late.command, by: late.by, output: msg.output, late: true });
-        try {
-          late.onLate?.(msg.output);
-        } catch (err) {
-          console.error('[hub] late output handler failed:', err);
-        }
-        return;
-      }
-      default:
-        // `msg` is parseModLine's copy of only the schema's fields; serverId last: a mod can't speak for another server.
-        this.emit('event', { ...msg, serverId: id });
-    }
-  }
-
-  #checkHung(): void {
-    const now = Date.now();
-    for (const [id, conn] of this.#conns) {
-      // A factorio server whose Agent is lost has its own one host notice instead (its connection is dropped anyway).
-      if (this.#states.get(id)!.game === 'factorio' && !this.#agentsUp.has(id)) continue;
-      // Armed by the first heartbeat (world load sends none) and disarmed by `stopping` (shutdown save).
-      if (conn.hung || conn.stopping || conn.lastBeat === 0 || now - conn.lastBeat < this.#hungMs) continue;
-      conn.hung = true;
-      this.#states.get(id)!.hung = true;
-      this.#emit(id, 'hung');
-    }
-  }
-
-  #send(socket: Socket, msg: HubMsg): void {
-    socket.write(JSON.stringify(msg) + '\n');
-  }
-
-  #emit(serverId: string, type: Lifecycle): void {
-    if (this.#configs.get(serverId)?.game === 'factorio' && !this.#lifecycleFits(serverId, type)) return;
-    this.emit('event', { serverId, type });
-  }
-
-  /**
-   * Whether a factorio server's lifecycle event fits its budget (`LIFECYCLE`) now. One that doesn't is dropped, for
-   * the uptime log, the stream and Discord alike, and kept as the latest: when the next token comes it goes out then
-   * (unless a later event went out first), so the recorded state is never wrong for longer than one token (3 min).
-   * `get` and `downs` are right all along; what follows the stream is not until then: the dashboard's card and its
-   * latest rate (`LiveFeed`). A restart countdown is cancelled anyway: `RestartScheduler` checks `downs` too.
-   */
-  #lifecycleFits(serverId: string, type: Lifecycle): boolean {
-    const now = Date.now();
-    let b = this.#lifecycle.get(serverId);
-    if (!b) this.#lifecycle.set(serverId, (b = { tokens: LIFECYCLE.burst, last: now, pending: null, dropped: 0, loggedAt: -Infinity }));
-    b.tokens = Math.min(LIFECYCLE.burst, b.tokens + (Math.max(0, now - b.last) * LIFECYCLE.perHour) / HOUR_MS);
-    b.last = now;
-    // A hair under 1 is float rounding when the timer below fires: a whole token, so its replay is never a drop.
-    if (b.tokens >= 1 - 1e-9) {
-      b.tokens -= 1;
-      b.pending = null; // a later event went out: the dropped one is stale
-      return true;
-    }
-    b.pending = type;
-    b.dropped++;
-    if (now < b.loggedAt || now - b.loggedAt >= LOG_MS) {
-      console.error(`[hub] ${serverId}: over ${LIFECYCLE.perHour} lifecycle events an hour, dropped ${b.dropped}`);
-      b.loggedAt = now;
-      b.dropped = 0;
-    }
-    if (!b.timer) {
-      const budget = b;
-      budget.timer = setTimeout(
-        () => {
-          budget.timer = undefined;
-          const latest = budget.pending;
-          budget.pending = null;
-          if (latest && !this.#closing) this.#emit(serverId, latest); // through the budget again: rounding may re-arm it
-        },
-        Math.ceil(((1 - b.tokens) * HOUR_MS) / LIFECYCLE.perHour),
-      );
-    }
-    return false;
+    readHandshake(this.#c, socket, () => this.#sockets.delete(socket));
   }
 }

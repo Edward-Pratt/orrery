@@ -26,7 +26,7 @@ file (and `image.json`, read from beside it) and `ORRERY_AGENT_ROOT` the agent's
 `import type` only: a release tarball is `agent/` alone, so no runtime import may leave `agent/`. `src/wire.ts` holds
 the agent's copies of `PROTOCOL_VERSION`, `LIMITS` and `NODE_RELEASE` (the hello's `node`, its `process.version`, sent
 only when it matches: the hub refuses a hello with any other); `test/wire.test.ts` checks them against
-`hub/src/protocol.ts`, so change them together. `src/update.ts`'s `GAME_MODS` (the game's own mods, for an update's
+`hub/src/protocol.ts`, so change them together. `src/update-checks.ts`'s `GAME_MODS` (the game's own mods, for an update's
 `to`) is a copy of `hub/src/updates/factorio.ts`'s, checked by `test/update-messages.test.ts`. One line on the Agent port is at most 1 MiB (`LIMITS.lineBytes`,
 set on 2026-10-31 while the owner was away: `docs/adr/0004`), its `\n` included, both ways.
 
@@ -55,7 +55,11 @@ documentation, so read it before changing the file, and change it with the file.
 - The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `events.ts` (the mod's
   events), `settings.ts`, `moderation.ts`, `logs.ts`.
 - Saves and files: `saves.ts`, `save-check.ts`, `files.ts`.
-- Game updates and deploys: `update.ts`, `unpack.ts`, `deploy.ts`.
+- Game updates and deploys: `update.ts` (`Updates`, re-exporting the rest), `update-ctx.ts` (its options and the
+  context its flows share), `update-run.ts` (the steps in order), `update-checks.ts` (the input checks, `labels`),
+  `update-download.ts`, `update-prepare.ts`, `update-backup.ts` (the saves and the hub's stop), `update-swap.ts` (swap,
+  gate, rollback), `update-release.ts` (`current`, pruning, cleaning), `update-steps.ts` (the `updateStep` throttle),
+  `update-job.ts` (`update.json`), `update-files.ts`, `unpack.ts`, `deploy.ts`.
 
 ## Trust boundaries (do not weaken)
 

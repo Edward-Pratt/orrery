@@ -61,7 +61,9 @@ documentation, so read it before changing the file, and change it with the file.
 - The game settings: `settings.ts` (`GameSettings`, re-exporting the rest), `settings-rules.ts` (the keys, the reads,
   the file it writes, the rules across fields), `settings-files.ts` (the config folder's files, `<state>/settings.json`),
   `settings-live.ts` (the `/config set` table, `/promote` and `/demote`).
-- Saves and files: `saves.ts`, `save-check.ts`, `files.ts`.
+- Saves and files: `saves.ts` (`Saves`, re-exporting the rest), `saves-rules.ts` (the names, kinds, times, constants
+  and types), `saves-folder.ts` (the folder opened once, the listing, pruning, the sweep at start, a save made and
+  waited for), `saves-copy.ts` (a restore, `keep`), `saves-upload.ts` (an upload), `save-check.ts`, `files.ts`.
 - Game updates and deploys: `update.ts` (`Updates`, re-exporting the rest), `update-ctx.ts` (its options and the
   context its flows share), `update-run.ts` (the steps in order), `update-checks.ts` (the input checks, `labels`),
   `update-download.ts`, `update-prepare.ts`, `update-backup.ts` (the saves and the hub's stop), `update-swap.ts` (swap,

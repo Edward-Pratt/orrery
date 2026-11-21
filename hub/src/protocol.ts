@@ -1,3 +1,4 @@
+// modular-exempt: one parser, the wire schemas and their checks (docs/notes/hardening.md, section 12).
 // Wire contract between the hub and what connects to it, one JSON object per line: a Mod or an Agent's game
 // connection (`parseModLine`), and an Agent connection (`parseAgentLine`).
 // The message types live in types.ts (pure types, for the dashboard and the agent too); this file validates against them.

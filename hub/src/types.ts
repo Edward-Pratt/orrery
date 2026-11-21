@@ -1,3 +1,4 @@
+// modular-exempt: the shared types of the hub, the dashboard and the Agent (docs/notes/hardening.md, section 12).
 // The hub's plain data types (wire messages, events, notices, audit entries, stats answers): the game connection's
 // (`Hello`, `ModMsg` with `milestone` and `heartbeat.paused`, `HubMsg` with Factorio's `notice` and `save`) and the
 // Agent connection's (`AgentHello`, `AgentMsg` with `settings`, `AgentRequest` with `settingsSet`, `HubAgentMsg`,

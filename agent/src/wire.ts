@@ -1,3 +1,4 @@
+// modular-exempt: the Agent's copy of the wire contract (docs/notes/hardening.md, section 12).
 // The agent's side of the wire contract (docs/protocol.md, "Agent connection"): the hub's constants, the capped line
 // reader, the line encoder and the checks on what the hub sends. The message types come from hub/src/types.ts through
 // `import type` only: an agent release carries no hub code, so the constants are copies, checked by test/wire.test.ts.

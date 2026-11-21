@@ -1,3 +1,4 @@
+// modular-exempt: the dashboard's contract, compiled alone by tsconfig.api.json (docs/notes/hardening.md, section 12).
 // The HTTP API's request/response types, one per endpoint (`Integrations`, `ServerCard`, `ServerDetail`, `AuditLog`,
 // `LiveEvent`, …, the game update ones: `GameState`, `GameCatalog`, `GameUpdateRequest`, `GameUpdateAnswer`, the mod
 // browser's `ModBrowse`, `PortalListing`, `PortalCategory`, `PortalSort`, the Import mod list's `ModCheckRequest`,

@@ -71,7 +71,9 @@ documentation, so read it before changing the file, and change it with the file.
   context its flows share), `update-run.ts` (the steps in order), `update-checks.ts` (the input checks, `labels`),
   `update-download.ts`, `update-prepare.ts`, `update-backup.ts` (the saves and the hub's stop), `update-swap.ts` (swap,
   gate, rollback), `update-release.ts` (`current`, pruning, cleaning), `update-steps.ts` (the `updateStep` throttle),
-  `update-job.ts` (`update.json`), `update-files.ts`, `unpack.ts`, `deploy.ts`.
+  `update-job.ts` (`update.json`), `update-files.ts`, `unpack.ts` (`unpack` and `unxz`, re-exporting the rest),
+  `unpack-tar.ts` (the tar reader: `Bytes`, the header fields, pax records, `Refused`), `unpack-paths.ts` (the path
+  rules), `unpack-glibc.ts` (`glibcNeed`, `compareGlibc`), `deploy.ts`.
 
 ## Trust boundaries (do not weaken)
 

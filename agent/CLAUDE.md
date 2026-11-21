@@ -57,7 +57,10 @@ documentation, so read it before changing the file, and change it with the file.
   reconnect waits), `hub-state.ts` (what `HubClient` keeps), `hub-files.ts` (`writeAtomic`, `installed.json`,
   `started.json`).
 - The server: `service.ts` (its unit), `rcon.ts`, `status.ts`, `gate.ts` (its starts), `events.ts` (the mod's
-  events), `settings.ts`, `moderation.ts`, `logs.ts`.
+  events), `moderation.ts`, `logs.ts`.
+- The game settings: `settings.ts` (`GameSettings`, re-exporting the rest), `settings-rules.ts` (the keys, the reads,
+  the file it writes, the rules across fields), `settings-files.ts` (the config folder's files, `<state>/settings.json`),
+  `settings-live.ts` (the `/config set` table, `/promote` and `/demote`).
 - Saves and files: `saves.ts`, `save-check.ts`, `files.ts`.
 - Game updates and deploys: `update.ts` (`Updates`, re-exporting the rest), `update-ctx.ts` (its options and the
   context its flows share), `update-run.ts` (the steps in order), `update-checks.ts` (the input checks, `labels`),
@@ -78,7 +81,7 @@ documentation, so read it before changing the file, and change it with the file.
   Factorio's log (this run's, not the previous one) shows Factorio bound that port; a `link` or `unlink` only for a
   player online at the latest `/orrery-status` (a fresh one if the last poll's list lacks them; never a UDP `join`). Every field is checked against the hub's limits before it is sent.
 - RCON commands the agent builds are the mod's own commands with one line of JSON as the argument, and Factorio's
-  built-ins `/config set <option> <value>` (the option from a fixed table in `settings.ts`, the value one it validated:
+  built-ins `/config set <option> <value>` (the option from a fixed table in `settings-live.ts`, the value one it validated:
   one line, printable, within its field's limit), `/promote <name>`, `/demote <name>`, `/unban <name>`,
   `/kick <name> [reason]` and `/ban <name> [reason]` (the name checked against `^[A-Za-z0-9_.-]{1,60}$`, a kick only
   for a player online at the latest `/orrery-status` or a fresh one, under its spelling; the reason cleaned by

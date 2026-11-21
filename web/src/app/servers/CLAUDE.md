@@ -55,17 +55,20 @@ from this browser), shown in the tab and the attention strip, no reply text; `lo
 for another file dropped, and with a linked service its journal from `GET /api/services/:id/logs` with its own
 Refresh; `history.ts`: rate (the card's `rate`; "Paused" beside it while `paused`), player and uptime graphs extended
 by live events newer than the history's `asOf` (`lost`: uptime unknown, a gap, and no players); `pack.ts` (only with
-the detail's `pack`, last): #87's variant A, Adopt as the empty state (a version picked from `GET /api/library`, with
-a link to the Library page, Compare, the report's keep boxes (all unticked to start), no confirm), then the summary
-card (Update pack, its sheet the same library picker, or Apply N changes; its Java runtime row: a `<select>` of System
-java and the library's runtimes with "pending restart", or, when the unit doesn't name the link, the two
-`Environment=` lines to add; disabled with the hub's `blocked` or offline), the amber pending box, the red box for a
-failure while preparing, Extras (pills, ⋯ Replace / Edit label and note / Remove, the Mod as a locked last row),
-Config edits (a red line when one matched nothing, a match preview in its sheet), Kept path chips and the history (By
-hidden on a phone); sheets full screen on a phone; changes ask nothing (a toast says they're pending), Update and
-Apply ask once; the running update's step card follows `packUpdateStep` notices (Cancel only while preparing or
-counting down), a "Done" line on success; after a rollback an amber line whose restore offer opens Backups with
-`?restore=<backup>` preselected (a typed restore like any); `game.ts` (only with `features.update`, a factorio
+the detail's `pack`, last; it holds the state, the stream and the requests, `pack-rules.ts` the pure rules): #87's
+variant A, Adopt as the empty state (`pack-adopt.ts`: a version picked from `GET /api/library` in `pack-source.ts`'s
+picker, with a link to the Library page, Compare, the report's keep boxes (all unticked to start), no confirm), then
+the summary card (`pack-summary.ts`: Update pack, its sheet the same library picker, or Apply N changes; its Java
+runtime row: a `<select>` of System java and the library's runtimes with "pending restart", or, when the unit doesn't
+name the link, the two `Environment=` lines to add; disabled with the hub's `blocked` or offline), the amber pending
+box, the red box for a failure while preparing, Extras (`pack-extras.ts`: pills, ⋯ Replace / Edit label and note /
+Remove, the Mod as a locked last row), Config edits (`pack-edits.ts`: a red line when one matched nothing, a match
+preview in its sheet), Kept path chips (`pack-kept.ts`) and the history (By hidden on a phone); sheets
+(`pack-sheet.ts`, which holds the Extra and edit forms) full screen on a phone; changes ask nothing (a toast says
+they're pending), Update and Apply ask once; the running update's step card follows `packUpdateStep` notices (Cancel
+only while preparing or counting down), a "Done" line on success; after a rollback an amber line
+(`pack-rolled-back.ts`) whose restore offer opens Backups with `?restore=<backup>` preselected (a typed restore like
+any); `game.ts` (only with `features.update`, a factorio
 server's while the hub's game updates are on, last; `hub-v2.14.0` reports it false, so no Game tab shows there):
 Factorio and every mod it runs (with `mod-updates.ts`'s `PortalUpdates`, provided by the tab: `GET …/game/updates`
 asked on its first state, whenever what the server runs changes, on a `modUpdates` notice and a finished update; a

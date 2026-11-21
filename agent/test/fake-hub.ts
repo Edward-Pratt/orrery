@@ -1,3 +1,5 @@
+import type { ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseAgentLine, parseModLine } from '../../hub/src/protocol.ts';
@@ -89,4 +91,12 @@ export async function eventually<T>(fn: () => T | undefined | null | false, ms =
     if (performance.now() > until) throw new Error(`timed out waiting for ${what}`);
     await sleep(5);
   }
+}
+
+/** Kills a child agent and waits for its exit, so it writes nothing more into a folder a later `t.after` removes. */
+export async function killed(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = once(child, 'exit');
+  child.kill('SIGKILL');
+  await exit;
 }

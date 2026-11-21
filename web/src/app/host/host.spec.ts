@@ -90,7 +90,7 @@ describe('host page', () => {
   });
 
   it("picks a host when there is more than one: the hub's own first, then another's tiles and graphs", async () => {
-    const VM: HostNow = { id: 'vm', sample: { ...SAMPLE, cpu: 0.75, disks: [{ mount: '/srv', free: 5 * GB, total: 100 * GB }] } };
+    const VM: HostNow = { id: 'vm', sample: { ...SAMPLE, cpu: 0.75, disks: [{ mount: '/srv', free: 5 * GB, total: 100 * GB }] }, node: null };
     const { el, events, backend, render, text, tiles, chart, period } = await setup(SAMPLE, true, ON, [VM]);
     backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([SAMPLE]);
     await render();
@@ -141,5 +141,25 @@ describe('host page without a sample yet', () => {
     el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
     await render();
     expect(said()).toBe('No sample yet: its Agent sends one each minute once it is connected.');
+  });
+});
+
+describe('host page Node', () => {
+  it("shows an Agent's Host's Node, kept through live samples; nothing for the hub's own or an older Agent", async () => {
+    const VM: HostNow = { id: 'vm', sample: SAMPLE, node: 'v24.22.2' };
+    const OLD: HostNow = { id: 'old', sample: SAMPLE, node: null };
+    const { el, events, backend, render, text } = await setup(SAMPLE, true, ON, [VM, OLD]);
+    backend.expectOne('/api/hosts/oracle/samples?hours=24').flush([]);
+    await render();
+    expect(el.querySelector('[data-node]')).toBeNull(); // the hub's own
+    el.querySelector<HTMLButtonElement>('[data-host=vm]')!.click();
+    await render();
+    expect(text('[data-node]')).toBe('Node v24.22.2');
+    events.push(1, { target: 'host', id: 'vm', type: 'sample', sample: { ...SAMPLE, ts: 2 } });
+    await render();
+    expect(text('[data-node]')).toBe('Node v24.22.2');
+    el.querySelector<HTMLButtonElement>('[data-host=old]')!.click();
+    await render();
+    expect(el.querySelector('[data-node]')).toBeNull();
   });
 });

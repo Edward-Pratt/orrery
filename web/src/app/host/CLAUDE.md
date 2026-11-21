@@ -1,7 +1,8 @@
 # host
 
 The host page: one Host at a time from `GET /api/hosts`, the hub's own first, with a picker (a toggle group) only when
-there is more than one; stat tiles (CPU, load, memory, a disk each) from its latest sample, replaced by each live
+there is more than one; under the heading, an Agent's Host's Node (`node`, "Node v24.22.2"; none for the hub's own, an
+older Agent or an older hub); stat tiles (CPU, load, memory, a disk each) from its latest sample, replaced by each live
 `sample` event (every host's kept, so switching back is current), with a bar amber/red past a threshold (CPU 80/95%
 used, memory 85/95%, a disk under 20/10% free; load has none), skeletons while loading, and before a host's first
 sample a line saying when it comes (the hub's own a minute after it starts, an Agent's once it is connected); graphs

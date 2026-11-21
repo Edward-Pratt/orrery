@@ -9,7 +9,7 @@
 // `packUpdateStep` notices, a server's `settings` notices and a library add's progress stay out of that buffer, only
 // the latest of each is kept (a server's TPS and `paused` dropped when it goes down or is `lost`, its step when its
 // update finishes, an add's progress when it finishes; an Agent's heartbeats come at up to 1 a second, so toggling
-// `paused` can't push chat out); no limit on its listeners (`setMaxListeners(0)`): `web.ts` adds one per open
+// `paused` can't push chat out); no limit on its listeners (`setMaxListeners(0)`): `web-events.ts` adds one per open
 // `/api/events` stream, the dashboard opening one per section, each removed when it closes, so over 10 is normal use,
 // not a leak. Hub core.
 

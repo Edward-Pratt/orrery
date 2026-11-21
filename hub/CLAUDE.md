@@ -19,7 +19,9 @@ pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env D
 
 ## Modules
 
-`src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts` with its field checks `config-check.ts`,
+`src/` keeps the wiring (`index.ts`, `start.ts`, `config.ts` (`loadConfig`; callers import every config name from it)
+with its types `config-types.ts`, defaults `config-defaults.ts`, validation `config-validate.ts` (`servers[]`'s in
+`config-servers.ts`) and field checks `config-check.ts`,
 `check-config.ts`, `users-cli.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
 `api-game-extras.ts`, `api-public.ts`, `api-users.ts`) and two small helpers (`daily.ts`,
 `units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying

@@ -1,7 +1,9 @@
 // The checks `validateConfig` and each integration's own section checker share: `checks(errors)` gives `err` (a
 // problem, prefixed with where it is) and the field checks built on it (`str`, `id` for a Discord ID, `num`, `port`,
 // `hostLimits`, `byServer`, `httpUrl`, `list` for an integration's entries with ids), each pushing its problem onto
-// `errors`. Hub core, offline.
+// `errors`; and `isDir`, for the checks of folders. Hub core, offline.
+
+import { statSync } from 'node:fs';
 
 export type Obj = Record<string, unknown>;
 export const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -87,3 +89,11 @@ export function checks(errors: string[]) {
 }
 
 export type Checks = ReturnType<typeof checks>;
+
+export function isDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}

@@ -18,7 +18,7 @@ const file = (name: string, version: string) => `zip of ${name} ${version}`;
 const cdn = (name: string) => `https://dl-mod.factorio.com/files/${name}.zip?secure=sig`;
 
 /** A ModsZip over a server running `mods`, a portal holding `flib` 0.16.3 and `helmod` 2.0.1, and the CDN serving `served`. */
-function world(mods: FactorioMod[] | null, served: (name: string) => string | null = (n) => file(n, n === 'flib' ? '0.16.3' : '2.0.1')) {
+function world(mods: FactorioMod[] | null, served: (name: string) => string | null = (n) => file(n, n === 'flib' ? '0.16.3' : '2.0.1'), idleMs?: number) {
   const releases: Record<string, string> = { flib: '0.16.3', helmod: '2.0.1' };
   const asked: string[] = [];
   const fetch: PortalFetch = async (url, { signal }) => {
@@ -37,7 +37,7 @@ function world(mods: FactorioMod[] | null, served: (name: string) => string | nu
     link: async (url) => cdn(url.split('/')[2]!),
   };
   const gameUpdates = { has: (id: string) => id === 'fac', state: () => ({ installed: mods && { factorio: '2.1.24', mods } }) } as unknown as ModsZipDeps['gameUpdates'];
-  return { zip: new ModsZip({ catalog, fetch, gameUpdates }), asked };
+  return { zip: new ModsZip({ catalog, fetch, gameUpdates }, { idleMs }), asked };
 }
 
 const RUNS = [
@@ -121,4 +121,18 @@ test('on a real socket: a client going away frees the server for the next zip; a
   const res2 = await fetch(await served(t, bad.zip));
   assert.equal(res2.status, 200);
   await assert.rejects(res2.arrayBuffer());
+});
+
+test('the slot is freed for a client gone before the stream, a stream nobody reads, and HEAD never makes one', async (t) => {
+  const { zip, asked } = world(RUNS, undefined, 20);
+  const gone = new AbortController();
+  gone.abort();
+  await assert.rejects(zip.open('fac', gone.signal));
+  const unread = await zip.open('fac'); // never read nor cancelled
+  await assert.rejects(new Promise((r) => setTimeout(r, 60)).then(() => unread.getReader().read()), /wasn't read/);
+  await (await zip.open('fac')).cancel();
+  const before = asked.length;
+  const res = await fetch(await served(t, zip), { method: 'HEAD' });
+  assert.equal(res.status, 405);
+  assert.equal(asked.length, before);
 });

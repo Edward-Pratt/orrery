@@ -77,7 +77,8 @@ badge "N updates" or "Mods up to date" by Installed, each updatable chip's "→ 
 readers, lines for releases needing a newer Factorio, mods gone from the portal (amber), the unchecked and a failed
 check, and Update N mods…, which opens the sheet with those at "Newest that fits"; an older hub's 404 shows none of
 it) (the game's own muted: `base`, `space-age`, `quality`, `elevated-rails`, `recycler`, never picked), Update game
-(disabled with the hub's `blocked`, not while stopped: the update starts it), its sheet (`game-sheet.ts`, which
+(disabled with the hub's `blocked`, not while stopped: the update starts it), Download mods (a link to `GET
+…/game/mods.zip`, with a portal mod installed), its sheet (`game-sheet.ts`, which
 holds the picks and the catalog's answer; its update view `game-update-view.ts`) the Factorio version (the
 running one and the catalog's per channel; one listed on both channels reads stable, whatever the order) and the
 portal mods, each at its version or "Newest that fits", Remove (none on `orrery`: its Agent needs it), Add by portal

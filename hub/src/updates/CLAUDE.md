@@ -5,7 +5,8 @@ update through its Agent, over the shared `GameCtx` (`game-ctx.ts`, with the loo
 `game-run.ts` (an update's start, the Agent's steps and end, cancel), `game-stop.ts` (the hub's stop), `game-job.ts`
 (the job's steps, quiet give-up, waits and end), `game-catalog.ts` (the catalog, the mod browser and the Import mod
 list's check) and `game-messages.ts` (the request checks, `fitsLine`, `redact`); `mod-updates.ts` its portal mod
-updates; `factorio.ts` is the catalog (factorio.com and the mod portal), with `factorio-fetch.ts` (the reads: caps,
+updates; `mods-zip.ts` the mods zip (the server's portal mods rebuilt from the portal, written by `zip-store.ts`);
+`factorio.ts` is the catalog (factorio.com and the mod portal), with `factorio-fetch.ts` (the reads: caps,
 timeouts, redirect rules, `GameRefused`), `factorio-resolve.ts` (dependency resolution), `factorio-link.ts` (a mod's
 signed download link), `factorio-browse.ts` (the mod browser's row checks and search), `factorio-thumbs.ts` (the
 thumbnails' path rule and PNG check) and `factorio-releases.ts` (the pure checks on what the portal says);

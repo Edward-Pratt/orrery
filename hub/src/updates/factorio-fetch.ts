@@ -1,6 +1,7 @@
 // The catalog's reads of factorio.com and the mod portal, through the injected `PortalFetch` (15 s timeouts,
-// `TIMEOUT_MS`; answers capped, bytes counted as read (`CAPS`): 64 KiB, 4 MiB for `sha256sums/` and a mod's page,
-// 16 MiB for a line's list (`CAPS.list`), 512 KiB for a short page and a thumbnail; every request `redirect: 'manual'`,
+// `TIMEOUT_MS`, unless a read says its own; answers capped, bytes counted as read (`CAPS`): 64 KiB, 4 MiB for
+// `sha256sums/` and a mod's page, 16 MiB for a line's list (`CAPS.list`), 512 KiB for a short page and a thumbnail;
+// every request `redirect: 'manual'`,
 // a public read following at most 3 redirects itself, each checked before it is asked: https on `factorio.com`,
 // `www.factorio.com` or `mods.factorio.com`, no port, no user, else 502): `portalRead(fetch, url, cap, who, …)` (the
 // bytes; null for a 404 when `missing` allows it; `hops: 0` refuses any redirect, `type` the media type it must have),
@@ -57,8 +58,14 @@ export async function portalText(fetch: PortalFetch, url: string, cap: number, w
  * redirect is refused), each checked before it is asked: https on `PUBLIC_HOSTS`, no port, no user. `type`: the
  * media type the answer must have.
  */
-export async function portalRead(fetch: PortalFetch, url: string, cap: number, who: string, { missing = false, hops = MAX_HOPS, type }: { missing?: boolean; hops?: number; type?: string } = {}): Promise<Buffer<ArrayBuffer> | null> {
-  const signal = AbortSignal.timeout(TIMEOUT_MS);
+export async function portalRead(
+  fetch: PortalFetch,
+  url: string,
+  cap: number,
+  who: string,
+  { missing = false, hops = MAX_HOPS, type, timeout = TIMEOUT_MS, abort }: { missing?: boolean; hops?: number; type?: string; timeout?: number; abort?: AbortSignal } = {},
+): Promise<Buffer<ArrayBuffer> | null> {
+  const signal = abort ? AbortSignal.any([AbortSignal.timeout(timeout), abort]) : AbortSignal.timeout(timeout);
   let res: Response;
   for (let at = url, hop = 0; ; hop++) {
     try {

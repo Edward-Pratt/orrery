@@ -5,11 +5,13 @@ import { arCheck } from '@armil/icons';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { ModUpdatesBadge, ModUpdatesNotes, PortalUpdates } from './mod-updates';
 import { GAME_MODS } from './mod-list';
+import ServerPage from './server';
 
 /**
  * The Game tab's summary card: what the server runs (Factorio and every mod, the game's own muted, each updatable
  * chip's "→ <version>" from the tab's `PortalUpdates`), Update game and Update N mods… (both disabled with the hub's
- * `blocked`, not while stopped: the update starts it), the red box for a failure while preparing, and the "Done" line
+ * `blocked`, not while stopped: the update starts it), Download mods (`GET …/game/mods.zip`, with a portal mod
+ * installed: the hub rebuilds them from the portal, so a player can drop the folder into their own `mods/`), the red box for a failure while preparing, and the "Done" line
  * after an update watched here. The page holds the state and opens the sheet.
  */
 @Component({
@@ -55,6 +57,9 @@ import { GAME_MODS } from './mod-list';
           @if (updates.state()?.updates?.length; as n) {
             <button hlmBtn variant="outline" [disabled]="!g.installed || !!g.blocked || busy()" (click)="open.emit(true)" data-update-all>Update {{ n }} {{ n === 1 ? 'mod' : 'mods' }}…</button>
           }
+          @if (g.installed && hasPortalMods(g.installed.mods)) {
+            <a hlmBtn variant="ghost" [href]="zip" download data-mods-zip>Download mods</a>
+          }
           @if (g.blocked; as why) {
             <p class="text-xs text-muted-foreground" data-update-why>{{ why }}</p>
           }
@@ -78,6 +83,9 @@ export class GameSummary {
   /** Update game (false) or Update N mods… (true): the page opens the sheet. */
   readonly open = output<boolean>();
 
+  protected readonly zip = `/api/servers/${encodeURIComponent(inject(ServerPage).id)}/game/mods.zip`;
+
   protected isGame = (name: string) => GAME_MODS.has(name);
+  protected hasPortalMods = (mods: { name: string }[]) => mods.some((m) => !GAME_MODS.has(m.name));
   protected line = (factorio: string) => factorio.split('.').slice(0, 2).join('.');
 }

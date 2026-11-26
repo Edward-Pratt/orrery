@@ -152,7 +152,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   late.services = services;
   services?.start();
   const restores = buildRestores(config, deps, { hub, services, agents, agentOf, stats, updating, late });
-  const { gameUpdates, modUpdates, moderation, gameSettings } = startGame(config, deps, { hub, db, agents, services, restarts, restores, updating, late });
+  const { gameUpdates, modUpdates, modsZip, moderation, gameSettings } = startGame(config, deps, { hub, db, agents, services, restarts, restores, updating, late });
   const dbCopies = join(dirname(config.dbPath), 'db-backups');
   const deploys = startDeploys(config, deps, { hub, db, restarts, agents, restores, updating, gameSettings, dbCopies, late });
   const { uploads, library, packs } = buildPacks(config, deps, { hub, db, services, restarts, restores, deploys, agents, port, late });
@@ -167,7 +167,7 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await packs?.start(); // after the frontend: it hears every notice from the start
   const roles = web && new Roles(db.users, (entry) => db.audit(entry));
   const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
-  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, agents, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
+  const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, agents, services, restores, deploys, packs, gameUpdates, modUpdates, modsZip, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);
 

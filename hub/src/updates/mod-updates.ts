@@ -38,8 +38,8 @@ type Found = Pick<ModUpdatesState, 'updates' | 'later' | 'gone' | 'unchecked'>;
 
 const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
-/** Runs `fn` on each item, at most `n` at once. */
-async function eachAtMost<T>(n: number, items: T[], fn: (item: T) => Promise<void>): Promise<void> {
+/** Runs `fn` on each item, at most `n` at once (the mods zip's links too). */
+export async function eachAtMost<T>(n: number, items: T[], fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
   const lane = async () => {
     while (next < items.length) await fn(items[next++]!);

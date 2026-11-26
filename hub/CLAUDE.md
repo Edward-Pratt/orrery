@@ -85,8 +85,9 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
 - Game updates: the owner's factorio.com account (`FACTORIO_USERNAME`, `FACTORIO_TOKEN`: env only, from
   `/etc/orrery-factorio-account.env`, the hub unit's alone) is sent only on a mod's download-link request to
   `https://mods.factorio.com/download/…`, never following its redirect; only a redirect to `https://dl-mod.factorio.com`
-  whose only query key is `secure` and that holds no credential reaches the Agent, which never gets the account. No
-  error or log holds that request's URL. Everything from factorio.com and the portal is untrusted: names, versions,
+  whose only query key is `secure` and that holds no credential reaches the Agent, which never gets the account. The
+  mods zip (`GET …/game/mods.zip`, `servers.pack`) fetches those signed links itself, following no redirect, and
+  checks each file's sha1. No error or log holds that request's URL. Everything from factorio.com and the portal is untrusted: names, versions,
   hashes and links pass the Agent's own checks before they are used, answers are size-capped and time out, and a
   public read follows only `https:` redirects. The mod browser's strings (titles, owners, summaries, categories) are
   plain text, cut and stripped of control characters, its numbers checked finite and its portal links built by the hub
@@ -125,8 +126,8 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   the invites and, with `integrations.web.status`,
   `/api/public/status` (the Status page: only the listed servers, built field by field: name, game, state, the player
   names online and uptime; never an id, an address, a token, a path or a Discord name) needs a session; every write
-  needs a rule in `web/permit.ts` that its user's grants meet (default deny: a write without a rule is 403), and three
-  reads too (a server's logs, its game settings, the audit log). No one grants, or changes a user holding, what they
+  needs a rule in `web/permit.ts` that its user's grants meet (default deny: a write without a rule is 403), and four
+  reads too (a server's logs, its game settings, its mods zip, the audit log). No one grants, or changes a user holding, what they
   don't hold themself; `owner` is granted, and roles edited, by owners only; the last owner stays. The dashboard
   hiding a button is never the check. Every request but GET/HEAD (the login and logout too) must also carry `Origin`
   = the public URL's origin (else 403) and a JSON content type (else 415): CSRF, alongside SameSite=Lax. The one

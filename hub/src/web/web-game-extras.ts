@@ -1,13 +1,14 @@
 // `gameExtrasRoutes`, registered by `webApi` before the online check, each block only with its module on: `GET
 // /api/servers/:id/game/updates` (`ModUpdatesState`) and `GET`/`POST /api/servers/:id/moderation` (`ModerationState`;
-// `ModerateRequest` answering `ModerateAnswer`), 404 for a server the module doesn't have, `GameRefused`'s status and
-// text.
+// `ModerateRequest` answering `ModerateAnswer`) and `GET /api/servers/:id/game/mods.zip` (`ModsZip`: the zip as an
+// attachment, `<id>-mods.zip`), 404 for a server the module doesn't have, `GameRefused`'s status and text.
 
 import type { Context, Hono } from 'hono';
 import type { Me, ModerateAnswer, ModerationState, ModUpdatesState } from '../api.ts';
 import { GameRefused } from '../updates/factorio.ts';
 import type { Moderation } from '../servers/moderation.ts';
 import type { ModUpdates } from '../updates/mod-updates.ts';
+import type { ModsZip } from '../updates/mods-zip.ts';
 import type { Env } from './web.ts';
 
 /** A route's answer for a server the module has (else 404), its `GameRefused` as its status and text. */
@@ -15,7 +16,8 @@ async function answer(c: Context<Env>, has: (id: string) => boolean, fn: (id: st
   const id = c.req.param('id')!;
   if (!has(id)) return c.notFound();
   try {
-    return c.json(await fn(id, c.get('user')));
+    const body = await fn(id, c.get('user'));
+    return body instanceof Response ? body : c.json(body);
   } catch (err) {
     if (err instanceof GameRefused) return c.text(err.message, err.status);
     throw err;
@@ -23,16 +25,24 @@ async function answer(c: Context<Env>, has: (id: string) => boolean, fn: (id: st
 }
 
 /**
- * A factorio server's portal mod updates (`GET …/game/updates`) and its players' moderation (`GET` and `POST
+ * A factorio server's portal mod updates (`GET …/game/updates`), its mods zip (`GET …/game/mods.zip`) and its players' moderation (`GET` and `POST
  * …/moderation`), each with its module on, registered by `webApi` before the online check: the lists are read while
  * the server is stopped too, and an action's refusal says why itself. `actor` names the user in the audit.
  */
 export function gameExtrasRoutes(
   app: Hono<Env>,
-  { modUpdates, moderation, actor, body }: { modUpdates?: ModUpdates; moderation?: Moderation; actor: (user: Me) => string; body: (c: Context<Env>) => Promise<Record<string, unknown>> },
+  { modUpdates, modsZip, moderation, actor, body }: { modUpdates?: ModUpdates; modsZip?: ModsZip; moderation?: Moderation; actor: (user: Me) => string; body: (c: Context<Env>) => Promise<Record<string, unknown>> },
 ): void {
   if (modUpdates) {
     app.get('/servers/:id/game/updates', (c) => answer(c, (id) => modUpdates.has(id), async (id) => (await modUpdates.state(id)) satisfies ModUpdatesState));
+  }
+  if (modsZip) {
+    app.get('/servers/:id/game/mods.zip', (c) =>
+      answer(c, (id) => modsZip.has(id), async (id) => {
+        const file = `${id.replace(/[^A-Za-z0-9_-]/g, '_')}-mods.zip`;
+        return new Response(await modsZip.open(id, c.req.raw.signal), { headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${file}"` } });
+      }),
+    );
   }
   if (moderation) {
     const has = (id: string) => moderation.has(id);

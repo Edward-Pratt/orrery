@@ -5,9 +5,9 @@
 // servers.console on gtnh"). Then the default deny: a request other than GET or HEAD that no rule passed is 403, so a
 // write added later is refused until it has a rule here. GET and HEAD (Hono routes HEAD as GET) need only the session,
 // but for the reads a rule names: a server's log files (player IPs), a factorio server's game settings (its game
-// password) and the audit log. A scoped permission is checked on the route's `:id` server; a service's on the server
-// it is linked to (`Services.serverOf`), an unlinked one needing an unscoped grant. The dashboard hiding a button is
-// never the check: this is.
+// password), its mods zip (made with the owner's factorio.com account) and the audit log. A scoped permission is
+// checked on the route's `:id` server; a service's on the server it is linked to (`Services.serverOf`), an unlinked
+// one needing an unscoped grant. The dashboard hiding a button is never the check: this is.
 
 import type { Context, Hono } from 'hono';
 import { VERBS } from '../services/services.ts';
@@ -40,6 +40,7 @@ export const RULES: readonly Rule[] = [
   ['PUT', `${S}/pack/edits/:edit`, PACK],
   ['DELETE', `${S}/pack/edits/:edit`, PACK],
   ...(['catalog', 'update', 'update/cancel', 'check'] as const).map((a): Rule => ['POST', `${S}/game/${a}`, PACK]),
+  ['GET', `${S}/game/mods.zip`, PACK],
   ['GET', `${S}/settings`, server('servers.settings')],
   ['PUT', `${S}/settings`, server('servers.settings')],
   ['POST', `${S}/moderation`, server('servers.moderation')],

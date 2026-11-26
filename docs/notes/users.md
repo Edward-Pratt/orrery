@@ -461,7 +461,7 @@ not listed is refused by the default-deny middleware; a read not listed needs on
 | `servers.control` | `POST /servers/:id/restart`, `POST /servers/:id/restart/cancel`, `POST /servers/:id/backup`, `POST /servers/:id/saves` |
 | `servers.restore` | `POST /servers/:id/restore` |
 | `servers.logs` | `GET /servers/:id/logs`, `GET /servers/:id/logs/:name` |
-| `servers.pack` | `POST /servers/:id/pack/compare`, `…/pack/adopt`, `…/pack/update`, `…/pack/update/cancel`, `PUT …/pack/runtime`, `POST/PUT/DELETE …/pack/extras[/:extra]`, `POST …/pack/edits/preview`, `POST/PUT/DELETE …/pack/edits[/:edit]`, `POST /servers/:id/game/catalog`, `…/game/update`, `…/game/update/cancel`, `…/game/check` |
+| `servers.pack` | `POST /servers/:id/pack/compare`, `…/pack/adopt`, `…/pack/update`, `…/pack/update/cancel`, `PUT …/pack/runtime`, `POST/PUT/DELETE …/pack/extras[/:extra]`, `POST …/pack/edits/preview`, `POST/PUT/DELETE …/pack/edits[/:edit]`, `POST /servers/:id/game/catalog`, `…/game/update`, `…/game/update/cancel`, `…/game/check`, `GET …/game/mods.zip` (the mods zip: made with the owner's factorio.com account) |
 | `servers.settings` | `GET /servers/:id/settings`, `PUT /servers/:id/settings` |
 | `servers.moderation` | `POST /servers/:id/moderation` |
 | `services.control` | `POST /services/:id/<verb>` (each of `VERBS`, `web.ts:282`); a linked service is checked as its server |

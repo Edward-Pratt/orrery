@@ -8,7 +8,7 @@
 // audit log (`serversRoutes`, `web-servers.ts`), then everything that works on a stopped server, before the online
 // check: the restore (`restoreRoutes`, `web-actions.ts`), the uploads, library and packs (`packsRoutes`,
 // `web-packs.ts`), game updates (`gameUpdatesRoutes`, `web-game.ts`), portal mod updates and moderation
-// (`gameExtrasRoutes`, `web-game-extras.ts`), game settings and save uploads (`gameSettingsRoutes`, `web-game.ts`);
+// and the mods zip (`gameExtrasRoutes`, `web-game-extras.ts`), game settings and save uploads (`gameSettingsRoutes`, `web-game.ts`);
 // then the online check and the actions behind it (`actionsRoutes`, `web-actions.ts`) and the event stream
 // (`eventsRoutes`, `web-events.ts`). Each module's header holds its routes' contract. Every other route needs a
 // session, and each write a permission. `serveWebApi` serves it on 127.0.0.1.
@@ -35,6 +35,7 @@ import { newServerRoutes, packsRoutes } from './web-packs.ts';
 import { serversRoutes } from './web-servers.ts';
 import type { Moderation } from '../servers/moderation.ts';
 import type { ModUpdates } from '../updates/mod-updates.ts';
+import type { ModsZip } from '../updates/mods-zip.ts';
 import type { SaveUploads } from '../backups/save-uploads.ts';
 import type { GameUpdates } from '../updates/game-updates.ts';
 import type { GameSettings } from '../servers/game-settings.ts';
@@ -88,6 +89,8 @@ export type WebDeps = {
   gameSettings?: GameSettings;
   /** With game updates. */
   modUpdates?: ModUpdates;
+  /** With game updates. */
+  modsZip?: ModsZip;
   /** With the agents integration. */
   moderation?: Moderation;
   saveUploads?: SaveUploads;
@@ -99,7 +102,7 @@ export type WebDeps = {
 };
 
 /** The HTTP API under /api: logins, sessions, and every other route behind a session and its permissions. */
-export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, agents, services, restores, deploys, packs, gameUpdates, modUpdates, moderation, gameSettings, saveUploads, uploads, library, integrations }: WebDeps) {
+export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts, agents, services, restores, deploys, packs, gameUpdates, modUpdates, modsZip, moderation, gameSettings, saveUploads, uploads, library, integrations }: WebDeps) {
   // New server installs a library pack (packs) with the Mod from GitHub's releases (deploys).
   const newServer = Boolean(packs && library && deploys);
   const app = new Hono<Env>().basePath('/api');
@@ -134,7 +137,7 @@ export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats
   packsRoutes(app, { uploads, library, packs });
   // Game updates start a stopped server too, so they come before the online check below.
   if (gameUpdates) gameUpdatesRoutes(app, { gameUpdates });
-  gameExtrasRoutes(app, { modUpdates, moderation, actor, body: (c) => jsonBody(c.req) });
+  gameExtrasRoutes(app, { modUpdates, modsZip, moderation, actor, body: (c) => jsonBody(c.req) });
   gameSettingsRoutes(app, { gameSettings, saveUploads });
   actionsRoutes(app, { hub, stats, restarts });
   eventsRoutes(app, { live });

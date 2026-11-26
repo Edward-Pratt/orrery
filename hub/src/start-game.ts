@@ -1,5 +1,5 @@
 // The Factorio game extras' wiring, for `startHub`. `startGame`: one `FactorioCatalog`, shared by `GameUpdates` and
-// `ModUpdates` (which follows it, with its 6-hour check) so the mod browser's cache serves both; `Moderation` with
+// `ModUpdates` (which follows it, with its 6-hour check) and `ModsZip` so the mod browser's cache serves them all; `Moderation` with
 // agents; `GameUpdates` with agents and systemd, built and started (the last hub's running rows closed, the Agents
 // listened to) before the first await, so before any Agent can connect, and `GameSettings` beside it (its `updating`,
 // restores and deploys the same; its `busy` given to `Restores` (through its `updating`), `GameUpdates` and `Deploys`
@@ -14,6 +14,7 @@ import { FactorioCatalog } from './updates/factorio.ts';
 import { GameSettings } from './servers/game-settings.ts';
 import { GameUpdates } from './updates/game-updates.ts';
 import { ModUpdates } from './updates/mod-updates.ts';
+import { ModsZip } from './updates/mods-zip.ts';
 import { Moderation } from './servers/moderation.ts';
 import type { Restores } from './backups/restore.ts';
 import type { RestartScheduler } from './servers/restarts.ts';
@@ -62,6 +63,7 @@ export function startGame(config: Config, deps: HubDeps, { hub, db, agents, serv
   gameUpdates?.start();
   const modUpdates = gameUpdates && new ModUpdates({ hub, db, catalog, gameUpdates, servers: config.servers.map((s) => s.id) }, deps.modUpdates);
   modUpdates?.start();
+  const modsZip = gameUpdates && new ModsZip({ catalog, fetch: deps.portal ?? fetch, gameUpdates });
   const moderation = agents && new Moderation({ hub, agents, servers: config.servers });
   // Game settings, with an Agent's server: listening before any Agent can connect.
   const gameSettings =
@@ -79,7 +81,7 @@ export function startGame(config: Config, deps: HubDeps, { hub, db, agents, serv
     });
   late.gameSettings = gameSettings;
   gameSettings?.start();
-  return { gameUpdates, modUpdates, moderation, gameSettings };
+  return { gameUpdates, modUpdates, modsZip, moderation, gameSettings };
 }
 
 type SaveUploadsParts = {

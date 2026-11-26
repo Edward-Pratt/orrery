@@ -15,7 +15,7 @@ export const PERMISSIONS = [
   { name: 'servers.control', scoped: true, label: 'Control', description: 'restart and cancel, back up on request, upload a save' },
   { name: 'servers.restore', scoped: true, label: 'Restore', description: 'put a Backup back (the world is replaced)' },
   { name: 'servers.logs', scoped: true, label: 'Logs', description: "read a server's log files (they can hold player IPs)" },
-  { name: 'servers.pack', scoped: true, label: 'Pack and game updates', description: 'pack updates, adopt, Extras, config edits, the runtime; game updates, the catalog, Import mod list' },
+  { name: 'servers.pack', scoped: true, label: 'Pack and game updates', description: 'pack updates, adopt, Extras, config edits, the runtime; game updates, the catalog, Import mod list, the mods zip' },
   { name: 'servers.settings', scoped: true, label: 'Game settings', description: "read and change a factorio server's game settings (the game password is in them)" },
   { name: 'servers.moderation', scoped: true, label: 'Moderation', description: 'kick, ban, unban, promote and demote' },
   { name: 'services.control', scoped: true, label: 'Services', description: 'start, stop and restart services (a linked service counts as its server)' },

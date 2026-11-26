@@ -1,6 +1,6 @@
 // The permission each route needs (`src/web/permit.ts`) on a whole hub with two servers (`gtnh`, linked to the
 // `gtnh` service, and `tfc`) and an unlinked service (`caddy`): a viewer's writes are 403 naming what is missing and
-// never run, the three gated reads too (HEAD as GET), the default deny for a write without a rule; an operator
+// never run, the four gated reads too (HEAD as GET), the default deny for a write without a rule; an operator
 // scoped to `gtnh` acts on `gtnh` and its service only; an owner passes every rule.
 
 import assert from 'node:assert/strict';
@@ -35,7 +35,7 @@ async function permitHub(t: TestContext) {
   return { web, owner, role, call, acted };
 }
 
-test("a viewer's writes are 403 naming the permission and never run; reads but three pass", async (t) => {
+test("a viewer's writes are 403 naming the permission and never run; reads but four pass", async (t) => {
   const { web, role, call, acted } = await permitHub(t);
   const { cookie } = await loginAs(web, { username: 'vic', grants: [{ roleId: role('Viewer') }] });
   const refused: [string, string, string][] = [
@@ -58,6 +58,7 @@ test("a viewer's writes are 403 naming the permission and never run; reads but t
     ['GET', '/servers/gtnh/logs', 'Needs servers.logs on gtnh'],
     ['GET', '/servers/gtnh/logs/latest.log', 'Needs servers.logs on gtnh'],
     ['GET', '/servers/gtnh/settings', 'Needs servers.settings on gtnh'],
+    ['GET', '/servers/gtnh/game/mods.zip', 'Needs servers.pack on gtnh'],
     ['GET', '/services/gtnh/logs', 'Needs services.logs on gtnh'],
     ['GET', '/users', 'Needs users'],
   ];

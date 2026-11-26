@@ -87,6 +87,7 @@ test('GET …/game/mods.zip: an attachment for a server an Agent runs, after its
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'application/zip');
   assert.equal(res.headers.get('content-disposition'), 'attachment; filename="space-mods.zip"');
+  assert.equal(res.headers.get('cache-control'), 'no-store');
   await res.body?.cancel();
   assert.equal((await h.req('GET', '/api/servers/gtnh/game/mods.zip')).status, 404);
   assert.equal((await h.req('GET', '/api/servers/nope/game/mods.zip')).status, 404);

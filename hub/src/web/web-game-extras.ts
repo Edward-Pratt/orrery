@@ -1,7 +1,7 @@
 // `gameExtrasRoutes`, registered by `webApi` before the online check, each block only with its module on: `GET
 // /api/servers/:id/game/updates` (`ModUpdatesState`) and `GET`/`POST /api/servers/:id/moderation` (`ModerationState`;
 // `ModerateRequest` answering `ModerateAnswer`) and `GET /api/servers/:id/game/mods.zip` (`ModsZip`: the zip as an
-// attachment, `<id>-mods.zip`; HEAD 405), 404 for a server the module doesn't have, `GameRefused`'s status and text.
+// attachment, `<id>-mods.zip`, `no-store`: made afresh each time; HEAD 405), 404 for a server the module doesn't have, `GameRefused`'s status and text.
 
 import type { Context, Hono } from 'hono';
 import type { Me, ModerateAnswer, ModerationState, ModUpdatesState } from '../api.ts';
@@ -41,7 +41,7 @@ export function gameExtrasRoutes(
     app.get('/servers/:id/game/mods.zip', async (c) =>
       c.req.method === 'HEAD' ? c.body(null, 405, { allow: 'GET' }) : answer(c, (id) => modsZip.has(id), async (id) => {
         const file = `${id.replace(/[^A-Za-z0-9_-]/g, '_')}-mods.zip`;
-        return new Response(await modsZip.open(id, c.req.raw.signal), { headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${file}"` } });
+        return new Response(await modsZip.open(id, c.req.raw.signal), { headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${file}"`, 'cache-control': 'no-store' } });
       }),
     );
   }

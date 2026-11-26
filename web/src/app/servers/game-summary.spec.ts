@@ -14,7 +14,7 @@ describe('server game tab', () => {
     expect(el.querySelector('[data-mod=space-age]')!.className).toContain('text-muted-foreground');
     expect(el.querySelector('[data-mod=space-age]')!.getAttribute('title')).toBe('Comes with Factorio');
     expect(el.querySelector('[data-mod=flib]')!.getAttribute('title')).toBeNull();
-    expect(el.querySelector('[data-mods-zip]')!.getAttribute('href')).toBe('/api/servers/space/game/mods.zip');
+    expect(el.querySelector('[data-mods-zip]')!.getAttribute('href')).toMatch(/^\/api\/servers\/space\/game\/mods\.zip\?v=[0-9a-f]+$/);
     const rows = [...el.querySelectorAll('[data-update-row]')].map((r) => [...r.querySelectorAll('td')].slice(1).map(text));
     expect(rows).toEqual([
       ['2.1.24 · 3 mods', 'rolled back 14 m', 'alex'],

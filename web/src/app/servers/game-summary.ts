@@ -11,7 +11,8 @@ import ServerPage from './server';
  * The Game tab's summary card: what the server runs (Factorio and every mod, the game's own muted, each updatable
  * chip's "→ <version>" from the tab's `PortalUpdates`), Update game and Update N mods… (both disabled with the hub's
  * `blocked`, not while stopped: the update starts it), Download mods (`GET …/game/mods.zip`, with a portal mod
- * installed: the hub rebuilds them from the portal, so a player can drop the folder into their own `mods/`), the red box for a failure while preparing, and the "Done" line
+ * installed: the hub rebuilds them from the portal, so a player can drop the folder into their own `mods/`; its `?v=`
+ * changes with what the server runs, so a browser never hands back a zip of an older set), the red box for a failure while preparing, and the "Done" line
  * after an update watched here. The page holds the state and opens the sheet.
  */
 @Component({
@@ -58,7 +59,7 @@ import ServerPage from './server';
             <button hlmBtn variant="outline" [disabled]="!g.installed || !!g.blocked || busy()" (click)="open.emit(true)" data-update-all>Update {{ n }} {{ n === 1 ? 'mod' : 'mods' }}…</button>
           }
           @if (g.installed && hasPortalMods(g.installed.mods)) {
-            <a hlmBtn variant="ghost" [href]="zip" download data-mods-zip>Download mods</a>
+            <a hlmBtn variant="ghost" [href]="zipHref(g.installed)" download data-mods-zip>Download mods</a>
           }
           @if (g.blocked; as why) {
             <p class="text-xs text-muted-foreground" data-update-why>{{ why }}</p>
@@ -83,7 +84,14 @@ export class GameSummary {
   /** Update game (false) or Update N mods… (true): the page opens the sheet. */
   readonly open = output<boolean>();
 
-  protected readonly zip = `/api/servers/${encodeURIComponent(inject(ServerPage).id)}/game/mods.zip`;
+  readonly #zip = `/api/servers/${encodeURIComponent(inject(ServerPage).id)}/game/mods.zip`;
+
+  /** The zip's link, keyed by what the server runs (FNV-1a of it): a new set is a new URL, never a cached zip. */
+  protected zipHref = (i: NonNullable<GameState['installed']>) => {
+    let h = 0x811c9dc5;
+    for (const ch of JSON.stringify(i)) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+    return `${this.#zip}?v=${h.toString(16)}`;
+  };
 
   protected isGame = (name: string) => GAME_MODS.has(name);
   protected hasPortalMods = (mods: { name: string }[]) => mods.some((m) => !GAME_MODS.has(m.name));

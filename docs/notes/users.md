@@ -7,8 +7,9 @@ The owner asked to move the dashboard off Discord logins: a users database, a pa
 access, and what follows from those. Today a dashboard login is a Discord OAuth round trip (`hub/src/web/auth.ts`),
 and "may use the dashboard" means "holds the admin role in the guild"; every logged-in person may do everything.
 After this, a **User** is a row in `hub.db` with a username and a password, **Roles** hold **Permissions**, and the
-hub refuses an action the user's roles don't cover. The Discord bot keeps its own admin-role check for its slash
-commands (`hub/src/discord/discord.ts:440`): that is Discord's authorization, not the dashboard's, and stays.
+hub refuses an action the user's roles don't cover. The Discord bot kept its own admin-role check for its slash
+commands at first; since #398 a member linked to a User is checked by that User's grants instead (`hub/src/discord/admin.ts`,
+ADR 0005's amendment), with the admin role left for unlinked members until the cleanup release (with web off, the role stays the only check).
 
 Contents: [Resume here](#resume-here), [Decisions](#decisions), [Model](#model), [Hub](#hub), [Dashboard](#dashboard),
 [Trust rules](#trust-rules), [Rollback](#rollback), [Tests to write](#tests-to-write), [Build order](#build-order),
@@ -413,11 +414,17 @@ Discord login to give). Then, on the host:
 2. Invite the others from the Users page; the friend gets `operator` scoped to `factorio`.
 3. Staging: the same command as `orrery-staging`.
 4. Leave `clientId`, `guildId`, `adminRoleId` and `DISCORD_CLIENT_SECRET` in place until the cleanup release.
+5. For the bot's admin commands (#398): set each admin's Discord id on the Users page, and under Discord's Server
+   Settings → Integrations allow `/cmd`, `/restart` and `/backup` to any linked member without the admin role. The
+   cleanup release also ends the role's fallback for members linked to no User, while Users exist; with web off the
+   role stays the bot's only check.
 
 Smoke: a wrong password five times locks the name from that address (429, the card's text) and not from another; a viewer sees no buttons and the hub
 refuses a hand-made POST (403 with the permission's name); a scoped operator can restart `factorio` and not `gtnh`;
 Reset password gives a link that works once; Log out everywhere ends an open tab (its next request is 401, the card
-says the session ended); the last owner can't be disabled.
+says the session ended); the last owner can't be disabled. In Discord: the friend, linked and scoped to `factorio`, gets `/restart` in
+factorio's channel and "needs servers.control on gtnh" in gtnh's, even holding the admin role; once disabled on the
+Users page, nothing; a member linked to no User still gets in by the role.
 
 ## Docs to update
 

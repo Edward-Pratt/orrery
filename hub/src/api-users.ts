@@ -38,7 +38,7 @@ export type UserView = {
 
 /** A grant in a request: a role, for every server (`servers` left out or null) or some. */
 export type GrantRequest = { roleId: string; servers?: string[] | null };
-/** `POST /api/users`; `discordId` (owners only) puts dashboard chat under the name that Discord user linked in game. */
+/** `POST /api/users`; `discordId` (owners only) puts dashboard chat under the name that Discord user linked in game, and their grants on the bot's admin commands. */
 export type NewUserRequest = { username: string; grants: GrantRequest[]; discordId?: string | null };
 /** `PUT /api/users/:id`: each field present is changed, all or none; 204. */
 export type UserChange = { grants?: GrantRequest[]; discordId?: string | null; disabled?: boolean };

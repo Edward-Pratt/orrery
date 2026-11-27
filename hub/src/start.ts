@@ -7,7 +7,7 @@
 // links): wires and starts a whole hub (`get` serves the health ping and checks), switching on each integration whose
 // config section is present (Minecraft: `listen`; agents: `Agents`, each Agent's Host added to `Hosts`, its port not
 // awaited, and given to `Services`, `Stats` and the web API, and with `nodeIndex` the nightly Node check; Discord:
-// `startFrontend`; web: `Roles`, `Users` and the HTTP API);
+// `startFrontend`, given `Users` while web is on; web: `Roles`, `Users` and the HTTP API);
 // its handle has the `LiveFeed`, `Hosts` (the seam for another host's samples) and the Agent port's `agentPort`
 // promise, and its `close` stops everything in order (open event streams included). The seam for whole-hub tests.
 // It keeps the order of construction, starts and awaits, the checks and `Services`; the parts are built by
@@ -40,6 +40,7 @@ import type { Stats } from './stats/stats.ts';
 import { scheduleSummaries } from './stats/summary.ts';
 import { Roles } from './users/roles.ts';
 import { Users } from './users/users.ts';
+import type { DiscordUsers } from './discord/admin.ts';
 import { serveWebApi, webApi, type WebApi } from './web/web.ts';
 import { buildCore, type Late } from './start-core.ts';
 import { buildRestores, watchBackups } from './start-backups.ts';
@@ -58,6 +59,8 @@ export type HubDeps = {
     restarts: RestartScheduler,
     links: Links,
     cfg: DiscordConfig,
+    /** The Users whose grants decide a linked member's admin commands; undefined while the web integration is off. */
+    users?: DiscordUsers,
   ) => Promise<Frontend>;
   /** The HTTP GET of the health ping and of checks. */
   get: Get;
@@ -157,7 +160,9 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   const deploys = startDeploys(config, deps, { hub, db, restarts, agents, restores, updating, gameSettings, dbCopies, late });
   const { uploads, library, packs } = buildPacks(config, deps, { hub, db, services, restarts, restores, deploys, agents, port, late });
   const saveUploads = buildSaveUploads({ hub, agents, uploads, agentOf, updating, gameSettings, restores, deploys });
-  const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord) : undefined;
+  const roles = web && new Roles(db.users, (entry) => db.audit(entry));
+  const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
+  const frontend = discord ? await deps.startFrontend(hub, stats, restarts, links, discord, users || undefined) : undefined;
   const stopPing = config.healthcheckUrl ? startPinger(config.healthcheckUrl, 60_000, deps.get) : () => {};
   const stopSummaries = scheduleSummaries(hub, stats, config.servers); // throws on a bad time
   const DB_UPKEEP_TIME = '04:00'; // local; before the usual 06:00 daily restart
@@ -165,8 +170,6 @@ export async function startHub(config: Config, deps: HubDeps): Promise<HubHandle
   await uploads?.start();
   await library?.start();
   await packs?.start(); // after the frontend: it hears every notice from the start
-  const roles = web && new Roles(db.users, (entry) => db.audit(entry));
-  const users = roles && new Users(db.users, roles, (entry) => db.audit(entry), { knownServer: (id) => config.servers.some((s) => s.id === id) });
   const app = web && roles && users && webApi(web, { db, users, roles, live, hub, stats, restarts, lag, checks, hosts: hostCfg || agentsCfg ? hosts : undefined, agents, services, restores, deploys, packs, gameUpdates, modUpdates, modsZip, moderation, gameSettings, saveUploads, uploads, library, integrations: config.integrations });
   const http = app && web ? await serveWebApi(app, web.listenPort) : undefined;
   if (http) console.log(`[hub] web API on 127.0.0.1:${http.port}`);

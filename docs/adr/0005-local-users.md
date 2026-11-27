@@ -12,7 +12,7 @@ password is reset. The built-in `owner` role holds everything; the last owner ca
 or changes what they don't hold themself. The hub checks every write against a rules table before any route runs
 (`hub/src/web/permit.ts`), with default deny; reads are open to every user but three (a server's logs, its game
 settings, the audit log). The first owner, and a locked-out one, come from a CLI on the host (`npm run users --
-invite <name>`): there is no email in the hub. The Discord bot keeps its own admin-role check for its slash commands.
+invite <name>`): there is no email in the hub. The Discord bot keeps its own admin-role check for its slash commands (amended below).
 
 One cut-over release: the hub release removes the Discord login, the dashboard release minutes later replaces the
 login card. `integrations.web`'s `clientId`, `guildId` and `adminRoleId`, and `DISCORD_CLIENT_SECRET`, are ignored
@@ -26,3 +26,14 @@ with a warning for one release (the Rollback window), then removed.
   can add them next to passwords. A second factor (TOTP) is the release after this one.
 - **Four fixed roles in code, no Roles page**: a day less work and enough for three users, but the owner asked for RBAC.
 - **A read permission per area**: would mean filtering the one event stream per user; reads stay open but for three.
+
+## Amendment (2026-11-27): the bot's admin commands follow Users' grants
+
+The admin-role check above let a member with the role run `/cmd`, `/restart` and `/backup` on every server, while the
+dashboard scoped the same actions per server. Now a member whose Discord id is on a User is decided by that User's
+grants on the channel's server alone (`/cmd`: `servers.console`; `/restart`, `/backup`: `servers.control`), the role
+or not, and a disabled User by nothing (`hub/src/discord/admin.ts`). A member linked to no User still gets in by the admin
+role until the Users cleanup release drops that fallback; with the web integration off there are no Users, and the role
+stays the only check.
+Considered: a Discord role per server in config, which keeps the bot apart from Users but is a second permission
+system to keep in step.

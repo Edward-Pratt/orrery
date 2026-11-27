@@ -1,8 +1,8 @@
 // The slash commands (`COMMANDS`) and their answers (`handleCommand`), worded for any game: `/status` `/list` `/tps`
 // `/playtime` `/top` `/link` (how to type the code in each game that has a server) `/unlink` (every game's link), and
-// the admin role's `/cmd` (late output as follow-ups) `/restart` `/backup` (`backupCommand`: the server's Backups, a
-// factorio server's saves, and `start` through `ServerHub.backup`). Every action goes to the audit as
-// `discord:<username> (<id>)`.
+// the admin commands `/cmd` (late output as follow-ups) `/restart` `/backup` (`backupCommand`: the server's Backups, a
+// factorio server's saves, and `start` through `ServerHub.backup`), allowed by `adminRefusal` (a linked User's grants
+// on the channel's server, else the admin role). Every action goes to the audit as `discord:<username> (<id>)`.
 
 import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import {
@@ -17,16 +17,15 @@ import {
   formatTop,
   formatTps,
 } from './format.ts';
+import { ADMIN_COMMANDS, adminRefusal, type DiscordUsers } from './admin.ts';
 import type { DiscordConfig } from '../config.ts';
 import type { Links } from '../servers/links.ts';
 import type { RestartScheduler } from '../servers/restarts.ts';
 import type { ServerHub } from '../servers/servers.ts';
 import type { Period, Stats } from '../stats/stats.ts';
 
-const ADMIN_COMMANDS = new Set(['cmd', 'restart', 'backup']);
-
-// Admin commands are hidden (default_member_permissions "0") until the admin role is allowed under
-// Server Settings → Integrations; the adminRoleId check below still applies either way.
+// Admin commands are hidden (default_member_permissions "0") until the admin role (or a member) is allowed under
+// Server Settings → Integrations; `adminRefusal` still decides either way.
 export const COMMANDS = [
   new SlashCommandBuilder().setName('status').setDescription('Server status, TPS/UPS and uptime'),
   new SlashCommandBuilder().setName('list').setDescription('Players online'),
@@ -53,12 +52,12 @@ export const COMMANDS = [
     ),
   new SlashCommandBuilder()
     .setName('cmd')
-    .setDescription('Run a server console command (admin role only)')
+    .setDescription('Run a server console command (admins only)')
     .setDefaultMemberPermissions(0)
     .addStringOption((o) => o.setName('command').setDescription('The command, as typed in the server console').setRequired(true)),
   new SlashCommandBuilder()
     .setName('restart')
-    .setDescription('Restart the server with an in-game countdown (admin role only)')
+    .setDescription('Restart the server with an in-game countdown (admins only)')
     .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
@@ -71,7 +70,7 @@ export const COMMANDS = [
     .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the scheduled restart')),
   new SlashCommandBuilder()
     .setName('backup')
-    .setDescription('Backups (admin role only)')
+    .setDescription('Backups (admins only)')
     .setDefaultMemberPermissions(0)
     .addSubcommand((s) => s.setName('start').setDescription('Start a backup now and report when it finishes'))
     .addSubcommand((s) => s.setName('status').setDescription('Newest backup, count and total size'))
@@ -84,7 +83,7 @@ export type BackupInteraction = Pick<ChatInputCommandInteraction, 'reply' | 'def
 };
 
 /**
- * `/backup` in a server's channel (its admin role already checked): `status` and `list` of the server's Backups (a
+ * `/backup` in a server's channel (its admin check already passed): `status` and `list` of the server's Backups (a
  * factorio server's saves), or `start`, a Backup now through `ServerHub.backup` as `by`. The finished/failed notice
  * follows in the channel, from the game's backup event.
  */
@@ -125,11 +124,13 @@ export type CommandCtx = {
   links: Links;
   cfg: DiscordConfig;
   serverByChannel: Map<string, string>;
+  /** The Users whose grants decide a linked member's admin commands; undefined while the web integration is off. */
+  users?: DiscordUsers;
 };
 
-/** Answers a slash command in a server's channel; the admin commands only for the admin role. */
+/** Answers a slash command in a server's channel; the admin commands only for whom `adminRefusal` allows. */
 export async function handleCommand(ctx: CommandCtx, i: ChatInputCommandInteraction): Promise<void> {
-  const { hub, stats, restarts, links, cfg, serverByChannel } = ctx;
+  const { hub, stats, restarts, links, cfg, serverByChannel, users } = ctx;
   const serverId = serverByChannel.get(i.channelId);
   const state = serverId ? hub.get(serverId) : undefined;
   if (!serverId || !state) {
@@ -179,8 +180,10 @@ export async function handleCommand(ctx: CommandCtx, i: ChatInputCommandInteract
     return;
   }
   if (!ADMIN_COMMANDS.has(i.commandName)) return;
-  if (!i.inCachedGuild() || !i.member.roles.cache.has(cfg.adminRoleId)) {
-    await i.reply({ content: 'You need the admin role for this.', flags: MessageFlags.Ephemeral });
+  const hasAdminRole = i.inCachedGuild() && i.member.roles.cache.has(cfg.adminRoleId);
+  const refusal = adminRefusal(users, { discordId: i.user.id, hasAdminRole }, i.commandName, serverId);
+  if (refusal) {
+    await i.reply({ content: refusal, flags: MessageFlags.Ephemeral });
     return;
   }
   const audit = `discord:${i.user.username} (${i.user.id})`;

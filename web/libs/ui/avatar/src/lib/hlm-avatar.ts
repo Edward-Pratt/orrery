@@ -5,24 +5,21 @@ import { classes } from '@spartan-ng/helm/utils';
 @Component({
   selector: 'hlm-avatar',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  hostDirectives: [BrnAvatar],
   host: {
     'data-slot': 'avatar',
     '[attr.data-size]': 'size()',
   },
   template: `
-    @if (_image()?.canShow()) {
-      <ng-content select="[hlmAvatarImage],[brnAvatarImage]" />
-    } @else {
-      <ng-content select="[hlmAvatarFallback],[brnAvatarFallback]" />
-    }
+    <ng-content select="[hlmAvatarImage],[brnAvatarImage]" />
+    <ng-content select="[hlmAvatarFallback],[brnAvatarFallback]" />
     <ng-content />
   `,
 })
-export class HlmAvatar extends BrnAvatar {
+export class HlmAvatar {
   public readonly size = input<'default' | 'sm' | 'lg'>('default');
 
   constructor() {
-    super();
     classes(
       () =>
         // Armil's Mark with the user's initials: verdigris-wash, 26px (20px small).

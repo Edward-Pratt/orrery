@@ -31,7 +31,7 @@
     "@angular/compiler-cli": "^22.3.0",
     "@spartan-ng/cli": "^1.10.0",
     "@tailwindcss/postcss": "^4.3.5",
-    "jsdom": "^30.0.0",
+    "jsdom": "^31.0.1",
     "postcss": "^8.5.28",
     "prettier": "^3.10.1",
     "tailwindcss": "^4.3.5",

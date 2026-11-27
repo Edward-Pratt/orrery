@@ -19,7 +19,7 @@ import { Hono } from 'hono';
 import type { CheckStatus, Integrations } from '../api.ts';
 import type { Checks } from '../services/checks.ts';
 import type { Deploys } from '../updates/deploys.ts';
-import { authRoutes } from './auth.ts';
+import { authRoutes, sessionUser } from './auth.ts';
 import { permitRoutes } from './permit.ts';
 import { actor, jsonBody, type SessionUser } from './request.ts';
 import { usersRoutes } from './web-users.ts';
@@ -140,7 +140,7 @@ export function webApi(web: WebIntegration, { db, users, roles, live, hub, stats
   gameExtrasRoutes(app, { modUpdates, modsZip, moderation, actor, body: (c) => jsonBody(c.req) });
   gameSettingsRoutes(app, { gameSettings, saveUploads });
   actionsRoutes(app, { hub, stats, restarts });
-  eventsRoutes(app, { live });
+  eventsRoutes(app, { live, alive: (session) => sessionUser({ users, sessions: db.users }, session) !== undefined });
   return app;
 }
 

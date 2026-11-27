@@ -53,7 +53,8 @@ Lengths count characters (UTF-16 code units).
 | a `saveChunk`'s `data` (base64 of at most 512 KiB) | 700,000 characters |
 | an uploaded save's `size` (`saveUploadStart`) | 1 GiB |
 | every other string (ids, tokens, versions, unit names, tags, file names) | 256 characters |
-| one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake | 1 MiB (1,048,576 bytes) |
+| one line on the Agent port (`LIMITS.lineBytes`, its newline not counted), before and after the handshake, and on the Mod port before its hello is accepted | 1 MiB (1,048,576 bytes) |
+| one line on the Mod port after its hello is accepted (`MOD_LINE_BYTES`; deployed Mods send output of any length) | 16 MiB |
 
 ## Handshake
 

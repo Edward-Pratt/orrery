@@ -3,6 +3,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { LIMITS } from '../../src/protocol.ts';
+import { MOD_LINE_BYTES } from '../../src/servers/connections.ts';
 import { ServerHub } from '../../src/servers/servers.ts';
 import { fakeMod, hello, online, sleep, TOKEN, until } from '../fake-mod.ts';
 import { setup } from './server-hub.ts';
@@ -93,4 +95,26 @@ test('close() does not wait for connections that never sent hello', async () => 
   await hub.close();
   assert.ok(Date.now() - start < 1000, `close took ${Date.now() - start} ms`);
   await idle.closed;
+});
+
+test('a line over the 1 MiB cap before the hello closes the socket at once, not at the hello timeout', async (t) => {
+  const { port, types } = await setup(t, { helloTimeoutMs: 30_000 });
+  const mod = fakeMod(port);
+  const start = Date.now();
+  mod.socket.write('x'.repeat(LIMITS.lineBytes + 1)); // no newline: it would grow until the timeout
+  await mod.closed;
+  assert.ok(Date.now() - start < 5_000, `closed after ${Date.now() - start} ms`);
+  assert.deepEqual(types(), []);
+});
+
+test("after the hello a Mod's line may pass 1 MiB, but one over MOD_LINE_BYTES closes it as a crash", async (t) => {
+  const { hub, port, types } = await setup(t);
+  const mod = await online(port);
+  mod.send(JSON.stringify({ type: 'chat', player: 'a', message: 'x'.repeat(2 * LIMITS.lineBytes) })); // refused by the parser, kept by the reader
+  mod.send({ type: 'started' });
+  await until(() => types().includes('started'));
+  assert.equal(hub.get('gtnh')?.online, true);
+  mod.socket.write('x'.repeat(MOD_LINE_BYTES + 1));
+  await mod.closed;
+  await until(() => types().includes('crashed'));
 });

@@ -1,6 +1,7 @@
 // A game connection's life, over `ServerHub`'s state (`ServerCtx`); the sockets and the listener stay the class's. A
-// Mod's on the Mod port (`readHandshake`): every line through `parseModLine`, the first a hello within
-// `helloTimeoutMs`, else the socket is destroyed; a hello refused (`checkHello`: its protocol out of range, an unknown
+// Mod's on the Mod port (`readHandshake`): its lines read by `readLines`, at most `LIMITS.lineBytes` until its hello
+// is accepted and `MOD_LINE_BYTES` after (a longer one destroys the socket), each through `parseModLine` (a line whose
+// handling throws ends only its own connection), the first a hello within `helloTimeoutMs`, else the socket is destroyed; a hello refused (`checkHello`: its protocol out of range, an unknown
 // server or a bad token, compared with `timingSafeEqual`) gets a `reject`; junk after the handshake is ignored. An
 // accepted one, a Mod's or an Agent's (`open`), is welcomed and its server online, replacing an older one without an
 // alert, its messages handled by `dispatch.ts`. When it closes (`closed`): `stopping` first is a stop, else a crash;
@@ -9,22 +10,37 @@
 // Hub core.
 
 import type { Socket } from 'node:net';
-import { createInterface } from 'node:readline';
-import { parseModLine, type Hello, type ModMsg } from '../protocol.ts';
+import { readLines } from '../lines.ts';
+import { LIMITS, parseModLine, type Hello, type ModMsg } from '../protocol.ts';
 import { handle } from './dispatch.ts';
 import { emitLifecycle } from './lifecycle-budget.ts';
 import { send, type Conn, type ServerCtx } from './server-ctx.ts';
 import { protocolRefusal, tokenMatches } from './server-text.ts';
+
+/**
+ * A Mod's line once its hello is accepted. Deployed Mods send a command's output as up to 2000 lines of any length
+ * (`parseModLine` cuts it to `LIMITS.output` lines of `LIMITS.line`), so this is well above the Agent port's cap, and
+ * still bounds what one connection can hold.
+ */
+export const MOD_LINE_BYTES = 16 * 1024 * 1024;
 
 /** A socket accepted on the Mod port, until its hello is accepted or refused; `onClose` runs first on its `close`. */
 export function readHandshake(c: ServerCtx, socket: Socket, onClose: () => void): void {
   let onMsg: ((msg: ModMsg) => void) | null = null;
   socket.on('error', () => {}); // 'close' always follows and does the cleanup
   const helloTimer = setTimeout(() => socket.destroy(), c.helloTimeoutMs);
-  const lines = createInterface({ input: socket, crlfDelay: Infinity });
-  lines.on('error', () => {});
-  lines.on('line', (line) => {
+  const max = () => (onMsg ? MOD_LINE_BYTES : LIMITS.lineBytes);
+  readLines(socket, max, (line) => {
     if (socket.destroyed || socket.writableEnded) return;
+    try {
+      onLine(line);
+    } catch (err) {
+      // One bad line must never take the hub down: it ends only its own connection.
+      console.error('[hub] mod port: a line failed, closing:', err);
+      socket.destroy();
+    }
+  }, '[hub] mod port');
+  function onLine(line: string): void {
     const msg = parseModLine(line);
     if (onMsg) {
       if (msg && msg.type !== 'hello') onMsg(msg); // junk after handshake is ignored
@@ -38,7 +54,7 @@ export function readHandshake(c: ServerCtx, socket: Socket, onClose: () => void)
       return void socket.end();
     }
     onMsg = open(c, socket, msg.serverId, msg.modVersion);
-  });
+  }
   socket.on('close', () => {
     onClose();
     clearTimeout(helloTimer);

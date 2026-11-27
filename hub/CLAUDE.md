@@ -26,8 +26,8 @@ pnpm start          # node src/index.ts; reads ./config.json (or argv[2]), env D
 with its types `config-types.ts`, defaults `config-defaults.ts`, validation `config-validate.ts` (`servers[]`'s in
 `config-servers.ts`) and field checks `config-check.ts`,
 `check-config.ts`, `users-cli.ts`), the contract the agent and the dashboard import (`types.ts`, `protocol.ts`, `api.ts`,
-`api-game-extras.ts`, `api-public.ts`, `api-users.ts`) and two small helpers (`daily.ts`,
-`units.ts`). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
+`api-game-extras.ts`, `api-public.ts`, `api-users.ts`) and three small helpers (`daily.ts`,
+`units.ts`, `lines.ts`: both ports' line reader). Everything else is in a folder per feature, named as CONTEXT.md names it, each with a CLAUDE.md saying
 what its files hold: `servers/`, `agents/`, `services/`, `backups/`, `packs/`, `updates/`, `discord/`, `web/`,
 `stats/`, `users/`. Each file starts with a comment that says its job and its contract: read it before changing the file, and
 change it with the file. `start.ts` wires them all from config (through its `start-*.ts` parts), so it is the map. Tests mirror the folders under
@@ -40,7 +40,9 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
 
 ## Trust boundaries (do not weaken)
 
-- Mod input: every line goes through `parseModLine` (checks `Object.hasOwn` on the type, field types and every
+- Mod input: lines are read by `readLines` (`lines.ts`, the Agent port's reader too), at most `LIMITS.lineBytes`
+  before the hello is accepted and `MOD_LINE_BYTES` (16 MiB) after, a longer one destroying the socket; a line whose
+  handling throws ends only its connection. Every line goes through `parseModLine` (checks `Object.hasOwn` on the type, field types and every
   field's limit, and returns a copy holding only the schema's fields); Agent port input through `parseAgentLine`.
   Tokens 16–256 chars (an Agent's 32–256), compared with `timingSafeEqual`. The Mod port and the web API bind `127.0.0.1`.
 - Agent port (`agents/`: `agents.ts`, with `listener.ts`, `budgets.ts` and `dispatch.ts`): it binds only `integrations.agents.listen` (the tailnet address); a peer that isn't a

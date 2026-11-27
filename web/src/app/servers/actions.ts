@@ -78,7 +78,7 @@ const START_BLOCKED: Record<string, string> = { active: 'Service running', activ
         <form class="ar-menu ar-menu--form absolute top-full right-0 z-10 mt-1.5 flex items-center gap-2 text-sm" (submit)="$event.preventDefault(); restartIn(+minutes.value)" data-restart-form>
           <label class="flex items-center gap-2">
             Restart in
-            <input #minutes type="number" min="0" max="60" step="1" value="5" class="ar-input max-w-16" />
+            <input #minutes type="number" min="1" max="60" step="1" value="5" required class="ar-input max-w-16" />
             minutes
           </label>
           <button hlmBtn size="sm" type="submit">Schedule</button>
@@ -156,7 +156,10 @@ export class ServerActions {
     this.#post('restart', { minutes } satisfies RestartRequest, `Restart of ${name}`, minutes ? `${name} restarts in ${minutes} minutes.` : `${name} is restarting.`);
   }
 
+  /** The form's countdown: a whole 1 to 60 minutes, else nothing is sent (an empty field or 0 would restart at once,
+   * past Restart now's confirm) and the form stays open. */
   restartIn(minutes: number): void {
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) return;
     this.asking.set(false);
     this.restart(minutes);
   }

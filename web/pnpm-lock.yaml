@@ -197,7 +197,7 @@ importers:
         specifier: ^22.3.0
         version: 22.3.0(@angular/common@22.3.0(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2))(@angular/platform-browser@22.3.0(@angular/common@22.3.0(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2)))(rxjs@7.8.2)
       '@ng-icons/core':
-        specifier: '>=32.0.0 <34.0.0'
+        specifier: '>=32.0.0 <37.0.0'
         version: 33.4.0(@angular-devkit/schematics@22.3.0(chokidar@6.0.0))(@angular/common@22.3.0(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.3.0(@angular/compiler@22.3.0)(rxjs@7.8.2))(@schematics/angular@22.3.0(chokidar@6.0.0))(rxjs@7.8.2)
       '@spartan-ng/brain':
         specifier: ^1.10.0

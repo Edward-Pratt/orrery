@@ -66,7 +66,7 @@ export default class History {
   readonly history = signal<ServerHistory | null>(null);
   /** The last load failed, so the skeleton gives way to a message. */
   protected readonly failed = signal(false);
-  /** Stream events that change the graphs, with when they arrived; those up to the history's `asOf` are already in it. */
+  /** Stream events that change the graphs, at the hub's time (a reconnect's replay keeps its own); those up to the history's `asOf` are already in it. */
   readonly #live = signal<{ id: number; at: number; event: HubEvent }[]>([]);
   protected readonly charts = computed(() => {
     const h = this.history();
@@ -117,7 +117,7 @@ export default class History {
       .all$.pipe(filter(ofServer(id)), takeUntilDestroyed())
       .subscribe(({ id, event }) => {
         if (event.type === 'tps' || event.type === 'join' || event.type === 'leave' || STATES[event.type]) {
-          this.#live.update((live) => [...live, { id, at: Date.now(), event }]);
+          this.#live.update((live) => [...live, { id, at: event.at, event }]);
         }
       });
   }

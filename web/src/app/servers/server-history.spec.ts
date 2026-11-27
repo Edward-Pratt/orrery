@@ -48,6 +48,17 @@ describe('server history section', () => {
     backend.expectNone('/api/servers/gtnh/history?hours=24');
   });
 
+  it("plots live events at the hub's time, so a reconnect's replay doesn't pile up at the moment it arrives", async () => {
+    const { backend, events, render, chart } = await setup('/gtnh/history');
+    backend.expectOne('/api/servers/gtnh/history?hours=24').flush(HISTORY);
+    const then = Date.now() - 20 * 60_000; // missed while the tab slept
+    events.push(11, { serverId: 'gtnh', type: 'tps', tps: 17 }, then);
+    events.push(12, { serverId: 'gtnh', type: 'join', player: 'Alex' }, then + 1_000);
+    await render();
+    expect((chart('TPS')![0]![1] as [number, number][]).at(-1)).toEqual([then, 17]);
+    expect((chart('Players')![0]![1] as [number, number][]).at(-1)).toEqual([then + 1_000, 2]);
+  });
+
   it("graphs a factorio server's UPS out of 60", async () => {
     const { backend, render, chart, chartMax } = await setup('/space/history', FACTORIO);
     backend.expectOne('/api/servers/space/history?hours=24').flush(HISTORY);

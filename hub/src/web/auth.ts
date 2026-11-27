@@ -6,7 +6,7 @@
 // password checks run, so a flood can't fill Node's thread pool), `GET /api/invites/:token` (`InviteInfo`; 404
 // unknown, used or expired) and `POST /api/invites/:token` (`PasswordRequest`: `Users.acceptInvite`, then logged in as
 // a login is). Then the session check every later route sits behind: the cookie's row, then its user, read afresh on
-// every request (a missing or disabled user is 401, so a changed grant counts at once); `c.get('user')` is a
+// every request (`sessionUser`: a missing or disabled user is 401, so a changed grant counts at once; the event stream re-checks it); `c.get('user')` is a
 // `SessionUser`, `c.get('session')` the session's hash. Then the session's own routes: `GET /api/me` (`Me` only), `PUT
 // /api/me/password` (`PasswordChange`: the current one checked, and limited, as a login is; the user's other sessions
 // end), `POST /api/me/logout-all` and `POST /api/logout`. A login's address is the last `X-Forwarded-For` entry
@@ -36,6 +36,13 @@ const CHUNK = /^\/api\/uploads\/[^/]+$/;
 /** Password checks at once, at most: each holds one of the 4 threads of Node's pool (files, DNS) for ~40 ms. */
 export const MAX_VERIFYING = 2;
 const WRONG = 'Wrong username or password';
+
+/** The user a session (its hash) logs in, with their grants: undefined once it has expired or ended, or its user is gone or disabled. */
+export function sessionUser({ users, sessions }: Pick<AuthDeps, 'users' | 'sessions'>, session: string): ReturnType<Users['resolve']> {
+  const userId = sessions.session(session);
+  const found = userId ? users.resolve(userId) : undefined;
+  return found && !found.user.disabled ? found : undefined;
+}
 
 /** The client's address: the last `X-Forwarded-For` entry (Caddy's), else the socket's. */
 function addressOf(c: Context<Env>): string {
@@ -119,9 +126,8 @@ export function authRoutes(app: Hono<Env>, web: WebIntegration, { users, session
   app.use(async (c, next) => {
     const cookie = getCookie(c, 'session');
     const session = cookie ? hashToken(cookie) : undefined;
-    const userId = session ? sessions.session(session) : undefined;
-    const found = userId && users.resolve(userId);
-    if (!session || !found || found.user.disabled) return c.text('Not logged in', 401);
+    const found = session ? sessionUser({ users, sessions }, session) : undefined;
+    if (!session || !found) return c.text('Not logged in', 401);
     const { user, grants } = found;
     c.set('user', { id: user.id, username: user.username, owner: isOwner(grants), permissions: permissionsOf(grants), discordId: user.discordId, grants });
     c.set('session', session);

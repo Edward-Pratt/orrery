@@ -122,7 +122,8 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   up before the password is hashed, and its link is answered once to whoever minted it. Session ids are sent only in
   an httpOnly, Secure, SameSite=Lax cookie on `/api`, kept in `user_sessions` (never the Discord login's
   `web_sessions`: a hub rolled back past Users would take any row there for an admin's) and expire server-side; the session's user and grants are read
-  afresh on every request, so a disabled user or a changed grant counts at once. Every `/api` route but the login,
+  afresh on every request, so a disabled user or a changed grant counts at once, and an open event stream re-checks its session every 25 s
+  and closes once it has ended. Every `/api` route but the login,
   the invites and, with `integrations.web.status`,
   `/api/public/status` (the Status page: only the listed servers, built field by field: name, game, state, the player
   names online and uptime; never an id, an address, a token, a path or a Discord name) needs a session; every write

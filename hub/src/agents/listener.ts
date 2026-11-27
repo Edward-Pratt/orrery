@@ -1,7 +1,7 @@
 // The Agent port's sockets, for `Agents`. `accept`: a connection is paused at accept and destroyed without a word
 // unless its peer address is a configured Agent's and has fewer than 4 open (`PEER_SOCKETS`, handshaken or not; the
 // fifth logged at most once a minute, by `tooMany`), so nothing is read first; its lines are read from raw chunks
-// with `LIMITS.lineBytes` as the cap (`readLines`: a longer one destroys it) and its line budget, before and after
+// with `LIMITS.lineBytes` as the cap (`readLines`, `lines.ts`: a longer one destroys it) and its line budget, before and after
 // the handshake; a line whose handling throws ends only its own connection. Its first line, within 5 s
 // (`helloTimeoutMs`), goes to `agentHello` or `gameHello`, whose `Next` is the line budget and the handler of its next
 // lines; any other first line destroys it. `reject` refuses a first line: its `reject`, then the connection is ended
@@ -10,6 +10,7 @@
 import type { Socket } from 'node:net';
 import { LIMITS, parseAgentLine, type AgentHello, type Hello, type HubAgentMsg } from '../protocol.ts';
 import type { Budget } from './budgets.ts';
+import { readLines } from '../lines.ts';
 
 /** What a first line leads to: the line budget the connection's next lines take from, and what handles them. */
 export type Next = { lines: Budget['lines']; onLine: (line: string) => void };
@@ -60,7 +61,7 @@ export function accept(socket: Socket, { addresses, perPeer, sockets, tooMany, h
     if (next) ({ lines, onLine } = next);
     else socket.destroy();
   };
-  readLines(socket, LIMITS.lineBytes, (line) => {
+  readLines(socket, () => LIMITS.lineBytes, (line) => {
     if (socket.destroyed || socket.writableEnded || !lines(socket)) return;
     try {
       onLine(line);
@@ -69,36 +70,8 @@ export function accept(socket: Socket, { addresses, perPeer, sockets, tooMany, h
       console.error(`[agents] ${peer}: a line failed, closing:`, err);
       socket.destroy();
     }
-  });
+  }, '[agents]');
   socket.resume();
-}
-
-/**
- * Splits a socket's bytes into lines as they arrive, at most `max` bytes each (the newline not counted, a `\r` before
- * it dropped): a longer line destroys the socket before more of it is kept.
- */
-function readLines(socket: Socket, max: number, onLine: (line: string) => void): void {
-  let parts: Buffer[] = [];
-  let size = 0;
-  socket.on('data', (chunk: Buffer) => {
-    let start = 0;
-    while (start < chunk.length && !socket.destroyed) {
-      const nl = chunk.indexOf(0x0a, start);
-      const end = nl === -1 ? chunk.length : nl;
-      size += end - start;
-      if (size > max) {
-        console.error(`[agents] ${socket.remoteAddress}: a line over ${max} bytes, closing`);
-        return void socket.destroy();
-      }
-      parts.push(chunk.subarray(start, end));
-      if (nl === -1) return;
-      const line = Buffer.concat(parts).toString('utf8'); // whole first: a character may span two chunks
-      parts = [];
-      size = 0;
-      onLine(line.endsWith('\r') ? line.slice(0, -1) : line);
-      start = nl + 1;
-    }
-  });
 }
 
 /** Refuses a first line: its `reject`, then the connection is ended and destroyed within 2 s, whatever the peer does. */

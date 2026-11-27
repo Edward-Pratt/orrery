@@ -10,7 +10,8 @@
 // 100 (`serverName`), `admins[]` 100, `bans[]` 500 and a ban's `reason` 200 (a `playerLists` answer), `pending[]` 16,
 // `extra[]` 32, any other string 256; the same on both ports); over a limit the message is refused, but a command's
 // `output` and a `backup`'s `detail` are cut to fit (Mods already deployed send up to 2000 lines of any length).
-// `LIMITS.lineBytes` (1 MiB, the newline not counted) is the Agent port's line cap, for its line reader.
+// `LIMITS.lineBytes` (1 MiB, the newline not counted) is the Agent port's line cap, and the Mod port's before its
+// hello is accepted (after it, `MOD_LINE_BYTES` in `servers/connections.ts`).
 // `parseModLine` for a game connection (a Mod's, or an Agent's for its server: `milestone`, `heartbeat.paused`),
 // `parseAgentLine` for the Agent port (`agentHello`, its optional `node` by `NODE_RELEASE`: a Node release's
 // `process.version`, at most 32 characters, else the hello is refused; a game `hello` as a first line, and the Agent
@@ -112,8 +113,9 @@ export const LIMITS = {
   /** An uploaded save's size. */
   saveBytes: 1024 * 1024 * 1024,
   /**
-   * Bytes in one line on the Agent port (its newline not counted), before and after the handshake: a longer line
-   * destroys the socket. The Agent keeps every line it sends at or under it.
+   * Bytes in one line on the Agent port (its newline not counted), before and after the handshake, and on the Mod
+   * port before its hello is accepted: a longer line destroys the socket. The Agent keeps every line it sends at or
+   * under it.
    */
   lineBytes: 1024 * 1024,
 } as const;

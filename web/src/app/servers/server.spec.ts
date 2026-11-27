@@ -112,6 +112,22 @@ describe('server page', () => {
       req.flush(null, { status: 204, statusText: 'No Content' });
     });
 
+    it('Restart in… sends nothing for an empty field, 0 or more than 60, and stays open', async () => {
+      const { backend, el, items, render } = await open();
+      items().find((i) => i.textContent?.includes('Restart in'))!.click();
+      await render();
+      const input = el.querySelector<HTMLInputElement>('[data-restart-form] input')!;
+      expect(input.required).toBe(true);
+      expect(input.min).toBe('1');
+      for (const value of ['', '0', '61', '2.5']) {
+        input.value = value;
+        el.querySelector('[data-restart-form]')!.dispatchEvent(new Event('submit'));
+        await render();
+        backend.expectNone('/api/servers/gtnh/restart');
+        expect(el.querySelector('[data-restart-form]')).not.toBeNull();
+      }
+    });
+
     it('Stop confirms, then calls the service’s stop on a linked server', async () => {
       const { backend, items, render } = await open(true);
       items()[0]!.click();

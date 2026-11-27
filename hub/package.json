@@ -14,14 +14,14 @@
     "users": "node src/users-cli.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.9",
-    "discord.js": "^14.27.0",
-    "hono": "^4.13.9"
+    "@hono/node-server": "^2.1.11",
+    "discord.js": "^14.28.1",
+    "hono": "^4.13.21"
   },
   "devDependencies": {
     "@types/node": "~24.19.2",
-    "oxlint": "1.94.0",
-    "oxlint-tsgolint": "7.0.2007",
+    "oxlint": "1.95.0",
+    "oxlint-tsgolint": "7.0.2008",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.21.0"

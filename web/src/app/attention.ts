@@ -178,7 +178,7 @@ export class Attention {
     this.#events.all$.pipe(takeUntilDestroyed(this.#destroyRef))
       .subscribe((live) => {
         const { event } = live;
-        this.#progress.seen(event);
+        this.#progress.seen(live);
         if (ofTarget('service')(live) && event.type === 'state') {
           this.#refetchServices.next();
           this.#refetchCards.next(); // a card carries its service's state

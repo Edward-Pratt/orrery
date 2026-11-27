@@ -82,7 +82,7 @@ type Scope = string[] | null;
               >Discord id <span class="text-muted-foreground">(optional)</span>
               <input hlmInput class="mt-1 w-full ar-input--mono" inputmode="numeric" [value]="discordId()" (input)="discordId.set($any($event.target).value.trim())" data-discord
             /></label>
-            <p class="-mt-3 text-xs text-muted-foreground">Their dashboard chat goes in game under the name this Discord user linked.</p>
+            <p class="-mt-3 text-xs text-muted-foreground">Their dashboard chat goes in game under the name this Discord user linked, and the bot's admin commands follow their grants.</p>
             @if (!discordOk()) {
               <p class="text-xs text-status-down" data-discord-error>A Discord id is 17 to 20 digits.</p>
             }

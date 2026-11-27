@@ -1,6 +1,6 @@
 // `Users`: who may use the dashboard. A user is invited (`invite`: a username of 2 to 32 letters, digits, dots,
 // dashes or underscores, unique without case; grants; an optional Discord id, 17 to 20 digits, unique, set by owners
-// only, for dashboard chat under their linked name) and gets in by an Invite, a one-use link token (`INVITE_MS`,
+// only, for dashboard chat under their linked name and the bot's admin commands by their grants, `byDiscordId`) and gets in by an Invite, a one-use link token (`INVITE_MS`,
 // 24 h; stored as `hashToken`; used up before the password is hashed, so two takers can't both get in) that
 // `acceptInvite` turns into a password and a login (`invitee` names whom a token is for); `reset` mints one for an
 // existing user (the old password works until it is used); `inviteLink` is the dashboard's link for a token. A grant change ends the user's open invites: a link minted for a lesser user must not open a
@@ -76,6 +76,12 @@ export class Users {
   /** The per-request read: the user and their grants; undefined for an unknown id. */
   resolve(userId: string): { user: UserRow; grants: Grant[] } | undefined {
     return this.#store.resolve(userId);
+  }
+
+  /** The bot's read: the user with this Discord id and their grants (disabled ones too); undefined for none. */
+  byDiscordId(discordId: string): { user: UserRow; grants: Grant[] } | undefined {
+    const user = this.#store.userByDiscordId(discordId);
+    return user && this.#store.resolve(user.id);
   }
 
   /** A new user with their grants and an invite token; `input` is untrusted. */

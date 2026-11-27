@@ -34,8 +34,8 @@ Nothing builds at the root: run pnpm in `hub/`, `web/` and `agent/` (each pins i
 - **Discord integration** = the bot, a frontend. Frontends (Discord, and the dashboard through the web API) only call the public
   API of `ServerHub` (`hub/src/servers/servers.ts`), `RestartScheduler`, `Stats` (`hub/src/stats/stats.ts`), `LiveFeed`
   (`hub/src/stats/live.ts`, numbered events with replay) and the hub-core modules of the host, checks and services
-  (`Hosts`, `Agents`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`); they
-  never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
+  (`Hosts`, `Agents`, `Checks`, `Services`, `Restores`, `Deploys`, `Packs`, `Uploads`, `Library`; the bot also reads
+  `Users.byDiscordId` for its admin commands, `hub/src/discord/admin.ts`); they never talk to mods, systemd or the database directly. Off: no bot and no `DISCORD_TOKEN` needed; everything else still runs.
 - **Web integration** = the HTTP API (Hono, `127.0.0.1`, under `/api`) for the dashboard, with local Users (`hub/src/users/`:
   passwords, Roles of Permissions, per-server Grants, invites; `docs/adr/0005`; no bot needed), each route's permission in
   `hub/src/web/permit.ts`, and SQLite sessions (`hub/src/web/auth.ts`). Same frontend rule as Discord, plus `Users`, `Roles`

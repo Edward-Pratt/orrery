@@ -37,8 +37,12 @@ and start/stop/crash alerts.
    to **Copy ID** of: your Discord server (guild), the channel for each game
    server, and the role allowed to use `/cmd`.
 5. `/cmd` and `/restart` are hidden from everyone by default. Show them to the
-   admin role under Server Settings → Integrations → your bot → each command.
-   The admin-role check still applies either way.
+   admin role under Server Settings → Integrations → your bot → each command,
+   and to any member linked to a dashboard User without that role. The hub
+   still checks either way: a member whose Discord id is on a User (set on the
+   Users page) gets that User's grants on the channel's server (`/cmd` needs
+   Console, `/restart` and `/backup` need Control), the role or not; anyone
+   else needs the admin role.
 
 ### 2. Hub
 

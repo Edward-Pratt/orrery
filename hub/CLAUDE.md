@@ -110,7 +110,9 @@ Runtime: `discord.js`, and `hono` with its Node adapter `@hono/node-server` (web
   nowhere else: no answer, event, audit entry, log line or error holds it (the report has only `game_password_set`),
   and the hub's refusals name the field, never the value. What the Agent reports (`settings`, `rolledBack`, its
   refusals) is untrusted: it drives display, audit text and refusals only, never a command or a path.
-- `/cmd`: admin role check + `deferReply`. Every action on a server (commands via `runCommand`, restarts scheduled
+- `/cmd`, `/restart`, `/backup`: `adminRefusal` (`discord/admin.ts`): a member linked to a User (the Users page's Discord
+  id, owners only) by that User's grants on the channel's server (`servers.console`, `servers.control`), never the role;
+  a disabled one by nothing; an unlinked member by the admin role until the Users cleanup release; with web off (no `Users`), the role alone. `/cmd` then `deferReply`. Every action on a server (commands via `runCommand`, restarts scheduled
   or cancelled) goes to the `audit` table with its actor: `discord:<username> (<id>)`, or `hub:<why>`
   (`hub:daily`, `hub:restart`) for the hub's own, or `web:<username> (<id>)` from the dashboard (chat from it too).
 - Web: binds `127.0.0.1` (Caddy adds TLS in front). Logins are local Users (`users/`, `docs/adr/0005`): a username

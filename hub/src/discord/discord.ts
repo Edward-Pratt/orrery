@@ -8,6 +8,7 @@
 
 import { ActivityType, ChannelType, Client, Events, GatewayIntentBits, type Webhook } from 'discord.js';
 import { basename } from 'node:path';
+import type { DiscordUsers } from './admin.ts';
 import { postTargets } from './alerts.ts';
 import { COMMANDS, handleCommand, type CommandCtx } from './commands.ts';
 import { formatEvent, formatPresence, formatTopic, topicDue, type Post, type TopicEdit } from './format.ts';
@@ -38,6 +39,7 @@ export async function startDiscord(
   links: Links,
   cfg: DiscordConfig,
   token: string,
+  users?: DiscordUsers,
 ): Promise<DiscordFrontend> {
   const channels = new Map(Object.entries(cfg.channels)); // serverId -> channelId; a Map, so no inherited keys
   const serverByChannel = new Map([...channels].map(([serverId, channelId]) => [channelId, serverId]));
@@ -49,7 +51,7 @@ export async function startDiscord(
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
     allowedMentions: { parse: [] }, // nothing the bot posts can ping anyone
   });
-  const commandCtx: CommandCtx = { hub, stats, restarts, links, cfg, serverByChannel };
+  const commandCtx: CommandCtx = { hub, stats, restarts, links, cfg, serverByChannel, users };
 
   async function post(serverId: string, message: Post, files: string[] = []): Promise<void> {
     await postTo(channels.get(serverId), message, files);

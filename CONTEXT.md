@@ -62,7 +62,7 @@ A factorio server's own settings: its name, description, player limit, game pass
 _Avoid_: config (the hub's), server settings (`ServerSettings` is the hub's per-server config), options, preferences
 
 **Admin**:
-A player name a factorio server treats as an admin in game. Not a User of the dashboard, nor a Discord member with the admin role (who may run the bot's admin commands). While user verification is off the name is not checked, so anyone with the game password can join under it. Changed in the Settings tab, and promoted and demoted from the Players tab too.
+A player name a factorio server treats as an admin in game. Not a User of the dashboard, nor a Discord member allowed the bot's admin commands (by their User's grants, or the admin role). While user verification is off the name is not checked, so anyone with the game password can join under it. Changed in the Settings tab, and promoted and demoted from the Players tab too.
 _Avoid_: operator, op, moderator
 
 **Moderation**:

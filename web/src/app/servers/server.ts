@@ -112,7 +112,7 @@ export default class ServerPage {
     inject(LiveEvents)
       .all$.pipe(takeUntilDestroyed())
       .subscribe((live) => {
-        progress.seen(live.event);
+        progress.seen(live);
         if (ofServer(this.id)(live)) {
           const e = live.event;
           if (changesCard(e) || (e.type === 'notice' && e.kind.startsWith('backup'))) this.refresh();

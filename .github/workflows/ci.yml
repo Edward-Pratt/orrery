@@ -94,7 +94,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - run: ./gradlew spotlessCheck build
       - run: bash ../.github/mod-jars.sh . dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mod-jar
           path: mod/dist/orrery-*.jar
@@ -120,7 +120,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm run build # type-checks against hub/src/api.ts: an incompatible API change fails here
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-dist
           path: web/dist/web/browser
@@ -152,7 +152,7 @@ jobs:
       - run: | # a tarball keeps file modes; its package.json carries the tag's version, which the agent reports
           tag=$(git describe --tags --abbrev=0 --match 'agent-v*' 2>/dev/null || echo agent-v0.0.0)
           bash ../.github/agent-tarball.sh . "${tag#agent-v}" ../agent-dist.tar.gz
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-dist
           path: agent-dist.tar.gz
@@ -167,7 +167,7 @@ jobs:
       - run: | # the changelog's top version (a release's zip is built by release.yml, for its tag)
           v=$(sed -n 's/^Version: *//p' factorio/changelog.txt | head -n 1 | tr -d '\r')
           bash .github/factorio-zip.sh factorio "$v" dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: factorio-zip
           path: dist/orrery_*.zip

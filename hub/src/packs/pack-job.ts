@@ -1,7 +1,7 @@
 // A pack update's job, for `pack-update.ts`: its `Job` (steps, the Cancel window, the log), each step set and put on
 // the stream (`setStep`), the log (its last 40 lines on the row), the waits (`wait`, a server event or a time-out;
 // `ticker`, live detail every second), the Backup (`ServerHub.backup`: `backup start`, the Mod's `backup` event, 30
-// min), the stop's poll (`inactive`, every 2 s for 15 min), the health gate (`gate`: the Mod's hello, 10 min) and the
+// min), the stop's poll (`inactive`, every 2 s for 15 min, `untilStopped`; a closing hub ends it with a throw), the health gate (`gate`: the Mod's hello, 10 min) and the
 // end (`end`). Each update is a `pack_updates` row, audited, and announced as `packUpdateStarted`/`packUpdateStep`
 // (stream only)/`packUpdateFinished` notices. A closing hub stops each wait and ticker without resolving it, leaving a
 // running update as a crash would. Hub core.
@@ -10,6 +10,7 @@ import { rm } from 'node:fs/promises';
 import { listBackups } from '../backups/backups.ts';
 import type { ServerSettings } from '../config.ts';
 import type { HubEvent } from '../servers/servers.ts';
+import { untilStopped } from '../services/until-stopped.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from '../types.ts';
 import { formatDuration } from '../units.ts';
 import type { PacksCtx } from './pack-ctx.ts';
@@ -77,15 +78,10 @@ export async function backup(c: PacksCtx, job: Job, s: ServerSettings): Promise<
   return (await listBackups(s.backupDir ?? ''))[0]?.name ?? null;
 }
 
-/** Polls the unit until it is stopped. */
+/** Polls the unit until it is stopped; a closing hub ends the poll by throwing, so nothing after it runs. */
 export async function inactive(c: PacksCtx, serviceId: string): Promise<void> {
-  const end = Date.now() + c.o.stopMs;
-  for (;;) {
-    const state = (await c.d.services.read(serviceId))?.state;
-    if (state === 'inactive' || state === 'failed') return;
-    if (Date.now() > end) throw new Error(`The service didn't stop within ${formatDuration(c.o.stopMs)}.`);
-    await new Promise((r) => setTimeout(r, c.o.pollMs));
-  }
+  await untilStopped(c.d.services, serviceId, c.o, () => c.closed);
+  if (c.closed) throw new Error('The hub is closing.');
 }
 
 export function cancelled(job: Job): void {

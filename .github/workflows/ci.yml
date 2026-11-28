@@ -71,7 +71,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: hub/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      # A test file that never exits (a timer or socket left open) would hang the job to its timeout unnamed (#566):
+      # test/hang-report.ts prints what keeps a process alive at 4 min, then SIGINT at 5 min has node --test report
+      # the files still running, by name, and fail the step.
+      - run: timeout -s INT 5m pnpm test
+        env:
+          NODE_OPTIONS: --import ./test/hang-report.ts
       - run: pnpm run typecheck
       - run: pnpm lint
 

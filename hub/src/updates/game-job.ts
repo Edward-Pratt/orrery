@@ -4,11 +4,12 @@
 // the hub stops the server) has it given up and is told to cancel before the swap; it counts from the Agent's latest
 // step for the update (or the hub's latest request), as `docs/protocol.md` has the Agent repeat a running step at
 // least every 60 s), `tellCancel` (`updateCancel` that can't reach it goes on its next `agentUp`), the waits (`wait`,
-// a server event or a time-out; `ticker`, live detail every second; `inactive`, the unit read until stopped) and the
+// a server event or a time-out; `ticker`, live detail every second; `inactive`, the unit read until stopped or the hub closes) and the
 // end (`end`: the row closed, audited `game update`, announced as `packUpdateFinished`; one the hub ends, not the
 // Agent, awaits the Agent's later end). A closing hub stops each wait and ticker without resolving it. Hub core.
 
 import type { HubEvent } from '../servers/servers.ts';
+import { untilStopped } from '../services/until-stopped.ts';
 import type { PackFinished, PackStep, PackStepState, Severity } from '../types.ts';
 import { formatDuration } from '../units.ts';
 import type { GameCtx } from './game-ctx.ts';
@@ -126,16 +127,9 @@ export function cancellable(job: Job): boolean {
   return job.window !== null && !job.swapped && !job.cancelling;
 }
 
-/** Polls the unit until it is stopped, or `ended` says the update is over. */
-export async function inactive(c: GameCtx, serviceId: string, ended: () => boolean): Promise<void> {
-  const end = Date.now() + c.o.stopMs;
-  for (;;) {
-    if (ended()) return;
-    const state = (await c.d.services.read(serviceId))?.state;
-    if (state === 'inactive' || state === 'failed') return;
-    if (Date.now() > end) throw new Error(`The service didn't stop within ${formatDuration(c.o.stopMs)}.`);
-    await new Promise((r) => setTimeout(r, c.o.pollMs));
-  }
+/** Polls the unit until it is stopped, `ended` says the update is over, or the hub closes. */
+export function inactive(c: GameCtx, serviceId: string, ended: () => boolean): Promise<void> {
+  return untilStopped(c.d.services, serviceId, c.o, () => c.closed || ended());
 }
 
 /** Runs `fn` now and every second until the returned stop is called. */
